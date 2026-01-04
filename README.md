@@ -404,7 +404,7 @@ These commands run in your terminal and require the full installation:
 #### Memory Commands
 | Command | Description |
 |---------|-------------|
-| `maestro memory serve` | Launch web dashboard (http://localhost:8000) |
+| `maestro memory serve` | Launch web dashboard (http://localhost:18765) |
 | `maestro memory status` | Show memory system statistics |
 | `maestro memory import <db>` | Import from external memory systems |
 | `maestro memory search <query>` | Search memories by query |
