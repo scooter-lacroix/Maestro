@@ -155,7 +155,7 @@ Install Maestro directly from the Claude Code plugin marketplace:
 
 ```bash
 # Add the marketplace repository
-/plugin marketplace add scooterlacroix/maestro
+/plugin marketplace add scooter-lacroix/maestro
 
 # Install Maestro
 /plugin install maestro
