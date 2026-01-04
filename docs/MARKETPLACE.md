@@ -67,7 +67,7 @@ To submit a plugin to the Maestro Marketplace:
   "claude_code": {
     "supported": true,
     "min_version": "1.0.0",
-    "install_command": "curl -sSL https://raw.githubusercontent.com/yourusername/your-plugin/main/install-claude-code.sh | bash"
+    "install_command": "curl -sSL https://raw.githubusercontent.com/yourusername/your-plugin/master/install-claude-code.sh | bash"
   },
   "opencode": {
     "supported": false
@@ -104,10 +104,10 @@ For plugins not yet in the marketplace:
 
 ```bash
 # Claude Code
-curl -sSL https://raw.githubusercontent.com/author/plugin/main/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/author/plugin/master/install-claude-code.sh | bash
 
 # OpenCode
-curl -sSL https://raw.githubusercontent.com/author/plugin/main/install-opencode.sh | bash
+curl -sSL https://raw.githubusercontent.com/author/plugin/master/install-opencode.sh | bash
 ```
 
 ## Marketplace CLI Commands
@@ -328,7 +328,7 @@ The Maestro Marketplace is licensed under the MIT License. See LICENSE for detai
 
 - **Issues**: https://github.com/scooter-lacroix/Maestro/issues
 - **Discussions**: https://github.com/scooter-lacroix/Maestro/discussions
-- **Documentation**: https://github.com/scooter-lacroix/Maestro/blob/main/docs
+- **Documentation**: https://github.com/scooter-lacroix/Maestro/blob/master/docs
 
 ---
 

@@ -107,7 +107,7 @@ M  README.md
 
 ### Manual (Alternative)
 ```bash
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
 /maestro:setup
 ```
 

@@ -17,7 +17,7 @@
     },
     "license": "MIT",
     "homepage": "https://github.com/scooter-lacroix/Maestro#readme",
-    "documentation": "https://github.com/scooter-lacroix/Maestro/blob/main/docs",
+    "documentation": "https://github.com/scooter-lacroix/Maestro/blob/master/docs",
     "bugs": "https://github.com/scooter-lacroix/Maestro/issues",
     "keywords": [
       "development",
@@ -43,7 +43,7 @@
       "claude_code": {
         "supported": true,
         "min_version": "1.0.0",
-        "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash",
+        "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash",
         "commands": [
           {
             "name": "maestro:setup",
@@ -88,7 +88,7 @@
       "opencode": {
         "supported": true,
         "min_version": "1.0.0",
-        "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-opencode.sh | bash",
+        "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash",
         "commands": [
           {
             "name": "maestro setup",
@@ -140,8 +140,8 @@
         "install": "/plugin install maestro"
       },
       "manual": {
-        "url": "https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh",
-        "command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash"
+        "url": "https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh",
+        "command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash"
       }
     },
     "configuration": {
@@ -174,23 +174,23 @@
     },
     "changelog": {
       "current": "2.0.0",
-      "latest": "https://github.com/scooter-lacroix/Maestro/blob/main/CHANGELOG.md"
+      "latest": "https://github.com/scooter-lacroix/Maestro/blob/master/CHANGELOG.md"
     },
     "screenshots": [
       {
-        "url": "https://github.com/scooter-lacroix/Maestro/raw/main/brain.jpeg",
+        "url": "https://github.com/scooter-lacroix/Maestro/raw/master/brain.jpeg",
         "description": "Maestro Framework Overview",
         "type": "image"
       },
       {
-        "url": "https://github.com/scooter-lacroix/Maestro/raw/main/memory.png",
+        "url": "https://github.com/scooter-lacroix/Maestro/raw/master/memory.png",
         "description": "Nexus Memory Dashboard",
         "type": "image"
       }
     ],
     "links": {
       "quick_start": "https://github.com/scooter-lacroix/Maestro#quick-start",
-      "documentation": "https://github.com/scooter-lacroix/Maestro/blob/main/docs",
+      "documentation": "https://github.com/scooter-lacroix/Maestro/blob/master/docs",
       "examples": "https://github.com/scooter-lacroix/Maestro#examples",
       "support": "https://github.com/scooter-lacroix/Maestro/issues"
     }

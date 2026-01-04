@@ -172,7 +172,7 @@ If you prefer to install manually without the marketplace:
 
 ```bash
 # One-line installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
 
 # Or manually clone and install
 git clone https://github.com/scooter-lacroix/Maestro.git
@@ -189,7 +189,7 @@ Then in Claude Code:
 
 ```bash
 # One-line installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-opencode.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash
 
 # Or manually
 git clone https://github.com/scooter-lacroix/Maestro.git

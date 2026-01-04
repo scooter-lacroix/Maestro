@@ -11,7 +11,7 @@ Maestro is a spec-driven development framework that transforms Claude Code into 
 ### One-Line Installer
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/maestro/main/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/maestro/master/install-claude-code.sh | bash
 ```
 
 ### Manual Installation

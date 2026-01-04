@@ -50,7 +50,7 @@ This document describes the setup process for publishing Maestro to the Claude C
 
 ```bash
 # Step 1: Run installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
 
 # Step 2: Run setup
 /maestro:setup
@@ -148,7 +148,7 @@ To register Maestro with the official Claude Code marketplace:
      "claude_code": {
        "supported": true,
        "min_version": "1.0.0",
-       "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash"
+       "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash"
      },
      "categories": ["Development", "Testing", "Workflow", "Productivity"],
      "keywords": ["development", "framework", "spec-driven", "tdd", "testing", "agent", "memory"]
@@ -174,7 +174,7 @@ For self-hosted marketplace installation:
          "name": "maestro",
          "repository": "https://github.com/scooter-lacroix/Maestro",
          "version": "2.0.0",
-         "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash"
+         "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash"
        }
      ]
    }
@@ -219,7 +219,7 @@ The README now shows:
 /plugin install maestro
 
 # Alternative: Manual Installation
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
 ```
 
 ### 4. Test Marketplace Commands
@@ -288,7 +288,7 @@ When updating the marketplace entry:
 
 For issues or questions:
 
-- **Documentation**: https://github.com/scooter-lacroix/Maestro/blob/main/docs
+- **Documentation**: https://github.com/scooter-lacroix/Maestro/blob/master/docs
 - **Issues**: https://github.com/scooter-lacroix/Maestro/issues
 - **Discussions**: https://github.com/scooter-lacroix/Maestro/discussions
 
