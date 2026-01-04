@@ -575,10 +575,18 @@ func (s *Session) Start(command string) error {
 	}
 
 	// Create new tmux session in detached mode
+	// IMPORTANT: Ensure HOME is set in the tmux session environment
+	// CLI tools (Claude, Gemini, OpenCode, Codex) rely on HOME to find their config files
+	// (e.g., ~/.claude/settings.json, ~/.claude.json, ~/.gemini/config.json, etc.)
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", s.Name, "-c", workDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create tmux session: %w (output: %s)", err, string(output))
+	}
+
+	// Ensure HOME is set in the session environment for CLI tool config discovery
+	if homeDir := os.Getenv("HOME"); homeDir != "" {
+		_ = exec.Command("tmux", "set-environment", "-t", s.Name, "HOME", homeDir).Run()
 	}
 
 	// Register session in cache immediately to prevent race condition

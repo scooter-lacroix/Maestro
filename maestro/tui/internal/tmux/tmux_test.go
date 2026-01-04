@@ -50,6 +50,46 @@ func TestNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionStartSetsHome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if tmux is not available
+	if err := IsTmuxAvailable(); err != nil {
+		t.Skip("tmux not available:", err)
+	}
+
+	// Create a test session
+	sess := NewSession("test-home-env", "/tmp")
+	defer sess.Kill() // Cleanup
+
+	// Start the session
+	if err := sess.Start(""); err != nil {
+		t.Fatalf("Failed to start session: %v", err)
+	}
+
+	// Verify HOME is set in the session environment
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		t.Skip("HOME not set in parent environment")
+	}
+
+	// Check that HOME is accessible in the session
+	cmd := exec.Command("tmux", "show-environment", "-t", sess.Name, "HOME")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get HOME from tmux: %v", err)
+	}
+
+	// Output format is "HOME=value\n"
+	result := strings.TrimSpace(string(output))
+	expected := "HOME=" + homeDir
+	if result != expected {
+		t.Errorf("HOME in session = %s, want %s", result, expected)
+	}
+}
+
 func TestNewSessionUniqueness(t *testing.T) {
 	// Creating sessions with same name should produce unique tmux names
 	sess1 := NewSession("duplicate", "/tmp")
