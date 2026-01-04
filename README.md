@@ -105,7 +105,7 @@ Modern React-based dashboard for memory and project visualization:
 Access via:
 ```bash
 maestro memory serve
-# Visit http://localhost:8000
+# Visit http://localhost:18765
 ```
 
 ### Metacognitive Analysis
@@ -485,7 +485,7 @@ Maestro will:
 # Launch web dashboard
 maestro memory serve
 
-# In browser at http://localhost:8000:
+# In browser at http://localhost:18765:
 # - Browse all memories by project
 # - Semantic search across memories
 # - View project and track progress
