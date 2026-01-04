@@ -1,0 +1,99 @@
+{
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "id": "maestro",
+      "name": "maestro",
+      "displayName": "Maestro - Unified Development Framework",
+      "description": "Unified spec-driven development framework with track-based development, automatic agent selection, TDD enforcement, integrated memory system, and Critical Think metacognitive analysis.",
+      "version": "2.0.0",
+      "author": "scooter-lacroix",
+      "repository": "https://github.com/scooter-lacroix/Maestro",
+      "homepage": "https://github.com/scooter-lacroix/Maestro#readme",
+      "documentation": "https://github.com/scooter-lacroix/Maestro/blob/main/docs",
+      "bugs": "https://github.com/scooter-lacroix/Maestro/issues",
+      "license": "MIT",
+      "keywords": [
+        "development",
+        "framework",
+        "spec-driven",
+        "tdd",
+        "testing",
+        "agent",
+        "memory",
+        "critical-thinking",
+        "workflow",
+        "productivity",
+        "cli",
+        "automation"
+      ],
+      "categories": [
+        "Development",
+        "Testing",
+        "Workflow",
+        "Productivity"
+      ],
+      "download": {
+        "url": "https://github.com/scooter-lacroix/Maestro/archive/refs/heads/main.zip",
+        "type": "archive",
+        "sha256": ""
+      },
+      "install": {
+        "method": "script",
+        "url": "https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh",
+        "command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash"
+      },
+      "commands": [
+        "maestro:setup",
+        "maestro:newTrack",
+        "maestro:implement",
+        "maestro:status",
+        "maestro:revert",
+        "maestro:configure",
+        "maestro:tui"
+      ],
+      "features": [
+        "Spec-driven development workflow",
+        "Automatic agent selection based on task complexity",
+        "TDD enforcement with 80%+ coverage goals",
+        "Built-in Nexus Memory system for project context",
+        "Critical Think metacognitive analysis framework",
+        "Git-aware tracking with rollback capability",
+        "Web dashboard for memory and project visualization",
+        "Session management with TUI interface"
+      ],
+      "dependencies": {
+        "python": ">=3.10",
+        "required_packages": [
+          "click>=8.0.0",
+          "pydantic>=2.0.0",
+          "toml>=0.10.2",
+          "pyyaml>=6.0",
+          "rich>=13.0.0"
+        ],
+        "optional_packages": [
+          "sentence-transformers",
+          "numpy"
+        ]
+      },
+      "platform": "claude_code",
+      "min_claude_code_version": "1.0.0",
+      "screenshots": [
+        {
+          "url": "https://github.com/scooter-lacroix/Maestro/raw/main/brain.jpeg",
+          "description": "Maestro Framework Overview"
+        },
+        {
+          "url": "https://github.com/scooter-lacroix/Maestro/raw/main/memory.png",
+          "description": "Nexus Memory Dashboard"
+        }
+      ],
+      "links": {
+        "quick_start": "https://github.com/scooter-lacroix/Maestro#quick-start",
+        "documentation": "https://github.com/scooter-lacroix/Maestro/blob/main/docs",
+        "examples": "https://github.com/scooter-lacroix/Maestro#examples",
+        "support": "https://github.com/scooter-lacroix/Maestro/issues"
+      }
+    }
+  ]
+}
