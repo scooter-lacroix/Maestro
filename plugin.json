@@ -20,7 +20,9 @@
     "workflow",
     "productivity",
     "cli",
-    "automation"
+    "automation",
+    "tui",
+    "dashboard"
   ],
   "commands": [
     "./claude-code/commands/maestro:setup.md",
@@ -31,5 +33,20 @@
     "./claude-code/commands/maestro:configure.md",
     "./claude-code/commands/maestro:tui.md",
     "./claude-code/commands/maestro:memory.md"
-  ]
+  ],
+  "cli": {
+    "binary": "maestro",
+    "description": "Maestro CLI - Unified command-line interface for Maestro framework",
+    "install_path": "~/.local/bin/maestro",
+    "commands": {
+      "maestro memory serve": "Start the Maestro Memory Dashboard web server (default: http://localhost:8080)",
+      "maestro memory status": "Show Maestro memory system statistics and health",
+      "maestro memory migrate": "Migrate memories from Memori database to Nexus",
+      "maestro tui": "Launch the Maestro Terminal UI for session management"
+    },
+    "dependencies": {
+      "python": ">=3.8",
+      "go": ">=1.21 (for building maestro-tui binary, optional)"
+    }
+  }
 }
