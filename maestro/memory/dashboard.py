@@ -16,6 +16,7 @@ import html
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Optional, Dict, List, Any
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,7 +38,7 @@ from .service import MaestroMemoryService
 # Issue 5: CORS configuration from environment variable
 ALLOWED_ORIGINS = os.environ.get(
     "MAESTRO_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:8080"
+    "http://localhost:3000,http://localhost:18765"
 ).split(",")
 
 # Issue 6: Define allowed base directories for project_path validation
@@ -210,6 +211,40 @@ class ErrorResponse(BaseModel):
 # =============================================================================
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events.
+
+    This replaces the deprecated @app.on_event("startup") and @app.on_event("shutdown").
+    """
+    # Get database_path from app state or use default
+    database_path = getattr(app.state, 'database_path', None)
+    if database_path is None:
+        database_path = Path.home() / ".maestro" / "maestro.db"
+
+    # Ensure database_path is a Path object
+    if isinstance(database_path, str):
+        database_path = Path(database_path)
+
+    # Startup
+    logger.info("Starting Maestro Memory Dashboard")
+    memory_service = MaestroMemoryService(database_path=database_path)
+    await memory_service.initialize()
+
+    # Store service in app state for access in routes
+    app.state.memory_service = memory_service
+    logger.info(f"Maestro Memory Dashboard started with database: {memory_service.database_path}")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Maestro Memory Dashboard")
+    if memory_service:
+        await memory_service.close()
+        memory_service = None
+
+
 def create_dashboard_app(
     database_path: Optional[Path] = None,
     debug: bool = False
@@ -230,8 +265,14 @@ def create_dashboard_app(
         version="2.0.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json"
+        openapi_url="/api/openapi.json",
+        lifespan=lifespan
     )
+
+    # Store database_path in app state for lifespan manager
+    if database_path:
+        app.state.database_path = database_path
+    app.state.debug = debug
 
     # Issue 5: Fixed CORS - use environment variable, restrict with credentials
     # WARNING: allow_credentials=True requires specific origins, not "*"
@@ -245,9 +286,6 @@ def create_dashboard_app(
 
     # GZip compression
     app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-    # Initialize memory service (will be done in startup event)
-    memory_service: Optional[MaestroMemoryService] = None
 
     # Define exception handler functions
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
@@ -277,37 +315,6 @@ def create_dashboard_app(
     # Handle Starlette HTTPException (which includes FastAPI HTTPException and 404s)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
-
-    # Startup and shutdown events
-    @app.on_event("startup")
-    async def startup_event():
-        """Initialize memory service on startup"""
-        nonlocal memory_service
-        logger.info("Starting Maestro Memory Dashboard")
-
-        # Ensure database_path is a Path object
-        if isinstance(database_path, str):
-            database_path_obj = Path(database_path)
-        else:
-            database_path_obj = database_path
-
-        memory_service = MaestroMemoryService(database_path=database_path_obj)
-        await memory_service.initialize()
-
-        # Store service in app state for access in routes
-        app.state.memory_service = memory_service
-
-        logger.info(f"Maestro Memory Dashboard started with database: {memory_service.database_path}")
-
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        """Cleanup on shutdown"""
-        nonlocal memory_service
-        logger.info("Shutting down Maestro Memory Dashboard")
-
-        if memory_service:
-            await memory_service.close()
-            memory_service = None
 
     # Mount static files - prefer new built frontend, fallback to old static
     frontend_dist = Path(__file__).parent / "frontend" / "dist"

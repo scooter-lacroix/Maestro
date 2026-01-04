@@ -38,7 +38,7 @@
     "description": "Maestro CLI - Unified command-line interface for Maestro framework",
     "install_path": "~/.local/bin/maestro",
     "commands": {
-      "maestro memory serve": "Start the Maestro Memory Dashboard web server (default: http://localhost:8080)",
+      "maestro memory serve": "Start the Maestro Memory Dashboard web server (default: http://localhost:18765)",
       "maestro memory status": "Show Maestro memory system statistics and health",
       "maestro memory migrate": "Migrate memories from Memori database to Nexus",
       "maestro tui": "Launch the Maestro Terminal UI for session management"

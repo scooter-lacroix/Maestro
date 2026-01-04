@@ -248,8 +248,8 @@ def main():
     serve_parser.add_argument(
         "--port", "-p",
         type=int,
-        default=8080,
-        help="Port to run the dashboard on (default: 8080)"
+        default=18765,
+        help="Port to run the dashboard on (default: 18765)"
     )
     serve_parser.add_argument(
         "--host", "-H",

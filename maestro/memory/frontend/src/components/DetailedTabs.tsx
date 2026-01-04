@@ -328,7 +328,7 @@ const CommandsTabContent: React.FC<{ stats: StatsResponse | null }> = ({ stats }
       description: 'Start the web dashboard server for memory visualization and management.',
       usage: 'maestro memory serve [options]',
       options: ['--port <number>', '--host <address>', '--no-open'],
-      example: 'maestro memory serve --port 8080',
+      example: 'maestro memory serve',
     },
     {
       name: 'maestro memory status',

@@ -33,7 +33,7 @@ maestro memory serve [--port PORT] [--host HOST] [--db DATABASE] [--debug] [--qu
 ```
 
 **Options:**
-- `--port`, `-p`: Port to run the dashboard on (default: 8080)
+- `--port`, `-p`: Port to run the dashboard on (default: 18765)
 - `--host`, `-H`: Host to bind the dashboard to (default: 127.0.0.1)
 - `--db`, `-d`: Path to database file (default: ~/.maestro/maestro.db)
 - `--debug`: Enable debug mode (verbose logging, auto-reload)
@@ -41,7 +41,7 @@ maestro memory serve [--port PORT] [--host HOST] [--db DATABASE] [--debug] [--qu
 
 **Examples:**
 ```bash
-# Start on default port (8080)
+# Start on default port (18765)
 maestro memory serve
 
 # Start on custom port
@@ -51,11 +51,11 @@ maestro memory serve --port 3000
 maestro memory serve --debug
 
 # Start on all interfaces
-maestro memory serve --host 0.0.0.0 --port 8080
+maestro memory serve --host 0.0.0.0 --port 18765
 ```
 
 **Access the dashboard at:**
-- http://localhost:8080 (default)
+- http://localhost:18765 (default)
 - http://localhost:3000 (if using --port 3000)
 
 #### `maestro memory status`
@@ -240,9 +240,9 @@ The CLI commands work alongside the Claude Code/OpenCode slash commands:
 
 When the memory dashboard is running, you can access the API documentation at:
 
-- Swagger UI: http://localhost:8080/api/docs
-- ReDoc: http://localhost:8080/api/redoc
-- OpenAPI JSON: http://localhost:8080/api/openapi.json
+- Swagger UI: http://localhost:18765/api/docs
+- ReDoc: http://localhost:18765/api/redoc
+- OpenAPI JSON: http://localhost:18765/api/openapi.json
 
 ## Examples
 
@@ -257,7 +257,7 @@ cd /path/to/maestro
 export PATH="$HOME/.local/bin:$PATH"
 
 # 3. Start the memory dashboard
-maestro memory serve --port 8080 &
+maestro memory serve &
 
 # 4. Check memory status
 maestro memory status
@@ -265,7 +265,7 @@ maestro memory status
 # 5. Launch TUI (in another terminal)
 maestro tui
 
-# 6. Access dashboard at http://localhost:8080
+# 6. Access dashboard at http://localhost:18765
 ```
 
 ### Development Mode

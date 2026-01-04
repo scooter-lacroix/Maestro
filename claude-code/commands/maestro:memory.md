@@ -24,7 +24,7 @@ maestro memory serve [--port PORT] [--host HOST] [--db DATABASE] [--debug]
 ```
 
 **Options:**
-- `--port`, `-p`: Port to run on (default: 8080)
+- `--port`, `-p`: Port to run on (default: 18765)
 - `--host`, `-H`: Host to bind to (default: 127.0.0.1)
 - `--db`, `-d`: Path to database file (default: ~/.maestro/maestro.db)
 - `--debug`: Enable debug mode with verbose logging and auto-reload
@@ -35,12 +35,12 @@ maestro memory serve [--port PORT] [--host HOST] [--db DATABASE] [--debug]
 - Serves the Maestro Memory Dashboard
 - Provides REST API for memory operations
 - WebSocket support for real-time updates
-- Interactive UI at http://localhost:8080
+- Interactive UI at http://localhost:18765
 
 **To execute:**
-1. Run: `python -m maestro.memory.cli serve --port 8080`
-2. Open browser to http://localhost:8080
-3. Access API docs at http://localhost:8080/api/docs
+1. Run: `python -m maestro.memory.cli serve`
+2. Open browser to http://localhost:18765
+3. Access API docs at http://localhost:18765/api/docs
 
 ### 2. `maestro memory status`
 Show memory system statistics.
@@ -65,10 +65,10 @@ Run: `python -m maestro.memory.cli status`
 
 ### When user runs `maestro memory serve`:
 1. Inform user that you're starting the dashboard server
-2. Execute: `python -m maestro.memory.cli serve --port 8080`
+2. Execute: `python -m maestro.memory.cli serve`
 3. The server will run in the foreground - this is expected
-4. Provide the dashboard URL to user (http://localhost:8080)
-5. Provide API docs URL (http://localhost:8080/api/docs)
+4. Provide the dashboard URL to user (http://localhost:18765)
+5. Provide API docs URL (http://localhost:18765/api/docs)
 6. Inform user to press Ctrl+C to stop the server
 
 ### When user runs `maestro memory status`:
@@ -86,9 +86,9 @@ Run: `python -m maestro.memory.cli status`
 ## Example Interactions
 
 **User:** "maestro memory serve"
-**Response:** "Starting Maestro Memory Dashboard on port 8080...
-Access the dashboard at: http://localhost:8080
-API documentation: http://localhost:8080/api/docs
+**Response:** "Starting Maestro Memory Dashboard on port 18765...
+Access the dashboard at: http://localhost:18765
+API documentation: http://localhost:18765/api/docs
 Press Ctrl+C to stop the server."
 
 **User:** "maestro memory status"
