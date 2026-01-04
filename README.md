@@ -543,7 +543,7 @@ Contributions are welcome! Please read our contributing guidelines and submit pu
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
