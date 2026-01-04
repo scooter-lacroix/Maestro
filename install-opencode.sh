@@ -1,31 +1,46 @@
 #!/bin/bash
-# Maestro Installer for OpenCode v1.2.0
+# Maestro Installer for OpenCode v1.3.0
 set -e
 
 echo "🚀 Installing Maestro for OpenCode..."
 
-# Detect script directory for relative path resolution
-# Handle both piped (curl | bash) and direct execution
-if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "bash" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
-    # Script is being executed directly from a file
-    # Get the directory where the script is located
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Create a temporary directory for downloading the repository
+TMP_DIR=$(mktemp -d)
+trap "rm -rf $TMP_DIR" EXIT
+
+echo "📥 Downloading Maestro repository..."
+REPO_URL="https://github.com/scooter-lacroix/Maestro"
+REPO_BRANCH="master"
+
+# Try git clone first, fallback to curl+tar
+if command -v git &> /dev/null; then
+    echo "   Using git to download..."
+    git clone -q --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$TMP_DIR" 2>/dev/null || {
+        echo "   ⚠️  git clone failed, trying fallback method..."
+        if command -v curl &> /dev/null; then
+            curl -sSL "$REPO_URL/archive/$REPO_BRANCH.tar.gz" | tar -xz -C "$TMP_DIR" --strip-components=1
+        elif command -v wget &> /dev/null; then
+            wget -qO- "$REPO_URL/archive/$REPO_BRANCH.tar.gz" | tar -xz -C "$TMP_DIR" --strip-components=1
+        else
+            echo "❌ Error: Neither git nor curl/wget is available"
+            exit 1
+        fi
+    }
 else
-    # Script is being piped (curl | bash), use current directory
-    # This assumes the user is running the installer from the repository root
-    SCRIPT_DIR="$(pwd)"
+    # Fallback: download tarball
+    echo "   Downloading tarball..."
+    if command -v curl &> /dev/null; then
+        curl -sSL "$REPO_URL/archive/$REPO_BRANCH.tar.gz" | tar -xz -C "$TMP_DIR" --strip-components=1
+    elif command -v wget &> /dev/null; then
+        wget -qO- "$REPO_URL/archive/$REPO_BRANCH.tar.gz" | tar -xz -C "$TMP_DIR" --strip-components=1
+    else
+        echo "❌ Error: Neither curl nor wget is available"
+        exit 1
+    fi
 fi
 
-# Verify that we're in the correct directory
-if [[ ! -d "$SCRIPT_DIR/claude-code" ]]; then
-    echo "❌ Error: Could not find claude-code directory."
-    echo "   When piping the installer, please run from the Maestro repository root."
-    echo "   Current directory: $SCRIPT_DIR"
-    echo ""
-    echo "   Usage: cd /path/to/Maestro && curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash"
-    echo "   Or download and run: ./install-opencode.sh"
-    exit 1
-fi
+echo "✅ Download complete"
+SCRIPT_DIR="$TMP_DIR"
 
 # Create skill directory
 echo "📁 Creating skill directory..."
@@ -134,7 +149,7 @@ else
 fi
 
 # Install Go TUI binary if it exists
-echo "🔷 Installing Go TUI binary..."
+echo "🔷 Checking for Go TUI binary..."
 TUI_BINARY="$SCRIPT_DIR/maestro/tui/build/maestro-tui"
 if [ -f "$TUI_BINARY" ]; then
     mkdir -p ~/.local/bin
@@ -142,8 +157,7 @@ if [ -f "$TUI_BINARY" ]; then
     chmod +x ~/.local/bin/maestro-tui
     echo "   Installed maestro-tui to ~/.local/bin/maestro-tui"
 else
-    echo "   ℹ️  maestro-tui binary not found (may need to be built)"
-    echo "   To build: cd $SCRIPT_DIR/maestro/tui && go build"
+    echo "   ℹ️  maestro-tui binary not found (optional, requires Go build)"
 fi
 
 # Backup opencode.json
@@ -297,11 +311,11 @@ echo "🔗 Creating command symlinks..."
 mkdir -p ~/.claude/commands
 for cmd in setup newTrack implement status revert configure; do
     if [ ! -f ~/.claude/commands/"maestro:$cmd.md" ]; then
-        ln -sf "$SCRIPT_DIR/claude-code/commands/maestro:$cmd.md" ~/.claude/commands/"maestro:$cmd.md" 2>/dev/null || \
-            cp "$SCRIPT_DIR/claude-code/commands/maestro:$cmd.md" ~/.claude/commands/"maestro:$cmd.md"
+        cp "$SCRIPT_DIR/claude-code/commands/maestro:$cmd.md" ~/.claude/commands/"maestro:$cmd.md"
     fi
 done
 
+# Cleanup is handled by the trap at the top
 echo ""
 echo "✅ Maestro installed successfully for OpenCode!"
 echo ""
@@ -328,3 +342,4 @@ echo "  4. Run /maestro configure to customize settings"
 echo ""
 echo "📖 For more information, see:"
 echo "  https://github.com/scooter-lacroix/Maestro"
+echo ""
