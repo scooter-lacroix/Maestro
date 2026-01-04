@@ -126,9 +126,6 @@ maestro/data/
 maestro/memory/.code_indexer_data/
 maestro/memory/data/
 
-# CLI files
-maestro/cli.py
-
 # Prompts directory
 claude-code/prompts/
 
