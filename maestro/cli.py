@@ -102,11 +102,34 @@ def main():
         help="Path to backup directory (default: no backup)"
     )
 
+    # TUI module
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="Launch Maestro Terminal UI"
+    )
+
     # Parse arguments
     args = parser.parse_args()
 
     # Route to appropriate module
-    if args.module == "memory":
+    if args.module == "tui":
+        # Launch the Go TUI binary
+        import subprocess
+        import os
+
+        tui_binary = os.path.expanduser("~/.local/bin/maestro-tui")
+        if not os.path.exists(tui_binary):
+            # Try relative path from repo
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            tui_binary = os.path.join(script_dir, "maestro", "tui", "build", "maestro-tui")
+
+        if os.path.exists(tui_binary):
+            sys.exit(subprocess.run([tui_binary] + sys.argv[2:]).returncode)
+        else:
+            print(f"Error: Maestro TUI binary not found at {tui_binary}", file=sys.stderr)
+            print("To build: cd maestro/tui && go build", file=sys.stderr)
+            sys.exit(1)
+    elif args.module == "memory":
         # Import and delegate to memory CLI
         from .memory.cli import serve_command, status_command, migrate_command
 
