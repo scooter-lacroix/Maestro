@@ -575,8 +575,8 @@ func (s *Session) Start(command string) error {
 	}
 
 	// Create new tmux session in detached mode
-	// IMPORTANT: Ensure HOME is set in the tmux session environment
-	// CLI tools (Claude, Gemini, OpenCode, Codex) rely on HOME to find their config files
+	// IMPORTANT: Ensure HOME and PATH are set in the tmux session environment
+	// CLI tools (Claude, Gemini, OpenCode, Codex) rely on these to find their config files
 	// (e.g., ~/.claude/settings.json, ~/.claude.json, ~/.gemini/config.json, etc.)
 	cmd := exec.Command("tmux", "new-session", "-d", "-s", s.Name, "-c", workDir)
 	output, err := cmd.CombinedOutput()
@@ -588,6 +588,20 @@ func (s *Session) Start(command string) error {
 	if homeDir := os.Getenv("HOME"); homeDir != "" {
 		_ = exec.Command("tmux", "set-environment", "-t", s.Name, "HOME", homeDir).Run()
 	}
+
+	// Ensure PATH is set in the session environment so CLI tools can be found
+	// This is critical for tools installed in non-standard paths (e.g., Homebrew, NVM)
+	if pathEnv := os.Getenv("PATH"); pathEnv != "" {
+		_ = exec.Command("tmux", "set-environment", "-t", s.Name, "PATH", pathEnv).Run()
+	}
+
+	// Set CLAUDE_CONFIG_DIR to ensure Claude Code can find its settings.json and credentials
+	// This defaults to ~/.claude if not set in the environment
+	claudeConfigDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if claudeConfigDir == "" {
+		claudeConfigDir = filepath.Join(os.Getenv("HOME"), ".claude")
+	}
+	_ = exec.Command("tmux", "set-environment", "-t", s.Name, "CLAUDE_CONFIG_DIR", claudeConfigDir).Run()
 
 	// Register session in cache immediately to prevent race condition
 	// where Exists() returns false because cache was refreshed before session creation
