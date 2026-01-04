@@ -163,6 +163,68 @@ def scan_command(args):
     return asyncio.run(run_scan())
 
 
+def migrate_command(args):
+    """
+    Migrate memories from Memori database to Nexus.
+
+    Usage:
+        maestro memory migrate <source> [--db DATABASE] [--backup BACKUP_DIR]
+    """
+    import asyncio
+    from .service import MaestroMemoryService
+    from .migrations.memori_migration import (
+        migrate_memori_to_nexus,
+        validate_memori_database,
+        get_migration_summary
+    )
+
+    # Get database paths
+    source_db = Path(args.source)
+    if args.db:
+        target_db = Path(args.db)
+    else:
+        target_db = Path.home() / ".maestro" / "maestro.db"
+
+    # Validate source database
+    logger.info(f"Validating source database: {source_db}")
+    is_valid, error_msg = validate_memori_database(str(source_db))
+    if not is_valid:
+        logger.error(f"Invalid Memori database: {error_msg}")
+        return 1
+
+    # Ensure target database directory exists
+    target_db.parent.mkdir(parents=True, exist_ok=True)
+
+    # Run migration
+    async def run_migration():
+        # Progress callback
+        async def progress_callback(stage, progress, message):
+            logger.info(f"[{stage}] {progress*100:.1f}%: {message}")
+
+        # Initialize Nexus service
+        service = MaestroMemoryService(database_path=target_db)
+        await service.initialize()
+
+        try:
+            # Perform migration
+            result = await migrate_memori_to_nexus(
+                memori_db_path=str(source_db),
+                nexus_service=service,
+                backup_path=args.backup,
+                progress_callback=progress_callback
+            )
+
+            # Print summary
+            print("\n" + get_migration_summary(result))
+
+            return 0 if result["success"] else 1
+
+        finally:
+            await service.close()
+
+    return asyncio.run(run_migration())
+
+
 def main():
     """
     Main CLI entry point.
