@@ -151,22 +151,30 @@ Maestro solves these problems by:
 
 ### Marketplace Installation (Recommended)
 
-Maestro is available in the official Maestro Marketplace:
+Install Maestro directly from the Claude Code plugin marketplace:
 
 ```bash
-# Install via marketplace CLI (coming soon)
-maestro marketplace install maestro
+# Add the marketplace repository
+/plugin marketplace add scooterlacroix/maestro
 
-# For now, use one-line installers below
+# Install Maestro
+/plugin install maestro
 ```
 
-### For Claude Code
+Then run the setup command in Claude Code:
+```
+/maestro:setup
+```
+
+### Alternative: Manual Installation
+
+If you prefer to install manually without the marketplace:
 
 ```bash
 # One-line installer
 curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash
 
-# Or manually
+# Or manually clone and install
 git clone https://github.com/scooter-lacroix/Maestro.git
 cd Maestro
 ./install-claude-code.sh

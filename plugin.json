@@ -1,5 +1,6 @@
 {
   "name": "maestro",
+  "displayName": "Maestro - Unified Development Framework",
   "description": "Unified spec-driven development framework with track-based development, automatic agent selection, TDD enforcement, integrated memory system, and Critical Think metacognitive analysis.",
   "version": "2.0.0",
   "author": "scooter-lacroix",
@@ -7,6 +8,7 @@
   "repository": "https://github.com/scooter-lacroix/Maestro",
   "homepage": "https://github.com/scooter-lacroix/Maestro#readme",
   "documentation": "https://github.com/scooter-lacroix/Maestro/blob/main/docs",
+  "bugs": "https://github.com/scooter-lacroix/Maestro/issues",
   "keywords": [
     "development",
     "framework",
@@ -16,7 +18,10 @@
     "agent",
     "memory",
     "critical-thinking",
-    "workflow"
+    "workflow",
+    "productivity",
+    "cli",
+    "automation"
   ],
   "categories": [
     "Development",
@@ -28,13 +33,18 @@
     "supported": true,
     "min_version": "1.0.0",
     "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash",
+    "marketplace": {
+      "repository": "scooterlacroix/maestro",
+      "short_description": "Spec-driven development with automatic agent selection and TDD enforcement"
+    },
     "commands": [
       "maestro:setup",
       "maestro:newTrack",
       "maestro:implement",
       "maestro:status",
       "maestro:revert",
-      "maestro:configure"
+      "maestro:configure",
+      "maestro:tui"
     ],
     "features": [
       "Spec-driven development workflow",
