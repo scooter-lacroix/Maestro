@@ -37,31 +37,30 @@ if [ -d "$SCRIPT_DIR/maestro" ]; then
             echo "   ⚠️  Warning: pip install failed, installing manually..."
             # Fallback: create wrapper script
             mkdir -p ~/.local/bin
-            cat > ~/.local/bin/maestro << 'EOF'
+            cat > ~/.local/bin/maestro << EOF
 #!/bin/bash
 # Maestro CLI wrapper
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAESTRO_ROOT="/home/stan/Prod/maestro"
+MAESTRO_ROOT="$SCRIPT_DIR"
 
 # Handle 'tui' subcommand
-if [ "$1" = "tui" ]; then
+if [ "\$1" = "tui" ]; then
     # Check if maestro-tui binary exists
-    if [ -f "$MAESTRO_ROOT/maestro/tui/build/maestro-tui" ]; then
-        exec "$MAESTRO_ROOT/maestro/tui/build/maestro-tui" "${@:2}"
+    if [ -f "\$MAESTRO_ROOT/maestro/tui/build/maestro-tui" ]; then
+        exec "\$MAESTRO_ROOT/maestro/tui/build/maestro-tui" "\${@:2}"
     else
         echo "Error: maestro-tui binary not found"
-        echo "Please build it with: cd $MAESTRO_ROOT/maestro/tui && go build"
+        echo "Please build it with: cd \$MAESTRO_ROOT/maestro/tui && go build"
         exit 1
     fi
 # Handle 'memory' subcommand
-elif [ "$1" = "memory" ]; then
+elif [ "\$1" = "memory" ]; then
     # Delegate to Python CLI
-    cd "$MAESTRO_ROOT"
-    python3 -m maestro.memory.cli "${@:2}"
+    cd "\$MAESTRO_ROOT"
+    python3 -m maestro.memory.cli "\${@:2}"
 else
     # Delegate to main Python CLI
-    cd "$MAESTRO_ROOT"
-    python3 -m maestro.cli "$@"
+    cd "\$MAESTRO_ROOT"
+    python3 -m maestro.cli "\$@"
 fi
 EOF
             chmod +x ~/.local/bin/maestro
@@ -70,31 +69,30 @@ EOF
     else
         echo "   ⚠️  Warning: pip not found, creating manual wrapper..."
         mkdir -p ~/.local/bin
-        cat > ~/.local/bin/maestro << 'EOF'
+        cat > ~/.local/bin/maestro << EOF
 #!/bin/bash
 # Maestro CLI wrapper
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAESTRO_ROOT="/home/stan/Prod/maestro"
+MAESTRO_ROOT="$SCRIPT_DIR"
 
 # Handle 'tui' subcommand
-if [ "$1" = "tui" ]; then
+if [ "\$1" = "tui" ]; then
     # Check if maestro-tui binary exists
-    if [ -f "$MAESTRO_ROOT/maestro/tui/build/maestro-tui" ]; then
-        exec "$MAESTRO_ROOT/maestro/tui/build/maestro-tui" "${@:2}"
+    if [ -f "\$MAESTRO_ROOT/maestro/tui/build/maestro-tui" ]; then
+        exec "\$MAESTRO_ROOT/maestro/tui/build/maestro-tui" "\${@:2}"
     else
         echo "Error: maestro-tui binary not found"
-        echo "Please build it with: cd $MAESTRO_ROOT/maestro/tui && go build"
+        echo "Please build it with: cd \$MAESTRO_ROOT/maestro/tui && go build"
         exit 1
     fi
 # Handle 'memory' subcommand
-elif [ "$1" = "memory" ]; then
+elif [ "\$1" = "memory" ]; then
     # Delegate to Python CLI
-    cd "$MAESTRO_ROOT"
-    python3 -m maestro.memory.cli "${@:2}"
+    cd "\$MAESTRO_ROOT"
+    python3 -m maestro.memory.cli "\${@:2}"
 else
     # Delegate to main Python CLI
-    cd "$MAESTRO_ROOT"
-    python3 -m maestro.cli "$@"
+    cd "\$MAESTRO_ROOT"
+    python3 -m maestro.cli "\$@"
 fi
 EOF
         chmod +x ~/.local/bin/maestro

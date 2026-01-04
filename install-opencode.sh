@@ -41,7 +41,7 @@ if [ -d "$SCRIPT_DIR/maestro" ]; then
 #!/bin/bash
 # Maestro CLI wrapper
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAESTRO_ROOT="/home/stan/Prod/maestro"
+MAESTRO_ROOT="$SCRIPT_DIR"
 
 # Handle 'tui' subcommand
 if [ "$1" = "tui" ]; then
@@ -74,7 +74,7 @@ EOF
 #!/bin/bash
 # Maestro CLI wrapper
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAESTRO_ROOT="/home/stan/Prod/maestro"
+MAESTRO_ROOT="$SCRIPT_DIR"
 
 # Handle 'tui' subcommand
 if [ "$1" = "tui" ]; then
