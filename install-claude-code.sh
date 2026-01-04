@@ -65,10 +65,10 @@ echo "🐍 Installing Python CLI..."
 if [ -d "$SCRIPT_DIR/maestro" ]; then
     # Check if pip is available
     if command -v pip &> /dev/null || command -v pip3 &> /dev/null; then
-        # Install in development mode (editable)
-        echo "   Installing maestro Python package in development mode..."
+        # Install the package (regular install, not editable)
+        echo "   Installing maestro Python package..."
         cd "$SCRIPT_DIR"
-        pip install -e . --quiet 2>/dev/null || pip3 install -e . --quiet 2>/dev/null || {
+        pip install . --quiet 2>/dev/null || pip3 install . --quiet 2>/dev/null || {
             echo "   ⚠️  Warning: pip install failed, installing manually..."
             # Fallback: create wrapper script
             mkdir -p ~/.local/bin
