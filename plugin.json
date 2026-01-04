@@ -31,11 +31,5 @@
     "./claude-code/commands/maestro:configure.md",
     "./claude-code/commands/maestro:tui.md",
     "./claude-code/commands/maestro:memory.md"
-  ],
-  "agents": [
-    "./claude-code/agents/maestro.md"
-  ],
-  "skills": [
-    "./skills/nexus-memory/"
   ]
 }
