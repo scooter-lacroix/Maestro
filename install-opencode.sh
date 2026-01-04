@@ -21,7 +21,7 @@ mkdir -p ~/.claude/maestro-templates
 
 # Copy templates
 echo "📋 Copying templates..."
-cp "$SCRIPT_DIR/claude-code/templates/workflow.md ~/.claude/maestro-templates/"
+cp "$SCRIPT_DIR/claude-code/templates/workflow.md" ~/.claude/maestro-templates/
 mkdir -p ~/.claude/maestro-templates/code_styleguides
 cp "$SCRIPT_DIR/claude-code/templates/code_styleguides"/*.md ~/.claude/maestro-templates/code_styleguides/
 

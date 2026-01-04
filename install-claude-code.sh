@@ -21,7 +21,7 @@ mkdir -p ~/.claude/maestro-templates
 
 # Copy templates
 echo "📋 Copying templates..."
-cp "$SCRIPT_DIR/claude-code/templates/workflow.md ~/.claude/maestro-templates/"
+cp "$SCRIPT_DIR/claude-code/templates/workflow.md" ~/.claude/maestro-templates/
 mkdir -p ~/.claude/maestro-templates/code_styleguides
 cp "$SCRIPT_DIR/claude-code/templates/code_styleguides"/*.md ~/.claude/maestro-templates/code_styleguides/
 
@@ -35,7 +35,9 @@ echo "  /maestro:newTrack   - Create new track"
 echo "  /maestro:implement  - Implement track tasks"
 echo "  /maestro:status     - View project progress"
 echo "  /maestro:revert     - Revert work"
-echo "  /maestro:configure - Configure Maestro settings"
+echo "  /maestro:configure  - Configure Maestro settings"
+echo "  /maestro:tui        - Launch Terminal UI"
+echo "  /maestro:memory     - Interact with Memory System"
 echo ""
 echo "🎯 Next steps:"
 echo "  1. Open Claude Code"
