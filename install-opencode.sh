@@ -5,7 +5,27 @@ set -e
 echo "🚀 Installing Maestro for OpenCode..."
 
 # Detect script directory for relative path resolution
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Handle both piped (curl | bash) and direct execution
+if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "bash" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
+    # Script is being executed directly from a file
+    # Get the directory where the script is located
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # Script is being piped (curl | bash), use current directory
+    # This assumes the user is running the installer from the repository root
+    SCRIPT_DIR="$(pwd)"
+fi
+
+# Verify that we're in the correct directory
+if [[ ! -d "$SCRIPT_DIR/claude-code" ]]; then
+    echo "❌ Error: Could not find claude-code directory."
+    echo "   When piping the installer, please run from the Maestro repository root."
+    echo "   Current directory: $SCRIPT_DIR"
+    echo ""
+    echo "   Usage: cd /path/to/Maestro && curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash"
+    echo "   Or download and run: ./install-opencode.sh"
+    exit 1
+fi
 
 # Create skill directory
 echo "📁 Creating skill directory..."
