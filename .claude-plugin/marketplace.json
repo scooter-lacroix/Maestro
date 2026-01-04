@@ -13,6 +13,7 @@
       "author": {
         "name": "scooter-lacroix"
       },
+      "source": "./",
       "homepage": "https://github.com/scooter-lacroix/Maestro",
       "repository": "https://github.com/scooter-lacroix/Maestro",
       "license": "MIT",
