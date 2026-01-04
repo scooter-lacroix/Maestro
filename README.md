@@ -149,9 +149,23 @@ Maestro solves these problems by:
 
 ## Quick Start
 
-### Marketplace Installation (Recommended)
+### Understanding Maestro Components
 
-Install Maestro directly from the Claude Code plugin marketplace:
+Maestro has two types of tools:
+
+1. **Claude Code Slash Commands** - AI-assisted commands for development workflows
+   - Installed via plugin marketplace (no additional setup required)
+   - Work directly within Claude Code/OpenCode sessions
+   - Examples: `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`
+
+2. **CLI Tools** - Standalone terminal tools for advanced features
+   - Require running the installer script
+   - Run from your terminal outside of Claude Code
+   - Examples: `maestro tui` (Terminal UI), `maestro memory serve` (Web Dashboard)
+
+### Marketplace Installation (Slash Commands Only)
+
+Install Maestro slash commands directly from the Claude Code plugin marketplace:
 
 ```bash
 # Add the marketplace repository
@@ -166,9 +180,13 @@ Then run the setup command in Claude Code:
 /maestro:setup
 ```
 
-### Alternative: Manual Installation
+**What you get:** All core slash commands for spec-driven development, track management, and AI-assisted workflows.
 
-If you prefer to install manually without the marketplace:
+**What you don't get:** CLI tools (TUI, web dashboard) - see "Full Installation" below for those.
+
+### Full Installation (Slash Commands + CLI Tools)
+
+For the complete Maestro experience including the TUI and web dashboard:
 
 ```bash
 # One-line installer
@@ -184,6 +202,12 @@ Then in Claude Code:
 ```
 /maestro:setup
 ```
+
+**What you get:** Everything from marketplace installation PLUS:
+- `maestro tui` - Terminal UI for session and MCP management
+- `maestro memory serve` - Web dashboard for memory visualization
+- `maestro memory status` - Memory system statistics
+- Full CLI with all features
 
 ### For OpenCode
 
@@ -358,7 +382,9 @@ maestro/
 
 ## Commands Reference
 
-### Core Maestro Commands
+### Claude Code Slash Commands
+
+These commands work within Claude Code/OpenCode sessions:
 
 | Command | Description |
 |---------|-------------|
@@ -368,23 +394,28 @@ maestro/
 | `/maestro:status` | Display progress across all tracks |
 | `/maestro:revert [track\|phase\|task]` | Revert previous work |
 | `/maestro:configure` | Configure Maestro settings |
+| `/maestro:memory serve` | Start memory dashboard server (requires CLI installation) |
+| `/maestro:memory status` | Show memory system statistics (requires CLI installation) |
 
-### Memory Commands
+### CLI Tools (Terminal Commands)
 
+These commands run in your terminal and require the full installation:
+
+#### Memory Commands
 | Command | Description |
 |---------|-------------|
 | `maestro memory serve` | Launch web dashboard (http://localhost:8000) |
+| `maestro memory status` | Show memory system statistics |
 | `maestro memory import <db>` | Import from external memory systems |
 | `maestro memory search <query>` | Search memories by query |
 | `maestro memory stats` | Display memory statistics |
 | `maestro memory export <file>` | Export memories to JSON |
 | `maestro memory import <file>` | Import memories from JSON |
 
-### TUI Commands
-
+#### TUI Commands
 | Command | Description |
 |---------|-------------|
-| `maestro tui` | Launch Terminal User Interface |
+| `maestro tui` | Launch Terminal User Interface for session management |
 
 ## Documentation
 
