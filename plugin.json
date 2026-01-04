@@ -1,14 +1,13 @@
 {
   "name": "maestro",
-  "displayName": "Maestro - Unified Development Framework",
   "description": "Unified spec-driven development framework with track-based development, automatic agent selection, TDD enforcement, integrated memory system, and Critical Think metacognitive analysis.",
   "version": "2.0.0",
-  "author": "scooter-lacroix",
+  "author": {
+    "name": "scooter-lacroix"
+  },
   "license": "MIT",
   "repository": "https://github.com/scooter-lacroix/Maestro",
   "homepage": "https://github.com/scooter-lacroix/Maestro#readme",
-  "documentation": "https://github.com/scooter-lacroix/Maestro/blob/main/docs",
-  "bugs": "https://github.com/scooter-lacroix/Maestro/issues",
   "keywords": [
     "development",
     "framework",
@@ -23,109 +22,20 @@
     "cli",
     "automation"
   ],
-  "categories": [
-    "Development",
-    "Testing",
-    "Workflow",
-    "Productivity"
+  "commands": [
+    "./claude-code/commands/maestro:setup.md",
+    "./claude-code/commands/maestro:newTrack.md",
+    "./claude-code/commands/maestro:implement.md",
+    "./claude-code/commands/maestro:status.md",
+    "./claude-code/commands/maestro:revert.md",
+    "./claude-code/commands/maestro:configure.md",
+    "./claude-code/commands/maestro:tui.md",
+    "./claude-code/commands/maestro:memory.md"
   ],
-  "claude_code": {
-    "supported": true,
-    "min_version": "1.0.0",
-    "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-claude-code.sh | bash",
-    "marketplace": {
-      "repository": "scooterlacroix/maestro",
-      "short_description": "Spec-driven development with automatic agent selection and TDD enforcement"
-    },
-    "commands": [
-      "maestro:setup",
-      "maestro:newTrack",
-      "maestro:implement",
-      "maestro:status",
-      "maestro:revert",
-      "maestro:configure",
-      "maestro:tui"
-    ],
-    "features": [
-      "Spec-driven development workflow",
-      "Automatic agent selection based on task complexity",
-      "TDD enforcement with 80%+ coverage goals",
-      "Built-in Nexus Memory system for project context",
-      "Critical Think metacognitive analysis framework",
-      "Git-aware tracking with rollback capability",
-      "Web dashboard for memory and project visualization",
-      "Session management with TUI interface"
-    ]
-  },
-  "opencode": {
-    "supported": true,
-    "min_version": "1.0.0",
-    "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install-opencode.sh | bash",
-    "commands": [
-      "maestro setup",
-      "maestro newTrack",
-      "maestro implement",
-      "maestro status",
-      "maestro revert",
-      "maestro configure"
-    ],
-    "features": [
-      "Same workflow engine as Claude Code version",
-      "Spec-driven development with automatic planning",
-      "Agent selection and task orchestration",
-      "Integrated memory system",
-      "TDD enforcement with coverage tracking"
-    ]
-  },
-  "dependencies": {
-    "python": ">=3.10",
-    "required_packages": [
-      "click>=8.0.0",
-      "pydantic>=2.0.0",
-      "toml>=0.10.2",
-      "pyyaml>=6.0",
-      "rich>=13.0.0"
-    ],
-    "optional_packages": [
-      "sentence-transformers",
-      "numpy"
-    ]
-  },
-  "configuration": {
-    "global_config_path": "~/.claude/maestro.local.md",
-    "project_config_path": ".maestro/config.yaml",
-    "memory_config_path": ".maestro/memory_config.yaml"
-  },
-  "critical_think": {
-    "enabled": true,
-    "integration_points": 8,
-    "framework": "6-step metacognitive analysis",
-    "features": [
-      "Core thesis & confidence assessment",
-      "Foundational analysis (assumptions)",
-      "Logical integrity (premise mapping)",
-      "AI-specific pitfall detection",
-      "Risk & mitigation analysis",
-      "Synthesis & revised recommendation"
-    ]
-  },
-  "memory_system": {
-    "name": "Nexus Memory",
-    "features": [
-      "Agent-type categorization",
-      "Semantic search",
-      "Automatic project detection",
-      "LLM-enhanced context retrieval",
-      "Web dashboard UI"
-    ]
-  },
-  "testing": {
-    "framework": "pytest",
-    "coverage_target": "80%",
-    "current_coverage": "237 passing tests"
-  },
-  "changelog": {
-    "current": "2.0.0",
-    "latest": "https://github.com/scooter-lacroix/Maestro/blob/main/CHANGELOG.md"
-  }
+  "agents": [
+    "./claude-code/agents/maestro.md"
+  ],
+  "skills": [
+    "./skills/nexus-memory/"
+  ]
 }
