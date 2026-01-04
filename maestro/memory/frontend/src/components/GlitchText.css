@@ -1,0 +1,48 @@
+.glitch-text-wrapper {
+  position: relative;
+  display: inline-block;
+  cursor: default;
+}
+
+.glitch-text,
+.original-text {
+  display: block;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  white-space: inherit;
+}
+
+.original-text {
+  color: inherit;
+}
+
+.glitch-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: rgba(255, 255, 255, 0.3);
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.glitch-gradient {
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(
+    circle,
+    rgba(0, 128, 128, 0.8) 0%,
+    rgba(0, 255, 170, 0.5) 40%,
+    rgba(255, 255, 255, 0.1) 70%,
+    transparent 100%
+  );
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  transition: opacity 0.3s ease;
+  z-index: 0;
+}

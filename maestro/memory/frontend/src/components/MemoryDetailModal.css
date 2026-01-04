@@ -1,0 +1,152 @@
+.memory-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 10002;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.memory-modal-container {
+    background: var(--bg-secondary, #1a1a1a);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    border-radius: 8px;
+    width: 100%;
+    max-width: 800px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+    animation: scaleIn 0.2s ease-out;
+}
+
+.memory-modal-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.memory-modal-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.memory-command-badge {
+    background: rgba(100, 200, 255, 0.1);
+    color: var(--text-primary, #fff);
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    border: 1px solid rgba(100, 200, 255, 0.2);
+}
+
+.memory-category-badge {
+    color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.memory-modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.6));
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 8px;
+    transition: color 0.2s;
+}
+
+.memory-modal-close:hover {
+    color: var(--text-primary, #fff);
+}
+
+.memory-modal-content {
+    padding: 30px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.memory-timestamp {
+    font-size: 0.85rem;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+    margin-bottom: 20px;
+    font-family: 'Courier New', monospace;
+}
+
+.memory-body {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    color: var(--text-primary, #fff);
+    white-space: pre-wrap;
+    margin-bottom: 30px;
+}
+
+.memory-labels-section,
+.memory-metadata-section {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+}
+
+.memory-labels-section h4,
+.memory-metadata-section h4 {
+    font-size: 0.9rem;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+
+.memory-labels-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.memory-label-item {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.8));
+}
+
+.memory-metadata-pre {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}

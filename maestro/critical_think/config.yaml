@@ -1,0 +1,204 @@
+# Critical Think Integration Configuration
+# This file controls the behavior of the Critical Think metacognitive framework
+# integration into the Maestro workflow.
+
+# Enable or disable Critical Think integration globally
+enabled: true
+
+# Integration point configuration
+# Each integration point can be individually enabled/disabled
+integration_points:
+  # newTrack Q&A Phase
+  before_question:
+    enabled: true
+    confidence_threshold: 7
+    description: "Analyze before asking clarifying questions to prevent over-questioning"
+  after_question:
+    enabled: true
+    confidence_threshold: 7
+    description: "Validate after receiving answers to ensure understanding"
+
+  # Documentation Generation
+  before_docs:
+    enabled: true
+    confidence_threshold: 7
+    description: "Analyze before generating documentation"
+  after_docs:
+    enabled: true
+    confidence_threshold: 7
+    description: "Validate documentation quality after generation"
+
+  # Code Implementation
+  before_implementation:
+    enabled: true
+    confidence_threshold: 7
+    description: "Analyze before implementing code"
+  after_implementation:
+    enabled: true
+    confidence_threshold: 8
+    description: "Validate implementation quality after completion"
+
+  # Agent Delegation
+  before_agent_delegation:
+    enabled: true
+    confidence_threshold: 7
+    description: "Analyze before delegating to agents to prevent over-delegation"
+  after_agent_delegation:
+    enabled: true
+    confidence_threshold: 7
+    description: "Validate agent results after delegation"
+
+# Confidence score thresholds
+# When confidence falls below these thresholds, different behaviors are triggered
+confidence_thresholds:
+  # Below this threshold, must reconsider approach
+  critical: 4
+
+  # Below this threshold, should provide warnings
+  warning: 6
+
+  # At or above this threshold, can proceed
+  acceptable: 7
+
+  # At or above this threshold, highly confident
+  high: 9
+
+# Output formatting preferences
+output:
+  # Format options: detailed, summary, minimal
+  format: detailed
+
+  # Include confidence scores in output
+  show_confidence: true
+
+  # Include all 6 steps in output
+  show_all_steps: true
+
+  # Include risk analysis in output
+  show_risks: true
+
+  # Highlight AI-specific pitfalls
+  highlight_pitfalls: true
+
+  # Include revised confidence after analysis
+  show_revised_confidence: true
+
+# Behavior configuration
+behavior:
+  # Auto-proceed if confidence meets threshold (without asking user)
+  auto_proceed: true
+
+  # If confidence doesn't meet threshold, require user confirmation
+  require_confirmation_on_low_confidence: true
+
+  # Maximum number of assumptions to analyze
+  max_assumptions: 3
+
+  # Maximum number of risks to analyze
+  max_risks: 3
+
+  # Enable verbose mode (show full analysis)
+  verbose: true
+
+# Template paths
+# These point to the prompt templates for each integration point
+templates:
+  before_action: "maestro/critical_think/templates/criticalthink_before_action.md"
+  after_action: "maestro/critical_think/templates/criticalthink_after_action.md"
+  question: "maestro/critical_think/templates/criticalthink_question.md"
+  docs: "maestro/critical_think/templates/criticalthink_docs.md"
+  implementation: "maestro/critical_think/templates/criticalthink_implementation.md"
+  agent_delegation: "maestro/critical_think/templates/criticalthink_agent_delegation.md"
+
+# Integration with Maestro workflow
+# These settings control how Critical Think integrates with existing Maestro features
+maestro_integration:
+  # Integrate with TDD requirements
+  tdd_integration: true
+
+  # Integrate with agent selection criteria
+  agent_selection_integration: true
+
+  # Integrate with oracle review requirements
+  oracle_review_integration: true
+
+  # Track confidence scores in plan.md
+  track_confidence_in_plans: true
+
+  # Include Critical Think results in commit messages
+  include_in_commits: false
+
+# Native Claude Code Integration Configuration
+native_integration:
+  # Enable or disable native Claude Code session integration
+  enabled: true
+
+  # Use current session's model (recommended)
+  # When true, uses the model from the current Claude Code session
+  # When false, requires separate API configuration (not recommended)
+  use_session_model: true
+
+  # claude-hud integration
+  claude_hud:
+    # Enable claude-hud for native token/cost tracking
+    enabled: true
+
+    # Configure statusline to show Maestro-specific information
+    statusline_config:
+      # Show current Maestro command
+      show_command: true
+
+      # Show track/task context
+      show_context: true
+
+      # Show token usage
+      show_tokens: true
+
+      # Show cost estimates
+      show_cost: true
+
+# LLM Integration Configuration (DEPRECATED - Use native_integration instead)
+# This section is kept for backward compatibility but should not be used
+llm:
+  # DEPRECATED: Use native_integration.enabled instead
+  enabled: false
+
+  # DEPRECATED: Native integration uses current session, no API key needed
+  api_key: null
+
+  # DEPRECATED: Model selection now uses command frontmatter or session model
+  model: "claude-3-5-sonnet-20241022"
+
+  # Token limits (not used in native integration)
+  max_tokens: 4000
+
+  # Timeout (seconds) (not used in native integration)
+  timeout: 30.0
+
+  # Retry configuration (not used in native integration)
+  retry:
+    enabled: true
+    max_attempts: 3
+    backoff_base: 2.0
+
+  # Cost controls (handled by claude-hud in native integration)
+  cost_control:
+    daily_cost_limit: 10.0
+    max_analyses_per_day: 100
+
+  # Fallback behavior when LLM fails
+  fallback_on_error: true
+
+# Advanced settings
+advanced:
+  # Enable learning from past Critical Think sessions
+  learning_mode: false
+
+  # Cache Critical Think results to avoid redundant analysis
+  caching: false
+
+  # Parallel analysis (run multiple checks simultaneously)
+  parallel_analysis: false
+
+  # Custom analysis parameters per integration point
+  custom_parameters: {}

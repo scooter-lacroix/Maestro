@@ -1,0 +1,105 @@
+package session
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// TestStorageUpdatedAtTimestamp verifies that SaveWithGroups sets the UpdatedAt timestamp
+// and GetUpdatedAt() returns it correctly.
+func TestStorageUpdatedAtTimestamp(t *testing.T) {
+	// Create temporary directory for test
+	tmpDir := t.TempDir()
+	storagePath := filepath.Join(tmpDir, "sessions.json")
+
+	// Create storage instance
+	s := &Storage{
+		path:    storagePath,
+		profile: "_test",
+	}
+
+	// Create test data
+	instances := []*Instance{
+		{
+			ID:          "test-1",
+			Title:       "Test Session",
+			ProjectPath: "/tmp/test",
+			GroupPath:   "test-group",
+			Command:     "claude",
+			Tool:        "claude",
+			Status:      StatusIdle,
+			CreatedAt:   time.Now(),
+		},
+	}
+
+	// Save data
+	beforeSave := time.Now()
+	time.Sleep(10 * time.Millisecond) // Small delay to ensure timestamp differs
+
+	err := s.SaveWithGroups(instances, nil)
+	if err != nil {
+		t.Fatalf("SaveWithGroups failed: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond) // Small delay to ensure timestamp differs
+	afterSave := time.Now()
+
+	// Get the updated timestamp
+	updatedAt, err := s.GetUpdatedAt()
+	if err != nil {
+		t.Fatalf("GetUpdatedAt failed: %v", err)
+	}
+
+	// Verify timestamp is within expected range
+	if updatedAt.Before(beforeSave) {
+		t.Errorf("UpdatedAt %v is before save started %v", updatedAt, beforeSave)
+	}
+	if updatedAt.After(afterSave) {
+		t.Errorf("UpdatedAt %v is after save completed %v", updatedAt, afterSave)
+	}
+
+	// Verify timestamp is not zero
+	if updatedAt.IsZero() {
+		t.Error("UpdatedAt is zero, expected a valid timestamp")
+	}
+
+	// Save again and verify timestamp updates
+	time.Sleep(50 * time.Millisecond)
+	firstUpdatedAt := updatedAt
+
+	err = s.SaveWithGroups(instances, nil)
+	if err != nil {
+		t.Fatalf("Second SaveWithGroups failed: %v", err)
+	}
+
+	secondUpdatedAt, err := s.GetUpdatedAt()
+	if err != nil {
+		t.Fatalf("Second GetUpdatedAt failed: %v", err)
+	}
+
+	// Verify second timestamp is after first
+	if !secondUpdatedAt.After(firstUpdatedAt) {
+		t.Errorf("Second UpdatedAt %v should be after first %v", secondUpdatedAt, firstUpdatedAt)
+	}
+}
+
+// TestGetUpdatedAtNoFile verifies behavior when storage file doesn't exist
+func TestGetUpdatedAtNoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	storagePath := filepath.Join(tmpDir, "nonexistent.json")
+
+	s := &Storage{
+		path:    storagePath,
+		profile: "_test",
+	}
+
+	_, err := s.GetUpdatedAt()
+	if err == nil {
+		t.Error("Expected error when file doesn't exist, got nil")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("Expected IsNotExist error, got: %v", err)
+	}
+}

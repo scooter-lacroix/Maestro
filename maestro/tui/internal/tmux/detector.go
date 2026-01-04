@@ -1,0 +1,366 @@
+package tmux
+
+import (
+	"strings"
+)
+
+// SessionState represents the detected state of a session
+type SessionState string
+
+const (
+	StateIdle    SessionState = "idle"    // No activity, waiting for user
+	StateBusy    SessionState = "busy"    // Actively working (output changing)
+	StateWaiting SessionState = "waiting" // Showing a prompt, needs input
+)
+
+// =============================================================================
+// Prompt Detector - Detects tool-specific prompts (from Claude Squad source)
+// =============================================================================
+
+// PromptDetector checks for tool-specific prompts in terminal content
+// Based on Claude Squad's exact implementation:
+// https://github.com/smtg-ai/claude-squad/blob/main/session/tmux/tmux.go
+type PromptDetector struct {
+	tool string
+}
+
+// NewPromptDetector creates a detector for the specified tool
+func NewPromptDetector(tool string) *PromptDetector {
+	return &PromptDetector{tool: strings.ToLower(tool)}
+}
+
+// HasPrompt checks if the terminal content contains a prompt waiting for input
+// These patterns are derived from Claude Squad + additional research for edge cases
+func (d *PromptDetector) HasPrompt(content string) bool {
+	switch d.tool {
+	case "claude":
+		return d.hasClaudePrompt(content)
+
+	case "opencode":
+		// OpenCode TUI - look for characteristic UI elements
+		// OpenCode displays a visual TUI with input box, mode indicator, and logo
+		return strings.Contains(content, "Ask anything") || // Input placeholder
+			strings.Contains(content, "┃") || // Input box border characters
+			strings.Contains(content, "open code") || // ASCII logo (with space)
+			strings.Contains(content, "Build") || // Build mode indicator
+			strings.Contains(content, "Plan") || // Plan mode indicator
+			d.hasLineEndingWith(content, ">")
+
+	case "gemini":
+		// From Claude Squad: session/tmux/tmux.go line 284
+		return strings.Contains(content, "Yes, allow once") ||
+			strings.Contains(content, "gemini>") ||
+			d.hasLineEndingWith(content, ">")
+
+	case "codex":
+		// Codex/OpenAI CLI patterns
+		return strings.Contains(content, "codex>") ||
+			strings.Contains(content, "Continue?") ||
+			d.hasLineEndingWith(content, ">")
+
+	default:
+		// Generic shell - check for common prompts
+		return d.hasShellPrompt(content)
+	}
+}
+
+// hasClaudePrompt detects if Claude Code is waiting for input
+// Handles BOTH normal mode AND --dangerously-skip-permissions mode
+//
+// Claude Code UI States (from research):
+// - BUSY: Shows "esc to interrupt" with spinner (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏)
+// - WAITING (normal mode): Shows permission dialogs with Yes/No options
+// - WAITING (--dangerously-skip-permissions): Shows just ">" prompt
+// - THINKING: Extended reasoning mode with "think"/"think harder" keywords
+// - AUTO-ACCEPT: Toggled via Shift+Tab, auto-applies edits
+//
+// References:
+// - Claude Squad: github.com/smtg-ai/claude-squad
+// - CCManager state detection
+// - cli-spinners: github.com/sindresorhus/cli-spinners (dots spinner)
+func (d *PromptDetector) hasClaudePrompt(content string) bool {
+	// Get last 15 lines for analysis (increased from 10 for better context)
+	lines := strings.Split(content, "\n")
+	var lastLines []string
+	for i := len(lines) - 1; i >= 0 && len(lastLines) < 15; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			lastLines = append([]string{lines[i]}, lastLines...)
+		}
+	}
+	recentContent := strings.Join(lastLines, "\n")
+	recentLower := strings.ToLower(recentContent)
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// BUSY indicators (if these are present, Claude is NOT waiting)
+	// Priority: Check busy state FIRST - if busy, definitely not waiting
+	// ═══════════════════════════════════════════════════════════════════════
+	busyIndicators := []string{
+		"esc to interrupt",   // Main busy indicator from Claude Code
+		"(esc to interrupt)", // Sometimes in parentheses
+		"· esc to interrupt", // With separator
+	}
+	for _, indicator := range busyIndicators {
+		if strings.Contains(recentLower, indicator) {
+			return false // Claude is BUSY, not waiting
+		}
+	}
+
+	// Check for spinner characters in last 3 lines (indicates active processing)
+	// These are the exact braille spinner chars from cli-spinners "dots"
+	spinnerChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	last3Lines := lastLines
+	if len(last3Lines) > 3 {
+		last3Lines = last3Lines[len(last3Lines)-3:]
+	}
+	for _, line := range last3Lines {
+		for _, spinner := range spinnerChars {
+			if strings.Contains(line, spinner) {
+				// Spinner present in recent output = actively working
+				return false
+			}
+		}
+	}
+
+	// Check for timing indicators that show Claude is processing
+	// Format: "Thinking… (45s · 1234 tokens · esc to interrupt)"
+	// Or: "Connecting… (80s · 121 tokens · esc to interrupt)"
+	if strings.Contains(recentLower, "thinking") && strings.Contains(recentLower, "tokens") {
+		return false // Actively thinking
+	}
+	if strings.Contains(recentLower, "connecting") && strings.Contains(recentLower, "tokens") {
+		return false // Connecting state
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// WAITING indicators - Permission prompts (normal mode)
+	// ═══════════════════════════════════════════════════════════════════════
+	permissionPrompts := []string{
+		// From Claude Squad (most reliable indicator)
+		"No, and tell Claude what to do differently",
+		// Permission dialog options
+		"Yes, allow once",
+		"Yes, allow always",
+		"Allow once",
+		"Allow always",
+		// Box-drawing permission dialogs
+		"│ Do you want",
+		"│ Would you like",
+		"│ Allow",
+		// Selection indicators
+		"❯ Yes",
+		"❯ No",
+		"❯ Allow",
+		// Trust prompt on startup
+		"Do you trust the files in this folder?",
+		// MCP permission prompts
+		"Allow this MCP server",
+		// Tool permission prompts
+		"Run this command?",
+		"Execute this?",
+	}
+	for _, prompt := range permissionPrompts {
+		if strings.Contains(content, prompt) {
+			return true
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// WAITING indicators - Input prompt (--dangerously-skip-permissions mode)
+	// In this mode, Claude just shows ">" when waiting for next input
+	// This is the PRIMARY detection method for skip-permissions mode
+	// ═══════════════════════════════════════════════════════════════════════
+
+	// Check if last non-empty line is the input prompt
+	if len(lastLines) > 0 {
+		lastLine := strings.TrimSpace(lastLines[len(lastLines)-1])
+
+		// Strip ANSI codes from last line for accurate matching
+		cleanLastLine := StripANSI(lastLine)
+		cleanLastLine = strings.TrimSpace(cleanLastLine)
+
+		// Claude Code shows just ">" when waiting for input
+		// This is the standard prompt in --dangerously-skip-permissions mode
+		if cleanLastLine == ">" {
+			return true
+		}
+
+		// Also check for "> " (with trailing space/cursor position)
+		if cleanLastLine == "> " {
+			return true
+		}
+
+		// Check for prompt with partial user input (user started typing)
+		// Pattern: "> some text" where user is typing
+		if strings.HasPrefix(cleanLastLine, "> ") && !strings.Contains(cleanLastLine, "esc") {
+			// Make sure it's not a quote or output line
+			// Real prompts are short (user input in progress)
+			if len(cleanLastLine) < 100 {
+				return true
+			}
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// WAITING indicators - Completion/question prompts
+	// ═══════════════════════════════════════════════════════════════════════
+	questionPrompts := []string{
+		"Continue?",
+		"Proceed?",
+		"(Y/n)",
+		"(y/N)",
+		"[Y/n]",
+		"[y/N]",
+		"(yes/no)",
+		"[yes/no]",
+		// Plan mode prompts
+		"Approve this plan?",
+		"Execute plan?",
+	}
+	for _, prompt := range questionPrompts {
+		if strings.Contains(recentContent, prompt) {
+			return true
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// WAITING indicators - Task completion signals
+	// When Claude finishes a task, it shows summary and waits for next input
+	// ═══════════════════════════════════════════════════════════════════════
+	completionIndicators := []string{
+		"Task completed",
+		"Done!",
+		"Finished",
+		"What would you like",
+		"What else",
+		"Anything else",
+		"Let me know if",
+	}
+	// Only check completion indicators if we also have the ">" prompt nearby
+	hasCompletionIndicator := false
+	for _, indicator := range completionIndicators {
+		if strings.Contains(recentLower, strings.ToLower(indicator)) {
+			hasCompletionIndicator = true
+			break
+		}
+	}
+	if hasCompletionIndicator {
+		// Check if there's a ">" in the last few lines
+		for _, line := range last3Lines {
+			cleanLine := strings.TrimSpace(StripANSI(line))
+			if cleanLine == ">" || cleanLine == "> " {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// hasLineEndingWith checks if any recent line ends with the given suffix
+func (d *PromptDetector) hasLineEndingWith(content string, suffix string) bool {
+	lines := strings.Split(content, "\n")
+	// Check last 5 lines
+	start := len(lines) - 5
+	if start < 0 {
+		start = 0
+	}
+	for i := len(lines) - 1; i >= start; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == suffix || strings.HasSuffix(line+" ", suffix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasShellPrompt checks for generic shell prompts
+func (d *PromptDetector) hasShellPrompt(content string) bool {
+	// Check last few lines for shell prompt patterns
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 {
+		return false
+	}
+
+	// Get last non-empty line
+	var lastLine string
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" {
+			lastLine = trimmed
+			break
+		}
+	}
+
+	// Common shell prompt endings
+	shellPrompts := []string{"$ ", "# ", "% ", "❯ ", "➜ ", "> "}
+	for _, prompt := range shellPrompts {
+		if strings.HasSuffix(lastLine+" ", prompt) {
+			return true
+		}
+	}
+
+	// Yes/No confirmation prompts anywhere in recent output
+	confirmPatterns := []string{
+		"(Y/n)", "[Y/n]", "(y/N)", "[y/N]",
+		"(yes/no)", "[yes/no]",
+		"Continue?", "Proceed?",
+	}
+	// Check last 5 lines for confirmation prompts
+	checkLines := lines
+	if len(checkLines) > 5 {
+		checkLines = checkLines[len(checkLines)-5:]
+	}
+	recentContent := strings.Join(checkLines, "\n")
+	for _, pattern := range confirmPatterns {
+		if strings.Contains(recentContent, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// =============================================================================
+// ANSI Stripping Utility
+// =============================================================================
+
+// StripANSI removes ANSI escape codes from content
+// This is important because terminal output contains color codes
+func StripANSI(content string) string {
+	// Simple but effective ANSI stripping
+	result := content
+
+	// Remove CSI sequences (most common): ESC [ ... letter
+	for {
+		start := strings.Index(result, "\x1b[")
+		if start == -1 {
+			break
+		}
+		end := start + 2
+		for end < len(result) {
+			c := result[end]
+			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+				end++
+				break
+			}
+			end++
+		}
+		result = result[:start] + result[end:]
+	}
+
+	// Remove OSC sequences: ESC ] ... BEL
+	for {
+		start := strings.Index(result, "\x1b]")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start:], "\x07")
+		if end == -1 {
+			break
+		}
+		result = result[:start] + result[start+end+1:]
+	}
+
+	return result
+}

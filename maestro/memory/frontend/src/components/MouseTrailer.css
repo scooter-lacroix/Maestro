@@ -1,0 +1,44 @@
+/**
+ * Effect 4: Fantastical Mouse Trailer Effect
+ *
+ * Core: soft continuous neon pink glow
+ * Trail: falling stars using free Font Awesome fa-star icon
+ */
+
+.mouse-glow {
+  position: fixed;
+  width: 100px;
+  height: 100px;
+  pointer-events: none;
+  z-index: 9999;
+  background: radial-gradient(
+    circle,
+    rgba(255, 16, 240, 0.4) 0%,
+    rgba(255, 16, 240, 0.15) 40%,
+    transparent 70%
+  );
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  filter: blur(8px);
+  will-change: left, top, opacity;
+  transition: opacity 0.2s ease;
+}
+
+.trailer-star {
+  position: fixed;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  z-index: 9998;
+  font-size: 16px;
+  text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+  will-change: transform, opacity, left, top;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+}
+
+.trailer-star i {
+  display: block;
+}

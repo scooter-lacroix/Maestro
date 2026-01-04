@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maestro Memory Dashboard</title>
+
+    <!-- Distinctive Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Space+Grotesk:wght@400;500;600;700&family=Crimson+Pro:wght@400;600&display=swap" rel="stylesheet">
+
+    <style>
+        /* =============================================================================
+           MAESTRO DASHBOARD - MAXIMALIST LUXURY THEME
+           Aesthetic: Rich gradients, glassmorphism, dramatic typography
+           Font: Abril Fatface (display), Space Grotesk (body), Crimson Pro (accent)
+           ============================================================================= */
+
+        :root {
+            --primary: #667eea;
+            --secondary: #764ba2;
+            --accent: #f59e0b;
+            --gold: #d4a574;
+            --dark: #1a1a2e;
+            --light: #fafafa;
+            --glass: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.2);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--dark) 0%, #16213e 50%, var(--primary) 100%);
+            min-height: 100vh;
+            color: var(--light);
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Animated gradient overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 80%, rgba(102, 126, 234, 0.3) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(118, 75, 162, 0.3) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 40%, rgba(245, 158, 11, 0.15) 0%, transparent 40%);
+            animation: gradientShift 20s ease infinite;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(5%, 5%) rotate(5deg); }
+            66% { transform: translate(-5%, 5%) rotate(-5deg); }
+        }
+
+        /* Noise texture overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            opacity: 0.03;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .app {
+            position: relative;
+            z-index: 2;
+            min-height: 100vh;
+        }
+
+        /* =============================================================================
+           HEADER - Dramatic typography with glassmorphism
+           ============================================================================= */
+        .header {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--glass-border);
+            padding: 20px 40px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            animation: slideDown 0.6s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header-content {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 40px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4); }
+            50% { box-shadow: 0 8px 48px rgba(102, 126, 234, 0.6); }
+        }
+
+        .logo-icon svg {
+            width: 28px;
+            height: 28px;
+            fill: white;
+        }
+
+        .logo-text {
+            font-family: 'Abril Fatface', cursive;
+            font-size: 2rem;
+            background: linear-gradient(135deg, var(--primary), var(--accent), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex: 1;
+            max-width: 800px;
+        }
+
+        .search-box {
+            flex: 1;
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 14px 24px 14px 52px;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 30px;
+            color: var(--light);
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .search-box input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            color: var(--light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-icon:hover {
+            background: var(--primary);
+            transform: scale(1.05);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+        }
+
+        /* =============================================================================
+           NAVIGATION TABS - Staggered entrance animations
+           ============================================================================= */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            padding: 20px 40px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .tab {
+            padding: 14px 28px;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            opacity: 0;
+            animation: tabEntrance 0.5s ease forwards;
+        }
+
+        .tab:nth-child(1) { animation-delay: 0.1s; }
+        .tab:nth-child(2) { animation-delay: 0.15s; }
+        .tab:nth-child(3) { animation-delay: 0.2s; }
+        .tab:nth-child(4) { animation-delay: 0.25s; }
+
+        @keyframes tabEntrance {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .tab:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: var(--light);
+            transform: translateY(-2px);
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-color: transparent;
+            color: white;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+        }
+
+        /* =============================================================================
+           MAIN CONTENT
+           ============================================================================= */
+        .main {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px 40px 60px;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-family: 'Abril Fatface', cursive;
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--light), var(--gold));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .btn {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.5);
+        }
+
+        .btn-secondary {
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            box-shadow: none;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* =============================================================================
+           MEMORY CARDS - Glassmorphism with staggered animations
+           ============================================================================= */
+        .memories-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 24px;
+        }
+
+        .memory-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 28px;
+            transition: all 0.4s ease;
+            opacity: 0;
+            animation: cardEntrance 0.6s ease forwards;
+            cursor: pointer;
+        }
+
+        @keyframes cardEntrance {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .memory-card:nth-child(1) { animation-delay: 0.05s; }
+        .memory-card:nth-child(2) { animation-delay: 0.1s; }
+        .memory-card:nth-child(3) { animation-delay: 0.15s; }
+        .memory-card:nth-child(4) { animation-delay: 0.2s; }
+        .memory-card:nth-child(5) { animation-delay: 0.25s; }
+        .memory-card:nth-child(6) { animation-delay: 0.3s; }
+
+        .memory-card:hover {
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 20px 60px rgba(102, 126, 234, 0.3);
+            border-color: var(--primary);
+        }
+
+        .memory-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .memory-command {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .memory-time {
+            font-family: 'Crimson Pro', serif;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .memory-context {
+            font-family: 'Crimson Pro', serif;
+            font-size: 1.05rem;
+            line-height: 1.6;
+            color: rgba(255, 255, 255, 0.85);
+            margin-bottom: 16px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .memory-meta {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .memory-tag {
+            padding: 6px 14px;
+            background: rgba(102, 126, 234, 0.2);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: var(--primary);
+        }
+
+        /* =============================================================================
+           STATS CARDS - Dramatic display with animations
+           ============================================================================= */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 32px;
+            text-align: center;
+            transition: all 0.4s ease;
+            opacity: 0;
+            animation: statEntrance 0.8s ease forwards;
+        }
+
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+
+        @keyframes statEntrance {
+            from {
+                opacity: 0;
+                transform: scale(0.8) rotate(-5deg);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) rotate(0deg);
+            }
+        }
+
+        .stat-card:hover {
+            transform: scale(1.05) rotate(2deg);
+            box-shadow: 0 20px 60px rgba(102, 126, 234, 0.3);
+        }
+
+        .stat-value {
+            font-family: 'Abril Fatface', cursive;
+            font-size: 4rem;
+            background: linear-gradient(135deg, var(--accent), var(--gold));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.7);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        /* =============================================================================
+           PROJECT/TRACK CARDS
+           ============================================================================= */
+        .project-card, .track-card {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 32px;
+            transition: all 0.4s ease;
+            cursor: pointer;
+        }
+
+        .project-card:hover, .track-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 60px rgba(102, 126, 234, 0.3);
+            border-color: var(--primary);
+        }
+
+        .project-name, .track-name {
+            font-family: 'Abril Fatface', cursive;
+            font-size: 1.8rem;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, var(--light), var(--gold));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .project-path, .track-id {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 16px;
+        }
+
+        /* =============================================================================
+           LOADING STATES
+           ============================================================================= */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid var(--glass);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-family: 'Space Grotesk', sans-serif;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* =============================================================================
+           EMPTY STATE
+           ============================================================================= */
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+        }
+
+        .empty-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-text {
+            font-family: 'Crimson Pro', serif;
+            font-size: 1.4rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* =============================================================================
+           RESPONSIVE DESIGN
+           ============================================================================= */
+        @media (max-width: 1024px) {
+            .header-content {
+                flex-wrap: wrap;
+                gap: 20px;
+            }
+
+            .header-controls {
+                order: 3;
+                flex-basis: 100%;
+            }
+
+            .memories-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 16px 20px;
+            }
+
+            .tabs {
+                padding: 16px 20px;
+                flex-wrap: wrap;
+            }
+
+            .main {
+                padding: 16px 20px 40px;
+            }
+
+            .section-title {
+                font-size: 1.8rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l6.9 3.45L12 11.09 5.1 7.63 12 4.18zM4 8.82l7 3.5v7.36l-7-3.5V8.82zm9 10.86v-7.36l7-3.5v7.36l-7 3.5z"/>
+                        </svg>
+                    </div>
+                    <span class="logo-text">Maestro</span>
+                </div>
+
+                <div class="header-controls">
+                    <div class="search-box">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" placeholder="Search memories, projects, tracks..." id="searchInput">
+                    </div>
+
+                    <div class="header-actions">
+                        <button class="btn-icon" id="refreshBtn" title="Refresh">
+                            ↻
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="tabs">
+            <button class="tab active" data-tab="memories">Memories</button>
+            <button class="tab" data-tab="projects">Projects</button>
+            <button class="tab" data-tab="tracks">Tracks</button>
+            <button class="tab" data-tab="stats">Statistics</button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Memories Tab -->
+            <section id="tab-memories" class="tab-content active">
+                <div class="section-header">
+                    <h2 class="section-title">Memories</h2>
+                    <button class="btn" onclick="refreshMemories()">Refresh</button>
+                </div>
+
+                <div class="memories-grid" id="memoriesGrid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p class="loading-text">Loading memories...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Projects Tab -->
+            <section id="tab-projects" class="tab-content">
+                <div class="section-header">
+                    <h2 class="section-title">Projects</h2>
+                    <button class="btn" onclick="refreshProjects()">Refresh</button>
+                </div>
+
+                <div class="memories-grid" id="projectsGrid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p class="loading-text">Loading projects...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tracks Tab -->
+            <section id="tab-tracks" class="tab-content">
+                <div class="section-header">
+                    <h2 class="section-title">Tracks</h2>
+                    <button class="btn" onclick="refreshTracks()">Refresh</button>
+                </div>
+
+                <div class="memories-grid" id="tracksGrid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p class="loading-text">Loading tracks...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Statistics Tab -->
+            <section id="tab-stats" class="tab-content">
+                <div class="section-header">
+                    <h2 class="section-title">Statistics</h2>
+                    <button class="btn" onclick="refreshStats()">Refresh</button>
+                </div>
+
+                <div class="stats-grid" id="statsGrid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p class="loading-text">Loading statistics...</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // =============================================================================
+        // MAESTRO DASHBOARD JAVASCRIPT
+        // =============================================================================
+
+        const API_BASE = window.location.origin;
+
+        // Tab navigation
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active from all tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+                // Activate clicked tab
+                tab.classList.add('active');
+                const tabName = tab.dataset.tab;
+                document.getElementById(`tab-${tabName}`).classList.add('active');
+
+                // Load content for the tab
+                if (tabName === 'memories') refreshMemories();
+                else if (tabName === 'projects') refreshProjects();
+                else if (tabName === 'tracks') refreshTracks();
+                else if (tabName === 'stats') refreshStats();
+            });
+        });
+
+        // =============================================================================
+        // API CALLS
+        // =============================================================================
+
+        async function fetchAPI(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, options);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(`API Error [${endpoint}]:`, error);
+                return { success: false, error: error.message };
+            }
+        }
+
+        // =============================================================================
+        // MEMORIES
+        // =============================================================================
+
+        async function refreshMemories() {
+            const grid = document.getElementById('memoriesGrid');
+
+            // Fetch all projects first, then get memories for each
+            const projectsData = await fetchAPI('/api/v1/projects');
+
+            if (!projectsData.success || !projectsData.projects.length) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📭</div>
+                        <p class="empty-text">No memories found yet</p>
+                        <p style="color: rgba(255,255,255,0.4); margin-top: 10px;">Memories will appear here as you use Maestro commands</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Get memories for the first project (for demo)
+            const firstProject = projectsData.projects[0];
+            const memoriesData = await fetchAPI(`/api/v1/context/project?project_path=${encodeURIComponent(firstProject.project_path)}&limit=12`);
+
+            if (!memoriesData.success) {
+                grid.innerHTML = `<div class="empty-state"><p class="empty-text">Failed to load memories</p></div>`;
+                return;
+            }
+
+            const memories = memoriesData.memories || memoriesData.results || [];
+
+            if (!memories.length) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📭</div>
+                        <p class="empty-text">No memories for this project yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = memories.map(memory => {
+                const time = new Date(memory.created_at).toLocaleString();
+                const command = memory.command || 'unknown';
+                const context = memory.context || {};
+                const contentPreview = memory.content?.substring(0, 150) + '...' || 'No content';
+
+                return `
+                    <div class="memory-card">
+                        <div class="memory-header">
+                            <span class="memory-command">${command}</span>
+                            <span class="memory-time">${time}</span>
+                        </div>
+                        <p class="memory-context">${contentPreview}</p>
+                        <div class="memory-meta">
+                            <span class="memory-tag">${memory.project_path || 'Unknown Project'}</span>
+                            ${context.track_id ? `<span class="memory-tag">${context.track_id}</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // =============================================================================
+        // PROJECTS
+        // =============================================================================
+
+        async function refreshProjects() {
+            const grid = document.getElementById('projectsGrid');
+            const data = await fetchAPI('/api/v1/projects');
+
+            if (!data.success) {
+                grid.innerHTML = `<div class="empty-state"><p class="empty-text">Failed to load projects</p></div>`;
+                return;
+            }
+
+            const projects = data.projects || [];
+
+            if (!projects.length) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📁</div>
+                        <p class="empty-text">No projects yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = projects.map((project, index) => `
+                <div class="project-card" style="animation-delay: ${index * 0.05}s">
+                    <h3 class="project-name">${project.project_name || 'Unnamed Project'}</h3>
+                    <p class="project-path">${project.project_path}</p>
+                    <p style="color: rgba(255,255,255,0.6); font-size: 0.9rem;">
+                        Last active: ${project.last_active ? new Date(project.last_active).toLocaleDateString() : 'Unknown'}
+                    </p>
+                </div>
+            `).join('');
+        }
+
+        // =============================================================================
+        // TRACKS
+        // =============================================================================
+
+        async function refreshTracks() {
+            const grid = document.getElementById('tracksGrid');
+            const data = await fetchAPI('/api/v1/tracks');
+
+            if (!data.success) {
+                grid.innerHTML = `<div class="empty-state"><p class="empty-text">Failed to load tracks</p></div>`;
+                return;
+            }
+
+            const tracks = data.tracks || [];
+
+            if (!tracks.length) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">🛤️</div>
+                        <p class="empty-text">No tracks yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = tracks.map((track, index) => `
+                <div class="track-card" style="animation-delay: ${index * 0.05}s">
+                    <h3 class="track-name">${track.title || track.track_id}</h3>
+                    <p class="track-id">ID: ${track.track_id}</p>
+                    <span class="memory-tag" style="display: inline-block; margin-top: 12px;">Status: ${track.status}</span>
+                </div>
+            `).join('');
+        }
+
+        // =============================================================================
+        // STATISTICS
+        // =============================================================================
+
+        async function refreshStats() {
+            const grid = document.getElementById('statsGrid');
+            const data = await fetchAPI('/api/v1/stats');
+
+            if (!data.success) {
+                grid.innerHTML = `<div class="empty-state"><p class="empty-text">Failed to load statistics</p></div>`;
+                return;
+            }
+
+            grid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${data.total_memories || 0}</div>
+                    <div class="stat-label">Total Memories</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.total_projects || 0}</div>
+                    <div class="stat-label">Projects</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.total_tracks || 0}</div>
+                    <div class="stat-label">Tracks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${Object.keys(data.memories_by_command || {}).length}</div>
+                    <div class="stat-label">Command Types</div>
+                </div>
+            `;
+        }
+
+        // =============================================================================
+        // INITIALIZE
+        // =============================================================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load initial tab content
+            refreshMemories();
+
+            // Refresh button
+            document.getElementById('refreshBtn').addEventListener('click', () => {
+                const activeTab = document.querySelector('.tab.active').dataset.tab;
+                if (activeTab === 'memories') refreshMemories();
+                else if (activeTab === 'projects') refreshProjects();
+                else if (activeTab === 'tracks') refreshTracks();
+                else if (activeTab === 'stats') refreshStats();
+            });
+
+            // Search functionality (basic)
+            document.getElementById('searchInput').addEventListener('input', debounce((e) => {
+                const query = e.target.value.toLowerCase();
+                // TODO: Implement actual search via API
+                console.log('Search:', query);
+            }, 300));
+        });
+
+        // Debounce utility
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+    </script>
+</body>
+</html>

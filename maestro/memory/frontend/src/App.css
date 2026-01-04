@@ -1,0 +1,686 @@
+/**
+ * Maestro Memory Dashboard - Global Styles
+ * Brutalist design aesthetic with dark theme
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Courier New', monospace;
+  background: var(--bg-primary, #0a0a0a);
+  color: var(--text-primary, rgba(255, 255, 255, 0.9));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* Dark Theme (default) */
+body.theme-dark,
+body {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #1a1a1a;
+  --text-primary: rgba(255, 255, 255, 0.9);
+  --text-secondary: rgba(255, 255, 255, 0.5);
+  --border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Light Theme */
+/* Light Mode with enhanced visibility & red accents */
+body.theme-light {
+  --bg-primary: #f0f0f5;
+  --bg-secondary: #ffffff;
+  --text-primary: #101015;
+  --text-secondary: #555560;
+  --border-color: #d1d1d8;
+  --accent-color: #e02020;
+  /* Red accent */
+}
+
+/* Red accent on wires / details */
+body.theme-light .dashboard {
+  /* Wire effect */
+  background-image:
+    linear-gradient(to right, rgba(224, 32, 32, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(224, 32, 32, 0.05) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+body.theme-light .dashboard::before {
+  /* Visible background dots */
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(#101015 1px, transparent 1px);
+  background-size: 20px 20px;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body.theme-light .card-title,
+body.theme-light .section-title {
+  color: #101015;
+  border-left: 4px solid var(--accent-color);
+  padding-left: 8px;
+}
+
+body.theme-light .glitch-card {
+  border: 1px solid var(--border-color);
+  box-shadow: 4px 4px 0 rgba(224, 32, 32, 0.1);
+  background: #fff;
+}
+
+body.theme-light .glitch-card:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 6px 6px 0 rgba(224, 32, 32, 0.2);
+}
+
+body.theme-light .project-item,
+body.theme-light .track-item,
+body.theme-light .memory-item {
+  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+/* FIX: Ensure Detailed Tabs are visible in Light Mode */
+body.theme-light .detailed-tabs-container {
+  background: white;
+  border: 1px solid #d1d1d8;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+}
+
+body.theme-light .detailed-tabs-overlay {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+body.theme-light .tabs-header,
+body.theme-light .tabs-nav {
+  background: #f8f8fa;
+  border-bottom-color: #e0e0e5;
+}
+
+body.theme-light .stat-box,
+body.theme-light .memory-detail-item,
+body.theme-light .project-detail-item,
+body.theme-light .track-detail-item,
+body.theme-light .settings-section {
+  background: white;
+  border: 1px solid #e0e0e5;
+  color: #101015;
+}
+
+body.theme-light .tabs-close-btn {
+  background: white;
+  border-color: #d1d1d8;
+  color: #555;
+}
+
+body.theme-light .tab-btn {
+  color: #666;
+}
+
+body.theme-light .tab-btn.active {
+  background: #fff0f0;
+  color: #d01010;
+  border-bottom-color: #d01010;
+}
+
+body.theme-light .stat-value {
+  color: #101015;
+}
+
+body.theme-light .stat-label {
+  color: #666;
+}
+
+/* Dither Dark Theme */
+body.theme-dither {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #1a1a1a;
+  --text-primary: #00ff41;
+  --text-secondary: #00aa30;
+  --border-color: #00ff41;
+}
+
+body.theme-dither::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: repeating-linear-gradient(0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 255, 65, 0.03) 2px,
+      rgba(0, 255, 65, 0.03) 4px);
+  pointer-events: none;
+  z-index: 10000;
+}
+
+body.theme-dither .dashboard {
+  background: var(--bg-primary);
+}
+
+body.theme-dither .glitch-card,
+body.theme-dither .project-item,
+body.theme-dither .track-item,
+body.theme-dither .memory-item {
+  border-color: rgba(0, 255, 65, 0.3);
+  color: #00ff41;
+}
+
+body.theme-dither .card-title,
+body.theme-dither .project-name,
+body.theme-dither .track-title,
+body.theme-dither .section-title {
+  color: #00ff41;
+  text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+}
+
+/* Enhanced dither terminal flicker effect */
+body.theme-dither .card {
+  animation: terminalFlicker 0.15s infinite;
+}
+
+@keyframes terminalFlicker {
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.98;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+/* CRT scanline effect for dither theme */
+body.theme-dither #cards::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 255, 65, 0.03) 2px,
+      rgba(0, 255, 65, 0.03) 4px);
+  pointer-events: none;
+  z-index: 100;
+  animation: scanlineMove 8s linear infinite;
+}
+
+@keyframes scanlineMove {
+  0% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(50px);
+  }
+}
+
+/* Model's Choice: Cyberpunk Neon Theme - FIXED: Reduced purple, added cyan/magenta balance */
+body.theme-cyberpunk {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #1a1a2f;
+  --text-primary: rgba(255, 100, 255, 0.9);
+  --text-secondary: rgba(100, 200, 255, 0.7);
+  --border-color: rgba(255, 100, 255, 0.3);
+}
+
+body.theme-cyberpunk .dashboard {
+  background:
+    /* Circuit board trace pattern */
+    repeating-linear-gradient(90deg, transparent, transparent 50px, rgba(0, 255, 255, 0.02) 50px, rgba(0, 255, 255, 0.02) 51px),
+    repeating-linear-gradient(0deg, transparent, transparent 50px, rgba(255, 0, 255, 0.02) 50px, rgba(255, 0, 255, 0.02) 51px),
+    /* More balanced gradient */
+    linear-gradient(135deg, #0a0a0f 0%, #0f0a1a 30%, #0a0f1a 70%, #0a0a0f 100%);
+}
+
+body.theme-cyberpunk .glitch-card {
+  border-color: rgba(255, 100, 255, 0.3);
+  box-shadow: 0 0 20px rgba(255, 100, 255, 0.1);
+}
+
+body.theme-cyberpunk .glitch-card:hover {
+  box-shadow: 0 0 30px rgba(255, 100, 255, 0.3);
+}
+
+body.theme-cyberpunk .card-title,
+body.theme-cyberpunk .section-title {
+  color: rgba(255, 100, 255, 0.9);
+  text-shadow: 0 0 10px rgba(255, 100, 255, 0.5);
+}
+
+/* Enhanced cyberpunk card glow */
+body.theme-cyberpunk .card {
+  animation: cyberpunkPulse 4s ease-in-out infinite;
+}
+
+@keyframes cyberpunkPulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(255, 100, 255, 0.1);
+  }
+
+  50% {
+    box-shadow: 0 0 30px rgba(255, 100, 255, 0.2);
+  }
+}
+
+body.theme-cyberpunk .project-item,
+body.theme-cyberpunk .track-item {
+  border-color: rgba(100, 200, 255, 0.3);
+}
+
+body.theme-cyberpunk .project-item:hover,
+body.theme-cyberpunk .track-item:hover {
+  box-shadow: 0 0 15px rgba(100, 200, 255, 0.2);
+}
+
+/* 5th Theme: Midnight Aurora */
+/* 5th Theme: Midnight Aurora (Rebuilt) */
+/* Blue, gold, subtle white */
+body.theme-midnight {
+  --bg-primary: #05081a;
+  --bg-secondary: #0a1025;
+  --text-primary: #ffebcc;
+  /* subtle gold/white blend */
+  --text-secondary: #6e85ab;
+  --border-color: rgba(255, 215, 0, 0.2);
+  /* faint gold */
+  --accent-color: #ffd700;
+  --accent-color: #ffd700;
+}
+
+/* FIX: Midnight Aurora visibility in Detailed Tabs */
+body.theme-midnight .detailed-tabs-overlay {
+  background: rgba(5, 8, 26, 0.9);
+}
+
+body.theme-midnight .detailed-tabs-container {
+  background: linear-gradient(135deg, rgba(10, 16, 37, 0.95), rgba(5, 8, 26, 0.98));
+  border: 1px solid rgba(100, 150, 255, 0.2);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+body.theme-midnight .tabs-header,
+body.theme-midnight .tabs-nav {
+  background: rgba(10, 16, 37, 0.6);
+  border-bottom-color: rgba(100, 150, 255, 0.1);
+}
+
+body.theme-midnight .stat-box,
+body.theme-midnight .memory-detail-item,
+body.theme-midnight .project-detail-item,
+body.theme-midnight .track-detail-item,
+body.theme-midnight .settings-section {
+  background: rgba(14, 23, 44, 0.6);
+  border: 1px solid rgba(100, 150, 255, 0.15);
+}
+
+body.theme-midnight .dashboard {
+  background: radial-gradient(circle at 50% 10%, #0f1c4d 0%, #05081a 100%);
+  position: relative;
+  z-index: 1;
+}
+
+/* Background elements rebuilt: no images, just CSS shapes */
+body.theme-midnight::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: linear-gradient(0deg, transparent 24%, rgba(255, 215, 0, 0.03) 25%, rgba(255, 215, 0, 0.03) 26%, transparent 27%, transparent 74%, rgba(255, 215, 0, 0.03) 75%, rgba(255, 215, 0, 0.03) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(255, 215, 0, 0.03) 25%, rgba(255, 215, 0, 0.03) 26%, transparent 27%, transparent 74%, rgba(255, 215, 0, 0.03) 75%, rgba(255, 215, 0, 0.03) 76%, transparent 77%, transparent);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body.theme-midnight .glitch-card {
+  background: rgba(10, 16, 37, 0.8);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.05);
+}
+
+body.theme-midnight .glitch-card:hover {
+  box-shadow: 0 0 25px rgba(255, 215, 0, 0.15);
+  border-color: rgba(255, 215, 0, 0.5);
+}
+
+body.theme-midnight .card-title,
+body.theme-midnight .section-title {
+  color: #ffd700;
+  /* Gold */
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+}
+
+body.theme-midnight .project-item,
+body.theme-midnight .track-item,
+body.theme-midnight .memory-item {
+  border-color: rgba(110, 133, 171, 0.3);
+  background: rgba(10, 16, 37, 0.6);
+}
+
+/* 6th Theme: Sepia (Neutral) */
+body.theme-sepia {
+  --bg-primary: #2b2520;
+  /* Dark brown/sepia base */
+  --bg-secondary: #362e26;
+  --text-primary: #d4cba8;
+  /* Sepia white */
+  --text-secondary: #8c8574;
+  --border-color: #524b3d;
+  --accent-color: #c98a5b;
+  /* Neutral orange */
+}
+
+body.theme-sepia .dashboard {
+  background: #2b2520;
+}
+
+body.theme-sepia::before {
+  /* Subtle grain/texture */
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+body.theme-sepia .card-title,
+body.theme-sepia .section-title {
+  color: #7da378;
+  /* Neutral Green */
+}
+
+body.theme-sepia .glitch-card {
+  border-color: var(--border-color);
+  background: #362e26;
+}
+
+body.theme-sepia .project-item,
+body.theme-sepia .track-item,
+body.theme-sepia .memory-item {
+  background: #362e26;
+  border-color: var(--border-color);
+}
+
+body.theme-sepia .action-btn,
+body.theme-sepia .tab-btn.active {
+  background: #c98a5b;
+  /* Neutral orange accent */
+  color: #2b2520;
+}
+
+/* FIX: Sepia Green Accents & Backgrounds */
+body.theme-sepia .detailed-tabs-overlay {
+  background: rgba(43, 37, 32, 0.9);
+}
+
+body.theme-sepia .detailed-tabs-container {
+  background: #2b2520;
+  border: 1px solid #524b3d;
+}
+
+body.theme-sepia .tabs-header,
+body.theme-sepia .tabs-nav {
+  background: #362e26;
+  border-bottom-color: #524b3d;
+}
+
+body.theme-sepia .stat-box,
+body.theme-sepia .memory-detail-item,
+body.theme-sepia .project-detail-item,
+body.theme-sepia .track-detail-item,
+body.theme-sepia .settings-section {
+  background: #362e26;
+  border: 1px solid #524b3d;
+  color: #d4cba8;
+}
+
+/* Neutral Green Accents */
+body.theme-sepia .stat-label,
+body.theme-sepia .settings-subtitle {
+  color: #7da378;
+}
+
+body.theme-sepia .memory-command-tag {
+  background: rgba(125, 163, 120, 0.2);
+  color: #7da378;
+}
+
+body.theme-sepia .tabs-close-btn:hover {
+  background: rgba(125, 163, 120, 0.2);
+  color: #7da378;
+}
+
+
+/* Background Elements for All Themes */
+
+/* Dark Brutalist - Subtle grid pattern and geometric shapes */
+body.theme-dark .dashboard::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body.theme-dark .dashboard::after {
+  content: '';
+  position: fixed;
+  top: 10%;
+  right: 15%;
+  width: 200px;
+  height: 200px;
+  border: 2px solid rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  transform: rotate(45deg);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Light - Clean dot grid */
+body.theme-light .dashboard::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Dither Dark - Scanlines already present, add terminal glow */
+body.theme-dither .dashboard::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(0, 255, 65, 0.02) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Cyberpunk Neon - Circuit board traces added above */
+body.theme-cyberpunk .dashboard::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(0, 255, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(255, 0, 255, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Midnight Aurora - Already handled above with aurora waves and stars */
+
+#root {
+  min-height: 100vh;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Selection */
+::selection {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Focus Styles */
+:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.3);
+  outline-offset: 2px;
+}
+
+/* Links */
+a {
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Buttons Reset */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+/* Images */
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Lists */
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+}
+
+/* Utilities */
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.mt-1 {
+  margin-top: 8px;
+}
+
+.mt-2 {
+  margin-top: 16px;
+}
+
+.mt-3 {
+  margin-top: 24px;
+}
+
+.mt-4 {
+  margin-top: 32px;
+}
+
+.mb-1 {
+  margin-bottom: 8px;
+}
+
+.mb-2 {
+  margin-bottom: 16px;
+}
+
+.mb-3 {
+  margin-bottom: 24px;
+}
+
+.mb-4 {
+  margin-bottom: 32px;
+}
+
+.p-1 {
+  padding: 8px;
+}
+
+.p-2 {
+  padding: 16px;
+}
+
+.p-3 {
+  padding: 24px;
+}
+
+.p-4 {
+  padding: 32px;
+}

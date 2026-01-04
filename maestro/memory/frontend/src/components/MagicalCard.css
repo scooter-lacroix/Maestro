@@ -1,0 +1,198 @@
+/**
+ * Effect 1: Magical Card Hover Effect
+ *
+ * Black background page
+ * 3x2 grid of cards (6 total cards)
+ * Dark gray cards, slightly rounded, small gaps
+ * Faint white borders
+ * Dimmed white icon in center of each card
+ * Faint radial gradient glow follows mouse within active card
+ * Inner card (dark gray) nested 1px inside wrapper card (lighter)
+ * Creates visible "border" via inset
+ * Outer card has brighter glow that appears on ALL cards when ANY card is hovered
+ * Outer glow only visible through 1px inset border
+ * Makes it appear glow extends across neighboring cards
+ */
+
+.magical-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 20px;
+}
+
+@media (max-width: 1024px) {
+  .magical-card-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .magical-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.magical-card {
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+
+.magical-card:hover {
+  transform: translateY(-4px);
+}
+
+/* Outer wrapper card (lighter gray) */
+.card-outer {
+  position: relative;
+  background: #1a1a1a;
+  border-radius: 8px;
+  padding: 1px;
+  overflow: hidden;
+  transition: box-shadow 0.3s ease;
+}
+
+/* 1px inset border that reveals the outer glow */
+.card-border-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  padding: 1px;
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+/* Show outer glow on ALL cards when ANY card is hovered */
+.magical-card-grid:hover .card-border-glow {
+  opacity: 1;
+  background: radial-gradient(
+    circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(255, 255, 255, 0.15) 0%,
+    transparent 50%
+  );
+}
+
+/* Inner card (darker gray) */
+.card-inner {
+  position: relative;
+  background: #0a0a0a;
+  border-radius: 7px;
+  padding: 24px;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Faint white border */
+.card-inner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  pointer-events: none;
+}
+
+/* Mouse-following radial gradient glow */
+.card-glow {
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.02) 40%,
+    transparent 70%
+  );
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.magical-card:hover .card-glow {
+  opacity: 1;
+}
+
+/* Card content */
+.card-content {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  width: 100%;
+}
+
+/* Dimmed white icon */
+.card-icon {
+  font-size: 48px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-bottom: 16px;
+  transition: color 0.3s ease, transform 0.3s ease;
+}
+
+.magical-card:hover .card-icon {
+  color: rgba(255, 255, 255, 0.6);
+  transform: scale(1.1);
+}
+
+/* Card title */
+.card-title {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  margin-bottom: 8px;
+}
+
+/* Card description */
+.card-description {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Expanded content */
+.card-expanded {
+  position: relative;
+  z-index: 1;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
+  text-align: left;
+  animation: expandIn 0.3s ease;
+}
+
+@keyframes expandIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.magical-card.expanded .card-inner {
+  min-height: auto;
+}
+
+.magical-card.expanded .card-content {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.magical-card.expanded .card-icon {
+  font-size: 24px;
+  margin-bottom: 0;
+}

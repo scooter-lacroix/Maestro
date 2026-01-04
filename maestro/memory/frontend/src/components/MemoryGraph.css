@@ -1,0 +1,128 @@
+.memory-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.graph-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.graph-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 20px 0;
+  letter-spacing: 1px;
+}
+
+.graph-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.graph-node {
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 200px;
+}
+
+.node-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.node-count {
+  font-size: 24px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 16px;
+}
+
+.node-connection {
+  position: relative;
+  margin-top: 12px;
+  padding-left: 20px;
+}
+
+.connection-line {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.3), transparent);
+}
+
+.connected-memory {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.memory-command {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'Courier New', monospace;
+  margin-bottom: 4px;
+}
+
+.memory-preview {
+  display: block;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.4;
+}
+
+.graph-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.command-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.command-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: 'Courier New', monospace;
+  min-width: 150px;
+}
+
+.bar-container {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.4));
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.command-count {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  min-width: 30px;
+  text-align: right;
+}

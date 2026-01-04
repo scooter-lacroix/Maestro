@@ -1,0 +1,164 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Testing
+test*.py
+tests/
+*.test.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maestro-specific (internal tools and workflows)
+*SUMMARY.MD
+SUMMARY.MD
+PHASE*.MD
+**/PHASE*.md
+
+# Code indexer
+code_indexer/
+**/code_indexer/
+
+# Kilocode
+.kilocode/
+**/.kilocode/
+
+# GitHub workflows (internal CI)
+.github/workflows/
+
+# Phase docs (to be replaced with Maestro architecture docs)
+docs/phase1-task1-nexus-architecture-review.md
+docs/phase1-task2-integration-architecture.md
+docs/phase*.md
+**/phase*.md
+
+# Migration docs (legacy)
+docs/MIGRATION.md
+docs/MEMORI_MIGRATION.md
+docs/AGENT_DECK_MIGRATION.md
+docs/MAESTRO_UPGRADE.md
+docs/CRITICAL_THINK.md
+
+# Data folder
+data/
+**/data/
+
+# Logs
+logs/
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+coverage.json
+*.cover
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# Session files
+*.db-shm
+*.db-wal
+
+# Build artifacts
+maestro_framework.egg-info/
+
+# Additional internal documentation
+AGENT_PROMPT_*.md
+MAESTRO_COMMAND_FIX.md
+FEATURE_COMPARISON.md
+CHANGELOG.md
+HEADER*.md
+*_SUMMARY.md
+
+# Internal docs in maestro/critical_think/
+maestro/critical_think/README.md
+maestro/critical_think/SECURITY_HARDENING.md
+maestro/critical_think/CONFIG_FEATURES.md
+maestro/critical_think/CONFIG_IMPLEMENTATION_SUMMARY.md
+
+# Internal docs in maestro/memory/
+maestro/memory/DASHBOARD_V2.md
+maestro/memory/FRONTEND_BUILD_GUIDE.md
+
+# Session tracking docs
+maestro/tracks/maestro-unified_20250101/FRONTEND_DEBUGGING_SESSION.md
+maestro/tracks/maestro-unified_20250101/PHASE*.md
+maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md
+maestro/tracks/maestro-unified_20250101/CI_CD_SETUP.md
+maestro/tracks/maestro-unified_20250101/*.md
+maestro/tracks/*/plan.md
+maestro/tracks/*/spec.md
+maestro/tracks/*/metadata.json
+
+# Frontend build artifacts
+maestro/memory/frontend/node_modules/
+maestro/memory/frontend/dist/
+maestro/memory/frontend/.vite/
+
+# Images and assets not for repo
+Header.png
+head.png
+brain.jpeg
+memory.png
+
+# Internal data directories
+maestro/.claude/
+maestro/.code_indexer_data/
+maestro/brand/
+maestro/data/
+maestro/memory/.code_indexer_data/
+maestro/memory/data/
+
+# CLI files
+maestro/cli.py
+
+# Prompts directory
+claude-code/prompts/
+
+# Logs directory
+logs/
+
+# Root level internal docs
+ARCHITECTURE.md
+REPOSITORY_STRUCTURE.md
+SESSION_SUMMARY_*.md
+AGENT_PROMPT_*.md
+MAESTRO_COMMAND_FIX.md
+FEATURE_COMPARISON.md
+
+# Coverage files
+coverage.out
+coverage.json
+htmlcov/
+
+# Code indexer data (root level)
+.code_indexer_data/
+
+# Legacy migration command
+claude-code/commands/maestro:migrate:agent-deck.md
+
+# Memory system legacy docs (all memori/agent deck references)
+maestro/memory/docs/memori_*.md
+maestro/memory/migrations/
+maestro/tui/internal/session/migration.go
+
+# OpenCode skill README (references external projects)
+opencode/skill/maestro/README.md

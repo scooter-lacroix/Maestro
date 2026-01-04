@@ -1,0 +1,220 @@
+/**
+ * GlitchCard Component - Proper Card Structure with Glitch Text Effect
+ *
+ * Based on the reference implementation with:
+ * - Outer card (wrapper) with background
+ * - Outer glow revealed on grid hover
+ * - Inner card (content) with 1px inset
+ * - Inner glow on specific card hover
+ * - Glitch text layer that fills background
+ * - Mouse-following radial gradient mask
+ */
+
+/* The Card Grid */
+#cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  max-width: 1250px;
+  width: calc(100% - 20px);
+  position: relative;
+  z-index: 101;
+  /* Ensure cards appear above header */
+}
+
+/* The Outer Card (Wrapper) */
+.card {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  position: relative;
+  height: 260px;
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Enhanced card hover effect */
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Active/pressed state */
+.card:active {
+  transform: translateY(-2px);
+}
+
+/* Keyboard focus state */
+.card:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.card:focus-visible:hover {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+}
+
+/* The Outer Glow (Hidden by default, revealed on grid hover) */
+.card::before {
+  content: "";
+  height: 100%;
+  width: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: inherit;
+  background: radial-gradient(800px circle at var(--mouse-x) var(--mouse-y),
+      rgba(255, 255, 255, 0.4),
+      transparent 40%);
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+
+/* Reveal Outer Glow on ALL cards when hovering the grid */
+#cards:hover .card::before {
+  opacity: 1;
+}
+
+/* The Inner Card (Content) */
+.card-content {
+  background-color: var(--bg-secondary, #171717);
+  border-radius: inherit;
+  position: absolute;
+  inset: 1px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+}
+
+/* The Inner Glow (Specific to hovered card) */
+.card-content::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(400px circle at var(--mouse-x) var(--mouse-y),
+      rgba(255, 255, 255, 0.15),
+      transparent 40%);
+  border-radius: inherit;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+
+/* Reveal Inner Glow only when specific card is hovered */
+.card:hover .card-content::before {
+  opacity: 1;
+}
+
+/* Icon Styling */
+.card-icon {
+  position: relative;
+  z-index: 4;
+  color: rgba(255, 255, 255, 0.5);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-icon svg {
+  width: 32px;
+  height: 32px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Enhanced icon hover effect */
+.card:hover .card-icon {
+  color: rgba(255, 255, 255, 0.9);
+  transform: scale(1.1);
+}
+
+.card:hover .card-icon svg {
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.5));
+}
+
+/* Card Title */
+.card-title {
+  position: relative;
+  z-index: 4;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  margin: 0;
+}
+
+/* Card Description */
+.card-description {
+  position: relative;
+  z-index: 4;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  text-align: center;
+  margin: 0;
+}
+
+/* Glitch Text Layer - fills card background */
+.glitch-text-layer {
+  position: absolute;
+  inset: 0;
+  font-size: 12px;
+  line-height: 12px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+
+  /* Gradient mask following mouse */
+  color: transparent;
+  background-image: radial-gradient(circle 250px at var(--mouse-x) var(--mouse-y),
+      rgba(46, 137, 255, 0.7) 0%,
+      rgba(21, 230, 200, 0.6) 30%,
+      rgba(255, 100, 255, 0.4) 60%,
+      rgba(255, 255, 255, 0.2) 80%,
+      transparent 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+
+  z-index: 5;
+  /* Enhance glitch effect with subtle animation */
+  animation: glitchShimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes glitchShimmer {
+
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* Show glitch on card hover */
+.card:hover .glitch-text-layer {
+  opacity: 1;
+  animation: none;
+}
+
+/* Responsive Layout */
+@media (max-width: 700px) {
+  #cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 450px) {
+  #cards {
+    grid-template-columns: 1fr;
+  }
+}
