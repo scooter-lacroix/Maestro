@@ -1,0 +1,25 @@
+# MANIFEST.in - Explicitly control what files are included in the distribution
+
+# Include Maestro templates
+recursive-include maestro/templates *
+graft maestro/templates
+
+# Include Memory Dashboard frontend dist files (built assets)
+recursive-include maestro/memory/frontend/dist *
+graft maestro/memory/frontend/dist
+
+# Exclude frontend development files (node_modules, src, test files, etc.)
+recursive-exclude maestro/memory/frontend/node_modules *
+global-exclude maestro/memory/frontend/node_modules/*
+recursive-exclude maestro/memory/frontend/src *
+global-exclude maestro/memory/frontend/src/*
+prune maestro/memory/frontend/node_modules
+prune maestro/memory/frontend/src
+
+# Exclude test and development files from frontend
+exclude maestro/memory/frontend/test_*.py
+exclude maestro/memory/frontend/*.json
+exclude maestro/memory/frontend/*.lock
+global-exclude maestro/memory/frontend/package*.json
+global-exclude maestro/memory/frontend/tsconfig*.json
+global-exclude maestro/memory/frontend/vite.config.*

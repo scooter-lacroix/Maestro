@@ -88,6 +88,7 @@ include = ["maestro*"]
 
 [tool.setuptools.package-data]
 "maestro" = ["templates/*", "templates/**/*"]
+"maestro.memory" = ["frontend/dist/*", "frontend/dist/**/*", "frontend/dist/assets/*"]
 
 [tool.black]
 line-length = 100
