@@ -574,34 +574,43 @@ func (s *Session) Start(command string) error {
 		workDir = os.Getenv("HOME")
 	}
 
-	// Create new tmux session in detached mode
-	// IMPORTANT: Ensure HOME and PATH are set in the tmux session environment
-	// CLI tools (Claude, Gemini, OpenCode, Codex) rely on these to find their config files
-	// (e.g., ~/.claude/settings.json, ~/.claude.json, ~/.gemini/config.json, etc.)
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", s.Name, "-c", workDir)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to create tmux session: %w (output: %s)", err, string(output))
-	}
+	// Prepare environment variables to pass to tmux session
+	// CRITICAL: These must be set via -e flags when creating the session, NOT via set-environment afterwards.
+	// Using set-environment after session creation doesn't affect the initial shell process - only new processes.
+	// The -e flag ensures the environment variables are available from the moment the shell starts.
+	var envVars []string
 
-	// Ensure HOME is set in the session environment for CLI tool config discovery
+	// Set HOME for CLI tool config discovery (Claude: ~/.claude, Gemini: ~/.gemini, etc.)
 	if homeDir := os.Getenv("HOME"); homeDir != "" {
-		_ = exec.Command("tmux", "set-environment", "-t", s.Name, "HOME", homeDir).Run()
+		envVars = append(envVars, fmt.Sprintf("HOME=%s", homeDir))
 	}
 
-	// Ensure PATH is set in the session environment so CLI tools can be found
-	// This is critical for tools installed in non-standard paths (e.g., Homebrew, NVM)
+	// Set PATH to ensure CLI tools can be found
+	// Critical for tools in non-standard paths (Homebrew: /home/linuxbrew/.linuxbrew/bin, NVM: ~/.nvm, etc.)
 	if pathEnv := os.Getenv("PATH"); pathEnv != "" {
-		_ = exec.Command("tmux", "set-environment", "-t", s.Name, "PATH", pathEnv).Run()
+		envVars = append(envVars, fmt.Sprintf("PATH=%s", pathEnv))
 	}
 
 	// Set CLAUDE_CONFIG_DIR to ensure Claude Code can find its settings.json and credentials
-	// This defaults to ~/.claude if not set in the environment
 	claudeConfigDir := os.Getenv("CLAUDE_CONFIG_DIR")
 	if claudeConfigDir == "" {
 		claudeConfigDir = filepath.Join(os.Getenv("HOME"), ".claude")
 	}
-	_ = exec.Command("tmux", "set-environment", "-t", s.Name, "CLAUDE_CONFIG_DIR", claudeConfigDir).Run()
+	envVars = append(envVars, fmt.Sprintf("CLAUDE_CONFIG_DIR=%s", claudeConfigDir))
+
+	// Build tmux new-session command with -e flags for environment variables
+	// The -e flag passes environment variables to the session at creation time,
+	// ensuring they're available in the shell from the start.
+	args := []string{"new-session", "-d", "-s", s.Name, "-c", workDir}
+	for _, env := range envVars {
+		args = append(args, "-e", env)
+	}
+
+	cmd := exec.Command("tmux", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create tmux session: %w (output: %s)", err, string(output))
+	}
 
 	// Register session in cache immediately to prevent race condition
 	// where Exists() returns false because cache was refreshed before session creation
