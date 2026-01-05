@@ -80,7 +80,7 @@ Repository = "https://github.com/scooter-lacroix/Maestro"
 maestro = "maestro.cli:main"
 
 [tool.setuptools]
-packages = ["maestro"]
+packages = ["maestro", "maestro.memory"]
 
 [tool.setuptools.package-data]
 "maestro" = ["templates/*", "templates/**/*"]
