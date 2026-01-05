@@ -148,6 +148,36 @@ else
     echo "   ⚠️  Warning: maestro/ directory not found, skipping CLI installation"
 fi
 
+# Build Memory Dashboard frontend
+echo "🎨 Building Memory Dashboard frontend..."
+FRONTEND_DIR="$SCRIPT_DIR/maestro/memory/frontend"
+if [ -d "$FRONTEND_DIR" ]; then
+    # Check if npm/node is available
+    if command -v npm &> /dev/null && command -v node &> /dev/null; then
+        echo "   Installing npm dependencies..."
+        if cd "$FRONTEND_DIR" && npm install --quiet 2>/dev/null; then
+            echo "   Building frontend..."
+            if npm run build --quiet 2>/dev/null; then
+                echo "   ✅ Frontend built successfully"
+            else
+                echo "   ⚠️  Warning: Frontend build failed"
+                echo "   You can build it manually later:"
+                echo "   cd $FRONTEND_DIR && npm install && npm run build"
+            fi
+        else
+            echo "   ⚠️  Warning: npm install failed"
+            echo "   You can install dependencies manually later:"
+            echo "   cd $FRONTEND_DIR && npm install && npm run build"
+        fi
+    else
+        echo "   ℹ️  npm/node not found, skipping frontend build"
+        echo "   To enable the memory dashboard, install Node.js and build manually:"
+        echo "   cd $FRONTEND_DIR && npm install && npm run build"
+    fi
+else
+    echo "   ℹ️  Frontend directory not found, skipping build"
+fi
+
 # Install Go TUI binary if it exists
 echo "🔷 Checking for Go TUI binary..."
 TUI_BINARY="$SCRIPT_DIR/maestro/tui/build/maestro-tui"
