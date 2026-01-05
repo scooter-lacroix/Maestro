@@ -53,14 +53,19 @@ from maestro.memory.constants import (
 
 def _discover_nexus_path() -> str:
     """
-    Discover Nexus Memory System path using multiple fallback strategies.
+    Discover Nexus Memory System path using multiple robust fallback strategies.
 
     Priority order:
     1. Environment variable NEXUS_MEMORY_PATH
-    2. Parent directory relative to maestro package
-    3. User's home directory under work_resources
+    2. Parent directory relative to maestro package (work_resources sibling)
+    3. Common development directories (~/work_resources, ~/dev, ~/projects)
     4. System-wide installation under /opt
-    5. Raise error if not found
+    5. Recursive search in home directory (depth-limited to 3 levels)
+    6. Raise error if not found
+
+    This function is designed to work automatically on any system without
+    manual environment variable configuration. It searches intelligently
+    based on common project structures and locations.
 
     Returns:
         Absolute path to Nexus Memory System
@@ -68,47 +73,116 @@ def _discover_nexus_path() -> str:
     Raises:
         ImportError: If Nexus cannot be found in any location
     """
-    # Strategy 1: Environment variable (highest priority)
+    # Strategy 1: Environment variable (highest priority - explicit override)
     env_path = os.environ.get('NEXUS_MEMORY_PATH')
     if env_path and Path(env_path).exists():
         logger.debug(f"Using Nexus from environment variable: {env_path}")
-        return env_path
+        return str(env_path)
 
     # Strategy 2: Parent directory relative to maestro package
-    # Assumes structure: .../work_resources/nexus-memory-system and .../Prod/maestro
+    # Handles structure: .../work_resources/nexus-memory-system and .../Prod/maestro
+    # This works for both: ~/Prod/maestro and ~/projects/maestro layouts
     try:
-        maestro_parent = Path(__file__).parent.parent.parent  # Goes up to /home/stan/Prod
-        # Try work_resources sibling
-        work_resources = maestro_parent.parent / "work_resources" / "nexus-memory-system"
+        maestro_root = Path(__file__).parent.parent.parent  # maestro package root
+        # Try work_resources sibling (common pattern)
+        work_resources = maestro_root.parent / "work_resources" / "nexus-memory-system"
         if work_resources.exists():
-            logger.debug(f"Using Nexus from work_resources: {work_resources}")
+            logger.debug(f"Using Nexus from work_resources sibling: {work_resources}")
             return str(work_resources)
+
+        # Try sibling directories directly
+        sibling_nexus = maestro_root.parent / "nexus-memory-system"
+        if sibling_nexus.exists():
+            logger.debug(f"Using Nexus from sibling directory: {sibling_nexus}")
+            return str(sibling_nexus)
     except Exception as e:
         logger.debug(f"Could not discover Nexus via parent directory: {e}")
 
-    # Strategy 3: User's home directory
+    # Strategy 3: Common development directories in user's home
+    # This covers various common development setups
+    common_locations = [
+        Path.home() / "work_resources" / "nexus-memory-system",
+        Path.home() / "dev" / "nexus-memory-system",
+        Path.home() / "development" / "nexus-memory-system",
+        Path.home() / "projects" / "nexus-memory-system",
+        Path.home() / "code" / "nexus-memory-system",
+        Path.home() / "src" / "nexus-memory-system",
+        Path.home() / "Prod" / "work_resources" / "nexus-memory-system",
+        Path.home() / "Prod" / "nexus-memory-system",
+    ]
+
+    for location in common_locations:
+        if location.exists():
+            logger.debug(f"Using Nexus from common location: {location}")
+            return str(location)
+
+    # Strategy 4: System-wide installation paths
+    # Covers both Unix/Linux and common system installation locations
+    system_paths = [
+        Path("/opt/nexus-memory-system"),
+        Path("/usr/local/nexus-memory-system"),
+        Path("/usr/local/lib/nexus-memory-system"),
+    ]
+
+    for system_path in system_paths:
+        if system_path.exists():
+            logger.debug(f"Using Nexus from system path: {system_path}")
+            return str(system_path)
+
+    # Strategy 5: Depth-limited recursive search in home directory
+    # This is a fallback to find nexus in non-standard locations
+    # Limited to depth 3 to avoid excessive filesystem traversal
     try:
-        home_nexus = Path.home() / "work_resources" / "nexus-memory-system"
-        if home_nexus.exists():
-            logger.debug(f"Using Nexus from home directory: {home_nexus}")
-            return str(home_nexus)
+        logger.debug("Performing depth-limited recursive search for Nexus...")
+        max_depth = 3
+        home_dir = Path.home()
+
+        # Use os.walk for controlled depth iteration
+        for root, dirs, files in os.walk(home_dir):
+            # Calculate current depth
+            current_depth = root.relative_to(home_dir).parts.__len__()
+
+            # Skip if we've exceeded max depth
+            if current_depth > max_depth:
+                # Don't descend further
+                dirs[:] = []
+                continue
+
+            # Skip hidden directories and common system dirs
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in {
+                'node_modules', 'venv', '.venv', 'env', '__pycache__',
+                'site-packages', '.git', '.cache', 'Applications', 'Library'
+            }]
+
+            # Check if nexus-memory-system exists in current directory
+            if 'nexus-memory-system' in dirs:
+                nexus_path = Path(root) / 'nexus-memory-system'
+                # Verify it has the expected structure
+                if (nexus_path / 'nexus' / 'database' / '__init__.py').exists():
+                    logger.debug(f"Using Nexus from recursive search: {nexus_path}")
+                    return str(nexus_path)
+                    # Don't continue searching after finding one
+                    break
     except Exception as e:
-        logger.debug(f"Could not discover Nexus via home directory: {e}")
+        logger.debug(f"Recursive search failed: {e}")
 
-    # Strategy 4: System-wide installation
-    system_nexus = Path("/opt/nexus-memory-system")
-    if system_nexus.exists():
-        logger.debug(f"Using Nexus from system directory: {system_nexus}")
-        return str(system_nexus)
+    # All strategies failed - provide helpful error message
+    searched_locations = [
+        "1. Environment variable NEXUS_MEMORY_PATH",
+        "2. Parent directory work_resources/nexus-memory-system",
+        "3. Common locations: ~/work_resources, ~/dev, ~/projects, ~/Prod",
+        "4. System paths: /opt, /usr/local",
+        f"5. Recursive search in {Path.home()} (depth=3)",
+    ]
 
-    # All strategies failed
     error_msg = (
-        "Nexus Memory System not found. Tried:\n"
-        "  1. Environment variable NEXUS_MEMORY_PATH\n"
-        "  2. Parent directory work_resources/nexus-memory-system\n"
-        "  3. ~/work_resources/nexus-memory-system\n"
-        "  4. /opt/nexus-memory-system\n"
-        "Please set NEXUS_MEMORY_PATH to the Nexus installation directory."
+        "Nexus Memory System not found. Tried the following locations:\n" +
+        "\n".join(f"  {loc}" for loc in searched_locations) +
+        f"\n\nTo fix this, either:\n" +
+        f"  1. Set NEXUS_MEMORY_PATH environment variable to Nexus directory\n" +
+        f"  2. Clone Nexus to one of the searched locations above\n" +
+        f"     git clone https://github.com/anthropics/nexus-memory-system.git\n" +
+        f"  3. Install Nexus system-wide to /opt/nexus-memory-system\n"
     )
     logger.error(error_msg)
     raise ImportError(error_msg)
