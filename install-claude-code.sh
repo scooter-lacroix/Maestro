@@ -60,7 +60,37 @@ cp "$SCRIPT_DIR/claude-code/templates/workflow.md" ~/.claude/maestro-templates/
 mkdir -p ~/.claude/maestro-templates/code_styleguides
 cp "$SCRIPT_DIR/claude-code/templates/code_styleguides"/*.md ~/.claude/maestro-templates/code_styleguides/
 
-# Install Python CLI
+# Build Memory Dashboard frontend FIRST (before pip install so dist files are included in package)
+echo "🎨 Building Memory Dashboard frontend..."
+FRONTEND_DIR="$SCRIPT_DIR/maestro/memory/frontend"
+if [ -d "$FRONTEND_DIR" ]; then
+    # Check if npm/node is available
+    if command -v npm &> /dev/null && command -v node &> /dev/null; then
+        echo "   Installing npm dependencies..."
+        if cd "$FRONTEND_DIR" && npm install --quiet 2>/dev/null; then
+            echo "   Building frontend..."
+            if npm run build --quiet 2>/dev/null; then
+                echo "   ✅ Frontend built successfully"
+            else
+                echo "   ⚠️  Warning: Frontend build failed"
+                echo "   You can build it manually later:"
+                echo "   cd $FRONTEND_DIR && npm install && npm run build"
+            fi
+        else
+            echo "   ⚠️  Warning: npm install failed"
+            echo "   You can install dependencies manually later:"
+            echo "   cd $FRONTEND_DIR && npm install && npm run build"
+        fi
+    else
+        echo "   ℹ️  npm/node not found, skipping frontend build"
+        echo "   To enable the memory dashboard, install Node.js and build manually:"
+        echo "   cd $FRONTEND_DIR && npm install && npm run build"
+    fi
+else
+    echo "   ℹ️  Frontend directory not found, skipping build"
+fi
+
+# Install Python CLI (after frontend is built so dist files are included in package)
 echo "🐍 Installing Python CLI..."
 if [ -d "$SCRIPT_DIR/maestro" ]; then
     # Check if pip is available
@@ -146,36 +176,6 @@ EOF
     fi
 else
     echo "   ⚠️  Warning: maestro/ directory not found, skipping CLI installation"
-fi
-
-# Build Memory Dashboard frontend
-echo "🎨 Building Memory Dashboard frontend..."
-FRONTEND_DIR="$SCRIPT_DIR/maestro/memory/frontend"
-if [ -d "$FRONTEND_DIR" ]; then
-    # Check if npm/node is available
-    if command -v npm &> /dev/null && command -v node &> /dev/null; then
-        echo "   Installing npm dependencies..."
-        if cd "$FRONTEND_DIR" && npm install --quiet 2>/dev/null; then
-            echo "   Building frontend..."
-            if npm run build --quiet 2>/dev/null; then
-                echo "   ✅ Frontend built successfully"
-            else
-                echo "   ⚠️  Warning: Frontend build failed"
-                echo "   You can build it manually later:"
-                echo "   cd $FRONTEND_DIR && npm install && npm run build"
-            fi
-        else
-            echo "   ⚠️  Warning: npm install failed"
-            echo "   You can install dependencies manually later:"
-            echo "   cd $FRONTEND_DIR && npm install && npm run build"
-        fi
-    else
-        echo "   ℹ️  npm/node not found, skipping frontend build"
-        echo "   To enable the memory dashboard, install Node.js and build manually:"
-        echo "   cd $FRONTEND_DIR && npm install && npm run build"
-    fi
-else
-    echo "   ℹ️  Frontend directory not found, skipping build"
 fi
 
 # Install Go TUI binary if it exists
