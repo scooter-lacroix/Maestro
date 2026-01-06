@@ -22,29 +22,29 @@
 3. **Agent Selection Criteria (Execute Automatically):**
    - **Trivial tasks (1-5 lines, simple changes):** Implement directly
    - **Standard tasks (5-50 lines, single file):** Automatically use appropriate implementation agents (opencode-scaffolder)
-   - **Complex tasks (multiple files, >50 lines):** Automatically use codex-reviewer or gemini-analyzer for design + appropriate implementation agents
+   - **Complex tasks (multiple files, >50 lines):** Automatically use sonnet-specialist or gemini-analyzer for design + appropriate implementation agents
    - **Large codebase analysis (>100KB):** Automatically use gemini-analyzer for exploration
-   - **Spec-driven/ambiguous requirements:** Automatically use codex-reviewer for specification
+   - **Spec-driven/ambiguous requirements:** Automatically use droid-factory for specification
    - **ALL implementation work:** MUST be automatically followed by codex-reviewer for validation
 
 **Core Agents:**
-- **codex-reviewer**: Architecture, code review, strategy. (MANDATORY for all implementation)
-- **gemini-analyzer**: Multi-repo analysis, doc lookup, implementation examples.
-- **opencode-scaffolder**: Fast codebase exploration and pattern matching.
-- **gemini-frontend-designer**: Designer turned developer. Builds gorgeous UIs.
-- **sonnet-specialist**: Technical writing expert. Writes prose that flows.
-- **general-purpose**: Visual content specialist. Analyzes PDFs, images, diagrams.
-- **droid-factory**: Specialized in spec-driven development and strategic planning.
+- **codex-reviewer**(alias=oracle): Architecture, code review, strategy. (MANDATORY for all implementation)
+- **gemini-analyzer**(alias=librarian): Multi-repo analysis, doc lookup, implementation examples.
+- **opencode-scaffolder**(alias=macgyver): Fast codebase exploration and pattern matching.
+- **gemini-frontend-designer**(alias=michaelangello): Designer turned developer. Builds gorgeous UIs.
+- **sonnet-specialist**(alias=hobbs): Technical writing expert. Writes prose that flows.
+- **general-purpose**(alias=luis): Visual content specialist. Analyzes PDFs, images, diagrams.
+- **droid-factory**(alias=dexter): Specialized in spec-driven development and strategic planning.
 
 **Code Implementation Agents:**
 - **qwen-coder**, **kilocode-orchestrator**: Trivial tasks even those exceeding 1-5 lines
 - **amp-code**, **opencode-scaffolder**: Standard and some complex tasks
 - **rovo-dev**, **droid-factory**: Complex tasks that require pragmatic, high quality code implementations and sound, consistent logic
-- **opus-specialist**: Tasks that involve complex algorithms, complicated, multi-layered logic and reasoning and exceptional coding capabilities with thorough edge case consideration.
+- **opus-specialist**(alias=einstein): Tasks that involve complex algorithms, complicated, multi-layered logic and reasoning and exceptional coding capabilities with thorough edge case consideration.
 
 **Orchestrator Agents:**
-- **kilocode-orchestrator**: Large-scale projects with persistent memory across sessions.
-- **llm-council-evaluator**: Meta-agent selection for high-risk or complex decisions.
+- **kilocode-orchestrator**(alias=kant): Large-scale projects with persistent memory across sessions.
+- **llm-council-evaluator**(alias=legion): Meta-agent selection for high-risk or complex decisions.
 
 4. **Mandatory Pre-Commit Review:** Before marking any task complete and committing:
    - ALL code changes MUST be automatically reviewed by codex-reviewer agent

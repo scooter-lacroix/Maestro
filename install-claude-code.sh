@@ -267,6 +267,21 @@ else
     echo "   ⚠️  Warning: plugin.json not found, skipping plugin configuration"
 fi
 
+# Copy critical_think module
+echo "📋 Copying critical_think module..."
+if [ -d "$SCRIPT_DIR/maestro/critical_think" ]; then
+    cp -r "$SCRIPT_DIR/maestro/critical_think" ~/.claude/plugins/maestro/
+    echo "   ✅ Critical Think module installed"
+else
+    echo "   ⚠️  Warning: critical_think module not found"
+fi
+
+# Copy critical_think templates
+if [ -d "$SCRIPT_DIR/maestro/critical_think/templates" ]; then
+    cp "$SCRIPT_DIR/maestro/critical_think/templates"/*.md ~/.claude/maestro-templates/
+    echo "   ✅ Critical Think templates installed"
+fi
+
 # Build Memory Dashboard frontend FIRST (before pip install so dist files are included in package)
 echo "🎨 Building Memory Dashboard frontend..."
 FRONTEND_DIR="$SCRIPT_DIR/maestro/memory/frontend"
