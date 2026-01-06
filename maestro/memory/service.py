@@ -383,8 +383,10 @@ class MaestroMemoryService:
         }
 
         # Log using loguru's structured logging
+        # Format message with context as keyword arguments for loguru's bind()
         log_fn = getattr(logger, level, logger.info)
-        log_fn(**log_data)
+        # Pass message as positional argument and context as keyword arguments
+        log_fn(message, **{k: v for k, v in log_data.items() if k != "message"})
 
     def _create_tables_sync(self):
         """
