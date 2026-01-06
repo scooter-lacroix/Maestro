@@ -29,14 +29,14 @@
     "maxVersion": "3.0.0"
   },
   "commands": [
-    "setup",
-    "newTrack",
-    "implement",
-    "status",
-    "revert",
-    "configure",
-    "memory",
-    "tui"
+    "maestro:setup",
+    "maestro:newTrack",
+    "maestro:implement",
+    "maestro:status",
+    "maestro:revert",
+    "maestro:configure",
+    "maestro:memory",
+    "maestro:tui"
   ],
   "templates": [
     "workflow",
