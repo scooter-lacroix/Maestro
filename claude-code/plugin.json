@@ -34,7 +34,10 @@
     "maestro-implement",
     "maestro-status",
     "maestro-revert",
-    "maestro-configure"
+    "maestro-configure",
+    "maestro-memory",
+    "maestro-tui",
+    "maestro-migrate:agent-deck"
   ],
   "templates": [
     "workflow",
