@@ -258,8 +258,16 @@
   border-radius: 50%;
 }
 
-.legend-dot.category-dot {
+.legend-dot.project-dot {
   background: linear-gradient(135deg, #667eea, #764ba2);
+}
+
+.legend-dot.track-dot {
+  background: linear-gradient(135deg, #f093fb, #f5576c);
+}
+
+.legend-dot.category-dot {
+  background: linear-gradient(135deg, #43e97b, #38f9d7);
 }
 
 .legend-dot.memory-dot {

@@ -7,6 +7,8 @@ Integrates with MaestroMemoryService to provide:
 - Memory search and retrieval
 - Statistics and analytics
 - Real-time updates via WebSocket
+
+Enhanced with Zoekt integration for fast indexed code search.
 """
 
 import json
@@ -28,6 +30,7 @@ from pydantic import BaseModel, Field, validator
 from loguru import logger
 
 from .service import MaestroMemoryService
+from .search.zoekt_client import ZoektClient, ZoektConfig
 
 
 # =============================================================================
@@ -592,7 +595,12 @@ npm run build
     async def list_tracks(
         project_id: Optional[int] = Query(None, description="Filter by project ID")
     ):
-        """List all tracks in memory"""
+        """
+        List all tracks in memory.
+
+        Returns tracks with all fields including task counts and progress information.
+        Ensures consistent data structure even when some fields are missing in the database.
+        """
         service: MaestroMemoryService = app.state.memory_service
 
         try:
@@ -609,7 +617,18 @@ npm run build
                 tracks = result.scalars().all()
 
                 # Use to_dict() method for complete field mapping
-                track_list = [t.to_dict() for t in tracks]
+                # Ensure all required fields are present with default values
+                track_list = []
+                for t in tracks:
+                    track_dict = t.to_dict()
+                    # Ensure all expected fields have values
+                    track_dict.setdefault('phase_count', 0)
+                    track_dict.setdefault('current_phase', 0)
+                    track_dict.setdefault('total_tasks', 0)
+                    track_dict.setdefault('completed_tasks', 0)
+                    track_dict.setdefault('track_type', None)
+                    track_dict.setdefault('description', None)
+                    track_list.append(track_dict)
 
                 return TrackListResponse(
                     success=True,
@@ -835,11 +854,19 @@ npm run build
         """
         Scan filesystem for Maestro projects and import to database.
 
-        Request body:
+        Request body (all optional):
             {
-                "base_dirs": ["/path/to/scan", ...],  # Optional, defaults to ~/Prod
+                "base_dirs": ["/path/to/scan", ...],  # Optional, defaults to comprehensive search
                 "max_depth": 5  # Optional, max directory depth
             }
+
+        Default scan locations (if base_dirs not provided):
+            - ~/Prod (main production directory)
+            - ~/dev (development projects)
+            - ~/projects (general projects)
+            - ~/code (code projects)
+            - ~/work (work projects)
+            - ~ (home directory for root-level projects)
         """
         from .scanner import MaestroScanner
 
@@ -850,8 +877,11 @@ npm run build
         except:
             body = {}
 
-        base_dirs = body.get("base_dirs", [str(Path.home() / "Prod")])
+        # Use None to trigger comprehensive default search
+        base_dirs = body.get("base_dirs", None)
         max_depth = body.get("max_depth", 5)
+
+        logger.info(f"Scan request received - base_dirs: {base_dirs}, max_depth: {max_depth}")
 
         try:
             scanner = MaestroScanner(service)
@@ -860,6 +890,125 @@ npm run build
         except Exception as e:
             logger.error(f"Error scanning projects: {e}")
             raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+
+    @app.post("/api/v1/search/code")
+    async def search_code(request: Request):
+        """
+        Search code using Zoekt for fast indexed code search.
+
+        Request body:
+            {
+                "query": "search query",           # Required: Zoekt query string
+                "file_patterns": ["*.md", "*.py"], # Optional: File pattern filters
+                "max_results": 50,                  # Optional: Max results (default: 50)
+                "context_lines": 3                   # Optional: Context lines (default: 3)
+            }
+
+        Returns:
+            {
+                "success": true,
+                "query": "...",
+                "results": [
+                    {
+                        "file_path": "...",
+                        "repository": "...",
+                        "line_matches": [
+                            {
+                                "line_number": 42,
+                                "line": "matched line content",
+                                "before": ["context before"],
+                                "after": ["context after"]
+                            }
+                        ],
+                        "score": 0.95
+                    }
+                ],
+                "total": 10
+            }
+        """
+        try:
+            body = await request.json()
+        except:
+            body = {}
+
+        query = body.get("query")
+        if not query:
+            raise HTTPException(status_code=400, detail="Missing required field: query")
+
+        file_patterns = body.get("file_patterns")
+        max_results = body.get("max_results", 50)
+        context_lines = body.get("context_lines", 3)
+
+        try:
+            # Create Zoekt client
+            zoekt_config = ZoektConfig(
+                enabled=True,
+                max_results=max_results,
+                context_lines=context_lines
+            )
+            client = ZoektClient(zoekt_config)
+
+            # Execute search
+            async with client:
+                # If file patterns provided, restrict search
+                if file_patterns:
+                    # Build query with file restrictions
+                    file_restrictions = " OR ".join([f"file:{p}" for p in file_patterns])
+                    enhanced_query = f"({query}) ({file_restrictions})"
+                    results = await client.search(enhanced_query)
+                else:
+                    results = await client.search(query)
+
+            # Format results for response
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "file_path": result.file_path,
+                    "repository": result.repository,
+                    "line_matches": result.line_matches,
+                    "score": result.score
+                })
+
+            return {
+                "success": True,
+                "query": query,
+                "results": formatted_results,
+                "total": len(formatted_results)
+            }
+
+        except Exception as e:
+            logger.error(f"Code search failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+    @app.get("/api/v1/search/zoekt/health")
+    async def zoekt_health_check():
+        """
+        Check if Zoekt search engine is available.
+
+        Returns:
+            {
+                "success": true,
+                "available": true/false,
+                "server_url": "http://127.0.0.1:6070"
+            }
+        """
+        try:
+            client = ZoektClient(ZoektConfig())
+            available = await client.health_check()
+
+            return {
+                "success": True,
+                "available": available,
+                "server_url": ZoektConfig().server_url
+            }
+        except Exception as e:
+            logger.error(f"Zoekt health check failed: {e}")
+            return {
+                "success": False,
+                "available": False,
+                "server_url": ZoektConfig().server_url,
+                "error": str(e)
+            }
 
     # WebSocket endpoint for real-time updates (optional, placeholder)
     @app.websocket("/ws/events")

@@ -6,6 +6,8 @@ import {
   TrackListResponse,
   SearchResponse,
   StatsResponse,
+  CodeSearchResponse,
+  ZoektHealthResponse,
 } from '../types';
 
 // Use relative URL for production since frontend is served from same FastAPI app
@@ -80,6 +82,25 @@ export const apiClient = {
   // Statistics
   getStats: async () => {
     const response = await api.get<StatsResponse>('/api/v1/stats');
+    return response.data;
+  },
+
+  // Code Search with Zoekt
+  searchCode: async (query: string, options?: {
+    file_patterns?: string[];
+    max_results?: number;
+    context_lines?: number;
+  }) => {
+    const response = await api.post<CodeSearchResponse>('/api/v1/search/code', {
+      query,
+      ...options,
+    });
+    return response.data;
+  },
+
+  // Zoekt Health Check
+  checkZoektHealth: async () => {
+    const response = await api.get<ZoektHealthResponse>('/api/v1/search/zoekt/health');
     return response.data;
   },
 };

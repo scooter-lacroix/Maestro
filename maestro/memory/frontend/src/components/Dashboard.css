@@ -74,7 +74,41 @@
   display: flex;
   gap: 8px;
   flex: 1;
-  max-width: 500px;
+  max-width: 600px;
+  align-items: center;
+}
+
+/* Search Mode Toggle */
+.search-mode-toggle {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mode-button {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.mode-button.active {
+  background: rgba(100, 150, 255, 0.2);
+  color: #6af;
 }
 
 .search-input {
@@ -185,6 +219,15 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 40px;
+}
+
+/* When a project is selected, tracks section expands and memories move below */
+.dashboard-columns.project-selected {
+  grid-template-columns: 1fr;
+}
+
+.dashboard-columns.project-selected .dashboard-right {
+  grid-column: 1;
 }
 
 @media (max-width: 1024px) {
@@ -536,10 +579,38 @@
   border-color: rgba(255, 255, 255, 0.15);
 }
 
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .result-content {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.7);
   margin-bottom: 8px;
+  max-height: 200px;
+  overflow: hidden;
+  position: relative;
+}
+
+.result-content::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(transparent, rgba(10, 10, 10, 0.9));
+}
+
+.search-result-item:hover .result-content {
+  max-height: none;
+}
+
+.search-result-item:hover .result-content::after {
+  display: none;
 }
 
 .result-meta {
@@ -551,11 +622,33 @@
 .result-command {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.result-category {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.result-date {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .result-score {
   font-size: 11px;
   color: rgba(100, 200, 255, 0.7);
+}
+
+/* Memory Search Results Container */
+.memory-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 /* Loading State */
@@ -564,6 +657,17 @@
   padding: 40px;
   color: rgba(255, 255, 255, 0.4);
   font-size: 14px;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 /* Card Details Styles */

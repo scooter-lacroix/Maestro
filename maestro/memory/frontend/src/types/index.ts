@@ -38,6 +38,35 @@ export interface Track {
   completed_at?: string;
 }
 
+// Zoekt Code Search Types
+export interface LineMatch {
+  line_number: number;
+  line: string;
+  before: string[];
+  after: string[];
+}
+
+export interface CodeSearchResult {
+  file_path: string;
+  repository: string;
+  line_matches: LineMatch[];
+  score: number;
+}
+
+export interface CodeSearchResponse {
+  success: boolean;
+  query: string;
+  results: CodeSearchResult[];
+  total: number;
+}
+
+export interface ZoektHealthResponse {
+  success: boolean;
+  available: boolean;
+  server_url: string;
+  error?: string;
+}
+
 export interface MemoryListResponse {
   success: boolean;
   memories: Memory[];

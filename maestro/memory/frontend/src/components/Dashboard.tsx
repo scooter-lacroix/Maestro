@@ -5,7 +5,8 @@ import { MouseTrailer } from './MouseTrailer';
 import { GlitchText } from './GlitchText';
 import { DetailedTabs } from './DetailedTabs';
 import { ComprehensiveGraphView } from './ComprehensiveGraphView';
-import { useMemories, useProjects, useTracks, useStats, useSearch, useScan } from '../hooks/useMaestroData';
+import { CodeSearchResults } from './CodeSearchResults';
+import { useMemories, useProjects, useTracks, useStats, useSearch, useScan, useCodeSearch } from '../hooks/useMaestroData';
 import { MemoryDetailModal } from './MemoryDetailModal';
 import { Memory } from '../types';
 import './Dashboard.css';
@@ -13,6 +14,7 @@ import './Dashboard.css';
 export const Dashboard: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<'memory' | 'code'>('memory');
   const [showDetailedTabs, setShowDetailedTabs] = useState(false);
   const [showComprehensiveGraph, setShowComprehensiveGraph] = useState(false);
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
@@ -21,13 +23,18 @@ export const Dashboard: React.FC = () => {
   const { tracks, loading: tracksLoading } = useTracks(selectedProject ?? undefined);
   const { stats } = useStats();
   const { results: searchResults, search } = useSearch();
+  const { results: codeResults, searchCode, loading: codeSearchLoading } = useCodeSearch();
   const { scan, loading: scanLoading } = useScan();
   const [scanMessage, setScanMessage] = useState<string | null>(null);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      search(searchQuery);
+      if (searchMode === 'memory') {
+        search(searchQuery);
+      } else {
+        searchCode(searchQuery);
+      }
     }
   };
 
@@ -50,6 +57,8 @@ export const Dashboard: React.FC = () => {
       {showComprehensiveGraph && (
         <ComprehensiveGraphView
           memories={memories}
+          projects={projects}
+          tracks={tracks}
           onClose={() => setShowComprehensiveGraph(false)}
         />
       )}
@@ -64,15 +73,37 @@ export const Dashboard: React.FC = () => {
 
           {/* Search */}
           <form className="search-form" onSubmit={handleSearch}>
+            <div className="search-mode-toggle">
+              <button
+                type="button"
+                className={`mode-button ${searchMode === 'memory' ? 'active' : ''}`}
+                onClick={() => setSearchMode('memory')}
+              >
+                <i className="fas fa-database" />
+                Memories
+              </button>
+              <button
+                type="button"
+                className={`mode-button ${searchMode === 'code' ? 'active' : ''}`}
+                onClick={() => setSearchMode('code')}
+              >
+                <i className="fas fa-code" />
+                Code
+              </button>
+            </div>
             <input
               type="text"
-              placeholder="Search memories..."
+              placeholder={searchMode === 'memory' ? 'Search memories...' : 'Search code with Zoekt...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="search-input"
             />
-            <button type="submit" className="search-button">
-              <i className="fas fa-search" />
+            <button
+              type="submit"
+              className="search-button"
+              disabled={codeSearchLoading}
+            >
+              <i className={`fas ${codeSearchLoading ? 'fa-spinner fa-spin' : 'fa-search'}`} />
             </button>
           </form>
 
@@ -149,7 +180,7 @@ export const Dashboard: React.FC = () => {
         </section>
 
         {/* Two Column Layout */}
-        <div className="dashboard-columns">
+        <div className={`dashboard-columns ${selectedProject ? 'project-selected' : ''}`}>
           {/* Left Column - Projects & Tracks */}
           <div className="dashboard-left">
             <section className="projects-section">
@@ -198,52 +229,69 @@ export const Dashboard: React.FC = () => {
 
                 {tracksLoading ? (
                   <div className="loading-state">Loading tracks...</div>
+                ) : tracks.length === 0 ? (
+                  <div className="empty-state">No tracks found for this project</div>
                 ) : (
                   <div className="track-list">
-                    {tracks.map((track) => (
-                      <div
-                        key={track.id}
-                        className={`track-item status-${track.status}`}
-                        onMouseMove={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const x = ((e.clientX - rect.left) / rect.width) * 100;
-                          const y = ((e.clientY - rect.top) / rect.height) * 100;
-                          e.currentTarget.style.setProperty('--mouse-x', `${x}%`);
-                          e.currentTarget.style.setProperty('--mouse-y', `${y}%`);
-                        }}
-                      >
-                        <div className="track-header">
-                          <h3 className="track-title">{track.title}</h3>
-                          <span className={`track-status status-${track.status}`}>
-                            {track.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                        {track.description && (
-                          <p className="track-description">{track.description}</p>
-                        )}
-                        <div className="track-progress">
-                          <div className="progress-bar">
-                            <div
-                              className="progress-fill"
-                              style={{
-                                width: `${track.total_tasks > 0 ? (track.completed_tasks / track.total_tasks) * 100 : 0}%`,
-                              }}
-                            />
+                    {tracks.map((track) => {
+                      // Calculate progress safely
+                      const hasTasks = track.total_tasks > 0;
+                      const progressPercent = hasTasks
+                        ? (track.completed_tasks / track.total_tasks) * 100
+                        : 0;
+
+                      return (
+                        <div
+                          key={track.id}
+                          className={`track-item status-${track.status}`}
+                          onClick={() => {
+                            // Make tracks interactable - show track details
+                            console.log('Track clicked:', track);
+                            // TODO: Open track detail modal or navigate to track view
+                          }}
+                          onMouseMove={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const x = ((e.clientX - rect.left) / rect.width) * 100;
+                            const y = ((e.clientY - rect.top) / rect.height) * 100;
+                            e.currentTarget.style.setProperty('--mouse-x', `${x}%`);
+                            e.currentTarget.style.setProperty('--mouse-y', `${y}%`);
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <div className="track-header">
+                            <h3 className="track-title">{track.title || 'Untitled Track'}</h3>
+                            <span className={`track-status status-${track.status}`}>
+                              {track.status.replace('_', ' ')}
+                            </span>
                           </div>
-                          <span className="progress-text">
-                            {track.completed_tasks}/{track.total_tasks} tasks
-                          </span>
+                          {track.description && (
+                            <p className="track-description">{track.description}</p>
+                          )}
+                          <div className="track-progress">
+                            <div className="progress-bar">
+                              <div
+                                className="progress-fill"
+                                style={{
+                                  width: `${progressPercent}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="progress-text">
+                              {track.completed_tasks}/{track.total_tasks} tasks
+                              {!hasTasks && ' (no tasks defined)'}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </section>
             )}
           </div>
 
-          {/* Right Column - Memories */}
-          <div className="dashboard-right">
+          {/* Right Column - Memories (moves below tracks when project selected) */}
+          <div className={`dashboard-right ${selectedProject ? 'below-tracks' : ''}`}>
             <section className="memories-section">
               <GlitchText text="RECENT MEMORIES" className="section-title" as="h2" />
 
@@ -296,22 +344,48 @@ export const Dashboard: React.FC = () => {
             </section>
 
             {/* Search Results */}
-            {searchQuery && searchResults.length > 0 && (
+            {searchQuery && (searchResults.length > 0 || codeResults.length > 0) && (
               <section className="search-results-section">
                 <GlitchText text="SEARCH RESULTS" className="section-title" as="h2" />
-                <div className="search-results">
-                  {searchResults.map((memory) => (
-                    <div key={memory.id} className="search-result-item">
-                      <div className="result-content">{memory.content}</div>
-                      <div className="result-meta">
-                        <span className="result-command">{memory.command}</span>
-                        <span className="result-score">
-                          {Math.random().toFixed(2)} similarity
-                        </span>
+
+                {/* Memory Search Results */}
+                {searchMode === 'memory' && searchResults.length > 0 && (
+                  <div className="memory-search-results">
+                    <div className="search-summary">
+                      <div className="summary-info">
+                        <h3>Memory Search Results</h3>
+                        <p className="result-count">
+                          Found <strong>{searchResults.length}</strong> result{searchResults.length !== 1 ? 's' : ''} for "<code>{searchQuery}</code>"
+                        </p>
                       </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="search-results">
+                      {searchResults.map((memory) => (
+                        <div key={memory.id} className="search-result-item">
+                          <div className="result-header">
+                            <span className="result-command">{memory.command}</span>
+                            <span className="result-category">{memory.category}</span>
+                          </div>
+                          <div className="result-content">{memory.content}</div>
+                          <div className="result-meta">
+                            <span className="result-date">
+                              {new Date(memory.created_at).toISOString().split('T')[0]}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Code Search Results with Progressive Disclosure */}
+                {searchMode === 'code' && codeResults.length > 0 && (
+                  <CodeSearchResults
+                    results={codeResults}
+                    query={searchQuery}
+                    total={codeResults.length}
+                  />
+                )}
               </section>
             )}
           </div>

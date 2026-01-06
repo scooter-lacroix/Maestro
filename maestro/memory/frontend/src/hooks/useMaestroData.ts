@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../utils/api';
-import { Memory, Project, Track, StatsResponse } from '../types';
+import { Memory, Project, Track, StatsResponse, CodeSearchResult } from '../types';
 
 export const useMemories = (params?: { project_id?: number; track_id?: number; limit?: number }) => {
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -65,11 +65,21 @@ export const useTracks = (projectId?: number) => {
     const fetchTracks = async () => {
       try {
         setLoading(true);
+        console.log(`[useTracks] Fetching tracks for projectId: ${projectId}`);
         const response = await apiClient.listTracks(projectId);
-        setTracks(response.tracks);
-        setError(null);
+        console.log(`[useTracks] Response:`, response);
+
+        if (response.success && Array.isArray(response.tracks)) {
+          setTracks(response.tracks);
+          setError(null);
+          console.log(`[useTracks] Loaded ${response.tracks.length} tracks`);
+        } else {
+          console.warn('[useTracks] Invalid response format:', response);
+          setTracks([]);
+          setError('Invalid response format');
+        }
       } catch (err) {
-        console.error('Error fetching tracks:', err);
+        console.error('[useTracks] Error fetching tracks:', err);
         setError('Failed to fetch tracks');
         setTracks([]);
       } finally {
@@ -177,4 +187,36 @@ export const useScan = () => {
   };
 
   return { scan, loading, result, error };
+};
+
+export const useCodeSearch = () => {
+  const [results, setResults] = useState<CodeSearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchCode = async (query: string, options?: {
+    file_patterns?: string[];
+    max_results?: number;
+    context_lines?: number;
+  }) => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await apiClient.searchCode(query, options);
+      setResults(response.results);
+      setError(null);
+    } catch (err) {
+      console.error('Error searching code:', err);
+      setError('Failed to search code');
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { results, loading, error, searchCode };
 };

@@ -1,15 +1,19 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import * as d3 from 'd3';
-import { Memory } from '../types';
+import { Memory, Project, Track } from '../types';
 import './ComprehensiveGraphView.css';
 
 interface ComprehensiveGraphViewProps {
   memories: Memory[];
+  projects?: Project[];
+  tracks?: Track[];
   onClose: () => void;
 }
 
 export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
   memories,
+  projects = [],
+  tracks = [],
   onClose,
 }) => {
   const [activeView, setActiveView] = useState<'network' | 'category' | 'timeline' | 'heatmap'>('network');
@@ -41,33 +45,44 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
       timeline.get(dateKey)!.push(memory);
     });
 
-    return { categories, commands, projectMems, timeline };
-  }, [memories]);
+    // Create project-track relationships
+    const projectTrackMap = new Map<number, Track[]>();
+    tracks.forEach(track => {
+      if (!projectTrackMap.has(track.project_id)) {
+        projectTrackMap.set(track.project_id, []);
+      }
+      projectTrackMap.get(track.project_id)!.push(track);
+    });
 
-  // Network Graph with D3.js Force Simulation
+    return { categories, commands, projectMems, timeline, projectTrackMap };
+  }, [memories, tracks]);
+
+  // Network Graph with D3.js Force Simulation - Enhanced with Projects and Tracks
   useEffect(() => {
     if (activeView !== 'network' || !networkRef.current) return;
 
     // Clear previous visualization
     d3.select(networkRef.current).selectAll('*').remove();
 
-    const width = 1000;
-    const height = 600;
+    const width = 1200;
+    const height = 700;
     const svg = d3.select(networkRef.current)
       .append('svg')
       .attr('width', width)
       .attr('height', height)
-      .attr('viewBox', [0, 0, width, height]);
+      .attr('viewBox', [0, 0, width, height])
+      .style('background', 'rgba(0, 0, 0, 0.2)')
+      .style('border-radius', '12px');
 
     // Create gradient definitions
     const defs = svg.append('defs');
 
-    // Add beautiful gradients for nodes
+    // Add beautiful gradients for different node types
     const gradients = [
       { id: 'gradient-project', colors: ['#667eea', '#764ba2'] },
       { id: 'gradient-track', colors: ['#f093fb', '#f5576c'] },
       { id: 'gradient-memory', colors: ['#4facfe', '#00f2fe'] },
-      { id: 'gradient-command', colors: ['#43e97b', '#38f9d7'] },
+      { id: 'gradient-category', colors: ['#43e97b', '#38f9d7'] },
     ];
 
     gradients.forEach(({ id, colors }) => {
@@ -101,69 +116,135 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
       .attr('stdDeviation', '3')
       .attr('flood-opacity', '0.3');
 
-    // Create nodes and links
+    // Create nodes and links with meaningful relationships
     const nodes: any[] = [];
     const links: any[] = [];
 
-    // Category nodes (outer ring)
+    // 1. Project nodes (largest, outer ring)
+    projects.forEach((project) => {
+      const trackCount = graphData.projectTrackMap.get(project.id)?.length || 0;
+      nodes.push({
+        id: `project-${project.id}`,
+        type: 'project',
+        label: project.project_name || project.project_path.split('/').pop(),
+        fullPath: project.project_path,
+        description: project.description,
+        projectType: project.project_type,
+        radius: 30 + Math.sqrt(trackCount) * 5,
+        trackCount,
+        group: 1,
+      });
+    });
+
+    // 2. Track nodes (medium, connected to projects)
+    let trackIndex = 0;
+    tracks.forEach((track) => {
+      nodes.push({
+        id: `track-${track.id}`,
+        type: 'track',
+        label: track.title,
+        description: track.description,
+        status: track.status,
+        progress: `${track.completed_tasks}/${track.total_tasks}`,
+        radius: 20 + Math.sqrt(track.total_tasks) * 3,
+        group: 2,
+      });
+
+      // Link track to its project
+      links.push({
+        source: `track-${track.id}`,
+        target: `project-${track.project_id}`,
+        value: 2,
+      });
+
+      trackIndex++;
+    });
+
+    // 3. Category nodes (organizing memories)
     let categoryIndex = 0;
     graphData.categories.forEach((mems, category) => {
       nodes.push({
-        id: category,
+        id: `category-${category}`,
         type: 'category',
-        radius: 25 + Math.sqrt(mems.length) * 8,
+        label: category,
+        radius: 25 + Math.sqrt(mems.length) * 6,
         count: mems.length,
-        group: categoryIndex,
+        group: 3 + categoryIndex,
       });
       categoryIndex++;
     });
 
-    // Memory nodes (inner cluster)
-    memories.slice(0, 100).forEach((memory) => {
+    // 4. Memory nodes (smallest, connected to categories)
+    memories.slice(0, 150).forEach((memory) => {
       nodes.push({
         id: `memory-${memory.id}`,
         type: 'memory',
-        radius: 6 + Math.random() * 6,
-        command: memory.command,
+        label: memory.command,
+        content: memory.content.slice(0, 50) + '...',
         category: memory.category,
-        group: categoryIndex + memory.id % 5,
+        radius: 8 + Math.random() * 4,
+        group: 10 + memory.id % 5,
       });
 
       // Link memory to its category
       links.push({
         source: `memory-${memory.id}`,
-        target: memory.category,
+        target: `category-${memory.category}`,
         value: 1,
       });
     });
 
-    // Create force simulation
+    // Create force simulation with proper physics
     const simulation = d3.forceSimulation(nodes as any)
       .force('link', d3.forceLink(links as any)
         .id((d: any) => d.id)
-        .distance(120)
-        .strength(0.5))
-      .force('charge', d3.forceManyBody().strength(-400))
+        .distance((d: any) => {
+          // Projects and tracks should be further apart
+          if (d.source.type === 'project' || d.target.type === 'project') return 150;
+          if (d.source.type === 'track' || d.target.type === 'track') return 120;
+          if (d.source.type === 'category' || d.target.type === 'category') return 100;
+          return 80;
+        })
+        .strength(0.4))
+      .force('charge', d3.forceManyBody().strength((d: any) => {
+        // Larger nodes have more repulsion
+        if (d.type === 'project') return -800;
+        if (d.type === 'track') return -600;
+        if (d.type === 'category') return -500;
+        return -300;
+      }))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius((d: any) => d.radius + 8));
+      .force('collision', d3.forceCollide().radius((d: any) => d.radius + 10))
+      .force('x', d3.forceX(width / 2).strength(0.05))
+      .force('y', d3.forceY(height / 2).strength(0.05));
 
-    // Create links
-    const link = svg.append('g')
+    // Create zoomable group
+    const g = svg.append('g');
+
+    // Create links first (so they appear behind nodes)
+    const link = g.append('g')
       .attr('class', 'links')
       .selectAll('line')
       .data(links)
       .join('line')
-      .attr('stroke', 'rgba(255, 255, 255, 0.15)')
-      .attr('stroke-width', (d: any) => Math.sqrt(d.value) * 2)
-      .attr('stroke-opacity', 0.7);
+      .attr('stroke', (d: any) => {
+        // Color links based on source type
+        if (d.source.type === 'project') return 'rgba(102, 126, 234, 0.4)';
+        if (d.source.type === 'track') return 'rgba(240, 147, 251, 0.4)';
+        if (d.source.type === 'category') return 'rgba(67, 233, 123, 0.3)';
+        return 'rgba(255, 255, 255, 0.15)';
+      })
+      .attr('stroke-width', (d: any) => Math.sqrt(d.value) * 1.5)
+      .attr('stroke-opacity', 0.6);
 
     // Create nodes
-    const node = svg.append('g')
+    const node = g.append('g')
       .attr('class', 'nodes')
       .selectAll('g')
       .data(nodes)
       .join('g')
       .attr('class', 'node')
+      .style('cursor', 'pointer')
       .call(d3.drag<SVGGElement, any>()
         .on('start', (event, d) => {
           if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -184,53 +265,113 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
     node.append('circle')
       .attr('r', (d: any) => d.radius)
       .attr('fill', (d: any) => {
-        if (d.type === 'category') return 'url(#gradient-project)';
+        if (d.type === 'project') return 'url(#gradient-project)';
+        if (d.type === 'track') return 'url(#gradient-track)';
+        if (d.type === 'category') return 'url(#gradient-category)';
         return 'url(#gradient-memory)';
       })
-      .attr('stroke', 'rgba(255, 255, 255, 0.4)')
+      .attr('stroke', 'rgba(255, 255, 255, 0.3)')
       .attr('stroke-width', 2)
       .style('filter', 'url(#shadow)')
-      .style('cursor', 'pointer')
-      .on('mouseover', function() {
+      .on('mouseover', function(event, d) {
         d3.select(this)
           .transition()
           .duration(200)
-          .attr('r', (d: any) => d.radius * 1.3)
+          .attr('r', d.radius * 1.2)
           .attr('stroke', 'rgba(255, 255, 255, 0.9)');
+
+        // Show tooltip with node details
+        const tooltip = d3.select('body').append('div')
+          .attr('class', 'graph-tooltip')
+          .style('position', 'absolute')
+          .style('background', 'rgba(0, 0, 0, 0.9)')
+          .style('border', '1px solid rgba(255, 255, 255, 0.2)')
+          .style('border-radius', '8px')
+          .style('padding', '12px')
+          .style('color', 'white')
+          .style('font-family', 'Courier New, monospace')
+          .style('font-size', '12px')
+          .style('pointer-events', 'none')
+          .style('z-index', '10000')
+          .style('max-width', '300px');
+
+        let tooltipContent = `<strong style="color: ${d.type === 'project' ? '#667eea' : d.type === 'track' ? '#f093fb' : d.type === 'category' ? '#43e97b' : '#4facfe'}">${d.label}</strong><br/>`;
+        tooltipContent += `<span style="color: rgba(255, 255, 255, 0.6); font-size: 10px; text-transform: uppercase;">${d.type}</span><br/>`;
+
+        if (d.type === 'project') {
+          tooltipContent += `<br/>Path: ${d.fullPath}<br/>`;
+          if (d.description) tooltipContent += `Description: ${d.description}<br/>`;
+          tooltipContent += `Tracks: ${d.trackCount}`;
+        } else if (d.type === 'track') {
+          if (d.description) tooltipContent += `<br/>${d.description}<br/>`;
+          tooltipContent += `Status: <span style="color: ${d.status === 'completed' ? '#4ade80' : d.status === 'in_progress' ? '#fbbf24' : '#94a3b8'}">${d.status}</span><br/>`;
+          tooltipContent += `Progress: ${d.progress}`;
+        } else if (d.type === 'category') {
+          tooltipContent += `<br/>Memories: ${d.count}`;
+        } else if (d.type === 'memory') {
+          tooltipContent += `<br/>${d.content}<br/>`;
+          tooltipContent += `Category: ${d.category}`;
+        }
+
+        tooltip.html(tooltipContent)
+          .style('left', (event.pageX + 10) + 'px')
+          .style('top', (event.pageY - 10) + 'px');
+
+        // Store reference to remove on mouseout
+        d3.select(this).datum({ ...d, tooltip });
       })
-      .on('mouseout', function() {
+      .on('mouseout', function(_, d) {
         d3.select(this)
           .transition()
           .duration(200)
-          .attr('r', (d: any) => d.radius)
-          .attr('stroke', 'rgba(255, 255, 255, 0.4)');
+          .attr('r', d.radius)
+          .attr('stroke', 'rgba(255, 255, 255, 0.3)');
+
+        // Remove tooltip
+        if (d.tooltip) {
+          d.tooltip.remove();
+        }
+        d3.selectAll('.graph-tooltip').remove();
+      })
+      .on('click', (event, d) => {
+        // Handle node click - could open modal or navigate
+        console.log('Node clicked:', d);
+        event.stopPropagation();
       });
 
-    // Add labels to category nodes
-    node.filter((d: any) => d.type === 'category')
+    // Add labels to project and track nodes
+    node.filter((d: any) => d.type === 'project' || d.type === 'track' || d.type === 'category')
       .append('text')
-      .text((d: any) => d.id)
+      .text((d: any) => {
+        if (d.type === 'project') return d.label;
+        if (d.type === 'track') return d.label;
+        if (d.type === 'category') return `${d.label} (${d.count})`;
+        return '';
+      })
       .attr('text-anchor', 'middle')
-      .attr('dy', (d: any) => d.radius + 18)
-      .attr('fill', 'rgba(255, 255, 255, 0.9)')
-      .attr('font-size', '13px')
+      .attr('dy', (d: any) => d.radius + 16)
+      .attr('fill', 'rgba(255, 255, 255, 0.85)')
+      .attr('font-size', (d: any) => {
+        if (d.type === 'project') return '11px';
+        if (d.type === 'track') return '10px';
+        return '9px';
+      })
       .attr('font-weight', '600')
-      .style('text-shadow', '0 2px 4px rgba(0,0,0,0.7)')
+      .style('text-shadow', '0 2px 4px rgba(0,0,0,0.8)')
       .style('pointer-events', 'none');
 
-    // Add count labels
+    // Add count labels inside larger nodes
     node.filter((d: any) => d.type === 'category')
       .append('text')
       .text((d: any) => d.count)
       .attr('text-anchor', 'middle')
       .attr('dy', 5)
       .attr('fill', 'white')
-      .attr('font-size', (d: any) => Math.min(d.radius / 2.2, 16) + 'px')
+      .attr('font-size', (d: any) => Math.min(d.radius / 2.5, 18) + 'px')
       .attr('font-weight', '700')
       .style('pointer-events', 'none');
 
     // Add zoom behavior
-    const g = svg.append('g');
     svg.call(d3.zoom<HTMLElement, unknown>()
       .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
@@ -249,23 +390,13 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
         .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
     });
 
-    // Re-append elements to g for zoom
-    const linkNode = link.node();
-    const nodeNode = node.node();
-    const gNode = g.node();
-    if (linkNode && gNode) {
-      gNode.appendChild(linkNode as Node);
-    }
-    if (nodeNode && gNode) {
-      gNode.appendChild(nodeNode as Node);
-    }
-
     // Cleanup function to prevent memory leaks
     return () => {
       simulation.stop();
       d3.select(networkRef.current).selectAll('*').remove();
+      d3.selectAll('.graph-tooltip').remove();
     };
-  }, [activeView, graphData, memories]);
+  }, [activeView, graphData, memories, projects, tracks]);
 
   // Calculate statistics for heatmap
   const heatmapData = useMemo(() => {
@@ -334,20 +465,20 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
             {/* Statistics Header */}
             <div className="network-stats-header">
               <div className="network-stat-box">
+                <div className="network-stat-value">{projects.length}</div>
+                <div className="network-stat-label">Projects</div>
+              </div>
+              <div className="network-stat-box">
+                <div className="network-stat-value">{tracks.length}</div>
+                <div className="network-stat-label">Tracks</div>
+              </div>
+              <div className="network-stat-box">
                 <div className="network-stat-value">{memories.length}</div>
-                <div className="network-stat-label">Total Memories</div>
+                <div className="network-stat-label">Memories</div>
               </div>
               <div className="network-stat-box">
                 <div className="network-stat-value">{graphData.categories.size}</div>
                 <div className="network-stat-label">Categories</div>
-              </div>
-              <div className="network-stat-box">
-                <div className="network-stat-value">{graphData.commands.size}</div>
-                <div className="network-stat-label">Commands</div>
-              </div>
-              <div className="network-stat-box">
-                <div className="network-stat-value">{timelineData.length}</div>
-                <div className="network-stat-label">Active Days</div>
               </div>
             </div>
 
@@ -390,12 +521,31 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
               <div className="legend-section">
                 <h4 className="legend-title">Node Types</h4>
                 <div className="legend-item">
+                  <span className="legend-dot project-dot"></span>
+                  <span>Projects ({projects.length})</span>
+                </div>
+                <div className="legend-item">
+                  <span className="legend-dot track-dot"></span>
+                  <span>Tracks ({tracks.length})</span>
+                </div>
+                <div className="legend-item">
                   <span className="legend-dot category-dot"></span>
                   <span>Categories ({graphData.categories.size})</span>
                 </div>
                 <div className="legend-item">
                   <span className="legend-dot memory-dot"></span>
                   <span>Memories ({memories.length})</span>
+                </div>
+              </div>
+              <div className="legend-section">
+                <h4 className="legend-title">Relationships</h4>
+                <div className="legend-item">
+                  <i className="fas fa-project-diagram"></i>
+                  <span>Projects contain tracks</span>
+                </div>
+                <div className="legend-item">
+                  <i className="fas fa-sitemap"></i>
+                  <span>Memories grouped by category</span>
                 </div>
               </div>
               <div className="legend-section">
@@ -407,6 +557,10 @@ export const ComprehensiveGraphView: React.FC<ComprehensiveGraphViewProps> = ({
                 <div className="legend-item">
                   <i className="fas fa-search"></i>
                   <span>Scroll to zoom in/out</span>
+                </div>
+                <div className="legend-item">
+                  <i className="fas fa-hand-pointer"></i>
+                  <span>Click nodes for details</span>
                 </div>
               </div>
             </div>

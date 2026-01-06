@@ -3,6 +3,8 @@ Maestro Project Scanner
 
 Scans the filesystem for Maestro projects and imports them into the database.
 This populates the dashboard with real project and track data.
+
+Enhanced with Zoekt integration for fast indexed code search.
 """
 
 import os
@@ -16,6 +18,7 @@ from loguru import logger
 from .service import MaestroMemoryService
 from .database.models import MaestroProject, MaestroTrack
 from .utils.detector import ProjectDetector, ProjectInfo
+from .search.zoekt_client import ZoektClient, ZoektConfig, ZoektIndexer
 
 
 class MaestroScanner:
@@ -27,19 +30,26 @@ class MaestroScanner:
     TRACK_FILE_PATTERN = re.compile(r'\[([x ~])\]\s+Track:\s*(.+?)(?:\(([^)]+)\))?$', re.MULTILINE)
     TASK_PATTERN = re.compile(r'^\s*-\s*\[([x ])\]', re.MULTILINE)
 
-    def __init__(self, service: MaestroMemoryService):
+    def __init__(self, service: MaestroMemoryService, use_zoekt: bool = True):
         """
         Initialize scanner with a MaestroMemoryService instance.
 
         Args:
             service: Initialized MaestroMemoryService for database operations
+            use_zoekt: Whether to use Zoekt for fast indexed search (default: True)
         """
         self.service = service
         self.detector = ProjectDetector()
+        self.use_zoekt = use_zoekt
+        self.zoekt_config = ZoektConfig()
+        self.zoekt_client: Optional[ZoektClient] = None
+        self.zoekt_indexer: Optional[ZoektIndexer] = None
 
     async def scan_directories(self, base_dirs: List[str], max_depth: int = 5) -> Dict[str, Any]:
         """
         Scan multiple directories for Maestro projects.
+
+        Enhanced with Zoekt integration for fast indexed search when available.
 
         Args:
             base_dirs: List of directories to scan
@@ -51,27 +61,36 @@ class MaestroScanner:
         discovered_projects = []
         discovered_tracks = []
         errors = []
+        scan_method = "unknown"
 
-        for base_dir in base_dirs:
-            base_path = Path(base_dir).expanduser().resolve()
-            if not base_path.exists():
-                errors.append(f"Directory does not exist: {base_dir}")
-                continue
+        logger.info(f"Starting scan of {len(base_dirs)} directories with max_depth={max_depth}")
+        for i, base_dir in enumerate(base_dirs):
+            logger.info(f"  [{i+1}/{len(base_dirs)}] {base_dir}")
 
-            logger.info(f"Scanning directory: {base_path}")
+        try:
+            # Try Zoekt-based scanning first (fast indexed search)
+            if self.use_zoekt and await self._check_zoekt_available():
+                logger.info("Using Zoekt for fast indexed project discovery")
+                scan_method = "zoekt"
+                zoekt_results = await self._scan_with_zoekt(base_dirs)
 
-            # Find all potential project directories
-            for project_path in self._find_maestro_projects(base_path, max_depth):
-                try:
-                    project_info = self._parse_project(project_path)
-                    if project_info:
-                        # Import to database
-                        db_project = await self._import_project(project_info)
+                # Import Zoekt-discovered projects
+                for project_info in zoekt_results:
+                    try:
+                        project_path = Path(project_info["path"])
+                        db_project = await self._import_project({
+                            "path": str(project_path),
+                            "name": project_info.get("name", project_path.name),
+                            "type": project_info.get("type", "unknown"),
+                            "description": None,
+                            "tech_stack": []
+                        })
                         discovered_projects.append({
                             "path": str(project_path),
                             "name": project_info.get("name", project_path.name),
                             "type": project_info.get("type", "unknown"),
-                            "id": db_project.id
+                            "id": db_project.id,
+                            "scan_method": "zoekt"
                         })
 
                         # Parse and import tracks
@@ -84,13 +103,72 @@ class MaestroScanner:
                                 "project_id": db_project.id
                             })
 
-                except Exception as e:
-                    logger.error(f"Error processing project {project_path}: {e}")
-                    errors.append(f"Error in {project_path}: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Error importing Zoekt-discovered project {project_info.get('path')}: {e}")
+                        errors.append(f"Error importing {project_info.get('path')}: {str(e)}")
+
+            else:
+                # Fall back to filesystem traversal
+                if self.use_zoekt:
+                    logger.info("Zoekt unavailable, falling back to filesystem scanning")
+                else:
+                    logger.info("Using filesystem traversal for project discovery")
+                scan_method = "filesystem"
+
+                for base_dir in base_dirs:
+                    base_path = Path(base_dir).expanduser().resolve()
+                    if not base_path.exists():
+                        logger.warning(f"Directory does not exist: {base_dir}")
+                        errors.append(f"Directory does not exist: {base_dir}")
+                        continue
+
+                    logger.info(f"Scanning directory: {base_path}")
+
+                    # Find all potential project directories
+                    for project_path in self._find_maestro_projects(base_path, max_depth):
+                        try:
+                            project_info = self._parse_project(project_path)
+                            if project_info:
+                                # Import to database
+                                db_project = await self._import_project(project_info)
+                                discovered_projects.append({
+                                    "path": str(project_path),
+                                    "name": project_info.get("name", project_path.name),
+                                    "type": project_info.get("type", "unknown"),
+                                    "id": db_project.id,
+                                    "scan_method": "filesystem"
+                                })
+
+                                # Parse and import tracks
+                                tracks = self._parse_tracks(project_path)
+                                for track in tracks:
+                                    db_track = await self._import_track(db_project.id, track)
+                                    discovered_tracks.append({
+                                        "track_id": track["track_id"],
+                                        "title": track["title"],
+                                        "project_id": db_project.id
+                                    })
+
+                        except Exception as e:
+                            logger.error(f"Error processing project {project_path}: {e}")
+                            errors.append(f"Error in {project_path}: {str(e)}")
+
+        except Exception as e:
+            logger.error(f"Scan failed: {e}")
+            errors.append(f"Scan failed: {str(e)}")
 
         # Store a memory for this scan operation
         if discovered_projects:
             await self._store_scan_memory(discovered_projects, discovered_tracks)
+
+        # Log comprehensive summary
+        logger.info(f"Scan complete using method: {scan_method}")
+        logger.info(f"Projects discovered: {len(discovered_projects)}")
+        logger.info(f"Tracks discovered: {len(discovered_tracks)}")
+        if errors:
+            logger.warning(f"Errors during scan: {len(errors)}")
+            for error in errors[:5]:  # Log first 5 errors
+                logger.warning(f"  - {error}")
 
         return {
             "success": True,
@@ -98,8 +176,53 @@ class MaestroScanner:
             "tracks_found": len(discovered_tracks),
             "projects": discovered_projects,
             "tracks": discovered_tracks,
-            "errors": errors
+            "errors": errors,
+            "scan_method": scan_method,
+            "directories_scanned": base_dirs,
+            "max_depth": max_depth
         }
+
+    async def _check_zoekt_available(self) -> bool:
+        """
+        Check if Zoekt server is available for indexed search.
+
+        Returns:
+            True if Zoekt is available and healthy
+        """
+        try:
+            if not self.zoekt_client:
+                self.zoekt_client = ZoektClient(self.zoekt_config)
+            return await self.zoekt_client.health_check()
+        except Exception as e:
+            logger.debug(f"Zoekt health check failed: {e}")
+            return False
+
+    async def _scan_with_zoekt(self, base_dirs: List[str]) -> List[Dict[str, Any]]:
+        """
+        Use Zoekt for fast indexed project discovery.
+
+        Args:
+            base_dirs: Base directories to search
+
+        Returns:
+            List of discovered project information
+        """
+        if not self.zoekt_client:
+            self.zoekt_client = ZoektClient(self.zoekt_config)
+
+        try:
+            # Find Maestro projects using Zoekt
+            projects = await self.zoekt_client.find_maestro_projects(
+                base_dirs=base_dirs,
+                max_results=1000  # High limit for comprehensive discovery
+            )
+
+            logger.info(f"Zoekt discovered {len(projects)} projects")
+            return projects
+
+        except Exception as e:
+            logger.error(f"Zoekt scan failed: {e}")
+            return []
 
     def _find_maestro_projects(self, base_path: Path, max_depth: int) -> List[Path]:
         """
@@ -118,19 +241,21 @@ class MaestroScanner:
             """
             Check if this is a real Maestro project, not just a directory
             containing a `maestro/` Python package.
-            
+
             A real Maestro project has:
             - maestro/product.md (greenfield)
             - maestro/tracks.md or maestro/tracks/ (any project)
             - .maestro/ directory (alternative marker)
+            - product.md at root level (alternative structure)
+            - tracks.md at root level (alternative structure)
             """
             maestro_dir = path / "maestro"
             dotmaestro_dir = path / ".maestro"
-            
+
             # Check for .maestro config directory
             if dotmaestro_dir.exists() and dotmaestro_dir.is_dir():
                 return True
-            
+
             # Check for maestro/ with project files (not just a Python package)
             if maestro_dir.exists() and maestro_dir.is_dir():
                 # Must have product.md, tracks.md, or workflow.md to be a project
@@ -142,7 +267,18 @@ class MaestroScanner:
                     return True
                 if (maestro_dir / "tracks").is_dir():
                     return True
-            
+
+            # Check for alternative structure: product.md and tracks.md at root level
+            # This handles cases like Artificial_Labs/conductor where the project
+            # is in a subdirectory without a maestro/ wrapper
+            if (path / "product.md").exists() and (path / "tracks.md").exists():
+                return True
+
+            # Check for tracks directory at root level
+            if (path / "tracks").is_dir():
+                if (path / "product.md").exists() or (path / "tracks.md").exists():
+                    return True
+
             return False
 
         def search(path: Path, depth: int):
@@ -152,8 +288,19 @@ class MaestroScanner:
             try:
                 # Check if this directory is a real Maestro project
                 if is_real_maestro_project(path):
-                    projects.append(path)
+                    # Check if we already found a parent project
+                    is_nested = any(
+                        path.is_relative_to(existing) or existing.is_relative_to(path)
+                        for existing in projects
+                    )
+                    # Only add if not nested within an already-found project
+                    if not is_nested:
+                        projects.append(path)
                     # Still recurse into subdirectories to find nested projects
+                    else:
+                        # This is a nested project, skip it
+                        logger.debug(f"Skipping nested maestro project: {path}")
+                        return
 
                 # Recurse into subdirectories
                 for item in path.iterdir():
@@ -190,8 +337,11 @@ class MaestroScanner:
             "tech_stack": []
         }
 
-        # Try to read product.md for description
+        # Try to read product.md for description (check both maestro/ and root)
         product_file = maestro_dir / "product.md"
+        if not product_file.exists():
+            product_file = project_path / "product.md"
+
         if product_file.exists():
             try:
                 content = product_file.read_text()
@@ -222,6 +372,8 @@ class MaestroScanner:
                 info["type"] = "brownfield"
             elif dotmaestro_dir.exists():
                 info["type"] = "generic"
+            elif (project_path / "product.md").exists():
+                info["type"] = "greenfield"
 
         return info
 
@@ -236,7 +388,11 @@ class MaestroScanner:
             List of track dictionaries
         """
         tracks = []
+
+        # Try both maestro/tracks.md and tracks.md at root
         tracks_file = project_path / "maestro" / "tracks.md"
+        if not tracks_file.exists():
+            tracks_file = project_path / "tracks.md"
 
         if not tracks_file.exists():
             return tracks
@@ -264,7 +420,11 @@ class MaestroScanner:
                 })
 
             # Try to parse individual track files for more details
+            # Check both maestro/tracks/ and tracks/ at root
             tracks_dir = project_path / "maestro" / "tracks"
+            if not tracks_dir.exists():
+                tracks_dir = project_path / "tracks"
+
             if tracks_dir.exists():
                 for track_file in tracks_dir.glob("*.md"):
                     track_content = track_file.read_text()
@@ -380,14 +540,30 @@ async def scan_projects(
     Convenience function to scan for Maestro projects.
 
     Args:
-        base_dirs: Directories to scan. Defaults to ["/home/stan/Prod"]
+        base_dirs: Directories to scan. Defaults to comprehensive search across common project locations:
+                   - ~/Prod (main production directory)
+                   - ~/dev (development projects)
+                   - ~/projects (general projects)
+                   - ~/code (code projects)
+                   - ~/work (work projects)
+                   - ~ (home directory for root-level projects)
         service: MaestroMemoryService instance. Creates one if not provided.
 
     Returns:
         Scan results dictionary
     """
     if base_dirs is None:
-        base_dirs = [str(Path.home() / "Prod")]
+        # Comprehensive default search across common project locations
+        home = Path.home()
+        base_dirs = [
+            str(home / "Prod"),
+            str(home / "dev"),
+            str(home / "projects"),
+            str(home / "code"),
+            str(home / "work"),
+            str(home),  # Home directory for root-level projects
+        ]
+        logger.info(f"Scanning default directories: {base_dirs}")
 
     if service is None:
         service = MaestroMemoryService()
