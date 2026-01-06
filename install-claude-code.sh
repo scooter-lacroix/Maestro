@@ -60,6 +60,20 @@ cp "$SCRIPT_DIR/claude-code/templates/workflow.md" ~/.claude/maestro-templates/
 mkdir -p ~/.claude/maestro-templates/code_styleguides
 cp "$SCRIPT_DIR/claude-code/templates/code_styleguides"/*.md ~/.claude/maestro-templates/code_styleguides/
 
+# Create plugin directory and copy plugin files
+echo "📁 Creating plugin directory..."
+mkdir -p ~/.claude/plugins/maestro
+if [ -f "$SCRIPT_DIR/claude-code/plugin.json" ]; then
+    echo "📋 Copying plugin files..."
+    cp "$SCRIPT_DIR/claude-code/plugin.json" ~/.claude/plugins/maestro/
+    # Copy other plugin files if they exist
+    [ -f "$SCRIPT_DIR/claude-code/README.md" ] && cp "$SCRIPT_DIR/claude-code/README.md" ~/.claude/plugins/maestro/ 2>/dev/null
+    [ -f "$SCRIPT_DIR/LICENSE" ] && cp "$SCRIPT_DIR/LICENSE" ~/.claude/plugins/maestro/ 2>/dev/null
+    echo "   ✅ Plugin configuration installed"
+else
+    echo "   ⚠️  Warning: plugin.json not found, skipping plugin configuration"
+fi
+
 # Build Memory Dashboard frontend FIRST (before pip install so dist files are included in package)
 echo "🎨 Building Memory Dashboard frontend..."
 FRONTEND_DIR="$SCRIPT_DIR/maestro/memory/frontend"

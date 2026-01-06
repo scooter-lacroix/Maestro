@@ -1,0 +1,68 @@
+{
+  "name": "maestro",
+  "version": "1.4.0",
+  "description": "Spec-driven development framework with rigorous agent review, TDD workflow, and project tracking. Features proactive agent usage, automated agent configuration, and comprehensive code style guides.",
+  "author": "scooter-lacroix",
+  "license": "MIT",
+  "homepage": "https://github.com/scooter-lacroix/Maestro",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scooter-lacroix/Maestro.git"
+  },
+  "keywords": [
+    "tdd",
+    "workflow",
+    "agent-review",
+    "spec-driven",
+    "project-management",
+    "development-framework",
+    "proactive-agents",
+    "multi-agent",
+    "opencode",
+    "maestro"
+  ],
+  "dependencies": {
+    "nexus-memory": ">=1.0.0"
+  },
+  "claude": {
+    "minVersion": "2.0.0",
+    "maxVersion": "3.0.0"
+  },
+  "commands": [
+    "maestro-setup",
+    "maestro-newTrack",
+    "maestro-implement",
+    "maestro-status",
+    "maestro-revert",
+    "maestro-configure"
+  ],
+  "templates": [
+    "workflow",
+    "code_styleguides/general",
+    "code_styleguides/docker",
+    "code_styleguides/go",
+    "code_styleguides/graphql",
+    "code_styleguides/html-css",
+    "code_styleguides/javascript",
+    "code_styleguides/nextjs",
+    "code_styleguides/nodejs",
+    "code_styleguides/python",
+    "code_styleguides/react",
+    "code_styleguides/rust",
+    "code_styleguides/shell",
+    "code_styleguides/typescript",
+    "code_styleguides/vue"
+  ],
+  "features": [
+    "Proactive automatic agent usage",
+    "Automated agent creation via /maestro:configure",
+    "Comprehensive code style guides (14 languages)",
+    "Exhaustive agent support (10+ agents)",
+    "Fallback for missing CLI tools",
+    "TDD workflow enforcement",
+    "Git-aware project tracking",
+    "OpenCode integration support"
+  ],
+  "updateUrl": "https://github.com/scooter-lacroix/Maestro/releases/latest",
+  "changelog": "https://github.com/scooter-lacroix/Maestro/blob/master/CHANGELOG.md"
+}
