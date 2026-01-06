@@ -25,15 +25,14 @@
     "dashboard"
   ],
   "commands": [
-    "./claude-code/commands/setup.md",
-    "./claude-code/commands/newTrack.md",
-    "./claude-code/commands/implement.md",
-    "./claude-code/commands/status.md",
-    "./claude-code/commands/revert.md",
-    "./claude-code/commands/configure.md",
-    "./claude-code/commands/memory.md",
-    "./claude-code/commands/tui.md",
-    "./claude-code/commands/migrate:agent-deck.md"
+    "setup",
+    "newTrack",
+    "implement",
+    "status",
+    "revert",
+    "configure",
+    "memory",
+    "tui"
   ],
   "cli": {
     "binary": "maestro",

@@ -29,15 +29,14 @@
     "maxVersion": "3.0.0"
   },
   "commands": [
-    "maestro-setup",
-    "maestro-newTrack",
-    "maestro-implement",
-    "maestro-status",
-    "maestro-revert",
-    "maestro-configure",
-    "maestro-memory",
-    "maestro-tui",
-    "maestro-migrate:agent-deck"
+    "setup",
+    "newTrack",
+    "implement",
+    "status",
+    "revert",
+    "configure",
+    "memory",
+    "tui"
   ],
   "templates": [
     "workflow",
