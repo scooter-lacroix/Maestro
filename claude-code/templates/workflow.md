@@ -21,41 +21,41 @@
 
 3. **Agent Selection Criteria (Execute Automatically):**
    - **Trivial tasks (1-5 lines, simple changes):** Implement directly
-   - **Standard tasks (5-50 lines, single file):** Automatically use appropriate implementation agents (explore)
-   - **Complex tasks (multiple files, >50 lines):** Automatically use oracle or librarian for design + appropriate implementation agents
-   - **Large codebase analysis (>100KB):** Automatically use librarian for exploration
-   - **Spec-driven/ambiguous requirements:** Automatically use oracle for specification
-   - **ALL implementation work:** MUST be automatically followed by oracle for validation
+   - **Standard tasks (5-50 lines, single file):** Automatically use appropriate implementation agents (opencode-scaffolder)
+   - **Complex tasks (multiple files, >50 lines):** Automatically use codex-reviewer or gemini-analyzer for design + appropriate implementation agents
+   - **Large codebase analysis (>100KB):** Automatically use gemini-analyzer for exploration
+   - **Spec-driven/ambiguous requirements:** Automatically use codex-reviewer for specification
+   - **ALL implementation work:** MUST be automatically followed by codex-reviewer for validation
 
 **Core Agents:**
-- **oracle**='codex-reviewer': Architecture, code review, strategy. (MANDATORY for all implementation)
-- **librarian**='gemini-analyzer': Multi-repo analysis, doc lookup, implementation examples.
-- **explore**='opencode-scaffolder': Fast codebase exploration and pattern matching.
-- **frontend-ui-ux-engineer**='gemini-frontend-designer': Designer turned developer. Builds gorgeous UIs.
-- **document-writer': Technical writing expert. Writes prose that flows.
-- **multimodal-looker**='general-purpose': Visual content specialist. Analyzes PDFs, images, diagrams.
-- **maverick**='droid-factory': Specialized in spec-driven development and strategic planning.
+- **codex-reviewer**: Architecture, code review, strategy. (MANDATORY for all implementation)
+- **gemini-analyzer**: Multi-repo analysis, doc lookup, implementation examples.
+- **opencode-scaffolder**: Fast codebase exploration and pattern matching.
+- **gemini-frontend-designer**: Designer turned developer. Builds gorgeous UIs.
+- **sonnet-specialist**: Technical writing expert. Writes prose that flows.
+- **general-purpose**: Visual content specialist. Analyzes PDFs, images, diagrams.
+- **droid-factory**: Specialized in spec-driven development and strategic planning.
 
 **Code Implementation Agents:**
-- **macgyver**='qwen-coder','kilocode-orchestrator': Trivial tasks even those exceeding 1-5 lines
-- **dexter**='amp-code','opencode-scaffolder': Standard and some complex tasks
-- **poindexter**='rovo-dev','droid-factory': Complex tasks that require pragmatic, high quality code implementations and sound, consistent logic
-- **einstein**='opus-specialist': Tasks that involve complex algorithms, complicated, multi-layered logic and reasoning and exceptional coding capabilities with thorough edge case consideration.
+- **qwen-coder**, **kilocode-orchestrator**: Trivial tasks even those exceeding 1-5 lines
+- **amp-code**, **opencode-scaffolder**: Standard and some complex tasks
+- **rovo-dev**, **droid-factory**: Complex tasks that require pragmatic, high quality code implementations and sound, consistent logic
+- **opus-specialist**: Tasks that involve complex algorithms, complicated, multi-layered logic and reasoning and exceptional coding capabilities with thorough edge case consideration.
 
 **Orchestrator Agents:**
 - **kilocode-orchestrator**: Large-scale projects with persistent memory across sessions.
 - **llm-council-evaluator**: Meta-agent selection for high-risk or complex decisions.
 
 4. **Mandatory Pre-Commit Review:** Before marking any task complete and committing:
-   - ALL code changes MUST be automatically reviewed by oracle agent
+   - ALL code changes MUST be automatically reviewed by codex-reviewer agent
    - Review results MUST be addressed before proceeding
    - If critical issues are found, they MUST be fixed before commit
 
 5. **Quota Awareness:**
-   - librarian: 300 requests/day (use sparingly for large analysis)
-   - frontend-ui-ux-engineer: Unlimited free (use liberally for prototyping)
-   - document-writer: Separate credit pool (use to preserve main quotas)
-   - explore: 2000 requests/day (use for standard implementation)
+   - gemini-analyzer: 300 requests/day (use sparingly for large analysis)
+   - gemini-frontend-designer: Unlimited free (use liberally for prototyping)
+   - sonnet-specialist: Separate credit pool (use to preserve main quotas)
+   - opencode-scaffolder: 2000 requests/day (use for standard implementation)
 
 ## Agent Availability and Fallbacks
 
@@ -94,26 +94,26 @@ All tasks follow a strict lifecycle:
 
 3. **Assess Complexity and Select Agent (AUTOMATIC):**
    - **CRITICAL:** Assess task complexity and automatically select the appropriate approach:
-     - Trivial tasks (1-5 lines): Implement directly using macgyver
-     - Standard tasks (5-50 lines, single file): Automatically launch explore for implementation
-     - Complex tasks (multiple files, >50 lines): Automatically launch oracle or librarian for design + explore for implementation
+     - Trivial tasks (1-5 lines): Implement directly using qwen-coder
+     - Standard tasks (5-50 lines, single file): Automatically launch opencode-scaffolder for implementation
+     - Complex tasks (multiple files, >50 lines): Automatically launch codex-reviewer or gemini-analyzer for design + opencode-scaffolder for implementation
    - **Do NOT ask user permission** - this is automatic
 
 4. **Write Failing Tests (Red Phase):**
    - Create a new test file for the feature or bug fix.
    - Write one or more unit tests that clearly define the expected behavior and acceptance criteria for the task.
    - **CRITICAL:** Run the tests and confirm that they fail as expected. This is the "Red" phase of TDD. Do not proceed until you have failing tests.
-   - **AUTOMATIC AGENT:** For test writing, automatically use appropriate agent (explore) for standard/complex tasks
+   - **AUTOMATIC AGENT:** For test writing, automatically use appropriate agent (opencode-scaffolder) for standard/complex tasks
 
 5. **Implement to Pass Tests (Green Phase):**
    - Write the minimum amount of application code necessary to make the failing tests pass.
    - Run the test suite again and confirm that all tests now pass. This is the "Green" phase.
-   - **AUTOMATIC AGENT:** For implementation, automatically use appropriate agent (explore) or oracle/librarian + explore (complex)
+   - **AUTOMATIC AGENT:** For implementation, automatically use appropriate agent (opencode-scaffolder) or codex-reviewer/gemini-analyzer + opencode-scaffolder (complex)
 
 6. **Refactor (Optional but Recommended):**
    - With the safety of passing tests, refactor the implementation code and the test code to improve clarity, remove duplication, and enhance performance without changing the external behavior.
    - Rerun tests to ensure they still pass after refactoring.
-   - **AUTOMATIC AGENT:** Automatically use explore for refactoring
+   - **AUTOMATIC AGENT:** Automatically use opencode-scaffolder for refactoring
 
 7. **Verify Coverage:** Run coverage reports using the project's chosen tools. For example, in a Python project, this might look like:
    ```bash
@@ -128,10 +128,10 @@ All tasks follow a strict lifecycle:
    - Resume implementation
 
 9. **Agent Review (MANDATORY - AUTOMATIC):**
-   **CRITICAL:** Before proceeding to commit, you MUST automatically launch oracle. Do NOT wait for user instruction.
-   - **AUTOMATICALLY Launch Code Review:** Use the oracle agent to review all changes made during this task. Provide context: task description, files changed, expected outcomes.
+   **CRITICAL:** Before proceeding to commit, you MUST automatically launch codex-reviewer. Do NOT wait for user instruction.
+   - **AUTOMATICALLY Launch Code Review:** Use the codex-reviewer agent to review all changes made during this task. Provide context: task description, files changed, expected outcomes.
    - **Address Review Findings:** If critical issues are found, fix them before proceeding. If suggestions are provided, address or document decision to defer.
-   - **Confirm Review Complete:** Only after oracle passes should you proceed to commit. Document any issues found and resolved.
+   - **Confirm Review Complete:** Only after codex-reviewer passes should you proceed to commit. Document any issues found and resolved.
 
 10. **Commit Code Changes:**
     - Stage all code changes related to the task.

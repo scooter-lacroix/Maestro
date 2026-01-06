@@ -1,5 +1,5 @@
 #!/bin/bash
-# Maestro Installer for Claude Code v1.3.0
+# Maestro Installer for Claude Code v1.4.0
 set -e
 
 echo "🚀 Installing Maestro for Claude Code..."

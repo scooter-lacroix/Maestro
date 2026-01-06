@@ -40,6 +40,29 @@ cd maestro
   - `workflow.md`
   - `code_styleguides/*.md`
 
+## Post-Installation Configuration
+
+**Recommended:** After installation, run `/maestro:configure` to set up enhanced agent capabilities.
+
+```
+/maestro:configure
+```
+
+This will:
+- Check for external CLI tools (gemini-cli, qwen-cli, codex-cli)
+- Create agent configurations for available tools
+- Set up API key requirements
+- Verify tool functionality
+- Configure fallback behavior for missing tools
+
+**Benefits of /maestro:configure:**
+- Access to specialized agents for large codebase analysis (gemini-analyzer)
+- Enhanced refactoring and test generation (qwen-coder)
+- Production-quality code review (codex-reviewer)
+- Automatic fallback to built-in agents if CLI tools unavailable
+
+**Note:** Maestro works without `/maestro:configure`, but with reduced agent capabilities.
+
 ## Quick Start
 
 ### 1. Initialize Your Project

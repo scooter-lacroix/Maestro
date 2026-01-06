@@ -28,6 +28,7 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > 1. **Model Selection**: Choose which Claude model to use for different command types
    > 2. **Analysis Frequency**: Configure when Critical Think analysis runs (before/during/after stages)
    > 3. **claude-hud Integration**: Enable native token/cost tracking in your statusline
+   > 4. **Agent Setup**: Automatically create specialized agents for CLI tools (gemini, qwen, codex)
    >
    > These settings will be saved to a global configuration file for use across all Maestro projects.
    > - **Linux/macOS**: `~/.claude/maestro.local.md`
@@ -166,7 +167,199 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 ---
 
-### 2.5 Global Enable/Disable Flags
+### 2.5 Agent Setup
+
+**PROTOCOL: Configure automated agent creation for CLI tools.**
+
+1. **Detect Environment:**
+   - Check if running in Claude Code: `if [ -n "$CLAUDECODE" ]; then`
+   - Check if running in OpenCode: `if [ -n "$OPencode_RUNNING" ]; then`
+   - Store environment type for later use
+
+2. **Explain Agent Setup:**
+   > "Maestro can automatically create specialized agents that integrate with CLI tools for enhanced capabilities:
+   >
+   > **Available Agents:**
+   > - **codex-reviewer**: High-rigor production review with GPT-5 reasoning (requires: codex CLI)
+   > - **gemini-analyzer**: Large codebase analysis with Gemini 2.5 Pro (requires: gemini CLI)
+   > - **qwen-coder**: Fast exploration and refactoring (requires: qwen CLI)
+   > - **amp-code**: Built-in agent (no CLI needed)
+   > - **rovo-dev**: Built-in agent (no CLI needed)
+   > - **opus-specialist**: Built-in agent (no CLI needed)
+   >
+   > These agents work as sub-agents, handling specialized tasks while you maintain overall orchestration."
+
+3. **Check for CLI Tools:**
+   Run detection commands:
+   ```bash
+   which gemini 2>/dev/null && echo "gemini:available" || echo "gemini:not_found"
+   which qwen 2>/dev/null && echo "qwen:available" || echo "qwen:not_found"
+   which codex 2>/dev/null && echo "codex:available" || echo "codex:not_found"
+   ```
+
+4. **Ask About Agent Setup:**
+   - Ask: "Would you like Maestro to create specialized agents?"
+     - A) Yes, create all available agents
+     - B) Yes, but let me choose which agents
+     - C) No, skip agent setup
+
+5. **If Yes (Option A or B):**
+   - For Option A: Create all agents for available CLI tools
+   - For Option B: Present each available agent and ask for confirmation
+
+6. **Agent Creation Protocol:**
+
+   **A) For Claude Code Environment:**
+
+   For each agent to create:
+
+   i. **Determine Agent Type:**
+      - CLI-based agents (codex-reviewer, gemini-analyzer, qwen-coder)
+      - Built-in agents (amp-code, rovo-dev, opus-specialist)
+
+   ii. **For CLI-Based Agents:**
+
+       If CLI tool is available:
+       - Check if agent already exists in `~/.claude/agents/`
+       - If exists, ask: "Agent {name} already exists. Overwrite?"
+         - A) Yes, overwrite
+         - B) No, keep existing
+       - If creating/overwriting:
+         - Attempt to use Task tool with agent-creator skill if available
+         - If skill unavailable, create agent file manually
+         - Write agent configuration to `~/.claude/agents/{agent-name}.md`
+         - Use the agent format from existing agents as template
+       - Verify creation success
+       - Track in configuration: `{agent-name}: created`
+
+       If CLI tool is NOT available:
+       - Ask: "CLI tool {tool} not found. Create agent anyway (without CLI integration)?"
+         - A) Yes, create basic agent
+         - B) No, skip this agent
+         - C) Help me install {tool} CLI
+       - If C:
+         - Provide installation instructions for the CLI tool
+         - After installation, re-check availability
+         - Proceed with agent creation
+
+   iii. **For Built-In Agents:**
+       - These agents work without CLI tools
+       - Create using same process as CLI-based agents
+       - No CLI tool detection needed
+
+   **B) For OpenCode Environment:**
+
+   For each agent to create:
+
+   i. **Determine Agent Directory:**
+      - OpenCode agents: `~/.config/opencode/agent/`
+      - Ensure directory exists: `mkdir -p ~/.config/opencode/agent`
+
+   ii. **Check for CLI Tools:**
+       - Same detection as Claude Code environment
+       - Tools: `gemini`, `qwen`, `codex`
+
+   iii. **Create Agent Files:**
+       - Use OpenCode agent format:
+         ```markdown
+         ---
+         mode: subagent
+         model: inherit
+         ---
+
+         # Agent Name
+
+         Description of when to use this agent.
+
+         ## Usage
+
+         Use the CLI tool:
+         ```bash
+         tool-name -p "prompt" @file/path
+         ```
+         ```
+       - Write to `~/.config/opencode/agent/{agent-name}.md`
+       - Verify creation success
+
+7. **Specific Agent Templates:**
+
+   **codex-reviewer** (requires: codex CLI)
+   - Purpose: High-rigor production review, security validation, complex reasoning
+   - CLI command: `codex exec --approval-mode read-only "prompt"`
+   - Specialization: Oracle/production review tasks
+
+   **gemini-analyzer** (requires: gemini CLI)
+   - Purpose: Large codebase analysis, security audits, pattern detection
+   - CLI command: `gemini -p "prompt" @files --yolo`
+   - Specialization: Librarian/large codebase analysis
+   - Features: API key rotation, sub-agent delegation
+
+   **qwen-coder** (requires: qwen CLI)
+   - Purpose: Fast exploration, prototyping, refactoring
+   - CLI command: `qwen -p "prompt" @files`
+   - Specialization: Explore/refactoring tasks
+
+   **amp-code** (built-in, no CLI)
+   - Purpose: ETL implementation, data pipelines
+   - Specialization: Heavy data processing
+
+   **rovo-dev** (built-in, no CLI)
+   - Purpose: Large codebase optimization
+   - Specialization: Complex refactoring
+
+   **opus-specialist** (built-in, no CLI)
+   - Purpose: High-quality implementation
+   - Specialization: Production-grade code
+
+8. **Agent Creation Fallback:**
+
+   If automatic agent creation fails:
+   - Provide manual creation instructions
+   - Show expected agent file format
+   - Offer to retry after user installs dependencies
+
+9. **Track Agent Setup Status:**
+   Store in configuration:
+   ```yaml
+   agent_setup:
+     environment: <claude-code|opencode>
+     agents_created:
+       - name: codex-reviewer
+         status: <created|skipped|failed>
+         cli_available: <true|false>
+       - name: gemini-analyzer
+         status: <created|skipped|failed>
+         cli_available: <true|false>
+       # ... etc
+     timestamp: <ISO-8601 timestamp>
+   ```
+
+10. **Summary of Agent Setup:**
+    > "Agent Setup Summary:
+    >
+    > **Environment Detected:** <Claude Code or OpenCode>
+    >
+    > **CLI Tools Found:**
+    > - gemini: <available/not available>
+    > - qwen: <available/not available>
+    > - codex: <available/not available>
+    >
+    > **Agents Created:**
+    > - codex-reviewer: <status>
+    > - gemini-analyzer: <status>
+    > - qwen-coder: <status>
+    > - amp-code: <status>
+    > - rovo-dev: <status>
+    > - opus-specialist: <status>
+    >
+    > **Next Steps:**
+    > - Agents are now available as sub-agents during Maestro sessions
+    > - You can invoke them directly or let Maestro delegate automatically
+    > - Run `/maestro:configure` again to update agents after installing CLI tools"
+
+---
+
+### 2.6 Global Enable/Disable Flags
 
 **PROTOCOL: Configure global enable/disable flags.**
 
@@ -189,7 +382,7 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 ---
 
-### 2.6 Write Configuration File
+### 2.7 Write Configuration File
 
 **PROTOCOL: Write the configuration to the global config file.**
 
@@ -249,6 +442,23 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    - **Statusline Configured**: <true|false>
    - **Installation Status**: <installed|not installed|skipped>
 
+   ## Agent Setup
+
+   - **Environment**: <claude-code|opencode>
+   - **Setup Completed**: <true|false>
+   - **Timestamp**: <ISO-8601 timestamp>
+   - **CLI Tools Available**:
+     - gemini: <true|false>
+     - qwen: <true|false>
+     - codex: <true|false>
+   - **Agents Created**:
+     - codex-reviewer: <created|skipped|failed>
+     - gemini-analyzer: <created|skipped|failed>
+     - qwen-coder: <created|skipped|failed>
+     - amp-code: <created|skipped|failed>
+     - rovo-dev: <created|skipped|failed>
+     - opus-specialist: <created|skipped|failed>
+
    ## Global Flags
 
    - **Critical Think Enabled**: <true|false>
@@ -277,7 +487,7 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 ---
 
-### 2.7 Update Project Configuration (Optional)
+### 2.8 Update Project Configuration (Optional)
 
 **PROTOCOL: Offer to update project-specific configuration.**
 
@@ -293,7 +503,7 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 ---
 
-### 2.8 Finalization
+### 2.9 Finalization
 
 **PROTOCOL: Summarize configuration and provide next steps.**
 
@@ -314,6 +524,11 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > **claude-hud:** <status>
    > **Native Integration:** <enabled/disabled>
    >
+   > **Agent Setup:**
+   > - Environment: <Claude Code|OpenCode>
+   > - Agents Created: <count> of <total>
+   > - CLI Tools Available: <list>
+   >
    > Configuration saved to the global Maestro configuration file."
 
 2. **Provide Next Steps:**
@@ -321,7 +536,8 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > - Run `/maestro:setup` to set up a new project with these settings
    > - Run `/maestro:status` to check current progress
    > - Run `/maestro:implement` to start implementing tracks
-   > - Run `/maestro:configure` again to change settings at any time"
+   > - Run `/maestro:configure` again to change settings at any time
+   > - Use specialized agents directly or let Maestro delegate automatically"
 
 3. **Explain Override Behavior:**
    > "Settings are applied in this order (later overrides earlier):
@@ -489,6 +705,22 @@ claude_hud:
   statusline_configured: true
   installation_status: installed
 
+agent_setup:
+  environment: claude-code
+  setup_completed: true
+  timestamp: "2026-01-05T20:00:00Z"
+  cli_tools_available:
+    gemini: true
+    qwen: true
+    codex: true
+  agents_created:
+    codex-reviewer: created
+    gemini-analyzer: created
+    qwen-coder: created
+    amp-code: created
+    rovo-dev: created
+    opus-specialist: created
+
 global_flags:
   critical_think_enabled: true
   native_integration: true
@@ -515,6 +747,11 @@ This file contains global Maestro settings...
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-01-04
-**Status**: Ready for Implementation
+**Document Version**: 2.0
+**Last Updated**: 2026-01-05
+**Status**: Enhanced with Agent Setup
+
+**Version History:**
+- v2.0 (2026-01-05): Added automated agent creation for CLI tools (gemini, qwen, codex) with environment detection for both Claude Code and OpenCode
+- v1.0 (2026-01-04): Initial configuration protocol with model selection, analysis frequency, and claude-hud integration
+

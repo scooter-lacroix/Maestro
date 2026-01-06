@@ -1,5 +1,5 @@
 #!/bin/bash
-# Maestro Installer for OpenCode v1.3.0
+# Maestro Installer for OpenCode v1.4.0
 set -e
 
 echo "🚀 Installing Maestro for OpenCode..."
@@ -54,7 +54,7 @@ cp -r "$SCRIPT_DIR/opencode/skill/maestro/"* ~/.opencode/skill/maestro/
 echo "📁 Creating templates directory..."
 mkdir -p ~/.claude/maestro-templates
 
-# Copy templates
+# Copy templates (use Claude Code versions for shared templates)
 echo "📋 Copying templates..."
 cp "$SCRIPT_DIR/claude-code/templates/workflow.md" ~/.claude/maestro-templates/
 mkdir -p ~/.claude/maestro-templates/code_styleguides
