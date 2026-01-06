@@ -82,12 +82,13 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
 4.  **Execute Tasks and Update Track Plan:**
     a. **Announce:** State that you will now execute the tasks from the track's `plan.md` by following the procedures in `workflow.md`.
     b. **Assess Task Complexity:** Before starting each task, assess its complexity and automatically select the appropriate approach:
-       - **Trivial tasks (1-5 lines, simple changes):** Implement directly
-       - **Standard tasks (5-50 lines, single file):** Use appropriate implementation agents
-       - **Complex tasks (multiple files, >50 lines):** Use oracle or librarian for design + appropriate implementation agents
-       - **All implementation work:** MUST be followed by oracle for validation
+       - **Trivial tasks (1-5 lines, simple changes):** Implement directly using qwen-coder agent
+       - **Standard tasks (5-50 lines, single file):** Use opencode-scaffolder agent
+       - **Complex tasks (multiple files, >50 lines):** Use amp-code or rovo-dev for implementation + codex-reviewer for design
+       - **ALL implementation work:** MUST be validated by codex-reviewer agent
 
        **CRITICAL:** You MUST proactively use agents without waiting for user instruction. The user has configured Maestro to use agents automatically. Agent selection is YOUR responsibility based on task complexity.
+
     c. **Iterate Through Tasks:** You MUST now loop through each task in the track's `plan.md` one by one.
     d. **For Each Task, You MUST:**
         i. **CRITICAL THINK INTEGRATION - BEFORE IMPLEMENTATION:**
@@ -112,10 +113,52 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
                - **Step 5:** What are the risks? What's the contingency if delegation fails?
                - **Step 6:** Proceed with delegation or handle yourself
 
-        iii. **AUTOMATIC AGENT SELECTION:** Based on the complexity assessment in step 4b, launch the appropriate agent(s):
-           - Launch appropriate implementation agent (if standard or complex task)
-           - Launch oracle for validation (ALL implementation work)
-           - Do NOT await user instruction to use agents - this is automatic
+        iii. **MANDATORY AGENT DEPLOYMENT - EXACT INSTRUCTIONS:**
+
+            **CRITICAL:** You MUST use the Task tool to deploy specialized agents. Agent deployment is NOT optional.
+
+            **EXACT Task tool usage by complexity:**
+
+            - **Trivial tasks (1-5 lines):** Use Task tool with:
+              ```
+              subagent_type: "qwen-coder"
+              prompt: "<detailed task description with context and requirements>"
+              ```
+
+            - **Standard tasks (5-50 lines, single file):** Use Task tool with:
+              ```
+              subagent_type: "opencode-scaffolder"
+              prompt: "<detailed task description with context and requirements>"
+              ```
+
+            - **Complex tasks (multiple files, >50 lines):** Use Task tool TWICE:
+              ```
+              1. First, for design/analysis:
+                 subagent_type: "codex-reviewer" or "gemini-analyzer"
+                 prompt: "<task context> Analyze this task and provide implementation strategy."
+
+              2. Second, for implementation:
+                 subagent_type: "amp-code" or "rovo-dev"
+                 prompt: "<detailed task with design from step 1>"
+              ```
+
+            - **ALL implementation work:** After agent completes work, use Task tool for validation:
+              ```
+              subagent_type: "codex-reviewer"
+              prompt: "Review the following changes for this task: <task description>. Files changed: <list>. Provide rigorous code review with zero tolerance for mediocrity."
+              ```
+
+            **Agent mappings (aliases → actual subagent_type):**
+            - "oracle" → `subagent_type: "codex-reviewer"`
+            - "librarian" → `subagent_type: "gemini-analyzer"`
+            - "macgyver" → `subagent_type: "opencode-scaffolder"`
+            - "michaelangello" → `subagent_type: "gemini-frontend-designer"`
+            - "hobbs" → `subagent_type: "sonnet-specialist"`
+            - "luis" → `subagent_type: "general-purpose"`
+            - "dexter" → `subagent_type: "droid-factory"`
+            - "einstein" → `subagent_type: "opus-specialist"`
+
+            **IMPORTANT:** Always await TaskOutput completion before proceeding. Use TaskOutput with block=true to wait for results.
 
         iv. **Defer to Workflow:** The `workflow.md` file is the **single source of truth** for the entire task lifecycle. You MUST now read and execute the procedures defined in the "Task Workflow" section of the `workflow.md` file you have in your context. Follow its steps for implementation, testing, and committing precisely.
 
