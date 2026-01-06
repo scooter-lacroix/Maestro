@@ -217,49 +217,49 @@ if command -v jq &> /dev/null; then
         else
             .
         end |
-        if .command."maestro:setup" == null then
-            .command."maestro:setup" = {
-                "template": "Read and execute from \($script_dir)/maestro:setup.md with args: $ARGUMENTS",
+        if .command.setup == null then
+            .command.setup = {
+                "template": "Read and execute from \($script_dir)/setup.md with args: $ARGUMENTS",
                 "description": "Maestro setup command"
             }
         else
             .
         end |
-        if .command."maestro:newTrack" == null then
-            .command."maestro:newTrack" = {
-                "template": "Read and execute from \($script_dir)/maestro:newTrack.md with args: $ARGUMENTS",
+        if .command.newTrack == null then
+            .command.newTrack = {
+                "template": "Read and execute from \($script_dir)/newTrack.md with args: $ARGUMENTS",
                 "description": "Maestro newTrack command"
             }
         else
             .
         end |
-        if .command."maestro:implement" == null then
-            .command."maestro:implement" = {
-                "template": "Read and execute from \($script_dir)/maestro:implement.md with args: $ARGUMENTS",
+        if .command.implement == null then
+            .command.implement = {
+                "template": "Read and execute from \($script_dir)/implement.md with args: $ARGUMENTS",
                 "description": "Maestro implement command"
             }
         else
             .
         end |
-        if .command."maestro:status" == null then
-            .command."maestro:status" = {
-                "template": "Read and execute from \($script_dir)/maestro:status.md with args: $ARGUMENTS",
+        if .command.status == null then
+            .command.status = {
+                "template": "Read and execute from \($script_dir)/status.md with args: $ARGUMENTS",
                 "description": "Maestro status command"
             }
         else
             .
         end |
-        if .command."maestro:revert" == null then
-            .command."maestro:revert" = {
-                "template": "Read and execute from \($script_dir)/maestro:revert.md with args: $ARGUMENTS",
+        if .command.revert == null then
+            .command.revert = {
+                "template": "Read and execute from \($script_dir)/revert.md with args: $ARGUMENTS",
                 "description": "Maestro revert command"
             }
         else
             .
         end |
-        if .command."maestro:configure" == null then
-            .command."maestro:configure" = {
-                "template": "Read and execute from \($script_dir)/maestro:configure.md with args: $ARGUMENTS",
+        if .command.configure == null then
+            .command.configure = {
+                "template": "Read and execute from \($script_dir)/configure.md with args: $ARGUMENTS",
                 "description": "Maestro configure command"
             }
         else
@@ -288,10 +288,9 @@ if 'maestro' not in config.get('command', {}):
 
 commands_dir = os.path.expanduser('~/.claude/commands')
 for cmd in ['setup', 'newTrack', 'implement', 'status', 'revert', 'configure']:
-    key = f'maestro:{cmd}'
-    if key not in config.get('command', {}):
-        config.setdefault('command', {})[key] = {
-            "template": f"Read and execute from {commands_dir}/maestro:{cmd}.md with args: $ARGUMENTS",
+    if cmd not in config.get('command', {}):
+        config.setdefault('command', {})[cmd] = {
+            "template": f"Read and execute from {commands_dir}/{cmd}.md with args: $ARGUMENTS",
             "description": f"Maestro {cmd} command"
         }
 
@@ -308,28 +307,28 @@ else
       "template": "Load Maestro skill. Available: setup, newTrack, implement, status, revert.",
       "description": "Maestro spec-driven development framework"
     },
-    "maestro:setup": {
-      "template": "Read and execute from ~/.claude/commands/maestro:setup.md with args: $ARGUMENTS",
+    "setup": {
+      "template": "Read and execute from ~/.claude/commands/setup.md with args: $ARGUMENTS",
       "description": "Maestro setup command"
     },
-    "maestro:newTrack": {
-      "template": "Read and execute from ~/.claude/commands/maestro:newTrack.md with args: $ARGUMENTS",
+    "newTrack": {
+      "template": "Read and execute from ~/.claude/commands/newTrack.md with args: $ARGUMENTS",
       "description": "Maestro newTrack command"
     },
-    "maestro:implement": {
-      "template": "Read and execute from ~/.claude/commands/maestro:implement.md with args: $ARGUMENTS",
+    "implement": {
+      "template": "Read and execute from ~/.claude/commands/implement.md with args: $ARGUMENTS",
       "description": "Maestro implement command"
     },
-    "maestro:status": {
-      "template": "Read and execute from ~/.claude/commands/maestro:status.md with args: $ARGUMENTS",
+    "status": {
+      "template": "Read and execute from ~/.claude/commands/status.md with args: $ARGUMENTS",
       "description": "Maestro status command"
     },
-    "maestro:revert": {
-      "template": "Read and execute from ~/.claude/commands/maestro:revert.md with args: $ARGUMENTS",
+    "revert": {
+      "template": "Read and execute from ~/.claude/commands/revert.md with args: $ARGUMENTS",
       "description": "Maestro revert command"
     },
-    "maestro:configure": {
-      "template": "Read and execute from ~/.claude/commands/maestro:configure.md with args: $ARGUMENTS",
+    "configure": {
+      "template": "Read and execute from ~/.claude/commands/configure.md with args: $ARGUMENTS",
       "description": "Maestro configure command"
     }
   }
@@ -340,8 +339,8 @@ fi
 echo "🔗 Creating command symlinks..."
 mkdir -p ~/.claude/commands
 for cmd in setup newTrack implement status revert configure; do
-    if [ ! -f ~/.claude/commands/"maestro:$cmd.md" ]; then
-        cp "$SCRIPT_DIR/claude-code/commands/maestro:$cmd.md" ~/.claude/commands/"maestro:$cmd.md"
+    if [ ! -f ~/.claude/commands/"$cmd.md" ]; then
+        cp "$SCRIPT_DIR/claude-code/commands/$cmd.md" ~/.claude/commands/"$cmd.md"
     fi
 done
 
