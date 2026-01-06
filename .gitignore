@@ -158,3 +158,6 @@ maestro/tui/internal/session/migration.go
 
 # OpenCode skill README (references external projects)
 opencode/skill/maestro/README.md
+maestro/tui/maestro-tui
+maestro/tui/test_env_setup.sh
+nanobanana-output/
