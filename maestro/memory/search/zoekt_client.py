@@ -115,15 +115,15 @@ class ZoektClient:
             config: Zoekt configuration. Uses defaults if not provided.
         """
         self.config = config or ZoektConfig()
-        self.client = None
+        self.client: Optional[httpx.AsyncClient] = None
         self._search_url = f"{self.config.server_url}/api/search"
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "ZoektClient":
         """Async context manager entry."""
         self.client = httpx.AsyncClient(timeout=30.0)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         if self.client:
             await self.client.aclose()
@@ -158,7 +158,7 @@ class ZoektClient:
             self.client = httpx.AsyncClient(timeout=30.0)
 
         # Build request payload
-        payload = {"Q": query}
+        payload: Dict[str, Any] = {"Q": query}
 
         # Add search options
         opts = {}
@@ -414,15 +414,15 @@ class ZoektIndexer:
 
     def _find_indexer_command(self) -> Optional[str]:
         """Find the zoekt-indexer binary."""
-        possible_paths = [
+        possible_paths: List[Optional[str]] = [
             shutil.which("zoekt-indexer"),
-            Path("/home/stan/go/bin/zoekt-indexer"),
-            Path.home() / "go" / "bin" / "zoekt-indexer",
-            Path("/usr/local/bin/zoekt-indexer"),
+            "/home/stan/go/bin/zoekt-indexer",
+            str(Path.home() / "go" / "bin" / "zoekt-indexer"),
+            "/usr/local/bin/zoekt-indexer",
         ]
 
         for path in possible_paths:
-            if path and (Path(path) if isinstance(path, str) else path).exists():
+            if path and Path(path).exists():
                 cmd = str(path)
                 logger.debug(f"Found zoekt-indexer at: {cmd}")
                 return cmd
@@ -531,7 +531,7 @@ class ZoektIndexer:
         Returns:
             Summary of indexing results
         """
-        results = {
+        results: Dict[str, Any] = {
             "success": True,
             "indexed": [],
             "failed": [],

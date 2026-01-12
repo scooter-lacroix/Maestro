@@ -46,8 +46,8 @@ class ProjectDetector:
         "maestro/workflow.md",          # Workflow config
     ]
 
-    def __init__(self):
-        self._cache: Dict[str, ProjectInfo] = {}
+    def __init__(self) -> None:
+        self._cache: Dict[str, Optional[ProjectInfo]] = {}
 
     def detect_project(self, start_path: Optional[str] = None) -> Optional[ProjectInfo]:
         """
@@ -166,7 +166,7 @@ class ProjectDetector:
             # Format: "## [ ] Track: Description (track-id)"
             import re
             pattern = r'\[[ ~x]\]\s+Track:.*?\(([^)]+)\)'
-            matches = re.findall(pattern, content)
+            matches: list[str] = re.findall(pattern, content)
 
             for track_id in matches:
                 # Return the first track ID found

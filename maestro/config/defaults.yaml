@@ -1,0 +1,845 @@
+# Maestro v2 Unified Configuration
+# Single source of truth for all Maestro framework settings
+
+# ============================================================================
+# CORE SETTINGS
+# ============================================================================
+core:
+  version: "2.0.0"
+  environment: "production"
+
+  # Base paths for Maestro components
+  paths:
+    # User's home directory for Maestro data
+    home: "~/.maestro"
+
+    # Project-local Maestro directory
+    project_dir: ".maestro"
+
+    # Tracks storage location (relative to project root)
+    tracks_dir: "tracks"
+
+    # Data directory for runtime data
+    data_dir: "data"
+
+  # Debug mode enables verbose logging and additional diagnostics
+  debug: false
+
+  # Verbosity level: 0=quiet, 1=normal, 2=verbose, 3=debug
+  verbosity: 1
+
+  # Profile name for configuration presets (development, production, testing)
+  profile: "production"
+
+# ============================================================================
+# MEMORY SYSTEM
+# ============================================================================
+memory:
+  # Enable or disable the unified memory system
+  enabled: true
+
+  # Database configuration
+  database:
+    # Path to SQLite database (relative to home or absolute)
+    path: "~/.maestro/memory.db"
+
+    # Connection pool settings
+    pool_size: 5
+    max_overflow: 10
+    pool_timeout: 30
+
+    # Enable foreign key constraints
+    foreign_keys: true
+
+    # WAL mode for better concurrency
+    wal_mode: true
+
+  # Hook system configuration
+  hooks:
+    # Hooks directory path
+    path: "maestro/hooks"
+
+    # Hook phases supported
+    phases:
+      - "session-start"
+      - "pre-tool-use"
+      - "post-tool-use"
+      - "pre-compact"
+      - "user-prompt-submit"
+      - "subagent-stop"
+      - "session-end"
+
+    # Native hooks - built-in capture mechanisms
+    native:
+      enabled: true
+
+      # Process monitoring hook
+      process_monitor:
+        enabled: true
+        sampling_interval: 1.0  # seconds
+        memory_threshold: 0.85  # trigger at 85% context
+
+      # Inactivity detector
+      inactivity_detector:
+        enabled: true
+        threshold_seconds: 30
+
+      # Persistent buffer
+      persistent_buffer:
+        enabled: true
+        buffer_size: 1000
+        flush_interval: 5  # seconds
+
+    # Hook timeout (seconds)
+    timeout: 30
+
+    # Enable hook chaining (hooks pass output to next hook)
+    chain_enabled: true
+
+    # Coordination hooks - file claims, handoffs, ledgers
+    coordination:
+      enabled: true
+
+      # File claims for multi-agent coordination
+      file_claims:
+        enabled: true
+        claim_ttl: 3600  # seconds
+        conflict_resolution: "error"  # error, warn, ignore
+
+      # Handoff management
+      handoffs:
+        enabled: true
+        auto_create: false
+        storage_path: "~/.maestro/handoffs"
+
+      # Continuity ledgers
+      ledgers:
+        enabled: true
+        auto_update: true
+        storage_path: "~/.maestro/ledgers"
+
+  # Embeddings configuration
+  embeddings:
+    enabled: true
+
+    # Model to use for embeddings
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+
+    # Embedding dimensions
+    dimensions: 384
+
+    # Batch size for embedding generation
+    batch_size: 32
+
+    # Vector similarity threshold
+    similarity_threshold: 0.75
+
+    # Maximum number of results to return
+    max_results: 10
+
+  # Memory categories/types
+  categories:
+    - name: "fact"
+      description: "Factual information learned during sessions"
+      ttl: null  # permanent
+
+    - name: "pattern"
+      description: "Reusable patterns and approaches"
+      ttl: null
+
+    - name: "decision"
+      description: "Decisions made and their rationale"
+      ttl: null
+
+    - name: "context"
+      description: "Session-specific context"
+      ttl: 604800  # 7 days
+
+    - name: "temporary"
+      description: "Transient information"
+      ttl: 86400  # 24 hours
+
+# ============================================================================
+# TRACKS
+# ============================================================================
+tracks:
+  # Storage configuration
+  storage:
+    # Base directory for track storage
+    base_path: "tracks"
+
+    # Directory name format for new tracks
+    # Variables: {date}, {timestamp}, {name}, {id}
+    dir_format: "{date}_{name}"
+
+    # Date format for track directories
+    date_format: "%Y%m%d"
+
+  # Git integration
+  git:
+    enabled: true
+
+    # Auto-commit track changes
+    auto_commit: true
+
+    # Commit message format
+    commit_format: "maestro(track): {track_name} - {action}"
+
+    # Branch name format for track work
+    branch_format: "maestro/{track_name}"
+
+    # Push to remote after completion
+    auto_push: false
+
+  # Memory integration
+  memory:
+    enabled: true
+
+    # Link memories to tracks
+    link_memories: true
+
+    # Store track context in memories
+    store_context: true
+
+    # Memory namespace for tracks
+    namespace: "tracks"
+
+  # Track phases
+  phases:
+    - name: "planning"
+      description: "Create and validate implementation plans"
+      required: true
+
+    - name: "implementation"
+      description: "Execute the plan using agents"
+      required: true
+
+    - name: "validation"
+      description: "Verify implementation meets requirements"
+      required: true
+
+    - name: "documentation"
+      description: "Generate documentation"
+      required: false
+
+# ============================================================================
+# SKILLS
+# ============================================================================
+skills:
+  # Total skills in system: 109
+  total_count: 109
+
+  # Enable or disable skill auto-suggestion
+  auto_suggest: true
+
+  # Maximum suggestions to show
+  max_suggestions: 3
+
+  # Skill categories
+  categories:
+    # Meta / Domain Skills
+    meta:
+      name: "Meta Skills"
+      description: "Workflow orchestration and system management"
+      skills:
+        - "compound-learnings"
+        - "mot"
+        - "debug-hooks"
+        - "hook-developer"
+        - "implement_plan"
+        - "workflow-router"
+
+    # Development Workflows
+    workflows:
+      name: "Development Workflows"
+      description: "Core development patterns and processes"
+      skills:
+        - "build"
+        - "fix"
+        - "explore"
+        - "debug"
+        - "tdd"
+        - "refactor"
+        - "migrate"
+        - "release"
+        - "review"
+        - "security"
+        - "test"
+        - "prove"
+
+    # Context Management
+    context:
+      name: "Context Skills"
+      description: "Session continuity and handoff management"
+      skills:
+        - "create_handoff"
+        - "resume_handoff"
+        - "continuity_ledger"
+        - "recall"
+        - "remember"
+        - "recall-reasoning"
+
+    # Code Analysis
+    analysis:
+      name: "Code Analysis"
+      description: "Deep code understanding and search"
+      skills:
+        - "tldr-code"
+        - "ast-grep-find"
+        - "morph-search"
+        - "morph-apply"
+        - "repoprompt"
+
+    # Research Skills
+    research:
+      name: "Research"
+      description: "External information gathering"
+      skills:
+        - "perplexity-search"
+        - "nia-docs"
+        - "github-search"
+        - "firecrawl-scrape"
+
+    # Quality & Testing
+    quality:
+      name: "Quality & Testing"
+      description: "Code quality, linting, and analysis"
+      skills:
+        - "qlty-check"
+        - "braintrust-analyze"
+        - "braintrust-tracing"
+
+    # Planning & Discovery
+    planning:
+      name: "Planning"
+      description: "Project planning and requirements discovery"
+      skills:
+        - "premortem"
+        - "discovery-interview"
+
+    # Math & Computation
+    math:
+      name: "Math & Computation"
+      description: "Mathematical computation and proving"
+      skills:
+        - "math-unified"
+        - "math-help"
+        - "pint-compute"
+        - "shapely-compute"
+        - "loogle-search"
+
+    # Math Topics (sub-skills)
+    math_topics:
+      name: "Math Topics"
+      description: "Specialized mathematical domains"
+      skills:
+        - "math/abstract-algebra"
+        - "math/category-theory"
+        - "math/complex-analysis"
+        - "math/functional-analysis"
+        - "math/graph-number-theory"
+        - "math/information-theory"
+        - "math/linear-algebra"
+        - "math/mathematical-logic"
+        - "math/measure-theory"
+        - "math/numerical-methods"
+        - "math/odes-pdes"
+        - "math/optimization"
+        - "math/real-analysis"
+        - "math/topology"
+
+    # Development Tools
+    tools:
+      name: "Development Tools"
+      description: "Git, CLI, and development utilities"
+      skills:
+        - "commit"
+        - "describe_pr"
+        - "cli-reference"
+        - "environment-triage"
+
+    # Architecture & Patterns
+    architecture:
+      name: "Architecture"
+      description: "Code organization and design patterns"
+      skills:
+        - "modular-code"
+        - "parallel-agent-contracts"
+        - "search-router"
+        - "reference-sdk"
+
+    # Onboarding
+    onboarding:
+      name: "Onboarding"
+      description: "Project setup and familiarization"
+      skills:
+        - "onboard"
+
+  # Skill activation rules
+  activation:
+    # Minimum confidence for auto-activation
+    min_confidence: 0.7
+
+    # Allow multiple skills to activate
+    allow_multiple: true
+
+    # Require user confirmation for skill activation
+    require_confirmation: false
+
+    # Blocked skill combinations (skills that conflict)
+    blocked_combinations:
+      - ["ast-grep-find", "morph-search"]  # Use one search tool
+
+# ============================================================================
+# AGENTS
+# ============================================================================
+agents:
+  # Total agents in system: 32
+  total_count: 32
+
+  # Default agent settings
+  defaults:
+    # Default model for agents
+    model: "opus"
+
+    # Maximum iterations for agent tasks
+    max_iterations: 10
+
+    # Timeout for agent execution (seconds)
+    timeout: 300
+
+    # Enable agent caching
+    cache_enabled: true
+
+  # Agent categories
+  categories:
+    # Orchestrators
+    orchestrators:
+      name: "Orchestrators"
+      description: "Multi-agent coordination"
+      agents:
+        - name: "maestro"
+          description: "Multi-agent coordination for complex patterns"
+          model: "opus"
+          permissions: ["queue"]
+
+        - name: "orchestrate-large"
+          description: "Large-scale orchestration with parallel execution"
+          model: "opus"
+          permissions: ["queue"]
+
+    # Planners
+    planners:
+      name: "Planners"
+      description: "Planning and architecture"
+      agents:
+        - name: "architect"
+          description: "System architecture and high-level design"
+          model: "opus"
+          permissions: []
+
+        - name: "phoenix"
+          description: "Comprehensive planning with research and validation"
+          model: "opus"
+          permissions: []
+
+        - name: "plan"
+          description: "Implementation planning"
+          model: "opus"
+          permissions: []
+
+        - name: "validate"
+          description: "Plan validation against requirements"
+          model: "opus"
+          permissions: []
+
+    # Explorers
+    explorers:
+      name: "Explorers"
+      description: "Codebase exploration and research"
+      agents:
+        - name: "scout"
+          description: "Comprehensive codebase exploration"
+          model: "opus"
+          permissions: []
+
+        - name: "oracle"
+          description: "External research and best practices"
+          model: "opus"
+          permissions: []
+
+        - name: "pathfinder"
+          description: "Repository structure and pattern analysis"
+          model: "opus"
+          permissions: []
+
+    # Implementers
+    implementers:
+      name: "Implementers"
+      description: "Code implementation"
+      agents:
+        - name: "kraken"
+          description: "Complex feature implementation with test validation"
+          model: "opus"
+          permissions: []
+
+        - name: "spark"
+          description: "Quick implementation and bug fixes"
+          model: "opus"
+          permissions: []
+
+    # Debuggers
+    debuggers:
+      name: "Debuggers"
+      description: "Issue investigation and resolution"
+      agents:
+        - name: "sleuth"
+          description: "Deep codebase investigation"
+          model: "opus"
+          permissions: []
+
+        - name: "debug"
+          description: "General debugging and error analysis"
+          model: "opus"
+          permissions: []
+
+        - name: "profiler"
+          description: "Performance profiling and optimization"
+          model: "opus"
+          permissions: []
+
+    # Validators
+    validators:
+      name: "Validators"
+      description: "Validation and quality assurance"
+      agents:
+        - name: "arbiter"
+          description: "Test validation and quality assurance"
+          model: "opus"
+          permissions: []
+
+        - name: "atlas"
+          description: "Architecture validation"
+          model: "opus"
+          permissions: []
+
+    # Reviewers
+    reviewers:
+      name: "Reviewers"
+      description: "Code review and feedback"
+      agents:
+        - name: "critic"
+          description: "Code critique and improvement suggestions"
+          model: "opus"
+          permissions: []
+
+        - name: "judge"
+          description: "Implementation judgment against requirements"
+          model: "opus"
+          permissions: []
+
+        - name: "surveyor"
+          description: "Comprehensive code survey"
+          model: "opus"
+          permissions: []
+
+        - name: "liaison"
+          description: "Review synthesis and communication"
+          model: "opus"
+          permissions: []
+
+    # Specialized
+    specialized:
+      name: "Specialized"
+      description: "Special purpose agents"
+      agents:
+        - name: "scribe"
+          description: "Documentation generation"
+          model: "opus"
+          permissions: []
+
+        - name: "herald"
+          description: "Change communication and summaries"
+          model: "opus"
+          permissions: []
+
+        - name: "chronicler"
+          description: "Session history and documentation"
+          model: "opus"
+          permissions: []
+
+        - name: "aegis"
+          description: "Security and vulnerability analysis"
+          model: "opus"
+          permissions: []
+
+        - name: "onboard"
+          description: "Project onboarding and familiarization"
+          model: "opus"
+          permissions: []
+
+        - name: "session-analyst"
+          description: "Session analysis and metrics"
+          model: "opus"
+          permissions: []
+
+        - name: "braintrust-analyst"
+          description: "Braintrust data analysis"
+          model: "opus"
+          permissions: []
+
+        - name: "memory-extractor"
+          description: "Memory extraction and consolidation"
+          model: "opus"
+          permissions: []
+
+        - name: "warden"
+          description: "Sentinel for code quality and standards"
+          model: "opus"
+          permissions: []
+
+        - name: "sentinel"
+          description: "Guard against breaking changes"
+          model: "opus"
+          permissions: []
+
+  # Agent selection patterns
+  selection:
+    # Complexity thresholds for agent selection
+    complexity:
+      low: 3
+      medium: 7
+      high: 15
+
+    # Agent selection by task type
+    by_task:
+      exploration: ["scout", "oracle", "pathfinder"]
+      planning: ["architect", "phoenix", "plan", "validate"]
+      implementation: ["kraken", "spark"]
+      debugging: ["sleuth", "debug", "profiler"]
+      validation: ["arbiter", "atlas"]
+      review: ["critic", "judge", "surveyor", "liaison"]
+
+# ============================================================================
+# TLDR (CODE ANALYSIS)
+# ============================================================================
+tldr:
+  enabled: true
+
+  # Analysis layers (5 layers)
+  layers:
+    - name: "ast"
+      description: "Abstract syntax tree analysis"
+      enabled: true
+
+    - name: "callgraph"
+      description: "Function call graph"
+      enabled: true
+
+    - name: "cfg"
+      description: "Control flow graph"
+      enabled: true
+
+    - name: "dfg"
+      description: "Data flow graph"
+      enabled: true
+
+    - name: "slicing"
+      description: "Program slicing"
+      enabled: true
+
+    - name: "semantic"
+      description: "Semantic indexing"
+      enabled: true
+
+  # Semantic index configuration
+  semantic_index:
+    enabled: true
+
+    # Index storage path
+    path: "~/.maestro/tldr-index"
+
+    # Update strategy
+    update_strategy: "auto"  # auto, manual, on_write
+
+    # Maximum file size to index (bytes)
+    max_file_size: 1048576  # 1MB
+
+  # Daemon configuration
+  daemon:
+    enabled: false
+
+    # Port for daemon API
+    port: 18766
+
+    # Host for daemon API
+    host: "127.0.0.1"
+
+  # Command aliases (Maestro-prefixed)
+  commands:
+    tree: "maestro:tree"
+    structure: "maestro:structure"
+    search: "maestro:search"
+    context: "maestro:context"
+    cfg: "maestro:cfg"
+    dfg: "maestro:dfg"
+    slice: "maestro:slice"
+    impact: "maestro:impact"
+    daemon: "maestro:daemon"
+
+# ============================================================================
+# CRITICAL THINK
+# ============================================================================
+critical_think:
+  enabled: true
+
+  # Confidence thresholds
+  thresholds:
+    critical: 4
+    warning: 6
+    acceptable: 7
+    high: 9
+
+  # Integration points
+  integration_points:
+    before_question:
+      enabled: true
+      confidence_threshold: 7
+
+    after_question:
+      enabled: true
+      confidence_threshold: 7
+
+    before_docs:
+      enabled: true
+      confidence_threshold: 7
+
+    after_docs:
+      enabled: true
+      confidence_threshold: 7
+
+    before_implementation:
+      enabled: true
+      confidence_threshold: 7
+
+    after_implementation:
+      enabled: true
+      confidence_threshold: 8
+
+    before_agent_delegation:
+      enabled: true
+      confidence_threshold: 7
+
+    after_agent_delegation:
+      enabled: true
+      confidence_threshold: 7
+
+  # Output configuration
+  output:
+    format: "detailed"  # detailed, summary, minimal
+    show_confidence: true
+    show_all_steps: true
+    show_risks: true
+    highlight_pitfalls: true
+    show_revised_confidence: true
+
+  # Behavior
+  behavior:
+    auto_proceed: true
+    require_confirmation_on_low_confidence: true
+    max_assumptions: 3
+    max_risks: 3
+    verbose: true
+
+  # Template paths
+  templates:
+    before_action: "templates/criticalthink_before_action.md"
+    after_action: "templates/criticalthink_after_action.md"
+    question: "templates/criticalthink_question.md"
+    docs: "templates/criticalthink_docs.md"
+    implementation: "templates/criticalthink_implementation.md"
+    agent_delegation: "templates/criticalthink_agent_delegation.md"
+
+# ============================================================================
+# DASHBOARD
+# ============================================================================
+dashboard:
+  enabled: true
+
+  # Server configuration
+  server:
+    host: "127.0.0.1"
+    port: 18765
+
+    # Auto-start dashboard on memory serve
+    auto_start: true
+
+    # Open browser automatically
+    open_browser: true
+
+  # Features
+  features:
+    # Memory browser
+    memory_browser:
+      enabled: true
+
+    # Coordination visualization
+    coordination:
+      enabled: true
+      show_file_claims: true
+      show_handoffs: true
+      show_ledgers: true
+
+    # Track status
+    tracks:
+      enabled: true
+
+    # Agent monitoring
+    agents:
+      enabled: true
+
+    # Session analytics
+    analytics:
+      enabled: true
+
+  # Authentication (for remote access)
+  auth:
+    enabled: false
+    type: "token"  # token, basic, oauth
+    token: null
+
+# ============================================================================
+# CLI
+# ============================================================================
+cli:
+  # Command prefix
+  prefix: "maestro:"
+
+  # Color output
+  color: true
+
+  # Progress indicators
+  progress: true
+
+  # Pager for long output
+  pager: "auto"  # auto, always, never
+
+  # Editor for editing files
+  editor: null  # Uses system default
+
+  # Shell completion
+  completion:
+    enabled: true
+    shell: "auto"  # auto, bash, zsh, fish
+
+# ============================================================================
+# ENVIRONMENT OVERRIDES
+# ============================================================================
+# These can be overridden by environment variables:
+# - MAESTRO_HOME: Override core.paths.home
+# - MAESTRO_DEBUG: Override core.debug (true/false)
+# - MAESTRO_MEMORY_PATH: Override memory.database.path
+# - MAESTRO_DASHBOARD_HOST: Override dashboard.server.host
+# - MAESTRO_DASHBOARD_PORT: Override dashboard.server.port
+# - MAESTRO_TRACKS_DIR: Override tracks.storage.base_path
+# - MAESTRO_PROFILE: Override core.profile

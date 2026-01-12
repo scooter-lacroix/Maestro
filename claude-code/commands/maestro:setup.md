@@ -17,6 +17,30 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 CRITICAL: When determining model complexity, ALWAYS prefer the "haiku" model for initial exploration and simple tasks, "sonnet" for standard implementation work, and only escalate to "opus" for complex architectural decisions. This ensures efficient token usage while maintaining quality.
 
+**CRITICAL - ASKUSERQUESTION TOOL REQUIREMENT:**
+You MUST use the `AskUserQuestion` tool for ALL user interactions including:
+- Asking clarifying questions during setup phases
+- Presenting options for user selection (A/B/C choices)
+- Requesting confirmations and approvals
+- Gathering project information (goals, features, tech stack)
+
+DO NOT use plain text output to ask questions. Always use the `AskUserQuestion` tool with properly structured options.
+
+Example usage:
+```
+AskUserQuestion:
+  question: "Which model should be used for setup/status commands?"
+  header: "Model"
+  options:
+    - label: "haiku (recommended)"
+      description: "Fast and cost-effective for simple tasks"
+    - label: "sonnet"
+      description: "Balanced speed and quality"
+    - label: "opus"
+      description: "Highest quality, slower"
+  multiSelect: false
+```
+
 ---
 
 ## 1.1 BEGIN `RESUME` CHECK

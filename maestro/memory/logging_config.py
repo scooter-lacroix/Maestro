@@ -10,17 +10,18 @@ with appropriate levels, rotation, and formatting for production use.
 import sys
 import os
 from pathlib import Path
+from typing import Optional, Any
 from loguru import logger
 
 
 def configure_logging(
     level: str = "INFO",
-    log_file: Path = None,
+    log_file: Optional[Path] = None,
     rotation: str = "500 MB",
     retention: str = "30 days",
     compression: str = "gz",
     enable_console: bool = True
-):
+) -> None:
     """
     Configure loguru logging for Maestro memory system.
 
@@ -90,7 +91,7 @@ def configure_logging(
     logger.info(f"Logging configured: level={level}, file={log_file}")
 
 
-def get_logger(name: str = None):
+def get_logger(name: Optional[str] = None) -> Any:
     """
     Get a logger instance.
 
@@ -112,7 +113,7 @@ DEFAULT_LOG_FILE = os.environ.get("MAESTRO_LOG_FILE")
 ENABLE_CONSOLE = os.environ.get("MAESTRO_LOG_CONSOLE", "true").lower() == "true"
 
 # Only configure if not already configured
-if not logger._core.handlers:
+if not logger._core.handlers:  # type: ignore[attr-defined]
     configure_logging(
         level=DEFAULT_LOG_LEVEL,
         log_file=Path(DEFAULT_LOG_FILE) if DEFAULT_LOG_FILE else None,

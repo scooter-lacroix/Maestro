@@ -102,13 +102,14 @@ behavior:
 
 # Template paths
 # These point to the prompt templates for each integration point
+# Paths are relative to the critical_think module directory (maestro/critical_think/)
 templates:
-  before_action: "maestro/critical_think/templates/criticalthink_before_action.md"
-  after_action: "maestro/critical_think/templates/criticalthink_after_action.md"
-  question: "maestro/critical_think/templates/criticalthink_question.md"
-  docs: "maestro/critical_think/templates/criticalthink_docs.md"
-  implementation: "maestro/critical_think/templates/criticalthink_implementation.md"
-  agent_delegation: "maestro/critical_think/templates/criticalthink_agent_delegation.md"
+  before_action: "templates/criticalthink_before_action.md"
+  after_action: "templates/criticalthink_after_action.md"
+  question: "templates/criticalthink_question.md"
+  docs: "templates/criticalthink_docs.md"
+  implementation: "templates/criticalthink_implementation.md"
+  agent_delegation: "templates/criticalthink_agent_delegation.md"
 
 # Integration with Maestro workflow
 # These settings control how Critical Think integrates with existing Maestro features

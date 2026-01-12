@@ -1,6 +1,6 @@
 #!/bin/bash
-# Maestro Installer for Claude Code v1.5.0
-# Enhanced with Go and Zoekt auto-installation
+# Maestro Installer for Claude Code v2.0.0
+# Enhanced with hooks, skills, agents, and memory system
 set -e
 
 echo "🚀 Installing Maestro for Claude Code..."
@@ -203,7 +203,7 @@ trap "rm -rf $TMP_DIR" EXIT
 
 echo "📥 Downloading Maestro repository..."
 REPO_URL="https://github.com/scooter-lacroix/Maestro"
-REPO_BRANCH="master"
+REPO_BRANCH="v2"
 
 # Try git clone first, fallback to curl+tar
 if command -v git &> /dev/null; then
@@ -256,15 +256,55 @@ cp "$SCRIPT_DIR/claude-code/templates/code_styleguides"/*.md ~/.claude/maestro-t
 # Create plugin directory and copy plugin files
 echo "📁 Creating plugin directory..."
 mkdir -p ~/.claude/plugins/maestro
-if [ -f "$SCRIPT_DIR/claude-code/plugin.json" ]; then
+if [ -f "$SCRIPT_DIR/plugin.json" ]; then
     echo "📋 Copying plugin files..."
-    cp "$SCRIPT_DIR/claude-code/plugin.json" ~/.claude/plugins/maestro/
+    cp "$SCRIPT_DIR/plugin.json" ~/.claude/plugins/maestro/
     # Copy other plugin files if they exist
-    [ -f "$SCRIPT_DIR/claude-code/README.md" ] && cp "$SCRIPT_DIR/claude-code/README.md" ~/.claude/plugins/maestro/ 2>/dev/null
+    [ -f "$SCRIPT_DIR/README.md" ] && cp "$SCRIPT_DIR/README.md" ~/.claude/plugins/maestro/ 2>/dev/null
     [ -f "$SCRIPT_DIR/LICENSE" ] && cp "$SCRIPT_DIR/LICENSE" ~/.claude/plugins/maestro/ 2>/dev/null
     echo "   ✅ Plugin configuration installed"
 else
     echo "   ⚠️  Warning: plugin.json not found, skipping plugin configuration"
+fi
+
+# Copy hooks (v2 component)
+echo "📋 Copying hooks..."
+if [ -d "$SCRIPT_DIR/maestro/hooks" ]; then
+    mkdir -p ~/.claude/plugins/maestro/hooks
+    cp -r "$SCRIPT_DIR/maestro/hooks"/* ~/.claude/plugins/maestro/hooks/
+    echo "   ✅ Hooks installed ($(find "$SCRIPT_DIR/maestro/hooks" -name "*.py" | wc -l) hook files)"
+else
+    echo "   ⚠️  Warning: hooks directory not found"
+fi
+
+# Copy skills (v2 component)
+echo "📋 Copying skills..."
+if [ -d "$SCRIPT_DIR/maestro/skills" ]; then
+    mkdir -p ~/.claude/plugins/maestro/skills
+    cp -r "$SCRIPT_DIR/maestro/skills"/* ~/.claude/plugins/maestro/skills/
+    echo "   ✅ Skills installed ($(find "$SCRIPT_DIR/maestro/skills" -name "SKILL.md" | wc -l) skills)"
+else
+    echo "   ⚠️  Warning: skills directory not found"
+fi
+
+# Copy agents (v2 component)
+echo "📋 Copying agents..."
+if [ -d "$SCRIPT_DIR/maestro/agents" ]; then
+    mkdir -p ~/.claude/plugins/maestro/agents
+    cp -r "$SCRIPT_DIR/maestro/agents"/* ~/.claude/plugins/maestro/agents/
+    echo "   ✅ Agents installed ($(find "$SCRIPT_DIR/maestro/agents" -name "*.md" | wc -l) agents)"
+else
+    echo "   ⚠️  Warning: agents directory not found"
+fi
+
+# Copy config module (v2 component)
+echo "📋 Copying config module..."
+if [ -d "$SCRIPT_DIR/maestro/config" ]; then
+    mkdir -p ~/.claude/plugins/maestro/config
+    cp -r "$SCRIPT_DIR/maestro/config"/* ~/.claude/plugins/maestro/config/
+    echo "   ✅ Config module installed"
+else
+    echo "   ⚠️  Warning: config directory not found"
 fi
 
 # Copy critical_think module
@@ -414,7 +454,7 @@ fi
 
 # Cleanup is handled by the trap at the top
 echo ""
-echo "✅ Maestro installed successfully for Claude Code!"
+echo "✅ Maestro v2.0.0 installed successfully for Claude Code!"
 echo ""
 echo "📚 Available Claude Code slash commands:"
 echo "  /maestro:setup      - Initialize Maestro environment"
@@ -424,6 +464,14 @@ echo "  /maestro:status     - View project progress"
 echo "  /maestro:revert     - Revert work"
 echo "  /maestro:configure  - Configure Maestro settings"
 echo "  /maestro:memory     - Interact with Memory System"
+echo "  /maestro:tui        - Launch Terminal UI"
+echo ""
+echo "🔌 v2 Components Installed:"
+echo "  ✅ Hooks      - Event-driven automation (16 hooks)"
+echo "  ✅ Skills     - Specialized capabilities (109+ skills)"
+echo "  ✅ Agents     - Task delegation (28 agents)"
+echo "  ✅ Config     - Unified settings management"
+echo "  ✅ Memory     - Persistent context system"
 echo ""
 echo "🖥️  Available CLI tools (from terminal):"
 echo "  maestro memory serve    - Start memory dashboard web server"

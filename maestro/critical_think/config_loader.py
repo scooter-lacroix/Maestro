@@ -5,7 +5,7 @@ This module handles loading, validating, and accessing configuration for the
 Critical Think metacognitive framework integration.
 """
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # type: ignore
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
@@ -133,7 +133,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
         config_path = None
         for path in default_paths:
-            p = Path(path)
+            p = Path(str(path))
             if p.exists():
                 config_path = str(p)
                 break
@@ -144,7 +144,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         return _config_cache
 
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding="utf-8") as f:
             user_config = yaml.safe_load(f)
 
         if user_config is None:
@@ -214,6 +214,8 @@ def validate_config(config: Dict[str, Any]) -> None:
     # Check integration_points
     if "integration_points" not in config:
         errors.append("Missing 'integration_points' section")
+    elif not isinstance(config["integration_points"], dict):
+        errors.append("'integration_points' must be a dictionary")
     else:
         for point_name, point_config in config["integration_points"].items():
             if not isinstance(point_config, dict):
@@ -325,7 +327,7 @@ def is_enabled(config: Optional[Dict[str, Any]] = None) -> bool:
     if config is None:
         config = load_config()
 
-    return config.get("enabled", True)
+    return bool(config.get("enabled", True))
 
 
 def is_integration_point_enabled(
@@ -353,7 +355,7 @@ def is_integration_point_enabled(
     integration_points = config.get("integration_points", {})
     point_config = integration_points.get(integration_point, {})
 
-    return point_config.get("enabled", True)
+    return bool(point_config.get("enabled", True))
 
 
 def get_confidence_threshold(
@@ -376,7 +378,7 @@ def get_confidence_threshold(
     integration_points = config.get("integration_points", {})
     point_config = integration_points.get(integration_point, {})
 
-    return point_config.get("confidence_threshold", 7)
+    return int(point_config.get("confidence_threshold", 7))
 
 
 def reload_config() -> Dict[str, Any]:

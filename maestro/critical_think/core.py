@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Import config loader
 from .config_loader import (
     load_config,
+    validate_config,
     get_config,
     is_enabled,
     is_integration_point_enabled,
@@ -291,7 +292,7 @@ class CriticalThinkEngine:
         try:
             before_path = get_template_path("before_action", self.config)
             logger.debug(f"Loading before_action template from {before_path}")
-            with open(before_path, 'r') as f:
+            with open(before_path, 'r', encoding="utf-8") as f:
                 templates["before_action"] = Template(f.read())
         except (FileNotFoundError, ValueError) as e:
             logger.warning(f"Could not load before_action template from file: {e}. Using default.")
@@ -301,7 +302,7 @@ class CriticalThinkEngine:
         try:
             after_path = get_template_path("after_action", self.config)
             logger.debug(f"Loading after_action template from {after_path}")
-            with open(after_path, 'r') as f:
+            with open(after_path, 'r', encoding="utf-8") as f:
                 templates["after_action"] = Template(f.read())
         except (FileNotFoundError, ValueError) as e:
             logger.warning(f"Could not load after_action template from file: {e}. Using default.")
@@ -313,7 +314,7 @@ class CriticalThinkEngine:
             try:
                 template_path = get_template_path(action_type, self.config)
                 logger.debug(f"Loading {action_type} template from {template_path}")
-                with open(template_path, 'r') as f:
+                with open(template_path, 'r', encoding="utf-8") as f:
                     templates[action_type] = Template(f.read())
             except (FileNotFoundError, ValueError):
                 # Use before_action as fallback for specialized templates

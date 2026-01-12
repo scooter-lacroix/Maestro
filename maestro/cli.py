@@ -9,9 +9,10 @@ This CLI provides access to all Maestro functionality including:
 
 import sys
 import argparse
+from typing import Any, NoReturn
 
 
-def main():
+def main() -> None:
     """
     Main CLI entry point for Maestro.
 
@@ -133,15 +134,9 @@ def main():
         # Import and delegate to memory CLI
         from .memory.cli import serve_command, status_command, migrate_command
 
-        # Create a namespace object for the command
-        class Args:
-            def __init__(self, **kwargs):
-                for k, v in kwargs.items():
-                    setattr(self, k, v)
-
         # Execute command
         if args.command == "serve":
-            cmd_args = Args(
+            cmd_args = argparse.Namespace(
                 port=args.port,
                 host=args.host,
                 db=args.db,
@@ -150,10 +145,10 @@ def main():
             )
             sys.exit(serve_command(cmd_args))
         elif args.command == "status":
-            cmd_args = Args(db=args.db)
+            cmd_args = argparse.Namespace(db=args.db)
             sys.exit(status_command(cmd_args))
         elif args.command == "migrate":
-            cmd_args = Args(
+            cmd_args = argparse.Namespace(
                 source=args.source,
                 db=args.db,
                 backup=args.backup

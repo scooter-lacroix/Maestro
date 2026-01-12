@@ -1,23 +1,27 @@
-# Maestro - The Unified Development Framework
+# Maestro v2 - The Unified Development Framework
 
 <div align="center">
 
 **Transform AI interactions into production-ready software**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-supported-purple.svg)](docs/CLAUDE-CODE.md)
 [![OpenCode](https://img.shields.io/badge/OpenCode-supported-orange.svg)](docs/OPENCODE.md)
-[![Tests](https://img.shields.io/badge/tests-237_passing-brightgreen.svg)](maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md)
+[![Tests](https://img.shields.io/badge/tests-250%2B_passing-brightgreen.svg)](maestro/tracks/maestro-v2_20260110/)
 
 </div>
 
 ## Overview
 
-Maestro is a unified spec-driven development framework that brings structure, reliability, and intelligence to AI-assisted software development. It combines powerful tools into one cohesive system:
+Maestro v2 is a major architectural evolution that unifies three powerful systems into a cohesive, spec-driven development orchestration framework:
 
 - **Maestro Core** - Spec-driven development with automatic agent selection and TDD enforcement
-- **Nexus Memory System** - Built-in project context and memory management
+- **Unified Memory System** - Built-in project context with semantic search and coordination patterns
+- **109 Rebranded Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
+- **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
+- **16 Integrated Hooks** - Session start, tool use, coordination, and session end hooks
+- **TLDR Code Analysis** - 5-layer code analysis with semantic indexing
 - **Maestro TUI** - Terminal User Interface for session and MCP management
 
 Transform AI chat interactions into professional software engineering workflows with:
@@ -430,14 +434,19 @@ These commands run in your terminal and require the full installation:
 ## Dependencies
 
 ### Built-in (No Installation Required)
-- **Nexus Memory System**: Fully integrated into Maestro core
+- **Unified Memory System**: 95-100% reliable memory capture via 4-layer hooks
+- **109 Skills**: Workflow, analysis, research, quality, planning, math, and context skills
+- **28 Agents**: Specialized agents for orchestration, planning, exploration, and more
+- **16 Hooks**: Session, tool use, coordination, and event-driven automation
+- **TLDR Analysis**: 5-layer code analysis with semantic indexing
 - **Web Dashboard**: Built with React 18 + TypeScript + Vite
 - **TUI**: Go-based terminal interface
 
 ### Optional Enhancements
 - **tmux**: Required for TUI session management
 - **Node.js 18+**: Required for web dashboard development
-- **Python 3.10+**: Required for Maestro core
+- **Python 3.11+**: Required for Maestro v2 core
+- **UV Package Manager**: Required for Maestro v2 installation
 
 ## Examples
 
@@ -526,16 +535,17 @@ Maestro embodies these principles:
 
 ## Testing
 
-Maestro includes comprehensive testing infrastructure:
+Maestro v2 includes comprehensive testing infrastructure:
 
-- **237 tests** across unit, integration, E2E, and performance suites
-- **135 unit tests** passing (53.47% coverage with roadmap to 98%)
-- **61 integration tests** covering all system integration points
-- **28 E2E tests** for complete workflow validation
-- **8 performance benchmarks** with automated regression detection
-- **6 CI/CD jobs** with coverage and security scanning
+- **250+ tests** across unit, integration, E2E, and performance suites
+- **Target >98% code coverage** for critical paths
+- **Unit tests** for skills, agents, hooks, memory, and tracks modules
+- **Integration tests** for memory system, coordination patterns, and TLDR
+- **E2E tests** for complete track workflows (newTrack, implement, status, revert)
+- **Performance benchmarks** for memory operations and semantic search
+- **CI/CD ready** with pytest, coverage, and automated regression detection
 
-See [Testing Coverage Analysis](maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md) for details.
+See [Maestro v2 Track](maestro/tracks/maestro-v2_20260110/) for implementation details.
 
 ## Contributing
 

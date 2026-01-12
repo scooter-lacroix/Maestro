@@ -17,6 +17,46 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 NOTE: When the track is implemented via `/maestro:implement`, agents will be used AUTOMATICALLY based on task complexity. No user instruction is required for agent usage during implementation.
 
+**CRITICAL - ASKUSERQUESTION TOOL REQUIREMENT:**
+You MUST use the `AskUserQuestion` tool for ALL user interactions including:
+- Asking clarifying questions about the track/feature
+- Presenting options for user selection (A/B/C choices)
+- Gathering specification details (requirements, acceptance criteria)
+- Requesting confirmations and approvals for spec.md and plan.md
+- Any question that requires user input
+
+DO NOT use plain text output to ask questions. Always use the `AskUserQuestion` tool with properly structured options.
+
+Example usage for specification questions:
+```
+AskUserQuestion:
+  question: "What type of authentication should this feature use?"
+  header: "Auth Type"
+  options:
+    - label: "JWT tokens (recommended)"
+      description: "Stateless authentication with JSON Web Tokens"
+    - label: "Session-based"
+      description: "Server-side session storage"
+    - label: "OAuth 2.0"
+      description: "Third-party authentication integration"
+  multiSelect: false
+```
+
+Example for multi-select questions (additive):
+```
+AskUserQuestion:
+  question: "Which user types should have access to this feature? (Select all that apply)"
+  header: "User Types"
+  options:
+    - label: "Admin users"
+      description: "Full administrative access"
+    - label: "Regular users"
+      description: "Standard authenticated users"
+    - label: "Guest users"
+      description: "Unauthenticated visitors"
+  multiSelect: true
+```
+
 ## 1.1 SETUP CHECK
 **PROTOCOL: Verify that the Maestro environment is properly set up.**
 
@@ -223,8 +263,60 @@ NOTE: When the track is implemented via `/maestro:implement`, agents will be use
         (Replace placeholders with actual values)
 7.  **Announce Completion:** Inform the user:
     > "New track '<track_id>' has been created and added to the tracks file. You can now start implementation by running `/maestro:implement`."
-8.  **Store Track Creation Memory:** Store the new track in Nexus memory:
+8.  **Store Track Creation Memory:** Store the new track in Maestro memory:
     - Track ID and description
     - Track type (feature/bug/chore)
     - Track status (new)
     - Creation timestamp
+    - Associate with project and track IDs in memory system
+
+    **Memory Integration Protocol:**
+    a. Import the memory management modules:
+       ```python
+       from maestro.memory.database.models import create_tables, get_session, MaestroProject
+       from maestro.memory.database.managers import MemoryManager
+       from maestro.core.tracks.models import TrackManager
+       ```
+
+    b. Initialize the memory system:
+       ```python
+       import os
+       db_session = get_session()
+       project_path = os.getcwd()
+       track_manager = TrackManager(db_session, project_path)
+       ```
+
+    c. Create or get project and track records:
+       ```python
+       project_id = track_manager.get_or_create_project()
+       track_db_id = track_manager.get_or_create_track(track_id, title)
+       ```
+
+    d. Store the track creation memory:
+       ```python
+       track_manager.store_track_memory(
+           track_id,
+           f"Created new track: {title}. Type: {track_type}. Description: {description}",
+           category="context",
+           importance="normal",
+           summary=f"Track {track_id} created",
+       )
+       ```
+
+    e. Update metadata.json with memory references:
+       ```python
+       # Update the metadata.json file to include maestro_project_id and maestro_track_id
+       import json
+       metadata_path = f"maestro/tracks/{track_id}/metadata.json"
+       with open(metadata_path, "r") as f:
+           metadata = json.load(f)
+       metadata["maestro_project_id"] = project_id
+       metadata["maestro_track_id"] = track_db_id
+       with open(metadata_path, "w") as f:
+           json.dump(metadata, f, indent=2)
+       ```
+
+    f. Commit the database changes:
+       ```python
+       db_session.commit()
+       ```

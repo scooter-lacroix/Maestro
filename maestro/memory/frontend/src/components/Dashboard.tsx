@@ -6,7 +6,7 @@ import { GlitchText } from './GlitchText';
 import { DetailedTabs } from './DetailedTabs';
 import { ComprehensiveGraphView } from './ComprehensiveGraphView';
 import { CodeSearchResults } from './CodeSearchResults';
-import { useMemories, useProjects, useTracks, useStats, useSearch, useScan, useCodeSearch } from '../hooks/useMaestroData';
+import { useMemories, useProjects, useTracks, useStats, useSearch, useScan, useCodeSearch, useCoordinationSummary } from '../hooks/useMaestroData';
 import { MemoryDetailModal } from './MemoryDetailModal';
 import { Memory } from '../types';
 import './Dashboard.css';
@@ -25,6 +25,7 @@ export const Dashboard: React.FC = () => {
   const { results: searchResults, search } = useSearch();
   const { results: codeResults, searchCode, loading: codeSearchLoading } = useCodeSearch();
   const { scan, loading: scanLoading } = useScan();
+  const { summary: coordSummary } = useCoordinationSummary();
   const [scanMessage, setScanMessage] = useState<string | null>(null);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -162,6 +163,24 @@ export const Dashboard: React.FC = () => {
               icon="fa-terminal"
               title="Commands"
               description={`${Object.keys(stats?.memories_by_command || {}).length} types`}
+              onClick={() => setShowDetailedTabs(true)}
+            />
+            <GlitchCard
+              icon="fa-lock"
+              title="File Claims"
+              description={`${coordSummary?.summary?.active_file_claims || 0} active`}
+              onClick={() => setShowDetailedTabs(true)}
+            />
+            <GlitchCard
+              icon="fa-exchange-alt"
+              title="Pending Handoffs"
+              description={`${coordSummary?.summary?.pending_handoffs || 0} waiting`}
+              onClick={() => setShowDetailedTabs(true)}
+            />
+            <GlitchCard
+              icon="fa-list-alt"
+              title="Ledger Entries"
+              description={`${coordSummary?.summary?.recent_ledger_entries || 0} recent`}
               onClick={() => setShowDetailedTabs(true)}
             />
             <GlitchCard

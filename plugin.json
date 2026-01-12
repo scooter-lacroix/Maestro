@@ -25,28 +25,87 @@
     "dashboard"
   ],
   "commands": [
-    "setup",
-    "newTrack",
-    "implement",
-    "status",
-    "revert",
-    "configure",
-    "memory",
-    "tui"
+    "maestro:setup",
+    "maestro:newTrack",
+    "maestro:implement",
+    "maestro:status",
+    "maestro:revert",
+    "maestro:configure",
+    "maestro:memory",
+    "maestro:tui"
   ],
+  "skills": {
+    "path": "maestro/skills",
+    "count": 109,
+    "categories": [
+      "meta",
+      "workflows",
+      "context",
+      "analysis",
+      "research",
+      "quality",
+      "planning",
+      "math",
+      "math_topics",
+      "tools",
+      "architecture",
+      "onboarding"
+    ]
+  },
+  "agents": {
+    "path": "maestro/agents",
+    "count": 32,
+    "categories": [
+      "orchestrators",
+      "planners",
+      "explorers",
+      "implementers",
+      "debuggers",
+      "validators",
+      "reviewers",
+      "specialized"
+    ]
+  },
+  "hooks": {
+    "path": "maestro/hooks",
+    "count": 16,
+    "phases": [
+      "session-start",
+      "pre-tool-use",
+      "post-tool-use",
+      "pre-compact",
+      "user-prompt-submit",
+      "subagent-stop",
+      "session-end"
+    ]
+  },
   "cli": {
     "binary": "maestro",
     "description": "Maestro CLI - Unified command-line interface for Maestro framework",
     "install_path": "~/.local/bin/maestro",
     "commands": {
-      "maestro memory serve": "Start the Maestro Memory Dashboard web server (default: http://localhost:18765)",
+      "maestro memory serve": "Start the Maestro Memory Dashboard web server (default: http://127.0.0.1:18765)",
       "maestro memory status": "Show Maestro memory system statistics and health",
-      "maestro memory migrate": "Migrate memories from Memori database to Nexus",
-      "maestro tui": "Launch the Maestro Terminal UI for session management"
+      "maestro memory migrate": "Migrate memories from previous versions",
+      "maestro tui": "Launch the Maestro Terminal UI for session management",
+      "maestro configure": "Configure Maestro settings and preferences",
+      "maestro tree": "Show TLDR code analysis tree",
+      "maestro search": "Search codebase with semantic understanding"
     },
     "dependencies": {
-      "python": ">=3.8",
+      "python": ">=3.11",
+      "uv": ">=0.1.0",
       "go": ">=1.21 (for building maestro-tui binary, optional)"
     }
+  },
+  "memory": {
+    "database_path": "~/.maestro/memory.db",
+    "handoffs_path": "~/.maestro/handoffs",
+    "ledgers_path": "~/.maestro/ledgers"
+  },
+  "dashboard": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 18765
   }
 }

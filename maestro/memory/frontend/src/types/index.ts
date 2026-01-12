@@ -107,3 +107,85 @@ export interface ErrorResponse {
   error: string;
   detail?: string;
 }
+
+// Coordination Types for Maestro v2
+export interface FileClaim {
+  id: number;
+  claim_id: string;
+  agent_id: string;
+  session_id?: string;
+  file_patterns: string[];
+  status: 'active' | 'released' | 'expired' | 'revoked';
+  is_exclusive: boolean;
+  reason?: string;
+  task_description?: string;
+  created_at: string;
+  expires_at: string;
+  released_at?: string;
+  project_id?: number;
+  track_id?: number;
+}
+
+export interface Handoff {
+  id: number;
+  handoff_id: string;
+  title: string;
+  from_session_id: string;
+  to_session_id?: string;
+  from_agent_id: string;
+  to_agent_id?: string;
+  status: 'pending' | 'in_progress' | 'resumed' | 'abandoned' | 'completed';
+  context_yaml: string;
+  context_data?: Record<string, any>;
+  project_path?: string;
+  summary?: string;
+  tags?: string[];
+  created_at: string;
+  resumed_at?: string;
+  completed_at?: string;
+  project_id?: number;
+  track_id?: number;
+}
+
+export interface ContinuityLedger {
+  id: number;
+  ledger_id: string;
+  session_id: string;
+  agent_id: string;
+  entry_type: 'decision' | 'action' | 'outcome' | 'observation' | 'question' | 'answer';
+  title: string;
+  content: string;
+  metadata?: Record<string, any>;
+  parent_entry_id?: number;
+  created_at: string;
+  sequence_number: number;
+  project_id?: number;
+  track_id?: number;
+}
+
+export interface CoordinationSummary {
+  success: boolean;
+  summary: {
+    active_file_claims: number;
+    pending_handoffs: number;
+    recent_ledger_entries: number;
+  };
+}
+
+export interface FileClaimsResponse {
+  success: boolean;
+  claims: FileClaim[];
+  total: number;
+}
+
+export interface HandoffsResponse {
+  success: boolean;
+  handoffs: Handoff[];
+  total: number;
+}
+
+export interface LedgersResponse {
+  success: boolean;
+  ledgers: ContinuityLedger[];
+  total: number;
+}

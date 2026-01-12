@@ -7,11 +7,13 @@ This module provides a structured exception hierarchy for the Maestro
 memory system, enabling better error handling and debugging.
 """
 
+from typing import Optional, Dict, Any
+
 
 class MaestroMemoryError(Exception):
     """Base exception for all Maestro memory errors"""
 
-    def __init__(self, message: str, details: dict = None):
+    def __init__(self, message: str, details: Optional[Dict[Any, Any]] = None):
         """
         Initialize Maestro memory error.
 
@@ -23,7 +25,7 @@ class MaestroMemoryError(Exception):
         self.message = message
         self.details = details or {}
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.details:
             return f"{self.message} - Details: {self.details}"
         return self.message

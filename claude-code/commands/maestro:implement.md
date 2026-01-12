@@ -188,11 +188,91 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
     -   After all tasks in the track's local `plan.md` are completed, you MUST update the track's status in the tracks file.
     -   This requires finding the specific heading for the track (e.g., `## [~] Track: <Description>`) and replacing it with the completed status (e.g., `## [x] Track: <Description>`).
     -   Announce that the track is fully complete and the tracks file has been updated.
-    -   **Store Track Completion Memory:** Store track completion in Nexus memory:
+    -   **Store Track Completion Memory:** Store track completion in Maestro memory:
         - Track ID
         - Completion timestamp
         - Summary of changes made
         - Tasks completed count
+
+    **Memory and Handoff Integration Protocol:**
+
+    a. Import the memory and handoff modules:
+       ```python
+       from maestro.memory.database.models import get_session, MaestroProject
+       from maestro.memory.coordination.handoffs import HandoffHandler, HandoffTemplate
+       from maestro.core.tracks.models import TrackManager
+       from maestro.core.tracks.repository import TrackRepository
+       from maestro.core.tracks.integrations import TrackHandoffIntegration, TrackTldrIntegration
+       ```
+
+    b. Initialize the integration:
+       ```python
+       import os
+       db_session = get_session()
+       project_path = os.getcwd()
+       track_manager = TrackManager(db_session, project_path)
+       track_repository = TrackRepository("maestro/tracks")
+       handoff_integration = TrackHandoffIntegration(track_repository, track_manager, db_session)
+       ```
+
+    c. **Check for existing handoffs** to resume from:
+       ```python
+       # Check if there are pending handoffs for this track
+       pending_handoffs = handoff_integration.get_pending_handoffs(track_id)
+       if pending_handoffs:
+           # Inform user about available handoffs
+           # Ask if they want to resume from an existing handoff
+       ```
+
+    d. **Create handoff on pause/interruption:**
+       If the track implementation is paused or interrupted:
+       ```python
+       handoff_id = handoff_integration.create_pause_handoff(
+           track_id=track_id,
+           session_id="current-session-id",
+           agent_id="current-agent-id",
+           current_task="Current task being worked on",
+           completed_tasks=["Task 1", "Task 2"],
+           next_steps=["Next steps to take"],
+           files_modified=["file1.py", "file2.py"],
+           notes="Additional notes about current state",
+       )
+       # Inform user: "Handoff {handoff_id} created. Resume with /maestro:implement {track_id}"
+       ```
+
+    e. **Create completion handoff:**
+       When track is completed:
+       ```python
+       handoff_id = handoff_integration.complete_track_with_handoff(
+           track_id=track_id,
+           session_id="current-session-id",
+           agent_id="current-agent-id",
+           completion_summary="Summary of completed work",
+           achievements=["Achievement 1", "Achievement 2"],
+           files_modified=["file1.py", "file2.py"],
+       )
+       ```
+
+    f. **Store TLDR analysis results:**
+       During implementation, if code analysis is performed:
+       ```python
+       tldr_integration = TrackTldrIntegration(track_repository, track_manager, db_session)
+       tldr_integration.store_tldr_analysis(
+           track_id=track_id,
+           analysis_id="analysis-unique-id",
+           files_analyzed=["file1.py", "file2.py"],
+           findings={
+               "structures": ["Class1", "Class2"],
+               "patterns": ["singleton", "factory"],
+               "issues": ["Issue 1", "Issue 2"],
+           },
+       )
+       ```
+
+    g. Commit the database changes:
+       ```python
+       db_session.commit()
+       ```
 
 ---
 
