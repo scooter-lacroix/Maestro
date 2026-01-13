@@ -8,37 +8,12 @@ Maestro is a spec-driven development framework that transforms Claude Code into 
 
 ## Installation
 
-### One-Line Installer
+See [Installation Guide](INSTALLATION.md) for complete setup instructions.
 
+Quick install:
 ```bash
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/maestro/master/install-claude-code.sh | bash
+curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
 ```
-
-### Manual Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/scooter-lacroix/maestro.git
-cd maestro
-```
-
-2. Run the installer:
-```bash
-./install-claude-code.sh
-```
-
-### What Gets Installed
-
-- **Commands**: 5 slash commands in `~/.claude/commands/`
-  - `maestro:setup.md`
-  - `maestro:newTrack.md`
-  - `maestro:implement.md`
-  - `maestro:status.md`
-  - `maestro:revert.md`
-
-- **Templates**: Project templates in `~/.claude/maestro-templates/`
-  - `workflow.md`
-  - `code_styleguides/*.md`
 
 ## Post-Installation Configuration
 

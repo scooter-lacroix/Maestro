@@ -11,7 +11,6 @@ import time
 import psutil
 import tempfile
 import threading
-import pickle
 import json
 from typing import Dict, List, Optional, Callable, Any, Tuple
 from dataclasses import dataclass, asdict
@@ -21,7 +20,6 @@ from threading import Lock, Event
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -389,9 +387,9 @@ class MemoryProfiler:
     def spill_to_disk(self, key: str, data: Any) -> bool:
         """Spill data to disk and return success status."""
         try:
-            spill_file = self.spill_dir / f"{key}.pkl"
-            with open(spill_file, 'wb') as f:
-                pickle.dump(data, f)
+            spill_file = self.spill_dir / f"{key}.json"
+            with open(spill_file, 'w') as f:
+                json.dump(data, f)
             self.spilled_data[key] = str(spill_file)
             logger.info(f"Spilled data for key '{key}' to {spill_file}")
             return True
@@ -403,15 +401,15 @@ class MemoryProfiler:
         """Load spilled data from disk."""
         if key not in self.spilled_data:
             return None
-        
+
         try:
             spill_file = Path(self.spilled_data[key])
             if not spill_file.exists():
                 del self.spilled_data[key]
                 return None
-            
-            with open(spill_file, 'rb') as f:
-                data = pickle.load(f)
+
+            with open(spill_file, 'r') as f:
+                data = json.load(f)
             logger.info(f"Loaded spilled data for key '{key}' from {spill_file}")
             return data
         except Exception as e:

@@ -5,6 +5,7 @@ Implements structured handoff mechanisms with YAML schemas for goal/now/next
 patterns, supporting cross-terminal coordination and state persistence.
 """
 
+import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -101,14 +102,14 @@ class YAMLGoalNowNextSchema:
         if not isinstance(data['next'], str):
             return False
         
-        # Validate optional fields if present
-        if 'context' in data and not isinstance(data['context'], dict):
+        # Validate optional fields if present and not None
+        if 'context' in data and data['context'] is not None and not isinstance(data['context'], dict):
             return False
-        if 'metadata' in data and not isinstance(data['metadata'], dict):
+        if 'metadata' in data and data['metadata'] is not None and not isinstance(data['metadata'], dict):
             return False
-        if 'timestamp' in data and not isinstance(data['timestamp'], str):
+        if 'timestamp' in data and data['timestamp'] is not None and not isinstance(data['timestamp'], str):
             return False
-        if 'status' in data and data['status'] not in [status.value for status in HandoffStatus]:
+        if 'status' in data and data['status'] is not None and data['status'] not in [status.value for status in HandoffStatus]:
             return False
             
         return True
@@ -148,23 +149,30 @@ class YAMLGoalNowNextSchema:
     def to_dict(cls, schema: GoalNowNextSchema) -> Dict[str, Any]:
         """
         Convert a GoalNowNextSchema instance to a dictionary.
-        
+
         Args:
             schema: GoalNowNextSchema instance to convert
-            
+
         Returns:
             Dictionary representation of the schema
         """
-        return {
+        result = {
             'version': cls.SCHEMA_VERSION,
             'goal': schema.goal,
             'now': schema.now,
             'next': schema.next,
-            'context': schema.context,
-            'metadata': schema.metadata,
-            'timestamp': schema.timestamp,
             'status': schema.status.value
         }
+
+        # Only include optional fields if they are not None
+        if schema.context is not None:
+            result['context'] = schema.context
+        if schema.metadata is not None:
+            result['metadata'] = schema.metadata
+        if schema.timestamp is not None:
+            result['timestamp'] = schema.timestamp
+
+        return result
 
 
 class HandoffManager:
@@ -349,22 +357,26 @@ class HandoffManager:
         return None
     
     def save_to_storage(self):
-        """Save active handoffs to persistent storage."""
+        """Save active handoffs to persistent storage atomically."""
         if not self.storage_path:
             return
-        
+
         try:
             # Create parent directory if it doesn't exist
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Prepare data for storage
             storage_data = {}
             for handoff_id, schema in self.active_handoffs.items():
                 storage_data[handoff_id] = YAMLGoalNowNextSchema.to_dict(schema)
-            
-            # Write to file
-            with open(self.storage_path, 'w', encoding='utf-8') as f:
+
+            # Use atomic write pattern: write to temp file then rename
+            temp_path = str(self.storage_path) + '.tmp'
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 yaml.dump(storage_data, f, default_flow_style=False)
+
+            # Atomic rename (os.replace is atomic and Windows-safe when target exists)
+            os.replace(temp_path, self.storage_path)
         except Exception as e:
             print(f"Error saving handoffs to storage: {e}")
     

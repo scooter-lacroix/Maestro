@@ -13,7 +13,6 @@ import fnmatch
 from typing import Any, Dict, Optional, List, Tuple, Iterator
 from .storage_interface import StorageInterface, FileMetadataInterface, SearchInterface, DALInterface
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SQLiteStorage(StorageInterface):
@@ -209,6 +208,13 @@ class SQLiteStorage(StorageInterface):
         For SQLite, this is generally a no-op as transactions are committed per operation.
         """
         pass
+
+    def _initialize_database(self) -> None:
+        """
+        Initialize the database schema - entry point for integration tests.
+        This is an alias to _init_db for compatibility with integration tests.
+        """
+        self._init_db()
 
 class SQLiteFileMetadata(FileMetadataInterface):
     """SQLite-based file metadata storage, including versions and diffs."""

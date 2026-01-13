@@ -198,25 +198,34 @@ class FallbackChain:
         self.strategies.append(strategy)
         return self
     
-    def execute(self, primary_func: Callable, *args, 
+    def execute(self, primary_func: Callable, *args,
                 context: Optional[Dict[str, Any]] = None, **kwargs) -> FallbackResult:
         """Execute the primary function with fallback strategies."""
         if context is None:
             context = {}
-        
+
+        # Initialize primary_error to ensure it's always defined in case of UnboundLocalError
+        primary_error = None
+        primary_failed = False
+
         # Try primary function first
         try:
             result = primary_func(*args, **kwargs)
             return FallbackResult(success=True, value=result, message="Primary function succeeded")
-        except Exception as primary_error:
+        except Exception as e:
+            primary_error = e
+            primary_failed = True
             self.logger.warning(f"Primary function failed: {primary_error}")
-            
+
             # Execute fallback strategies in sequence
             for i, strategy in enumerate(self.strategies):
                 try:
                     if strategy.can_handle(primary_error, context):
                         self.logger.info(f"Trying fallback strategy {i+1}: {strategy.name}")
-                        
+
+                        # Initialize fallback_result to avoid UnboundLocalError
+                        fallback_result = None
+
                         # For strategies that need the original function, wrap appropriately
                         if isinstance(strategy, RetryFallback):
                             fallback_result = strategy.execute(primary_func, *args, **kwargs)
@@ -225,22 +234,28 @@ class FallbackChain:
                         else:
                             # Pass the error and context to the fallback
                             fallback_result = strategy.execute(primary_error, context)
-                        
-                        if fallback_result.success:
+
+                        if fallback_result and fallback_result.success:
                             self.logger.info(f"Fallback {strategy.name} succeeded")
                             return fallback_result
                         else:
-                            self.logger.warning(f"Fallback {strategy.name} failed: {fallback_result.message}")
+                            error_msg = fallback_result.message if fallback_result else "Fallback returned None"
+                            self.logger.warning(f"Fallback {strategy.name} failed: {error_msg}")
                     else:
                         self.logger.info(f"Fallback {strategy.name} cannot handle this error")
-                        
+
                 except Exception as fallback_error:
                     self.logger.error(f"Error in fallback {strategy.name}: {fallback_error}")
                     continue
-        
+
         # All strategies failed
-        return FallbackResult(success=False, error=primary_error, 
-                            level=FallbackLevel.CRITICAL, message="All fallback strategies failed")
+        if primary_failed:
+            return FallbackResult(success=False, error=primary_error,
+                                level=FallbackLevel.CRITICAL, message="All fallback strategies failed")
+        else:
+            # This shouldn't happen given the logic, but added for safety
+            return FallbackResult(success=False, error=None,
+                                level=FallbackLevel.CRITICAL, message="Unexpected execution path")
 
 
 class FallbackRegistry:

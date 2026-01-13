@@ -446,10 +446,22 @@ class MaestroMemoryService:
 
             # Create default namespace for maestro
             from maestro.memory.database.models import MaestroProject
-            conn.execute(text("""
-                INSERT OR IGNORE INTO agent_namespaces (name, description, agent_type)
-                VALUES ('maestro', 'Maestro unified development framework', 'maestro')
-            """))
+            
+            # Check if agent_type column exists before using it
+            result = conn.execute(text("PRAGMA table_info(agent_namespaces)"))
+            columns = [row[1] for row in result.fetchall()]
+            
+            if 'agent_type' in columns:
+                conn.execute(text("""
+                    INSERT OR IGNORE INTO agent_namespaces (name, description, agent_type)
+                    VALUES ('maestro', 'Maestro unified development framework', 'maestro')
+                """))
+            else:
+                # Fallback for older databases without agent_type column
+                conn.execute(text("""
+                    INSERT OR IGNORE INTO agent_namespaces (name, description)
+                    VALUES ('maestro', 'Maestro unified development framework')
+                """))
             conn.commit()
 
             # Check if we need to add Maestro columns to memories table

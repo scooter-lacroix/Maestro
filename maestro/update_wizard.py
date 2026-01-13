@@ -14,9 +14,14 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
-import requests
 import zipfile
-from packaging import version
+import logging
+ 
+# Import security utilities for path validation
+from maestro.leindex.security_utils import is_safe_zip_extraction
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 class UpdateWizard:
@@ -102,17 +107,25 @@ class UpdateWizard:
             Tuple of (has_update, current_version, latest_version)
         """
         try:
-            response = requests.get(self.remote_version_url)
+            import requests
+            import packaging.version
+        except ImportError as e:
+            print(f"Required library not available: {e}")
+            return False, self.current_version, self.current_version
+
+        try:
+            # Add timeout to prevent hanging
+            response = requests.get(self.remote_version_url, timeout=10)
             response.raise_for_status()
             
             data = response.json()
             latest_version = data.get('tag_name', '').lstrip('v')
-            
-            current_ver = version.parse(self.current_version)
-            latest_ver = version.parse(latest_version)
-            
+
+            current_ver = packaging.version.parse(self.current_version)
+            latest_ver = packaging.version.parse(latest_version)
+
             has_update = latest_ver > current_ver
-            
+
             return has_update, self.current_version, latest_version
         except Exception as e:
             print(f"Error checking for updates: {e}")
@@ -179,23 +192,29 @@ class UpdateWizard:
         Returns:
             Path to downloaded update package
         """
+        try:
+            import requests
+        except ImportError:
+            raise ImportError("requests library required for downloading updates")
+
         if destination is None:
             destination = os.path.join(tempfile.gettempdir(), f"maestro_update_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip")
-        
+
         print(f"Downloading update from: {self.update_source_url}")
-        
-        response = requests.get(self.update_source_url)
+
+        # Add timeout to prevent hanging
+        response = requests.get(self.update_source_url, timeout=30)
         response.raise_for_status()
-        
+
         with open(destination, 'wb') as f:
             f.write(response.content)
-        
+
         print(f"Update downloaded to: {destination}")
         return destination
 
     def extract_update(self, package_path: str, extract_to: Optional[str] = None) -> str:
         """
-        Extract the update package.
+        Extract the update package with zip-slip protection.
 
         Args:
             package_path: Path to the update package
@@ -203,11 +222,36 @@ class UpdateWizard:
 
         Returns:
             Path to extracted update directory
+        
+        Raises:
+            ValueError: If extraction is not safe or fails
         """
         if extract_to is None:
             extract_to = tempfile.mkdtemp(prefix="maestro_update_")
         
+        # Validate that zip extraction is safe
+        if not is_safe_zip_extraction(package_path, extract_to):
+            raise ValueError(f"Unsafe zip extraction: package_path={package_path}, extract_to={extract_to}")
+        
+        # Use safe zip extraction with path validation
         with zipfile.ZipFile(package_path, 'r') as zip_ref:
+            # Validate each file in the zip before extraction
+            for file_info in zip_ref.infolist():
+                # Check for zip-slip patterns
+                target_path = os.path.join(extract_to, file_info.filename)
+                
+                # Normalize the path to resolve any .. components
+                normalized_path = os.path.normpath(target_path)
+                
+                # Ensure the extracted path is within the target directory
+                if not normalized_path.startswith(os.path.abspath(extract_to)):
+                    raise ValueError(f"Zip-slip attack detected: {file_info.filename}")
+                
+                # Check for path traversal attempts
+                if ".." in file_info.filename or file_info.filename.startswith("/"):
+                    raise ValueError(f"Potential path traversal in zip: {file_info.filename}")
+            
+            # Safe to extract
             zip_ref.extractall(extract_to)
         
         # The extracted content usually has a root directory with the repo name
@@ -276,10 +320,21 @@ class UpdateWizard:
                 # Remove old maestro directory content (but preserve the directory itself)
                 for item in os.listdir(current_installation):
                     item_path = os.path.join(current_installation, item)
-                    if os.path.isdir(item_path):
-                        shutil.rmtree(item_path)
-                    else:
-                        os.remove(item_path)
+                    
+                    # Validate path before deletion to prevent accidental deletion
+                    try:
+                        # Ensure path is within the expected directory
+                        if not os.path.abspath(item_path).startswith(os.path.abspath(current_installation)):
+                            logger.error(f"Potential path traversal attack detected: {item_path}")
+                            continue
+                            
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                        else:
+                            os.remove(item_path)
+                    except Exception as e:
+                        logger.error(f"Error deleting {item_path}: {e}")
+                        continue
                 
                 # Copy new content
                 for item in os.listdir(source_maestro_dir):
@@ -342,10 +397,21 @@ class UpdateWizard:
             # Remove current installation content
             for item in os.listdir(current_installation):
                 item_path = os.path.join(current_installation, item)
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-                else:
-                    os.remove(item_path)
+                
+                # Validate path before deletion to prevent accidental deletion
+                try:
+                    # Ensure path is within the expected directory
+                    if not os.path.abspath(item_path).startswith(os.path.abspath(current_installation)):
+                        logger.error(f"Potential path traversal attack detected: {item_path}")
+                        continue
+                        
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                    else:
+                        os.remove(item_path)
+                except Exception as e:
+                    logger.error(f"Error deleting {item_path}: {e}")
+                    continue
             
             # Copy backup content back
             backup_maestro_dir = os.path.join(backup_path, 'maestro')
@@ -459,7 +525,7 @@ class UpdateWizard:
 def main():
     """Command-line interface for the Update Wizard."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Maestro Update Wizard')
     parser.add_argument('--check', action='store_true', help='Check for updates only')
     parser.add_argument('--update', action='store_true', help='Run update process')
@@ -467,18 +533,18 @@ def main():
     parser.add_argument('--sync', action='store_true', help='Sync components')
     parser.add_argument('--force', action='store_true', help='Force update even if no newer version')
     parser.add_argument('--config', metavar='CONFIG_PATH', help='Configuration file path')
-    
+
     args = parser.parse_args()
-    
+
     wizard = UpdateWizard(config_path=args.config)
-    
+
     if args.check:
         has_update, current_version, latest_version = wizard.check_for_updates()
         if has_update:
             print(f"Update available: {current_version} -> {latest_version}")
         else:
             print(f"No updates available. Current version: {current_version}")
-    
+
     elif args.update:
         success = wizard.run_update_process(force_update=args.force)
         if success:
@@ -486,7 +552,7 @@ def main():
         else:
             print("Update failed!")
             sys.exit(1)
-    
+
     elif args.rollback and args.rollback:
         success = wizard.rollback_update(args.rollback)
         if success:
@@ -494,7 +560,7 @@ def main():
         else:
             print("Rollback failed!")
             sys.exit(1)
-    
+
     elif args.sync:
         success = wizard.sync_components()
         if success:
@@ -502,7 +568,7 @@ def main():
         else:
             print("Component sync failed!")
             sys.exit(1)
-    
+
     else:
         # Show help if no arguments provided
         parser.print_help()

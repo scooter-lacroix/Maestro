@@ -24,6 +24,8 @@ from maestro.memory.coordination.ledgers import (
     LedgerBuilder,
     EntryType,
 )
+from maestro.memory.coordination.file_locks import AdvisoryLock
+from maestro.memory.coordination.session_registry import SessionRegistry
 
 __all__ = [
     # File claims
@@ -40,4 +42,7 @@ __all__ = [
     "ContinuityLedgerHandler",
     "LedgerBuilder",
     "EntryType",
+    # Coordination locks and registries
+    "AdvisoryLock",
+    "SessionRegistry",
 ]

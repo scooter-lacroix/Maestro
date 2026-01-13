@@ -307,7 +307,8 @@ class PersistentLRUCache(LRUCache):
             with open(temp_file, 'w') as f:
                 json.dump(cache_data, f, indent=2)
             
-            os.rename(temp_file, self.persistence_file)
+            # Atomic rename (os.replace is atomic and Windows-safe when target exists)
+            os.replace(temp_file, self.persistence_file)
             
         except Exception as e:
             print(f"Error saving cache to disk: {e}")
@@ -346,7 +347,7 @@ class PersistentLRUCache(LRUCache):
             # Create backup
             backup_file = self.persistence_file + '.backup'
             if os.path.exists(self.persistence_file):
-                os.rename(self.persistence_file, backup_file)
+                os.replace(self.persistence_file, backup_file)
             
             # Save current state (this removes expired entries)
             self._save_to_disk()
@@ -363,7 +364,7 @@ class PersistentLRUCache(LRUCache):
             # Restore backup if it exists
             backup_file = self.persistence_file + '.backup'
             if os.path.exists(backup_file):
-                os.rename(backup_file, self.persistence_file)
+                os.replace(backup_file, self.persistence_file)
     
     def _perform_cleanup(self):
         """Perform cleanup operations including persistence file compaction."""

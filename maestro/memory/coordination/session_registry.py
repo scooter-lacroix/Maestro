@@ -36,7 +36,7 @@ class SessionRegistry:
             try:
                 # Ensure directory exists (redundant but safe)
                 os.makedirs(os.path.dirname(self.registry_path), exist_ok=True)
-                os.rename(old_path, self.registry_path)
+                os.replace(old_path, self.registry_path)
                 logger.info(f"Migrated session registry from {old_path} to {self.registry_path}")
 
                 # Try to remove old directory if empty
@@ -79,6 +79,10 @@ class SessionRegistry:
                 "pid": os.getpid()
             }
             self._write_registry(registry)
+
+    def register(self, session_id: str, metadata: Dict[str, Any]) -> None:
+        """Register a new active session - alias for integration tests."""
+        self.register_session(session_id, metadata)
 
     def unregister_session(self, session_id: str) -> None:
         """Unregister a session (e.g., on exit)."""

@@ -124,10 +124,14 @@ class SessionRegistry:
             return {}
 
     def _write_registry(self, data: Dict[str, Any]) -> None:
-        """Write to the registry file. Must be called while holding the lock."""
+        """Write to the registry file atomically. Must be called while holding the lock."""
         os.makedirs(os.path.dirname(os.path.abspath(self.registry_path)), exist_ok=True)
-        with open(self.registry_path, 'w') as f:
+        # Use atomic write pattern: write to temp file then rename
+        temp_path = self.registry_path + '.tmp'
+        with open(temp_path, 'w') as f:
             json.dump(data, f, indent=2)
+        # Atomic rename - use os.replace for Windows compatibility
+        os.replace(temp_path, self.registry_path)
 
     def register(self, session_id: str, metadata: Dict[str, Any]) -> bool:
         """Register a new active session."""

@@ -15,7 +15,6 @@ import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 from loguru import logger
-import requests
 from urllib.parse import urljoin
 
 
@@ -47,8 +46,18 @@ class MemoryDaemonClient:
         self.pid_file = Path(pid_file) if pid_file else None
         self.api_base_url = api_base_url or "http://localhost:8080"
         self.yaml_schema_path = Path(yaml_schema_path) if yaml_schema_path else None
-        self.session = requests.Session()
-        self.session.headers.update({'Content-Type': 'application/json'})
+
+        # Lazy import of requests for optional functionality
+        try:
+            import requests
+            self.session = requests.Session()
+            self.session.headers.update({'Content-Type': 'application/json'})
+            self.requests_available = True
+        except ImportError:
+            self.session = None
+            self.requests_available = False
+        # Set default timeout for all requests
+        self.session_timeout = 15  # seconds
 
     def lookup_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -278,27 +287,28 @@ class MemoryDaemonClient:
         """
         url = urljoin(self.api_base_url, endpoint)
 
+        if not self.requests_available:
+            logger.error("requests library not available")
+            return None
+
         try:
             if method.upper() == 'GET':
-                response = self.session.get(url)
+                response = self.session.get(url, timeout=self.session_timeout)
             elif method.upper() == 'POST':
-                response = self.session.post(url, json=data)
+                response = self.session.post(url, json=data, timeout=self.session_timeout)
             elif method.upper() == 'PUT':
-                response = self.session.put(url, json=data)
+                response = self.session.put(url, json=data, timeout=self.session_timeout)
             elif method.upper() == 'DELETE':
-                response = self.session.delete(url)
+                response = self.session.delete(url, timeout=self.session_timeout)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
 
             response.raise_for_status()
             return response.json() if response.content else {}
 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             logger.error(f"API request failed: {e}")
             return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode JSON response: {e}")
-            return {}
 
     def get_daemon_status(self) -> Optional[Dict[str, Any]]:
         """

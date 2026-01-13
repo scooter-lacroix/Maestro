@@ -12,9 +12,34 @@ import subprocess
 import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-from loguru import logger
 
-from maestro.memory.utils.detector import detect_project
+# Lazy import of loguru for optional functionality
+try:
+    from loguru import logger
+    LOGURU_AVAILABLE = True
+except ImportError:
+    LOGURU_AVAILABLE = False
+    # Create a simple fallback logger
+    class LoggerStub:
+        def debug(self, msg, *args, **kwargs):
+            pass
+        def info(self, msg, *args, **kwargs):
+            print(f"INFO: {msg}")
+        def warning(self, msg, *args, **kwargs):
+            print(f"WARNING: {msg}")
+        def error(self, msg, *args, **kwargs):
+            print(f"ERROR: {msg}")
+        def critical(self, msg, *args, **kwargs):
+            print(f"CRITICAL: {msg}")
+
+    logger = LoggerStub()
+
+# Dependency hygiene: hook execution should work even when the optional memory stack
+# (and its deps) is not installed. Fall back to os.getcwd() if unavailable.
+try:
+    from maestro.memory.utils.detector import detect_project  # type: ignore
+except ImportError:  # pragma: no cover
+    detect_project = None  # type: ignore[assignment]
 
 
 def get_python_executable() -> str:
@@ -22,23 +47,26 @@ def get_python_executable() -> str:
     Get the appropriate Python executable for cross-platform compatibility.
 
     Priority order:
-    1. python3 (Unix-like systems)
-    2. python (Windows, some Unix systems)
-    3. sys.executable (fallback)
+    1. sys.executable (current environment)
+    2. python3 (Unix-like systems)
+    3. python (Windows, some Unix systems)
 
     Returns:
         Path to Python executable
     """
-    # Try python3 first (Unix-like systems)
+    # Priority 1: Current Python executable (best for venvs)
+    if sys.executable:
+        return sys.executable
+
+    # Try python3 next (Unix-like systems)
     if shutil.which("python3"):
         return "python3"
 
-    # Try python next (Windows, some Unix systems)
+    # Try python last (Windows, some Unix systems)
     if shutil.which("python"):
         return "python"
 
-    # Fallback to current Python executable
-    return sys.executable
+    return "python"
 
 
 class HookExecutor:
@@ -67,7 +95,7 @@ class HookExecutor:
         self.global_hooks_dir = Path.home() / ".claude" / "plugins" / "maestro" / "hooks"
 
         # Detect project root for CWD
-        project_info = detect_project()
+        project_info = detect_project() if callable(detect_project) else None
         self.project_root = project_info.project_path if project_info else os.getcwd()
 
     def _discover_hooks(self, phase: str) -> List[Path]:

@@ -312,6 +312,12 @@ def get_initial_migrations() -> List[Migration]:
             up=lambda session: _create_performance_indexes(session),
             down=lambda session: _drop_performance_indexes(session),
         ),
+        Migration(
+            version="004",
+            name="add_agent_type_to_namespaces",
+            up=lambda session: _add_agent_type_to_namespaces(session),
+            down=lambda session: _remove_agent_type_from_namespaces(session),
+        ),
     ]
 
 
@@ -348,6 +354,7 @@ def _create_base_schema(session: Any) -> None:
             description TEXT,
             owner_type VARCHAR(50) NOT NULL,
             owner_id VARCHAR(200) NOT NULL,
+            agent_type VARCHAR(50),
             is_public BOOLEAN DEFAULT 0 NOT NULL,
             allowed_readers JSON,
             allowed_writers JSON,
@@ -969,6 +976,79 @@ if __name__ == "__main__":
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(script_content)
+
+
+def _add_agent_type_to_namespaces(session: Any) -> None:
+    """
+    Add agent_type column to agent_namespaces table
+    
+    This migration adds the agent_type column that was missing from the original
+    schema but is required by the service layer.
+    """
+    # Check if column already exists
+    result = session.execute(text("PRAGMA table_info(agent_namespaces)"))
+    existing_columns = {row[1] for row in result.fetchall()}
+    
+    if 'agent_type' not in existing_columns:
+        # Add the column
+        session.execute(text("ALTER TABLE agent_namespaces ADD COLUMN agent_type VARCHAR(50)"))
+        # Create index for the new column
+        session.execute(text("CREATE INDEX IF NOT EXISTS idx_namespaces_agent_type ON agent_namespaces(agent_type)"))
+        session.commit()
+        logger.info("Added agent_type column to agent_namespaces table")
+    else:
+        logger.info("agent_type column already exists in agent_namespaces table")
+
+
+def _remove_agent_type_from_namespaces(session: Any) -> None:
+    """
+    Remove agent_type column from agent_namespaces table (rollback)
+    """
+    # Check if column exists before trying to remove it
+    result = session.execute(text("PRAGMA table_info(agent_namespaces)"))
+    existing_columns = {row[1] for row in result.fetchall()}
+    
+    if 'agent_type' in existing_columns:
+        # SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+        # First, create a new table with the desired schema
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS agent_namespaces_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(200) UNIQUE NOT NULL,
+                description TEXT,
+                owner_type VARCHAR(50) NOT NULL,
+                owner_id VARCHAR(200) NOT NULL,
+                is_public BOOLEAN DEFAULT 0 NOT NULL,
+                allowed_readers JSON,
+                allowed_writers JSON,
+                config JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                CHECK (owner_type IN ('agent', 'project', 'track'))
+            )
+        """))
+        
+        # Copy data from old table to new table (excluding agent_type)
+        session.execute(text("""
+            INSERT INTO agent_namespaces_new (id, name, description, owner_type, owner_id,
+                                           is_public, allowed_readers, allowed_writers,
+                                           config, created_at, updated_at)
+            SELECT id, name, description, owner_type, owner_id,
+                   is_public, allowed_readers, allowed_writers,
+                   config, created_at, updated_at
+            FROM agent_namespaces
+        """))
+        
+        # Drop the old table
+        session.execute(text("DROP TABLE agent_namespaces"))
+        
+        # Rename the new table
+        session.execute(text("ALTER TABLE agent_namespaces_new RENAME TO agent_namespaces"))
+        
+        session.commit()
+        logger.info("Removed agent_type column from agent_namespaces table")
+    else:
+        logger.info("agent_type column does not exist in agent_namespaces table")
 
 
 def run_migrations(

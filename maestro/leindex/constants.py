@@ -22,14 +22,14 @@ PERSISTENT_SETTINGS_DIR = ".leindex_data"
 """Configuration file name."""
 CONFIG_FILE = "config.json"
 
-"""File index pickle file name."""
-INDEX_FILE = "file_index.pickle"
+"""File index JSON file name."""
+INDEX_FILE = "file_index.json"
 
-"""Content cache pickle file name."""
-CACHE_FILE = "content_cache.pickle"
+"""Content cache JSON file name."""
+CACHE_FILE = "content_cache.json"
 
-"""File metadata pickle file name."""
-METADATA_FILE = "file_metadata.pickle"
+"""File metadata JSON file name."""
+METADATA_FILE = "file_metadata.json"
 
 # ============================================================================
 # Tantivy Configuration (Primary Full-Text Search Backend)

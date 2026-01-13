@@ -13,7 +13,6 @@ from enum import Enum
 from .incremental_indexer import IncrementalIndexer
 from .storage.storage_interface import FileMetadataInterface
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 

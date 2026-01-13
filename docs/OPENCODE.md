@@ -8,26 +8,14 @@ Maestro is a spec-driven development framework that integrates seamlessly with O
 
 ## Installation
 
-### One-Line Installer
+See [Installation Guide](INSTALLATION.md) for complete setup instructions.
 
+Quick install:
 ```bash
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/maestro/master/install-opencode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash
 ```
 
-### Manual Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/scooter-lacroix/maestro.git
-cd maestro
-```
-
-2. Run the installer:
-```bash
-./install-opencode.sh
-```
-
-### What Gets Installed
+## What Gets Installed
 
 - **Skill**: OpenCode skill at `~/.opencode/skill/maestro/`
 - **Commands**: Command files in `~/.claude/commands/`

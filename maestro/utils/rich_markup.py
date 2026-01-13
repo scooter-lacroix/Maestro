@@ -7,8 +7,14 @@ to prevent injection attacks and ensure safe display in terminals.
 """
 
 import re
+import logging
 from typing import Optional
-from loguru import logger
+
+# Dependency hygiene: loguru is optional in Maestro core installs.
+try:
+    from loguru import logger  # type: ignore
+except ImportError:  # pragma: no cover
+    logger = logging.getLogger(__name__)
 
 # Rich Unicode characters that could be used for markup injection
 RICH_MARKUP_PATTERNS = [

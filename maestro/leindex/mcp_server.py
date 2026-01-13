@@ -21,6 +21,9 @@ from typing import Optional, Dict, Any, List, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
+# Import security utilities
+from .security_utils import is_safe_path, is_approved_project_path, sanitize_file_path
+
 # Import FastMCP for MCP server creation
 try:
     from mcp.server.fastmcp import FastMCP, Context
@@ -237,26 +240,42 @@ async def set_project_path(project_path: str, ctx: Context) -> Dict[str, Any]:
     """
     state = _get_lifespan_state(ctx)
 
-    if not os.path.exists(project_path):
+    # Sanitize the project path
+    sanitized_path = sanitize_file_path(project_path)
+    if not sanitized_path:
         return {
             "success": False,
-            "error": f"Project path does not exist: {project_path}"
+            "error": "Invalid project path containing dangerous characters"
         }
 
-    if not os.path.isdir(project_path):
+    if not os.path.exists(sanitized_path):
         return {
             "success": False,
-            "error": f"Path is not a directory: {project_path}"
+            "error": f"Project path does not exist: {sanitized_path}"
         }
 
-    await _ensure_project_initialized(state, project_path)
+    if not os.path.isdir(sanitized_path):
+        return {
+            "success": False,
+            "error": f"Path is not a directory: {sanitized_path}"
+        }
 
-    logger.info(f"Project path set to: {project_path}")
+    # Validate that the project path is approved (within allowed directories)
+    # For now, we allow any existing directory, but this can be restricted
+    if not is_approved_project_path(sanitized_path):
+        return {
+            "success": False,
+            "error": f"Project path is not in an approved location: {sanitized_path}"
+        }
+
+    await _ensure_project_initialized(state, sanitized_path)
+
+    logger.info(f"Project path set to: {sanitized_path}")
 
     return {
         "success": True,
-        "project_path": project_path,
-        "message": f"Project path set to {project_path}"
+        "project_path": sanitized_path,
+        "message": f"Project path set to {sanitized_path}"
     }
 
 
@@ -405,17 +424,32 @@ async def analyze_file(
             "error": "Project path not set. Use set_project_path first."
         }
 
+    # Sanitize the file path
+    sanitized_file_path = sanitize_file_path(file_path)
+    if not sanitized_file_path:
+        return {
+            "success": False,
+            "error": "Invalid file path containing dangerous characters"
+        }
+
     # Default to all layers if not specified
     if layers is None:
         layers = ['ast', 'callgraph', 'cfg', 'dfg', 'slicing']
 
+    # Validate that the file path is safely contained within the project directory
+    if not is_safe_path(base_path, sanitized_file_path):
+        return {
+            "success": False,
+            "error": f"File path is not within the project directory: {sanitized_file_path}"
+        }
+
     # Normalize file path
-    full_path = os.path.join(base_path, file_path)
+    full_path = os.path.join(base_path, sanitized_file_path)
 
     if not os.path.exists(full_path):
         return {
             "success": False,
-            "error": f"File not found: {file_path}"
+            "error": f"File not found: {sanitized_file_path}"
         }
 
     try:
@@ -497,12 +531,27 @@ async def get_file_history(
         }
 
     try:
-        full_path = os.path.join(base_path, file_path)
+        # Sanitize the file path
+        sanitized_file_path = sanitize_file_path(file_path)
+        if not sanitized_file_path:
+            return {
+                "success": False,
+                "error": "Invalid file path containing dangerous characters"
+            }
+
+        # Validate that the file path is safely contained within the project directory
+        if not is_safe_path(base_path, sanitized_file_path):
+            return {
+                "success": False,
+                "error": f"File path is not within the project directory: {sanitized_file_path}"
+            }
+
+        full_path = os.path.join(base_path, sanitized_file_path)
 
         if not os.path.exists(full_path):
             return {
                 "success": False,
-                "error": f"File not found: {file_path}"
+                "error": f"File not found: {sanitized_file_path}"
             }
 
         # Get history from tracker

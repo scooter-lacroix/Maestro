@@ -294,31 +294,49 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
     a.  **Analyze `spec.md`:** Carefully analyze the `spec.md` to identify any new features, changes in functionality, or updates to the technology stack.
     b.  **Update `maestro/product.md`:**
         i. **Condition for Update:** Based on your analysis, you MUST determine if the completed feature or bug fix significantly impacts the description of the product itself.
-        ii. **Propose and Confirm Changes:** If an update is needed, generate the proposed changes. Then, present them to the user for confirmation:
-            > "Based on the completed track, I propose the following updates to `product.md`:"
-            > ```diff
-            > [Proposed changes here, ideally in a diff format]
-            > ```
-            > "Do you approve these changes? (yes/no)"
+        ii. **Propose and Confirm Changes:** If an update is needed, generate the proposed changes. Then, present them to the user for confirmation using `AskUserQuestion`:
+            ```
+            AskUserQuestion:
+              question: "Based on the completed track, I propose the following updates to product.md: [diff summary]. Do you approve?"
+              header: "Update product.md"
+              options:
+                - label: "Yes, approve changes"
+                  description: "Apply the proposed changes to product.md"
+                - label: "No, reject changes"
+                  description: "Keep product.md as is"
+              multiSelect: false
+            ```
         iii. **Action:** Only after receiving explicit user confirmation, perform the file edits to update the `maestro/product.md` file. Keep a record of whether this file was changed.
     c.  **Update `maestro/tech-stack.md`:**
         i. **Condition for Update:** Similarly, you MUST determine if significant changes in the technology stack are detected as a result of the completed track.
-        ii. **Propose and Confirm Changes:** If an update is needed, generate the proposed changes. Then, present them to the user for confirmation:
-            > "Based on the completed track, I propose the following updates to `tech-stack.md`:"
-            > ```diff
-            > [Proposed changes here, ideally in a diff format]
-            > ```
-            > "Do you approve these changes? (yes/no)"
+        ii. **Propose and Confirm Changes:** If an update is needed, generate the proposed changes. Then, present them to the user for confirmation using `AskUserQuestion`:
+            ```
+            AskUserQuestion:
+              question: "Based on the completed track, I propose the following updates to tech-stack.md: [diff summary]. Do you approve?"
+              header: "Update tech-stack.md"
+              options:
+                - label: "Yes, approve changes"
+                  description: "Apply the proposed changes to tech-stack.md"
+                - label: "No, reject changes"
+                  description: "Keep tech-stack.md as is"
+              multiSelect: false
+            ```
         iii. **Action:** Only after receiving explicit user confirmation, perform the file edits to update the `maestro/tech-stack.md` file. Keep a record of whether this file was changed.
     d. **Update `maestro/product-guidelines.md` (Strictly Controlled):**
         i. **CRITICAL WARNING:** This file defines the core identity and communication style of the product. It should be modified with extreme caution and ONLY in cases of significant strategic shifts, such as a product rebrand or a fundamental change in user engagement philosophy. Routine feature updates or bug fixes should NOT trigger changes to this file.
         ii. **Condition for Update:** You may ONLY propose an update to this file if the track's `spec.md` explicitly describes a change that directly impacts branding, voice, tone, or other core product guidelines.
-        iii. **Propose and Confirm Changes:** If the conditions are met, you MUST generate the proposed changes and present them to the user with a clear warning:
-            > "WARNING: The completed track suggests a change to the core product guidelines. This is an unusual step. Please review carefully:"
-            > ```diff
-            > [Proposed changes here, ideally in a diff format]
-            > ```
-            > "Do you approve these critical changes to `product-guidelines.md`? (yes/no)"
+        iii. **Propose and Confirm Changes:** If the conditions are met, you MUST generate the proposed changes and present them to the user with a clear warning using `AskUserQuestion`:
+            ```
+            AskUserQuestion:
+              question: "WARNING: The completed track suggests a change to the core product guidelines. This is unusual. Proposed changes: [diff summary]. Do you approve?"
+              header: "Update guidelines"
+              options:
+                - label: "Yes, approve changes"
+                  description: "Apply the proposed changes to product-guidelines.md"
+                - label: "No, reject changes"
+                  description: "Keep product-guidelines.md as is"
+              multiSelect: false
+            ```
         iv. **Action:** Only after receiving explicit user confirmation, perform the file edits. Keep a record of whether this file was changed.
 
 6.  **Final Report:** Announce the completion of the synchronization process and provide a summary of the actions taken.
@@ -338,28 +356,46 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
 
 1.  **Execution Trigger:** This protocol MUST only be executed after the current track has been successfully implemented and the `SYNCHRONIZE PROJECT DOCUMENTATION` step is complete.
 
-2.  **Ask for User Choice:** You MUST prompt the user with the available options for the completed track.
-    > "Track '<track_description>' is now complete. What would you like to do?
-    > A.  **Archive:** Move the track's folder to `maestro/archive/` and remove it from the tracks file.
-    > B.  **Delete:** Permanently delete the track's folder and remove it from the tracks file.
-    > C.  **Skip:** Do nothing and leave it in the tracks file.
-    > Please enter the number of your choice (A, B, or C)."
+2.  **Ask for User Choice:** You MUST prompt the user with the available options for the completed track using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "Track '<track_description>' is now complete. What would you like to do?"
+      header: "Track Cleanup"
+      options:
+        - label: "Archive"
+          description: "Move the track's folder to maestro/archive/ and remove from tracks file"
+        - label: "Delete"
+          description: "Permanently delete the track's folder and remove from tracks file"
+        - label: "Skip"
+          description: "Do nothing and leave it in the tracks file"
+      multiSelect: false
+    ```
 
 3.  **Handle User Response:**
-    *   **If user chooses "A" (Archive):**
+    *   **If user chooses "Archive":**
         i.   **Create Archive Directory:** Check for the existence of `maestro/archive/`. If it does not exist, create it.
         ii.  **Archive Track Folder:** Move the track's folder from `maestro/tracks/<track_id>` to `maestro/archive/<track_id>`.
         iii. **Remove from Tracks File:** Read the content of `maestro/tracks.md`, remove the entire section for the completed track (the part that starts with `---` and contains the track description), and write the modified content back to the file.
         iv.  **Announce Success:** Announce: "Track '<track_description>' has been successfully archived."
-    *   **If user chooses "B" (Delete):**
-        i. **CRITICAL WARNING:** Before proceeding, you MUST ask for a final confirmation due to the irreversible nature of the action.
-            > "WARNING: This will permanently delete the track folder and all its contents. This action cannot be undone. Are you sure you want to proceed? (yes/no)"
+    *   **If user chooses "Delete":**
+        i. **CRITICAL WARNING:** Before proceeding, you MUST ask for a final confirmation using `AskUserQuestion`:
+            ```
+            AskUserQuestion:
+              question: "WARNING: This will permanently delete the track folder and all its contents. This action cannot be undone. Are you sure?"
+              header: "Confirm Delete"
+              options:
+                - label: "Yes, delete permanently"
+                  description: "Permanently delete the track (cannot be undone)"
+                - label: "No, cancel"
+                  description: "Cancel deletion"
+              multiSelect: false
+            ```
         ii. **Handle Confirmation:**
-            - **If 'yes'**:
+            - **If user confirms:**
                 a. **Delete Track Folder:** Permanently delete the track's folder from `maestro/tracks/<track_id>`.
                 b. **Remove from Tracks File:** Read the content of `maestro/tracks.md`, remove the entire section for the completed track, and write the modified content back to the file.
                 c. **Announce Success:** Announce: "Track '<track_description>' has been permanently deleted."
-            - **If 'no' (or anything else)**:
+            - **If user cancels:**
                 a. **Announce Cancellation:** Announce: "Deletion cancelled. The track has not been changed."
-    *   **If user chooses "C" (Skip) or provides any other input:**
+    *   **If user chooses "Skip":**
         *   Announce: "Okay, the completed track will remain in your tracks file for now."

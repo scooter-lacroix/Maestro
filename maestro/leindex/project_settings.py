@@ -7,7 +7,6 @@ for the LeIndex MCP server.
 import os
 import json
 import shutil
-import pickle
 import tempfile
 import hashlib
 import logging
@@ -288,8 +287,8 @@ class ProjectSettings:
                 index_path = os.path.join(os.getcwd(), INDEX_FILE)
                 logger.debug(f"Using fallback path: {index_path}")
 
-            with open(index_path, 'wb') as f:
-                pickle.dump(file_index, f)
+            with open(index_path, 'w', encoding='utf-8') as f:
+                json.dump(file_index, f, indent=2)
 
             logger.debug(f"Index saved successfully to: {index_path}")
         except Exception as e:
@@ -298,8 +297,8 @@ class ProjectSettings:
             try:
                 fallback_path = os.path.join(os.getcwd(), INDEX_FILE)
                 logger.debug(f"Trying fallback path: {fallback_path}")
-                with open(fallback_path, 'wb') as f:
-                    pickle.dump(file_index, f)
+                with open(fallback_path, 'w', encoding='utf-8') as f:
+                    json.dump(file_index, f, indent=2)
                 logger.debug(f"Index saved to fallback path: {fallback_path}")
             except Exception as e2:
                 logger.debug(f"Error saving index to fallback path: {e2}")
@@ -319,11 +318,11 @@ class ProjectSettings:
 
             if os.path.exists(index_path):
                 try:
-                    with open(index_path, 'rb') as f:
-                        index = pickle.load(f)
+                    with open(index_path, 'r', encoding='utf-8') as f:
+                        index = json.load(f)
                     logger.debug(f"Index loaded successfully from: {index_path}")
                     return index
-                except (pickle.PickleError, EOFError) as e:
+                except (json.JSONDecodeError, EOFError) as e:
                     logger.debug(f"Error parsing index file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
@@ -336,8 +335,8 @@ class ProjectSettings:
                 if os.path.exists(fallback_path):
                     logger.debug(f"Trying fallback path: {fallback_path}")
                     try:
-                        with open(fallback_path, 'rb') as f:
-                            index = pickle.load(f)
+                        with open(fallback_path, 'r', encoding='utf-8') as f:
+                            index = json.load(f)
                         logger.debug(f"Index loaded from fallback path: {fallback_path}")
                         return index
                     except Exception as e:
@@ -371,8 +370,8 @@ class ProjectSettings:
                 cache_path = os.path.join(os.getcwd(), CACHE_FILE)
                 logger.debug(f"Using fallback path: {cache_path}")
 
-            with open(cache_path, 'wb') as f:
-                pickle.dump(content_cache, f)
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(content_cache, f, indent=2)
 
             logger.debug(f"Cache saved successfully to: {cache_path}")
         except Exception as e:
@@ -381,8 +380,8 @@ class ProjectSettings:
             try:
                 fallback_path = os.path.join(os.getcwd(), CACHE_FILE)
                 logger.debug(f"Trying fallback path: {fallback_path}")
-                with open(fallback_path, 'wb') as f:
-                    pickle.dump(content_cache, f)
+                with open(fallback_path, 'w', encoding='utf-8') as f:
+                    json.dump(content_cache, f, indent=2)
                 logger.debug(f"Cache saved to fallback path: {fallback_path}")
             except Exception as e2:
                 logger.debug(f"Error saving cache to fallback path: {e2}")
@@ -402,11 +401,11 @@ class ProjectSettings:
 
             if os.path.exists(cache_path):
                 try:
-                    with open(cache_path, 'rb') as f:
-                        cache = pickle.load(f)
+                    with open(cache_path, 'r', encoding='utf-8') as f:
+                        cache = json.load(f)
                     logger.debug(f"Cache loaded successfully from: {cache_path}")
                     return cache
-                except (pickle.PickleError, EOFError) as e:
+                except (json.JSONDecodeError, EOFError) as e:
                     logger.debug(f"Error parsing cache file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
@@ -419,8 +418,8 @@ class ProjectSettings:
                 if os.path.exists(fallback_path):
                     logger.debug(f"Trying fallback path: {fallback_path}")
                     try:
-                        with open(fallback_path, 'rb') as f:
-                            cache = pickle.load(f)
+                        with open(fallback_path, 'r', encoding='utf-8') as f:
+                            cache = json.load(f)
                         logger.debug(f"Cache loaded from fallback path: {fallback_path}")
                         return cache
                     except Exception as e:
@@ -454,8 +453,8 @@ class ProjectSettings:
                 metadata_path = os.path.join(os.getcwd(), METADATA_FILE)
                 logger.debug(f"Using fallback path: {metadata_path}")
 
-            with open(metadata_path, 'wb') as f:
-                pickle.dump(metadata, f)
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
 
             logger.debug(f"Metadata saved successfully to: {metadata_path}")
         except Exception as e:
@@ -464,8 +463,8 @@ class ProjectSettings:
             try:
                 fallback_path = os.path.join(os.getcwd(), METADATA_FILE)
                 logger.debug(f"Trying fallback path: {fallback_path}")
-                with open(fallback_path, 'wb') as f:
-                    pickle.dump(metadata, f)
+                with open(fallback_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, indent=2)
                 logger.debug(f"Metadata saved to fallback path: {fallback_path}")
             except Exception as e2:
                 logger.debug(f"Error saving metadata to fallback path: {e2}")
@@ -485,11 +484,11 @@ class ProjectSettings:
 
             if os.path.exists(metadata_path):
                 try:
-                    with open(metadata_path, 'rb') as f:
-                        metadata = pickle.load(f)
+                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
                     logger.debug(f"Metadata loaded successfully from: {metadata_path}")
                     return metadata
-                except (pickle.PickleError, EOFError) as e:
+                except (json.JSONDecodeError, EOFError) as e:
                     logger.debug(f"Error parsing metadata file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
@@ -502,8 +501,8 @@ class ProjectSettings:
                 if os.path.exists(fallback_path):
                     logger.debug(f"Trying fallback path: {fallback_path}")
                     try:
-                        with open(fallback_path, 'rb') as f:
-                            metadata = pickle.load(f)
+                        with open(fallback_path, 'r', encoding='utf-8') as f:
+                            metadata = json.load(f)
                         logger.debug(f"Metadata loaded from fallback path: {fallback_path}")
                         return metadata
                     except Exception as e:

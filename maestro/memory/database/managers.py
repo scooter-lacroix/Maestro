@@ -297,8 +297,8 @@ class DatabaseManager:
         if not self.backend:
             logger.warning("Analytics query attempted but no backend available.")
             # Fallback to SQLite via session if possible, or raise
-            return self.session.execute(text(query), kwargs)
-        return self.backend.query_analytics(query, **kwargs)
+            return self.session.execute(text(query), **kwargs)
+        return self.backend.query_analytics(query, parameters=kwargs)
 
     @contextmanager
     def _transaction(self, check_disk_space: bool = True) -> Generator[None, None, None]:

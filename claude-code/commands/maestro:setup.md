@@ -102,11 +102,18 @@ AskUserQuestion:
         -   **Begin Brownfield Project Initialization Protocol:**
             -   **1.0 Pre-analysis Confirmation:**
                 1.  **Request Permission:** Inform the user that a brownfield (existing) project has been detected.
-                2.  **Ask for Permission:** Request permission for a read-only scan to analyze the project with the following options using the next structure:
-                    > A) Yes
-                    > B) No
-                    >
-                    >  Please respond with A or B.
+                2.  **Ask for Permission:** Request permission for a read-only scan to analyze the project using the `AskUserQuestion` tool:
+                    ```
+                    AskUserQuestion:
+                      question: "Analyze existing project to understand its structure, tech stack, and conventions?"
+                      header: "Scan Project"
+                      options:
+                        - label: "Yes, analyze the project"
+                          description: "Perform a read-only scan to understand the codebase"
+                        - label: "No, skip analysis"
+                          description: "Proceed without analyzing the existing code"
+                      multiSelect: false
+                    ```
                 3.  **Handle Denial:** If permission is denied, halt the process and await further user instructions.
                 4.  **Confirmation:** Upon confirmation, proceed to the next step.
 
@@ -130,6 +137,22 @@ AskUserQuestion:
                     -   Database Drivers
                 3.  **Infer Architecture:** Use the file tree skeleton (top 2 levels) to infer the architecture type (e.g., Monorepo, Microservices, MVC).
                 4.  **Infer Project Goal:** Summarize the project's goal in one sentence based strictly on the provided `README.md` header or `package.json` description.
+
+            -   **2.3 Initialize Maestro Directory and Copy Critical Think Templates (EARLY):**
+                1.  **Ensure Maestro Directory Exists:** Execute `mkdir -p maestro` to create the Maestro directory if it doesn't exist.
+                2.  **Copy Critical Think Templates:** Immediately copy the Critical Think templates to the project so they are available during setup:
+                    -   Execute `mkdir -p maestro/critical_think/templates`.
+                    -   Copy all Critical Think templates from the user's Maestro installation to the project:
+                        -   `~/.claude/maestro-templates/criticalthink_after_action.md` → `maestro/critical_think/templates/criticalthink_after_action.md`
+                        -   `~/.claude/maestro-templates/criticalthink_agent_delegation.md` → `maestro/critical_think/templates/criticalthink_agent_delegation.md`
+                        -   `~/.claude/maestro-templates/criticalthink_before_action.md` → `maestro/critical_think/templates/criticalthink_before_action.md`
+                        -   `~/.claude/maestro-templates/criticalthink_docs.md` → `maestro/critical_think/templates/criticalthink_docs.md`
+                        -   `~/.claude/maestro-templates/criticalthink_implementation.md` → `maestro/critical_think/templates/criticalthink_implementation.md`
+                        -   `~/.claude/maestro-templates/criticalthink_question.md` → `maestro/critical_think/templates/criticalthink_question.md`
+                    -   **Fallback:** If the templates are not found in `~/.claude/maestro-templates/`, copy them from the Maestro installation directory if available, or notify the user that Critical Think templates will need to be added manually.
+                3.  **Initialize State File:** Create `maestro/setup_state.json` with the exact content:
+                    `{"last_successful_step": ""}`
+
         -   **Upon completing the brownfield initialization protocol, proceed to the Generate Product Guide section in 2.1.**
     -   **If Greenfield:**
         -   Announce that a new project will be initialized.
@@ -143,7 +166,17 @@ AskUserQuestion:
     -   **CRITICAL: You MUST NOT execute any tool calls until the user has provided a response.**
     -   **Upon receiving the user's response:**
         -   Execute `mkdir -p maestro`.
-        -   **Initialize State File:** Immediately after creating the `maestro` directory, you MUST create `maestro/setup_state.json` with the exact content:
+        -   **Copy Critical Think Templates (EARLY):** Immediately after creating the `maestro` directory, you MUST copy the Critical Think templates to the project so they are available during setup:
+            -   Execute `mkdir -p maestro/critical_think/templates`.
+            -   Copy all Critical Think templates from the user's Maestro installation to the project:
+                -   `~/.claude/maestro-templates/criticalthink_after_action.md` → `maestro/critical_think/templates/criticalthink_after_action.md`
+                -   `~/.claude/maestro-templates/criticalthink_agent_delegation.md` → `maestro/critical_think/templates/criticalthink_agent_delegation.md`
+                -   `~/.claude/maestro-templates/criticalthink_before_action.md` → `maestro/critical_think/templates/criticalthink_before_action.md`
+                -   `~/.claude/maestro-templates/criticalthink_docs.md` → `maestro/critical_think/templates/criticalthink_docs.md`
+                -   `~/.claude/maestro-templates/criticalthink_implementation.md` → `maestro/critical_think/templates/criticalthink_implementation.md`
+                -   `~/.claude/maestro-templates/criticalthink_question.md` → `maestro/critical_think/templates/criticalthink_question.md`
+            -   **Fallback:** If the templates are not found in `~/.claude/maestro-templates/`, copy them from the Maestro installation directory if available, or notify the user that Critical Think templates will need to be added manually.
+        -   **Initialize State File:** After copying templates, create `maestro/setup_state.json` with the exact content:
             `{"last_successful_step": ""}`
         -   Write the user's response into `maestro/product.md` under a header named `# Initial Concept`.
 
@@ -151,7 +184,7 @@ AskUserQuestion:
 
 ### 2.1 Generate Product Guide (Interactive)
 1.  **Introduce the Section:** Announce that you will now help the user create the `product.md`.
-2.  **Ask Questions Sequentially:** Ask one question at a time. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
+2.  **Ask Questions Sequentially:** Ask one question at a time using the `AskUserQuestion` tool. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
         -   **CONSTRAINT:** Limit your inquiry to a maximum of 5 questions.
         -   **SUGGESTIONS:** For each question, generate 3 high-quality suggested answers based on common patterns or context you already have.
         -   **Example Topics:** Target users, goals, features, etc
@@ -160,40 +193,46 @@ AskUserQuestion:
                 *   Use **Additive** for brainstorming and defining scope (e.g., users, goals, features, project guidelines). These questions allow for multiple answers.
                 *   Use **Exclusive Choice** for foundational, singular commitments (e.g., selecting a primary technology, a specific workflow rule). These questions require a single answer.
 
-            *   **2. Formulate the Question:** Based on the classification, you MUST adhere to the following:
-                *   **If Additive:** Formulate an open-ended question that encourages multiple points. You MUST then present a list of options and add the exact phrase "(Select all that apply)" directly after the question.
-                *   **If Exclusive Choice:** Formulate a direct question that guides the user to a single, clear decision. You MUST NOT add "(Select all that apply)".
-
+            *   **2. Formulate the Question:** Based on the classification, you MUST use the `AskUserQuestion` tool with proper structure:
+                ```
+                AskUserQuestion:
+                  question: "Your question here?"
+                  header: "Short Header"
+                  options:
+                    - label: "Option A"
+                      description: "Brief description of option A"
+                    - label: "Option B"
+                      description: "Brief description of option B"
+                    - label: "Option C"
+                      description: "Brief description of option C"
+                    - label: "Type your own answer"
+                      description: "Provide a custom response"
+                    - label: "Autogenerate and review product.md"
+                      description: "Auto-generate the remaining content and proceed"
+                  multiSelect: false  # or true for additive questions
+                ```
             *   **3. Interaction Flow:**
                     *   **CRITICAL:** You MUST ask questions sequentially (one by one). Do not ask multiple questions in a single turn. Wait for the user's response after each question.
-                *   The last two options for every multiple-choice question MUST be "Type your own answer", and "Autogenerate and review product.md".
+                *   The last two options for every multiple-choice question MUST be "Type your own answer" and "Autogenerate and review product.md".
                 *   Confirm your understanding by summarizing before moving on.
-            - **Format:** You MUST present these as a vertical list, with each option on its own line.
-            - **Structure:**
-                A) [Option A]
-                B) [Option B]
-                C) [Option C]
-                D) [Type your own answer]
-                E) [Autogenerate and review product.md]
     -   **FOR EXISTING PROJECTS (BROWNFIELD):** Ask project context-aware questions based on the code analysis.
-    -   **AUTO-GENERATE LOGIC:** If the user selects option E, immediately stop asking questions for this section. Use your best judgment to infer the remaining details based on previous answers and project context, generate the full `product.md` content, write it to the file, and proceed to the next section.
+    -   **AUTO-GENERATE LOGIC:** If the user selects "Autogenerate and review product.md", immediately stop asking questions for this section. Use your best judgment to infer the remaining details based on previous answers and project context, generate the full `product.md` content, write it to the file, and proceed to the next section.
 3.  **Apply Prompt Enhancer:** Before generating the document, you MUST apply the user's "prompt enhancer" hook if available. This hook enhances question generation and response synthesis based on user preferences and context.
-4.  **Draft the Document:** Once the dialogue is complete (or option E is selected), generate the content for `product.md`. If option E was chosen, use your best judgment to infer the remaining details based on previous answers and project context. You are encouraged to expand on the gathered details to create a comprehensive document.
-    -   **CRITICAL:** The source of truth for generation is **only the user's selected answer(s)**. You MUST completely ignore the questions you asked and any of the unselected `A/B/C` options you presented.
-        -   **Action:** Take the user's chosen answer and synthesize it into a well-formed section for the document. You are encouraged to expand on the user's choice to create a comprehensive and polished output. DO NOT include the conversational options (A, B, C, D, E) in the final file.
-5.  **User Confirmation Loop:** Present the drafted content to the user for review and begin the confirmation loop.
-    > "I've drafted the product guide. Please review the following:"
-    >
-    > ```markdown
-    > [Drafted product.md content here]
-    > ```
-    >
-    > "What would you like to do next?
-    > A) **Approve:** The document is correct and we can proceed.
-    > B) **Suggest Changes:** Tell me what to modify.
-    >
-    > You can always edit the generated file with the Claude Code built-in option "Modify with external editor" (if present), or with your favorite external editor after this step.
-    > Please respond with A or B."
+4.  **Draft the Document:** Once the dialogue is complete (or auto-generate is selected), generate the content for `product.md`. If auto-generate was chosen, use your best judgment to infer the remaining details based on previous answers and project context. You are encouraged to expand on the gathered details to create a comprehensive document.
+    -   **CRITICAL:** The source of truth for generation is **only the user's selected answer(s)**. You MUST completely ignore the questions you asked and any of the unselected options you presented.
+        -   **Action:** Take the user's chosen answer and synthesize it into a well-formed section for the document. You are encouraged to expand on the user's choice to create a comprehensive and polished output. DO NOT include the conversational options in the final file.
+5.  **User Confirmation Loop:** Present the drafted content to the user for review and begin the confirmation loop using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "I've drafted the product guide based on your responses. Please review and decide:"
+      header: "Review Draft"
+      options:
+        - label: "Approve"
+          description: "The document is correct and we can proceed"
+        - label: "Suggest Changes"
+          description: "Tell me what to modify (you can also edit directly after this step)"
+      multiSelect: false
+    ```
     -   **Loop:** Based on user response, either apply changes and re-present the document, or break the loop on approval.
 6.  **Write File:** Once approved, append the generated content to the existing `maestro/product.md` file, preserving the `# Initial Concept` section.
 7.  **Commit State:** Upon successful creation of the file, you MUST immediately write to `maestro/setup_state.json` with the exact content:
@@ -202,49 +241,26 @@ AskUserQuestion:
 
 ### 2.2 Generate Product Guidelines (Interactive)
 1.  **Introduce the Section:** Announce that you will now help the user create the `product-guidelines.md`.
-2.  **Ask Questions Sequentially:** Ask one question at a time. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
+2.  **Ask Questions Sequentially:** Ask one question at a time using the `AskUserQuestion` tool. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
     -   **CONSTRAINT:** Limit your inquiry to a maximum of 5 questions.
     -   **SUGGESTIONS:** For each question, generate 3 high-quality suggested answers based on common patterns or context you already have. Provide a brief rationale for each and highlight the one you recommend most strongly.
     -   **Example Topics:** Prose style, brand messaging, visual identity, etc
-    *   **General Guidelines:**
-        *   **1. Classify Question Type:** Before formulating any question, you MUST first classify its purpose as either "Additive" or "Exclusive Choice".
-            *   Use **Additive** for brainstorming and defining scope (e.g., users, goals, features, project guidelines). These questions allow for multiple answers.
-            *   Use **Exclusive Choice** for foundational, singular commitments (e.g., selecting a primary technology, a specific workflow rule). These questions require a single answer.
-
-        *   **2. Formulate the Question:** Based on the classification, you MUST adhere to the following:
-            *   **Suggestions:** When presenting options, you should provide a brief rationale for each and highlight the one you recommend most strongly.
-            *   **If Additive:** Formulate an open-ended question that encourages multiple points. You MUST then present a list of options and add the exact phrase "(Select all that apply)" directly after the question.
-            *   **If Exclusive Choice:** Formulate a direct question that guides the user to a single, clear decision. You MUST NOT add "(Select all that apply)".
-
-        *   **3. Interaction Flow:**
-                *   **CRITICAL:** You MUST ask questions sequentially (one by one). Do not ask multiple questions in a single turn. Wait for the user's response after each question.
-            *   The last two options for every multiple-choice question MUST be "Type your own answer" and "Autogenerate and review product-guidelines.md".
-            *   Confirm your understanding by summarizing before moving on.
-        - **Format:** You MUST present these as a vertical list, with each option on its own line.
-        - **Structure:**
-            A) [Option A]
-            B) [Option B]
-            C) [Option C]
-            D) [Type your own answer]
-            E) [Autogenerate and review product-guidelines.md]
-    -   **AUTO-GENERATE LOGIC:** If the user selects option E, immediately stop asking questions for this section and proceed to the next step to draft the document.
-3.  **Apply Prompt Enhancer:** Before generating the document, you MUST apply the user's "prompt enhancer" hook if available. This hook enhances question generation and response synthesis based on user preferences and context.
-4.  **Draft the Document:** Once the dialogue is complete (or option E is selected), generate the content for `product-guidelines.md`. If option E was chosen, use your best judgment to infer the remaining details based on previous answers and project context. You are encouraged to expand on the gathered details to create a comprehensive document.
-     **CRITICAL:** The source of truth for generation is **only the user's selected answer(s)**. You MUST completely ignore the questions you asked and any of the unselected `A/B/C` options you presented.
-    -   **Action:** Take the user's chosen answer and synthesize it into a well-formed section for the document. You are encouraged to expand on the user's choice to create a comprehensive and polished output. DO NOT include the conversational options (A, B, C, D, E) in the final file.
-5.  **User Confirmation Loop:** Present the drafted content to the user for review and begin the confirmation loop.
-    > "I've drafted the product guidelines. Please review the following:"
-    >
-    > ```markdown
-    > [Drafted product-guidelines.md content here]
-    > ```
-    >
-    > "What would you like to do next?
-    > A) **Approve:** The document is correct and we can proceed.
-    > B) **Suggest Changes:** Tell me what to modify.
-    >
-    > You can always edit the generated file with the Claude Code built-in option "Modify with external editor" (if present), or with your favorite external editor after this step.
-    > Please respond with A or B."
+    *   **General Guidelines:** Use the same `AskUserQuestion` format as in section 2.1, adjusting the question header and options appropriately. Include "Autogenerate and review product-guidelines.md" as the final option.
+    -   **AUTO-GENERATE LOGIC:** If the user selects "Autogenerate and review product-guidelines.md", immediately stop asking questions for this section and proceed to draft the document.
+3.  **Apply Prompt Enhancer:** Before generating the document, you MUST apply the user's "prompt enhancer" hook if available.
+4.  **Draft the Document:** Once the dialogue is complete (or auto-generate is selected), generate the content for `product-guidelines.md`. Use the same source-of-truth principles as in section 2.1.
+5.  **User Confirmation Loop:** Present the drafted content to the user for review using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "I've drafted the product guidelines based on your responses. Please review and decide:"
+      header: "Review Draft"
+      options:
+        - label: "Approve"
+          description: "The document is correct and we can proceed"
+        - label: "Suggest Changes"
+          description: "Tell me what to modify (you can also edit directly after this step)"
+      multiSelect: false
+    ```
     -   **Loop:** Based on user response, either apply changes and re-present the document, or break the loop on approval.
 6.  **Write File:** Once approved, write the generated content to the `maestro/product-guidelines.md` file.
 7.  **Commit State:** Upon successful creation of the file, you MUST immediately write to `maestro/setup_state.json` with the exact content:
@@ -253,56 +269,42 @@ AskUserQuestion:
 
 ### 2.3 Generate Tech Stack (Interactive)
 1.  **Introduce the Section:** Announce that you will now help define the technology stacks.
-2.  **Ask Questions Sequentially:** Ask one question at a time. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
+2.  **Ask Questions Sequentially:** Ask one question at a time using the `AskUserQuestion` tool. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
     -   **CONSTRAINT:** Limit your inquiry to a maximum of 5 questions.
     -   **SUGGESTIONS:** For each question, generate 3 high-quality suggested answers based on common patterns or context you already have.
     -   **Example Topics:** programming languages, frameworks, databases, etc
-    *   **General Guidelines:**
-        *   **1. Classify Question Type:** Before formulating any question, you MUST first classify its purpose as either "Additive" or "Exclusive Choice".
-            *   Use **Additive** for brainstorming and defining scope (e.g., users, goals, features, project guidelines). These questions allow for multiple answers.
-            *   Use **Exclusive Choice** for foundational, singular commitments (e.g., selecting a primary technology, a specific workflow rule). These questions require a single answer.
-
-        *   **2. Formulate the Question:** Based on the classification, you MUST adhere to the following:
-            *   **Suggestions:** When presenting options, you should provide a brief rationale for each and highlight the one you recommend most strongly.
-            *   **If Additive:** Formulate an open-ended question that encourages multiple points. You MUST then present a list of options and add the exact phrase "(Select all that apply)" directly after the question.
-            *   **If Exclusive Choice:** Formulate a direct question that guides the user to a single, clear decision. You MUST NOT add "(Select all that apply)".
-
-        *   **3. Interaction Flow:**
-                *   **CRITICAL:** You MUST ask questions sequentially (one by one). Do not ask multiple questions in a single turn. Wait for the user's response after each question.
-            *   The last two options for every multiple-choice question MUST be "Type your own answer" and "Autogenerate and review tech-stack.md".
-            *   Confirm your understanding by summarizing before moving on.
-        - **Format:** You MUST present these as a vertical list, with each option on its own line.
-        - **Structure:**
-            A) [Option A]
-            B) [Option B]
-            C) [Option C]
-            D) [Type your own answer]
-            E) [Autogenerate and review tech-stack.md]
+    *   **General Guidelines:** Use the same `AskUserQuestion` format as in section 2.1, adjusting the question header and options appropriately.
     -   **FOR EXISTING PROJECTS (BROWNFIELD):**
             -   **CRITICAL WARNING:** Your goal is to document the project's *existing* tech stack, not to propose changes.
             -   **State the Inferred Stack:** Based on the code analysis, you MUST state the technology stack that you have inferred. Do not present any other options.
-            -   **Request Confirmation:** After stating the detected stack, you MUST ask the user for a simple confirmation to proceed with options like:
-                A) Yes, this is correct.
-                B) No, I need to provide the correct tech stack.
-            -   **Handle Disagreement:** If the user disputes the suggestion, acknowledge their input and allow them to provide the correct technology stack manually as a last resort.
-    -   **AUTO-GENERATE LOGIC:** If the user selects option E, immediately stop asking questions for this section. Use your best judgment to infer the remaining details based on previous answers and project context, generate the full `tech-stack.md` content, write it to the file, and proceed to the next section.
-3.  **Apply Prompt Enhancer:** Before generating the document, you MUST apply the user's "prompt enhancer" hook if available. This hook enhances question generation and response synthesis based on user preferences and context.
-4.  **Draft the Document:** Once the dialogue is complete (or option E is selected), generate the content for `tech-stack.md`. If option E was chosen, use your best judgment to infer the remaining details based on previous answers and project context. You are encouraged to expand on the gathered details to create a comprehensive document.
-    -   **CRITICAL:** The source of truth for generation is **only the user's selected answer(s)**. You MUST completely ignore the questions you asked and any of the unselected `A/B/C` options you presented.
-    -   **Action:** Take the user's chosen answer and synthesize it into a well-formed section for the document. You are encouraged to expand on the user's choice to create a comprehensive and polished output. DO NOT include the conversational options (A, B, C, D, E) in the final file.
-4.  **User Confirmation Loop:** Present the drafted content to the user for review and begin the confirmation loop.
-    > "I've drafted the tech stack document. Please review the following:"
-    >
-    > ```markdown
-    > [Drafted tech-stack.md content here]
-    > ```
-    >
-    > "What would you like to do next?
-    > A) **Approve:** The document is correct and we can proceed.
-    > B) **Suggest Changes:** Tell me what to modify.
-    >
-    > You can always edit the generated file with the Claude Code built-in option "Modify with external editor" (if present), or with your favorite external editor after this step.
-    > Please respond with A or B."
+            -   **Request Confirmation:** After stating the detected stack, you MUST ask the user for confirmation using `AskUserQuestion`:
+                ```
+                AskUserQuestion:
+                  question: "Based on my analysis, your project uses: [inferred stack]. Is this correct?"
+                  header: "Confirm Stack"
+                  options:
+                    - label: "Yes, this is correct"
+                      description: "The inferred tech stack is accurate"
+                    - label: "No, I need to provide corrections"
+                      description: "I will provide the correct tech stack"
+                  multiSelect: false
+                ```
+            -   **Handle Disagreement:** If the user indicates the stack is incorrect, allow them to provide the correct technology stack.
+    -   **AUTO-GENERATE LOGIC:** If the user selects "Autogenerate and review tech-stack.md", immediately stop asking questions and proceed to draft the document.
+3.  **Apply Prompt Enhancer:** Before generating the document, you MUST apply the user's "prompt enhancer" hook if available.
+4.  **Draft the Document:** Once the dialogue is complete (or auto-generate is selected), generate the content for `tech-stack.md`. Use the same source-of-truth principles as in section 2.1.
+5.  **User Confirmation Loop:** Present the drafted content to the user for review using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "I've drafted the tech stack document based on your responses. Please review and decide:"
+      header: "Review Draft"
+      options:
+        - label: "Approve"
+          description: "The document is correct and we can proceed"
+        - label: "Suggest Changes"
+          description: "Tell me what to modify (you can also edit directly after this step)"
+      multiSelect: false
+    ```
     -   **Loop:** Based on user response, either apply changes and re-present the document, or break the loop on approval.
 6.  **Write File:** Once approved, write the generated content to the `maestro/tech-stack.md` file.
 7.  **Commit State:** Upon successful creation of the file, you MUST immediately write to `maestro/setup_state.json` with the exact content:
@@ -315,18 +317,35 @@ AskUserQuestion:
     -   List the available style guides by running `ls ~/.claude/maestro-templates/code_styleguides/`.
     -   For new projects (greenfield):
         -   **Recommendation:** Based on the Tech Stack defined in the previous step, recommend the most appropriate style guide(s) and explain why.
-        -   Ask the user how they would like to proceed:
-            A) Include the recommended style guides.
-            B) Edit the selected set.
-        -   If the user chooses to edit (Option B):
+        -   Ask the user using `AskUserQuestion`:
+            ```
+            AskUserQuestion:
+              question: "Based on your tech stack, I recommend these style guides: [list]. How would you like to proceed?"
+              header: "Style Guides"
+              options:
+                - label: "Include the recommended style guides"
+                  description: "Use the recommended guides for this project"
+                - label: "Edit the selected set"
+                  description: "Choose different style guides from the available options"
+              multiSelect: false
+            ```
+        -   If the user chooses to edit:
             -   Present the list of all available guides to the user as a **numbered list**.
             -   Ask the user which guide(s) they would like to copy.
     -   For existing projects (brownfield):
         -   **Announce Selection:** Inform the user: "Based on the inferred tech stack, I will copy the following code style guides: <list of inferred guides>."
-        -   **Ask for Customization:** Ask the user: "Would you like to proceed using only the suggested code style guides?"
-            -   Ask the user for a simple confirmation to proceed with options like:
-                    A) Yes, I want to proceed with the suggested code style guides.
-                    B) No, I want to add more code style guides.
+        -   **Ask for Customization:** Ask the user using `AskUserQuestion`:
+            ```
+            AskUserQuestion:
+              question: "Based on your tech stack, I recommend these style guides: [list]. Proceed with these or add more?"
+              header: "Style Guides"
+              options:
+                - label: "Yes, proceed with suggested guides"
+                  description: "Use the recommended guides for this project"
+                - label: "No, add more style guides"
+                  description: "Choose additional style guides from the available options"
+              multiSelect: false
+            ```
     -   **Action:** Construct and execute a command to create the directory and copy all selected files. For example: `mkdir -p maestro/code_styleguides && cp ~/.claude/maestro-templates/code_styleguides/python.md ~/.claude/maestro-templates/code_styleguides/javascript.md maestro/code_styleguides/`
     -   **Commit State:** Upon successful completion of the copy command, you MUST immediately write to `maestro/setup_state.json` with the exact content:
         `{"last_successful_step": "2.4_code_styleguides"}`
@@ -336,37 +355,45 @@ AskUserQuestion:
     -   Copy `~/.claude/maestro-templates/workflow.md` to `maestro/workflow.md`.
 
 2.  **Configure Workflow Mode:**
-    -   **Ask the user:** "Do you want to use the default manual workflow or autonomous mode?"
-        -   **Default Manual Workflow:** Pause for user verification after each phase completion
-        -   **Autonomous Mode:** Automatically verify and proceed through phases with optional checkpoints
-    -   Present options:
-        A) Default Manual Workflow (pause after each phase)
-        B) Autonomous Mode with full autonomy (pause only at final phase)
-        C) Autonomous Mode with checkpoints at every 3rd phase completion (33%, 66%, 99%)
-        D) Autonomous Mode with checkpoints at every quarter completion point (25%, 50%, 75%, 100%)
-        E) Autonomous Mode with checkpoints at every half completion point (50%, 100%)
+    -   **Ask the user** using `AskUserQuestion`:
+        ```
+        AskUserQuestion:
+          question: "Do you want to use the default manual workflow or autonomous mode?"
+          header: "Workflow Mode"
+          options:
+            - label: "Default Manual Workflow"
+              description: "Pause for user verification after each phase completion"
+            - label: "Autonomous - Full"
+              description: "Pause only at final phase (full autonomy)"
+            - label: "Autonomous - Checkpoints (33%, 66%, 99%)"
+              description: "Pause at every 3rd phase completion"
+            - label: "Autonomous - Checkpoints (25%, 50%, 75%, 100%)"
+              description: "Pause at every quarter completion point"
+            - label: "Autonomous - Checkpoints (50%, 100%)"
+              description: "Pause at every half completion point"
+          multiSelect: false
+        ```
 
 3.  **Configure "Tzar of Excellence" Review Agent:**
-    -   **Ask the user:** "Which agent should conduct the 'Tzar of Excellence' review for each phase?"
-        -   **Inform the user:** "The 'Tzar of Excellence' is a rigorous zero-tolerance code review that ensures production-ready quality before proceeding to the next phase. You can:"
-            -   Type a custom agent name
-            -   List available agents
-            -   Use the default 'codex-reviewer' agent"
-    -   **Present options:**
-        A) Use default 'codex-reviewer' agent (recommended)
-        B) List available agents
-        C) Type custom agent name
-
-    -   **If user selects B) List available agents:**
-        -   Present a numbered list of available review agents:
-            1. **codex-reviewer** (GPT-5 reasoning, high-rigor production review)
-            2. **gemini-analyzer** (1M+ context, comprehensive analysis)
-            3. **opus-specialist** (Advanced reasoning with thinking mode)
-            4. **qwen-coder** (Production implementation focus)
-        -   Ask the user to select by number or type a custom name.
-
-    -   **If user selects C) Type custom agent name:**
-        -   Prompt: "Please enter the agent name to use for 'Tzar of Excellence' reviews:"
+    -   **Inform the user:** "The 'Tzar of Excellence' is a rigorous zero-tolerance code review that ensures production-ready quality before proceeding to the next phase."
+    -   **Ask the user** using `AskUserQuestion`:
+        ```
+        AskUserQuestion:
+          question: "Which agent should conduct the 'Tzar of Excellence' review for each phase?"
+          header: "Review Agent"
+          options:
+            - label: "codex-reviewer (recommended)"
+              description: "GPT-5 reasoning, high-rigor production review"
+            - label: "gemini-analyzer"
+              description: "1M+ context, comprehensive analysis"
+            - label: "opus-specialist"
+              description: "Advanced reasoning with thinking mode"
+            - label: "qwen-coder"
+              description: "Production implementation focus"
+            - label: "Type custom agent name"
+              description: "Specify a different agent"
+          multiSelect: false
+        ```
 
 4.  **Create Workflow Configuration File:**
     -   Create `maestro/workflow-config.json` with the selected configuration:
@@ -385,11 +412,7 @@ AskUserQuestion:
           }
         }
         ```
-    -   **If autonomous mode selected:** Set `workflow_mode` to `"autonomous"` and `checkpoint_interval` to the selected value:
-        -   Full autonomy: `"checkpoint_interval": "final"`
-        -   Every 3rd: `"checkpoint_interval": "3"`
-        -   Every quarter: `"checkpoint_interval": "quarter"`
-        -   Every half: `"checkpoint_interval": "half"`
+    -   **If autonomous mode selected:** Set `workflow_mode` to `"autonomous"` and `checkpoint_interval` to the selected value.
     -   **Set `review_agent`** to the selected agent name.
 
 5.  **Commit State:** After the `workflow.md` file and `workflow-config.json` are successfully written or updated, you MUST immediately write to `maestro/setup_state.json` with the exact content:
@@ -411,28 +434,38 @@ AskUserQuestion:
     -   If not installed: Proceed to step 3
 
 3.  **Offer Installation:**
-    -   **Ask:** "claude-hud is not installed. Would you like to install it now?"
-        -   A) Yes, install claude-hud (recommended)
-        -   B) Skip for now (can install later with `/claude-hud:setup`)
-    -   **If A selected:**
+    -   **Ask** using `AskUserQuestion`:
+        ```
+        AskUserQuestion:
+          question: "claude-hud is not installed. Would you like to install it now?"
+          header: "Install claude-hud"
+          options:
+            - label: "Yes, install claude-hud"
+              description: "Install claude-hud for native token tracking (recommended)"
+            - label: "Skip for now"
+              description: "Can install later with /claude-hud:setup"
+          multiSelect: false
+        ```
+    -   **If user selects to install:**
         -   Run: `/claude-hud:setup` (if available as command)
-        -   Or provide manual installation instructions:
-            > "To install claude-hud:
-            > 1. Visit: https://github.com/Cline-org/claude-hud
-            > 2. Follow installation instructions for your platform
-            > 3. Run `/claude-hud:setup` to configure"
+        -   Or provide manual installation instructions.
     -   Verify installation and report status
 
 4.  **Configure Statusline:**
-    -   **Ask:** "Configure statusline to show Maestro session information?"
-        -   A) Yes, configure for Maestro (recommended)
-        -   B) Use default claude-hud settings
-    -   **If A selected:**
-        -   Create or update claude-hud configuration to show:
-            - Current command (maestro:setup, maestro:implement, etc.)
-            - Track/task being worked on
-            - Token usage for session
-            - Cost estimates
+    -   **Ask** using `AskUserQuestion`:
+        ```
+        AskUserQuestion:
+          question: "Configure statusline to show Maestro session information?"
+          header: "Statusline Config"
+          options:
+            - label: "Yes, configure for Maestro"
+              description: "Show Maestro-specific info in statusline (recommended)"
+            - label: "Use default settings"
+              description: "Use standard claude-hud configuration"
+          multiSelect: false
+        ```
+    -   **If user selects to configure:**
+        -   Create or update claude-hud configuration to show Maestro-specific information.
         -   Explain: "claude-hud will now show Maestro-specific information in your statusline"
 
 5.  **Document Configuration:**
@@ -480,47 +513,30 @@ AskUserQuestion:
 ### 3.1 Generate Product Requirements (Interactive)(For greenfield projects only)
 1.  **Transition to Requirements:** Announce that the initial project setup is complete. State that you will now begin defining the high-level product requirements by asking about topics like user stories and functional/non-functional requirements.
 2.  **Analyze Context:** Read and analyze the content of `maestro/product.md` to understand the project's core concept.
-3.  **Ask Questions Sequentially:** Ask one question at a time. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
+3.  **Ask Questions Sequentially:** Ask one question at a time using the `AskUserQuestion` tool. Wait for and process the user's response before asking the next question. Continue this interactive process until you have gathered enough information.
     -   **CONSTRAINT** Limit your inquiries to a maximum of 5 questions.
     -   **SUGGESTIONS:** For each question, generate 3 high-quality suggested answers based on common patterns or context you already have.
-    *   **General Guidelines:**
-        *   **1. Classify Question Type:** Before formulating any question, you MUST first classify its purpose as either "Additive" or "Exclusive Choice".
-            *   Use **Additive** for brainstorming and defining scope (e.g., users, goals, features, project guidelines). These questions allow for multiple answers.
-            *   Use **Exclusive Choice** for foundational, singular commitments (e.g., selecting a primary technology, a specific workflow rule). These questions require a single answer.
-
-        *   **2. Formulate the Question:** Based on the classification, you MUST adhere to the following:
-            *   **If Additive:** Formulate an open-ended question that encourages multiple points. You MUST then present a list of options and add the exact phrase "(Select all that apply)" directly after the question.
-            *   **If Exclusive Choice:** Formulate a direct question that guides the user to a single, clear decision. You MUST NOT add "(Select all that apply)".
-
-        *   **3. Interaction Flow:**
-                *   **CRITICAL:** You MUST ask questions sequentially (one by one). Do not ask multiple questions in a single turn. Wait for the user's response after each question.
-            *   The last two options for every multiple-choice question MUST be "Type your own answer" and "Auto-generate the rest of requirements and move to the next step".
-            *   Confirm your understanding by summarizing before moving on.
-        - **Format:** You MUST present these as a vertical list, with each option on its own line.
-        - **Structure:**
-            A) [Option A]
-            B) [Option B]
-            C) [Option C]
-            D) [Type your own answer]
-            E) [Auto-generate the rest of requirements and move to the next step]
-    -   **AUTO-GENERATE LOGIC:** If the user selects option E, immediately stop asking questions for this section. Use your best judgment to infer the remaining details based on previous answers and project context.
--   **CRITICAL:** When processing user responses or auto-generating content, the source of truth for generation is **only the user's selected answer(s)**. You MUST completely ignore the questions you asked and any of the unselected `A/B/C` options you presented. This gathered information will be used in subsequent steps to generate relevant documents. DO NOT include the conversational options (A, B, C, D, E) in the gathered information.
+    *   **General Guidelines:** Use the same `AskUserQuestion` format as in section 2.1, adjusting the question header and options appropriately. Include "Auto-generate the rest of requirements and move to the next step" as the final option.
+    -   **AUTO-GENERATE LOGIC:** If the user selects the auto-generate option, immediately stop asking questions and proceed to the next section.
+    -   **CRITICAL:** When processing user responses, the source of truth for generation is **only the user's selected answer(s)**. You MUST completely ignore the questions you asked and any of the unselected options you presented.
 4.  **Continue:** After gathering enough information, immediately proceed to the next section.
 
 ### 3.2 Propose a Single Initial Track (Automated + Approval)
 1.  **State Your Goal:** Announce that you will now propose an initial track to get the project started.
 2.  **Generate Track Title:** Analyze the project context (`product.md`, `tech-stack.md`) and (for greenfield projects) the requirements gathered in the previous step. Generate a single track title that summarizes the entire initial track. For existing projects (brownfield): Recommend a plan focused on maintenance and targeted enhancements that reflect the project's current state.
-    - Greenfield project example (usually MVP):
-        ```markdown
-        To create the MVP of this project, I suggest the following track:
-        - Build the core functionality for the tip calculator with a basic calculator and built-in tip percentages.
-        ```
-    - Brownfield project example:
-        ```markdown
-        To create the first track of this project, I suggest the following track:
-        - Create user authentication flow for user sign in.
-        ```
-3.  **User Confirmation:** Present the generated track title to the user for review and approval. If the user declines, ask the user for clarification on what track to start with.
+3.  **User Confirmation:** Present the generated track title to the user for review and approval using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "I propose this initial track: [track description]. Does this look correct?"
+      header: "Confirm Track"
+      options:
+        - label: "Yes, proceed with this track"
+          description: "The track description is accurate"
+        - label: "No, I want to modify it"
+          description: "Provide a different track description"
+      multiSelect: false
+    ```
+    -   If the user selects to modify, ask them for clarification on what track to start with.
 
 ### 3.3 Convert the Initial Track into Artifacts (Automated)
 1.  **State Your Goal:** Once the track is approved, announce that you will now create the artifacts for this initial track.

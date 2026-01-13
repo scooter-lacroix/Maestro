@@ -6,10 +6,16 @@ It identifies Maestro projects and provides memory isolation between projects.
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
-from loguru import logger
+
+# Dependency hygiene: allow this module to import even when loguru isn't installed.
+try:
+    from loguru import logger  # type: ignore
+except ImportError:  # pragma: no cover
+    logger = logging.getLogger(__name__)
 
 
 @dataclass

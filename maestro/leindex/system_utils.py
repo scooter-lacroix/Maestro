@@ -7,6 +7,7 @@ import subprocess
 import os
 import time
 import asyncio
+import shutil
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 
@@ -162,15 +163,7 @@ class SystemInfo:
 
     def _command_exists(self, command: str) -> bool:
         """Check if a command exists on the system."""
-        try:
-            subprocess.run(
-                ["which", command],
-                capture_output=True,
-                timeout=3
-            )
-            return True
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
-            return False
+        return shutil.which(command) is not None
 
     def _get_version(self) -> str:
         """Get system version information."""
@@ -191,7 +184,16 @@ class SystemInfo:
 
     def is_root(self) -> bool:
         """Check if running with root privileges."""
-        return os.geteuid() == 0
+        try:
+            return os.geteuid() == 0
+        except AttributeError:
+            if self.system == 'windows':
+                import ctypes
+                try:
+                    return ctypes.windll.shell32.IsUserAnAdmin() != 0
+                except Exception:
+                    return False
+            return False
 
     def supports_sudo(self) -> bool:
         """Check if sudo is available."""

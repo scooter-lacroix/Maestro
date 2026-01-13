@@ -7,11 +7,24 @@ Implements Don Norman UX principles: visibility, feedback, mapping.
 from typing import Dict, List, Tuple, Optional
 import math
 from dataclasses import dataclass
-from rich.console import Console
-from rich.table import Table
-from rich.progress import Progress, BarColumn, TextColumn
-from rich.panel import Panel
-from rich.text import Text
+
+# Lazy import of rich for optional functionality
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.progress import Progress, BarColumn, TextColumn
+    from rich.panel import Panel
+    from rich.text import Text
+    RICH_AVAILABLE = True
+except ImportError:
+    Console = None
+    Table = None
+    Progress = None
+    BarColumn = None
+    TextColumn = None
+    Panel = None
+    Text = None
+    RICH_AVAILABLE = False
 
 
 class TokenSavingsCalculator:
@@ -165,45 +178,71 @@ def generate_sparkline(data: List[float], width: Optional[int] = None, show_labe
 
 class DashboardRenderer:
     """Renders visual dashboard components."""
-    
+
     def __init__(self):
-        self.console = Console()
+        if RICH_AVAILABLE:
+            self.console = Console()
+        else:
+            self.console = None
     
     def render_token_savings_section(self, savings_data: Dict) -> str:
         """
         Render token savings visualization section.
-        
+
         Args:
             savings_data: Dictionary containing token savings information
-        
+
         Returns:
             Formatted string for token savings section
         """
+        if not RICH_AVAILABLE:
+            # Fallback plain text implementation
+            original_tokens = savings_data.get("original_tokens", 0)
+            optimized_tokens = savings_data.get("optimized_tokens", 0)
+            savings_percentage = savings_data.get("savings_percentage", 0.0)
+            savings_count = savings_data.get("savings_count", 0)
+
+            progress_bar = generate_progress_bar(
+                int(abs(savings_percentage)),
+                100,
+                width=30
+            )
+
+            return (
+                f"Token Savings:\n"
+                f"  Original Tokens: {format_token_display(original_tokens)}\n"
+                f"  Optimized Tokens: {format_token_display(optimized_tokens)}\n"
+                f"  Tokens Saved: {format_token_display(savings_count)}\n"
+                f"  Savings Progress: {progress_bar}\n"
+                f"  Savings Percentage: {savings_percentage:.2f}% "
+                f"({format_token_display(savings_count)} tokens saved)\n"
+            )
+
         original_tokens = savings_data.get("original_tokens", 0)
         optimized_tokens = savings_data.get("optimized_tokens", 0)
         savings_percentage = savings_data.get("savings_percentage", 0.0)
         savings_count = savings_data.get("savings_count", 0)
-        
+
         # Create a rich table for token savings
         table = Table(title="Token Savings", show_header=True, header_style="bold magenta")
         table.add_column("Metric", style="dim")
         table.add_column("Value", justify="right")
-        
+
         table.add_row("Original Tokens", format_token_display(original_tokens))
         table.add_row("Optimized Tokens", format_token_display(optimized_tokens))
         table.add_row("Tokens Saved", format_token_display(savings_count))
-        
+
         # Add progress bar for savings percentage
         progress_bar = generate_progress_bar(
-            int(abs(savings_percentage)), 
-            100, 
+            int(abs(savings_percentage)),
+            100,
             width=30
         )
-        
+
         # Color code based on savings (green for positive, red for negative)
         savings_color = "green" if savings_percentage >= 0 else "red"
         savings_text = Text(f"{savings_percentage:.2f}%", style=savings_color)
-        
+
         # Create a panel with the savings information
         savings_panel = Panel(
             f"[bold]Savings Progress:[/bold]\n"
@@ -212,7 +251,7 @@ class DashboardRenderer:
             title="Token Savings Visualization",
             border_style="blue"
         )
-        
+
         # Properly render the panel to string
         from rich.console import Console
         from io import StringIO
@@ -225,22 +264,39 @@ class DashboardRenderer:
     def render_usage_trends_section(self, trend_data: Dict) -> str:
         """
         Render usage trends visualization section with sparklines.
-        
+
         Args:
             trend_data: Dictionary containing usage trend information
-        
+
         Returns:
             Formatted string for usage trends section
         """
+        if not RICH_AVAILABLE:
+            # Fallback plain text implementation
+            daily_usage = trend_data.get("daily_usage", [])
+            avg_daily_usage = trend_data.get("avg_daily_usage", 0)
+
+            if not daily_usage:
+                return "No usage data available"
+
+            # Generate sparkline for daily usage
+            sparkline = generate_sparkline(daily_usage, width=40, show_labels=True)
+
+            return (
+                f"Usage Trends:\n"
+                f"  Daily Usage Trend: {sparkline}\n"
+                f"  Average Daily Usage: {format_token_display(avg_daily_usage)} tokens\n"
+            )
+
         daily_usage = trend_data.get("daily_usage", [])
         avg_daily_usage = trend_data.get("avg_daily_usage", 0)
-        
+
         if not daily_usage:
             return "No usage data available"
-        
+
         # Generate sparkline for daily usage
         sparkline = generate_sparkline(daily_usage, width=40, show_labels=True)
-        
+
         # Create a panel with the trends information
         trends_panel = Panel(
             f"[bold]Daily Usage Trend:[/bold]\n"
@@ -249,7 +305,7 @@ class DashboardRenderer:
             title="Usage Trends",
             border_style="green"
         )
-        
+
         # Properly render the panel to string
         from rich.console import Console
         from io import StringIO
@@ -262,23 +318,43 @@ class DashboardRenderer:
     def render_project_stats_section(self, stats_data: Dict) -> str:
         """
         Render project statistics section.
-        
+
         Args:
             stats_data: Dictionary containing project statistics
-        
+
         Returns:
             Formatted string for project stats section
         """
+        if not RICH_AVAILABLE:
+            # Fallback plain text implementation
+            total_projects = stats_data.get("total_projects", 0)
+            active_projects = stats_data.get("active_projects", 0)
+            total_tokens_used = stats_data.get("total_tokens_used", 0)
+
+            # Calculate active project percentage
+            active_percentage = (active_projects / total_projects * 100) if total_projects > 0 else 0
+
+            # Create progress bar for active projects
+            active_progress = generate_progress_bar(active_projects, total_projects, width=30)
+
+            return (
+                f"Project Statistics:\n"
+                f"  Total Projects: {total_projects}\n"
+                f"  Active Projects: {active_projects} ({active_percentage:.1f}%)\n"
+                f"  Progress: {active_progress}\n"
+                f"  Total Tokens Used: {format_token_display(total_tokens_used)}\n"
+            )
+
         total_projects = stats_data.get("total_projects", 0)
         active_projects = stats_data.get("active_projects", 0)
         total_tokens_used = stats_data.get("total_tokens_used", 0)
-        
+
         # Calculate active project percentage
         active_percentage = (active_projects / total_projects * 100) if total_projects > 0 else 0
-        
+
         # Create progress bar for active projects
         active_progress = generate_progress_bar(active_projects, total_projects, width=30)
-        
+
         # Create a panel with the stats information
         stats_panel = Panel(
             f"[bold]Project Overview:[/bold]\n"
@@ -289,7 +365,7 @@ class DashboardRenderer:
             title="Project Statistics",
             border_style="yellow"
         )
-        
+
         # Properly render the panel to string
         from rich.console import Console
         from io import StringIO
@@ -302,10 +378,10 @@ class DashboardRenderer:
     def render_complete_dashboard(self, dashboard_data: Dict) -> str:
         """
         Render complete dashboard with all sections.
-        
+
         Args:
             dashboard_data: Dictionary containing all dashboard data
-        
+
         Returns:
             Complete formatted dashboard string
         """
@@ -313,21 +389,30 @@ class DashboardRenderer:
         token_savings = dashboard_data.get("token_savings", {})
         usage_trends = dashboard_data.get("usage_trends", {})
         project_stats = dashboard_data.get("project_stats", {})
-        
+
         # Render each section
         savings_section = self.render_token_savings_section(token_savings)
         trends_section = self.render_usage_trends_section(usage_trends)
         stats_section = self.render_project_stats_section(project_stats)
-        
+
         # Combine all sections
-        complete_dashboard = (
-            f"[bold blue]Maestro Visual Dashboard[/bold blue]\n\n"
-            f"{savings_section}\n\n"
-            f"{trends_section}\n\n"
-            f"{stats_section}\n\n"
-            f"[dim]Dashboard generated with Don Norman UX principles: visibility, feedback, mapping[/dim]"
-        )
-        
+        if RICH_AVAILABLE:
+            complete_dashboard = (
+                f"[bold blue]Maestro Visual Dashboard[/bold blue]\n\n"
+                f"{savings_section}\n\n"
+                f"{trends_section}\n\n"
+                f"{stats_section}\n\n"
+                f"[dim]Dashboard generated with Don Norman UX principles: visibility, feedback, mapping[/dim]"
+            )
+        else:
+            complete_dashboard = (
+                f"Maestro Visual Dashboard\n\n"
+                f"{savings_section}\n\n"
+                f"{trends_section}\n\n"
+                f"{stats_section}\n\n"
+                f"Dashboard generated with Don Norman UX principles: visibility, feedback, mapping\n"
+            )
+
         return complete_dashboard
 
 
@@ -380,7 +465,7 @@ def example_dashboard_usage():
             "total_tokens_used": 45000
         }
     }
-    
+
     renderer = DashboardRenderer()
     dashboard_output = renderer.render_complete_dashboard(sample_data)
     print(dashboard_output)

@@ -96,31 +96,64 @@ AskUserQuestion:
    > - **opus**: Highest quality, slower. Best for complex architectural decisions and deep analysis."
 
 2. **Configure by Command Type:**
-   Ask the user to select a model for each command type:
+   Ask the user to select a model for each command type using `AskUserQuestion`:
 
    **A) Setup/Status Commands** (maestro:setup, maestro:status, maestro:configure)
    - Recommended: **haiku** (fast, lightweight)
-   - Ask: "Which model for setup/status commands?"
-     - A) haiku (recommended - fast)
-     - B) sonnet (balanced)
-     - C) opus (high quality)
-     - D) Use command frontmatter default
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Which model for setup/status commands?"
+       header: "Setup Model"
+       options:
+         - label: "haiku (recommended)"
+           description: "Fast and cost-effective for simple tasks"
+         - label: "sonnet"
+           description: "Balanced speed and quality"
+         - label: "opus"
+           description: "Highest quality, slower"
+         - label: "Use command default"
+           description: "Use the model specified in command frontmatter"
+       multiSelect: false
+     ```
 
    **B) Implementation Commands** (maestro:implement)
    - Recommended: **sonnet** (balanced for implementation)
-   - Ask: "Which model for implementation commands?"
-     - A) sonnet (recommended - balanced)
-     - B) opus (high quality)
-     - C) haiku (fast)
-     - D) Use command frontmatter default
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Which model for implementation commands?"
+       header: "Impl Model"
+       options:
+         - label: "sonnet (recommended)"
+           description: "Balanced speed and quality for implementation"
+         - label: "opus"
+           description: "Highest quality, best for complex implementations"
+         - label: "haiku"
+           description: "Fast, good for simple changes"
+         - label: "Use command default"
+           description: "Use the model specified in command frontmatter"
+       multiSelect: false
+     ```
 
    **C) Analysis Commands** (Critical Think analysis, oracle reviews)
    - Recommended: **sonnet** or **opus** (quality for metacognitive analysis)
-   - Ask: "Which model for analysis commands?"
-     - A) sonnet (recommended - balanced)
-     - B) opus (high quality)
-     - C) haiku (fast)
-     - D) Use current session model
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Which model for analysis commands?"
+       header: "Analysis Model"
+       options:
+         - label: "sonnet (recommended)"
+           description: "Balanced speed and quality for analysis"
+         - label: "opus"
+           description: "Highest quality for complex reasoning"
+         - label: "haiku"
+           description: "Fast, basic analysis"
+         - label: "Use current session"
+           description: "Use the same model as the current session"
+       multiSelect: false
+     ```
 
 3. **Record Selection:**
    Store the user's choices for later use in configuration file.
@@ -141,35 +174,79 @@ AskUserQuestion:
    > More frequent analysis provides better quality but uses more tokens."
 
 2. **Configure Integration Points:**
-   For each integration point, ask when to enable analysis:
+   For each integration point, ask when to enable analysis using `AskUserQuestion`:
 
    **A) Before Question** (maestro:newTrack Q&A phase)
-   - Ask: "When should Critical Think analyze during Q&A?"
-     - A) Before asking questions (prevent over-questioning)
-     - B) After receiving answers (validate understanding)
-     - C) Both before and after
-     - D) Disabled (no analysis during Q&A)
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze during Q&A?"
+       header: "Q&A Analysis"
+       options:
+         - label: "Before asking questions"
+           description: "Analyze to prevent over-questioning"
+         - label: "After receiving answers"
+           description: "Analyze to validate understanding"
+         - label: "Both before and after"
+           description: "Full analysis during Q&A"
+         - label: "Disabled"
+           description: "No analysis during Q&A"
+       multiSelect: false
+     ```
 
    **B) Documentation Generation**
-   - Ask: "When should Critical Think analyze during documentation?"
-     - A) Before generating docs (check approach)
-     - B) After generating docs (validate quality)
-     - C) Both before and after
-     - D) Disabled
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze during documentation?"
+       header: "Doc Analysis"
+       options:
+         - label: "Before generating docs"
+           description: "Check approach before writing"
+         - label: "After generating docs"
+           description: "Validate quality after writing"
+         - label: "Both before and after"
+           description: "Full documentation analysis"
+         - label: "Disabled"
+           description: "No analysis for documentation"
+       multiSelect: false
+     ```
 
    **C) Code Implementation**
-   - Ask: "When should Critical Think analyze during implementation?"
-     - A) Before implementing (plan analysis)
-     - B) After implementing (quality validation)
-     - C) Both before and after (recommended)
-     - D) Disabled
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze during implementation?"
+       header: "Impl Analysis"
+       options:
+         - label: "Before implementing"
+           description: "Analyze plan before coding"
+         - label: "After implementing"
+           description: "Validate quality after coding"
+         - label: "Both before and after (recommended)"
+           description: "Full implementation analysis"
+         - label: "Disabled"
+           description: "No analysis for implementation"
+       multiSelect: false
+     ```
 
    **D) Agent Delegation**
-   - Ask: "When should Critical Think analyze agent delegation?"
-     - A) Before delegating (prevent over-delegation)
-     - B) After agent returns (validate results)
-     - C) Both before and after
-     - D) Disabled
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze agent delegation?"
+       header: "Agent Analysis"
+       options:
+         - label: "Before delegating"
+           description: "Prevent over-delegation"
+         - label: "After agent returns"
+           description: "Validate agent results"
+         - label: "Both before and after"
+           description: "Full agent delegation analysis"
+         - label: "Disabled"
+           description: "No analysis for agent delegation"
+       multiSelect: false
+     ```
 
 3. **Record Selection:**
    Store the user's choices for each integration point.
@@ -190,23 +267,50 @@ AskUserQuestion:
    > This replaces the need for custom cost tracking in Critical Think."
 
 2. **Ask to Enable:**
-   - Ask: "Enable claude-hud integration?"
-     - A) Yes, enable claude-hud (recommended)
-     - B) No, skip claude-hud setup
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Enable claude-hud integration?"
+       header: "claude-hud"
+       options:
+         - label: "Yes, enable claude-hud"
+           description: "Enable native token/cost tracking (recommended)"
+         - label: "No, skip claude-hud setup"
+           description: "Can enable later"
+       multiSelect: false
+     ```
 
 3. **If Yes:**
    - Check if claude-hud is installed
    - If not installed, offer to install:
-     - Ask: "claude-hud is not installed. Install now?"
-       - A) Yes, install claude-hud
-       - B) Skip for now
-   - If user selects A, run: `/claude-hud:setup`
+     - Ask using `AskUserQuestion`:
+       ```
+       AskUserQuestion:
+         question: "claude-hud is not installed. Install now?"
+         header: "Install claude-hud"
+         options:
+           - label: "Yes, install claude-hud"
+             description: "Install claude-hud now"
+           - label: "Skip for now"
+             description: "Can install later"
+         multiSelect: false
+       ```
+   - If user selects to install, run: `/claude-hud:setup`
    - Verify installation and report status
 
 4. **Configure Statusline:**
-   - Ask: "Configure statusline to show Maestro sessions?"
-     - A) Yes, show token/cost info for Maestro commands
-     - B) No, use default claude-hud settings
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Configure statusline to show Maestro sessions?"
+       header: "Statusline"
+       options:
+         - label: "Yes, show Maestro info"
+           description: "Show token/cost info for Maestro commands"
+         - label: "No, use default settings"
+           description: "Use standard claude-hud configuration"
+       multiSelect: false
+     ```
 
 ---
 
@@ -241,14 +345,24 @@ AskUserQuestion:
    ```
 
 4. **Ask About Agent Setup:**
-   - Ask: "Would you like Maestro to create specialized agents?"
-     - A) Yes, create all available agents
-     - B) Yes, but let me choose which agents
-     - C) No, skip agent setup
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Would you like Maestro to create specialized agents?"
+       header: "Agent Setup"
+       options:
+         - label: "Create all available agents"
+           description: "Automatically create all agents for available CLI tools"
+         - label: "Let me choose which agents"
+           description: "Select specific agents to create"
+         - label: "Skip agent setup"
+           description: "Can configure agents later"
+       multiSelect: false
+     ```
 
 5. **If Yes (Option A or B):**
    - For Option A: Create all agents for available CLI tools
-   - For Option B: Present each available agent and ask for confirmation
+   - For Option B: Present each available agent and ask for confirmation using `AskUserQuestion` for each
 
 6. **Agent Creation Protocol:**
 
@@ -264,9 +378,18 @@ AskUserQuestion:
 
        If CLI tool is available:
        - Check if agent already exists in `~/.claude/agents/`
-       - If exists, ask: "Agent {name} already exists. Overwrite?"
-         - A) Yes, overwrite
-         - B) No, keep existing
+       - If exists, ask using `AskUserQuestion`:
+         ```
+         AskUserQuestion:
+           question: "Agent {name} already exists. Overwrite?"
+           header: "Overwrite Agent"
+           options:
+             - label: "Yes, overwrite"
+               description: "Replace existing agent with new configuration"
+             - label: "No, keep existing"
+               description: "Preserve current agent configuration"
+           multiSelect: false
+         ```
        - If creating/overwriting:
          - Attempt to use Task tool with agent-creator skill if available
          - If skill unavailable, create agent file manually
@@ -276,11 +399,21 @@ AskUserQuestion:
        - Track in configuration: `{agent-name}: created`
 
        If CLI tool is NOT available:
-       - Ask: "CLI tool {tool} not found. Create agent anyway (without CLI integration)?"
-         - A) Yes, create basic agent
-         - B) No, skip this agent
-         - C) Help me install {tool} CLI
-       - If C:
+       - Ask using `AskUserQuestion`:
+         ```
+         AskUserQuestion:
+           question: "CLI tool {tool} not found. Create agent anyway (without CLI integration)?"
+           header: "CLI Missing"
+           options:
+             - label: "Yes, create basic agent"
+               description: "Create agent without CLI integration"
+             - label: "No, skip this agent"
+               description: "Skip creating this agent"
+             - label: "Help me install {tool} CLI"
+               description: "Provide installation instructions"
+           multiSelect: false
+         ```
+       - If user selects to get help:
          - Provide installation instructions for the CLI tool
          - After installation, re-check availability
          - Proceed with agent creation
@@ -407,21 +540,47 @@ AskUserQuestion:
 **PROTOCOL: Configure global enable/disable flags.**
 
 1. **Critical Think Global:**
-   - Ask: "Enable Critical Think integration globally?"
-     - A) Yes, enabled (recommended)
-     - B) No, disabled (can be enabled per-command)
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Enable Critical Think integration globally?"
+       header: "Critical Think"
+       options:
+         - label: "Yes, enable globally"
+           description: "Enable Critical Think for all commands (recommended)"
+         - label: "No, disable globally"
+           description: "Can be enabled per-command"
+       multiSelect: false
+     ```
 
 2. **Native Integration:**
-   - Ask: "Use native Claude Code session for analysis (recommended)?"
-     - A) Yes, use native session (no separate API calls)
-     - B) No, use separate API calls (requires API key)
-
-   **Note**: Explain that native integration is the default and recommended approach.
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Use native Claude Code session for analysis (recommended)?"
+       header: "Native Mode"
+       options:
+         - label: "Yes, use native session"
+           description: "No separate API calls needed (recommended)"
+         - label: "No, use separate API calls"
+           description: "Requires API key configuration"
+       multiSelect: false
+     ```
+   - **Note**: Explain that native integration is the default and recommended approach.
 
 3. **Auto-Proceed:**
-   - Ask: "Auto-proceed when confidence meets threshold?"
-     - A) Yes, auto-proceed (faster workflow)
-     - B) No, require confirmation (more control)
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Auto-proceed when confidence meets threshold?"
+       header: "Auto-Proceed"
+       options:
+         - label: "Yes, auto-proceed"
+           description: "Faster workflow when confidence is high"
+         - label: "No, require confirmation"
+           description: "Maintain manual control over decisions"
+       multiSelect: false
+     ```
 
 ---
 
@@ -535,9 +694,18 @@ AskUserQuestion:
 **PROTOCOL: Offer to update project-specific configuration.**
 
 1. **Ask User:**
-   - Ask: "Configuration saved globally. Would you like to override any settings for the current project?"
-     - A) Yes, configure project-specific settings
-     - B) No, global settings are sufficient
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Configuration saved globally. Would you like to override any settings for the current project?"
+       header: "Project Config"
+       options:
+         - label: "Yes, configure project-specific settings"
+           description: "Override global settings for this project"
+         - label: "No, global settings are sufficient"
+           description: "Use global configuration for this project"
+       multiSelect: false
+     ```
 
 2. **If Yes:**
    - Create `maestro/.maestro.local.md` in the current project

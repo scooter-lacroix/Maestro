@@ -706,6 +706,8 @@ class AgentNamespace(Base):
     # Namespace owner
     owner_type = Column(String(50), nullable=False)  # type: ignore  # agent, project, track
     owner_id = Column(String(200), nullable=False, index=True)  # type: ignore
+    # Add agent_type column to match service.py:450
+    agent_type = Column(String(50), nullable=True, index=True)  # type: ignore  # Type of agent (e.g., maestro, claude, gemini)
 
     # Access control
     is_public = Column(Boolean, default=False, nullable=False)  # type: ignore
