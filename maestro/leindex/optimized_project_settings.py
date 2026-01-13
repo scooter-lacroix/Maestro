@@ -20,8 +20,18 @@ from .constants import (
     PERSISTENT_SETTINGS_DIR,
 )
 from .logger_config import logger
-from .registry.msgpack_serializer import FormatType, MessagePackSerializer
-from .registry.registration_integrator import register_after_index_save
+try:
+    from .registry.msgpack_serializer import FormatType, MessagePackSerializer
+    from .registry.registration_integrator import register_after_index_save
+except ImportError:
+    FormatType = None
+
+    class MessagePackSerializer:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("registry package is required for MessagePack support")
+
+    def register_after_index_save(*args, **kwargs):
+        return None
 from .search.ag import AgStrategy
 from .search.base import SearchStrategy
 from .search.basic import BasicSearchStrategy
@@ -93,8 +103,11 @@ class OptimizedProjectSettings:
         self.use_trie_index = use_trie_index
         self.available_strategies: List[SearchStrategy] = []
 
-        # Initialize MessagePack serializer for index persistence
-        self.msgpack_serializer = MessagePackSerializer(use_bin_type=True)
+        if FormatType is None:
+            self.msgpack_serializer = None
+            logger.warning("Registry package unavailable; MessagePack persistence disabled")
+        else:
+            self.msgpack_serializer = MessagePackSerializer(use_bin_type=True)
 
         # Initialize storage backend
         self._init_storage_backend()
@@ -259,6 +272,9 @@ class OptimizedProjectSettings:
         try:
             if self.storage_backend == "sqlite":
                 if self.use_trie_index:
+                    if self.msgpack_serializer is None:
+                        logger.warning("MessagePack serializer unavailable; skipping trie index persistence")
+                        return
                     # For Trie index, serialize with MessagePack
                     index_path = self.get_index_path()
                     # Use .msgpack extension for new files
@@ -343,6 +359,9 @@ class OptimizedProjectSettings:
 
     def _save_index_msgpack(self, file_index: Dict[str, Any]):
         """Save dictionary-based index with MessagePack."""
+        if self.msgpack_serializer is None:
+            logger.warning("MessagePack serializer unavailable; skipping index save")
+            return
         try:
             index_path = self.get_index_path()
             # Use .msgpack extension
@@ -362,41 +381,44 @@ class OptimizedProjectSettings:
         try:
             if self.storage_backend == "sqlite":
                 if self.use_trie_index:
+                    if self.msgpack_serializer is None or FormatType is None:
+                        logger.warning("MessagePack serializer unavailable; returning empty trie index")
+                        return {}
                     # Load Trie index from file with format detection
                     index_path = self.get_index_path()
                     msgpack_path = str(Path(index_path).with_suffix(".msgpack"))
 
                     # Try MessagePack first
                     if os.path.exists(msgpack_path):
-	                        try:
-	                            index_data = self.msgpack_serializer.read(msgpack_path)
-	                            logger.debug(
-	                                f"Trie index loaded from MessagePack: {msgpack_path}"
-	                            )
-	                            # Return the raw data as-is (dict or whatever was saved)
-	                            # This allows tests to save a dict and get that same dict back
-	                            return index_data
-	                        except Exception as e:
-	                            logger.exception(f"Error loading MessagePack index: {e}")
+                        try:
+                            index_data = self.msgpack_serializer.read(msgpack_path)
+                            logger.debug(
+                                f"Trie index loaded from MessagePack: {msgpack_path}"
+                            )
+                            # Return the raw data as-is (dict or whatever was saved)
+                            # This allows tests to save a dict and get that same dict back
+                            return index_data
+                        except Exception as e:
+                            logger.exception(f"Error loading MessagePack index: {e}")
 
                     # Fallback to legacy pickle file for migration
                     if os.path.exists(index_path):
-	                        format_type = self.msgpack_serializer.detect_format(index_path)
-	                        if format_type == FormatType.PICKLE:
-	                            logger.info(f"Migrating legacy pickle index: {index_path}")
-	                            try:
-	                                # Read with pickle support and migrate to MessagePack
-	                                legacy_data = self.msgpack_serializer.read(index_path)
-	                                # Save as MessagePack
-	                                self.msgpack_serializer.write(msgpack_path, legacy_data)
-	                                logger.info(
-	                                    f"Migrated index to MessagePack: {msgpack_path}"
-	                                )
-	                                # Optionally remove old pickle file after successful migration
-	                                # os.unlink(index_path)
-	                                return legacy_data
-	                            except Exception as e:
-	                                logger.exception(f"Error migrating pickle index: {e}")
+                        format_type = self.msgpack_serializer.detect_format(index_path)
+                        if format_type == FormatType.PICKLE:
+                            logger.info(f"Migrating legacy pickle index: {index_path}")
+                            try:
+                                # Read with pickle support and migrate to MessagePack
+                                legacy_data = self.msgpack_serializer.read(index_path)
+                                # Save as MessagePack
+                                self.msgpack_serializer.write(msgpack_path, legacy_data)
+                                logger.info(
+                                    f"Migrated index to MessagePack: {msgpack_path}"
+                                )
+                                # Optionally remove old pickle file after successful migration
+                                # os.unlink(index_path)
+                                return legacy_data
+                            except Exception as e:
+                                logger.exception(f"Error migrating pickle index: {e}")
 
                     # Return empty dict if no file found
                     logger.debug("No existing Trie index found, returning empty dict")
@@ -416,6 +438,10 @@ class OptimizedProjectSettings:
         try:
             index_path = self.get_index_path()
             msgpack_path = str(Path(index_path).with_suffix(".msgpack"))
+
+            if self.msgpack_serializer is None or FormatType is None:
+                logger.warning("MessagePack serializer unavailable; skipping index load")
+                return {}
 
             # Try MessagePack first
             if os.path.exists(msgpack_path):

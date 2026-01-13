@@ -5,11 +5,21 @@ import os
 import sys
 from datetime import datetime
 
-from .core_engine import CoreEngine, SearchOptions
+from .logger_config import logger
 from .storage.dal_factory import get_dal_instance
-from .logger_config import setup_logging
+from .storage.storage_interface import DALInterface
+from .stats_dashboard import IndexStatisticsCollector, DashboardCLI
 
-logger = setup_logging()
+try:
+    from .core_engine import CoreEngine, SearchOptions
+except ImportError:
+    CoreEngine = None
+    SearchOptions = None
+def _require_core_engine() -> None:
+    if CoreEngine is None or SearchOptions is None:
+        raise RuntimeError(
+            "Core engine unavailable. Install optional core components or run MCP server."
+        )
 
 
 def highlight_text(text: str, query: str) -> str:
@@ -74,6 +84,7 @@ def format_results_for_export(results, export_format: str) -> str:
 
 async def search_command(args, engine: CoreEngine):
     """Execute search command."""
+    _require_core_engine()
     options = SearchOptions(
         rerank=not args.no_rerank,
         top_k=args.max_count,
@@ -153,6 +164,7 @@ async def batch_search_command(args, engine: CoreEngine):
 
     Reads queries from a file (one per line) and executes searches for each.
     """
+    _require_core_engine()
     options = SearchOptions(
         rerank=not args.no_rerank,
         top_k=args.max_count,
@@ -363,6 +375,11 @@ Examples:
         asyncio.run(stats_command(args))
     elif args.command == "batch":
         # Batch search command
+        try:
+            _require_core_engine()
+        except RuntimeError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
         asyncio.run(batch_search_command(args, None))
     else:
         # Default to search for backward compatibility
@@ -428,6 +445,8 @@ Examples:
 
         # Initialize components
         try:
+            _require_core_engine()
+
             # We need a DAL instance for legacy fallback
             # Use simple sqlite config if env vars not set, to avoid crashing CLI if not fully configured
             try:

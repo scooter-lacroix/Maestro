@@ -17,8 +17,9 @@ import sys
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Iterable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 
 # Import FastMCP for MCP server creation
 try:
@@ -36,11 +37,13 @@ from .storage.dal_factory import get_dal_instance
 from .storage.storage_interface import DALInterface
 from .incremental_indexer import IncrementalIndexer
 from .file_change_tracker import FileChangeTracker
-from .async_indexer import AsyncBatchIndexer as AsyncIndexer
+from .async_indexer import AsyncRealtimeIndexer
+from .async_task_queue import IndexingPriority
 from .config_manager import ConfigManager
 from .constants import SETTINGS_DIR
 from .ignore_patterns import IgnorePatternMatcher
 from .logger_config import logger
+from .project_settings import ProjectSettings
 from .search.ranking import ResultRanker, RankingConfig
 from .search.result_merger import SearchResultMerger, MergedSearchResult
 from .analyzers.ast import ASTAnalyzer
@@ -50,9 +53,96 @@ from .analyzers.dfg import DFGAnalyzer
 from .analyzers.slicing import SlicingAnalyzer
 
 
-# ============================================================================
-# Lifespan Manager for Server State
-# ============================================================================
+
+
+@dataclass
+class LifespanState:
+    dal: Optional[DALInterface] = None
+    file_change_tracker: Optional[FileChangeTracker] = None
+    async_indexer: Optional[AsyncRealtimeIndexer] = None
+    analyzers: Dict[str, Any] = field(default_factory=dict)
+    config_manager: Optional[ConfigManager] = None
+    base_path: Optional[str] = None
+    ignore_matcher: Optional[IgnorePatternMatcher] = None
+    project_settings: Optional[ProjectSettings] = None
+    incremental_indexer: Optional[IncrementalIndexer] = None
+
+
+def _get_lifespan_state(ctx: Context) -> LifespanState:
+    return ctx.request_context.lifespan_context
+
+
+async def _ensure_project_initialized(state: LifespanState, project_path: str) -> None:
+    if state.base_path == project_path and state.async_indexer:
+        return
+
+    if state.async_indexer:
+        try:
+            await state.async_indexer.stop()
+        except Exception as e:
+            logger.warning(f"Failed to stop existing async indexer: {e}")
+
+    state.base_path = project_path
+    state.project_settings = ProjectSettings(base_path=project_path, skip_load=False)
+    state.incremental_indexer = IncrementalIndexer(state.project_settings)
+    state.ignore_matcher = IgnorePatternMatcher(project_path)
+
+    if state.dal and state.dal.metadata:
+        state.file_change_tracker = FileChangeTracker(
+            state.dal.metadata,
+            state.incremental_indexer
+        )
+    else:
+        state.file_change_tracker = None
+        logger.warning("Metadata backend not available; file change tracker disabled")
+
+    if state.dal and state.dal.search:
+        state.async_indexer = AsyncRealtimeIndexer(
+            storage_backend=state.dal.search,
+            base_path=project_path
+        )
+        await state.async_indexer.start()
+        logger.info("Async indexer started")
+    else:
+        state.async_indexer = None
+        logger.warning("Search backend not available; async indexer disabled")
+
+
+def _select_search_backend(dal: Optional[DALInterface]):
+    if not dal or not dal.search:
+        return None
+
+    try:
+        from .search_utils import SearchBackendSelector
+    except ImportError:
+        SearchBackendSelector = None
+
+    if SearchBackendSelector:
+        return SearchBackendSelector.get_search_backend(dal)
+
+    return dal.search
+
+
+async def _collect_index_targets(base_path: str, matcher: Optional[IgnorePatternMatcher]) -> Iterable[str]:
+    try:
+        from .fast_scanner import FastParallelScanner
+
+        scanner = FastParallelScanner(ignore_matcher=matcher)
+        results = await scanner.scan(base_path)
+        for root, _, files in results:
+            for filename in files:
+                full_path = os.path.join(root, filename)
+                yield os.path.relpath(full_path, base_path)
+        return
+    except Exception as e:
+        logger.warning(f"Fast scanner failed, falling back to os.walk: {e}")
+
+    for root, _, files in os.walk(base_path):
+        for filename in files:
+            full_path = os.path.join(root, filename)
+            if matcher and matcher.should_ignore(full_path):
+                continue
+            yield os.path.relpath(full_path, base_path)
 
 @asynccontextmanager
 async def indexer_lifespan(server: FastMCP):
@@ -61,13 +151,10 @@ async def indexer_lifespan(server: FastMCP):
 
     Manages initialization and cleanup of indexer resources.
     """
-    # Initialization
     logger.info("Initializing LeIndex MCP server...")
 
-    # Initialize config manager
     config_manager = ConfigManager()
 
-    # Initialize DAL instance
     dal_instance: Optional[DALInterface] = None
     try:
         dal_instance = get_dal_instance()
@@ -75,64 +162,41 @@ async def indexer_lifespan(server: FastMCP):
     except Exception as e:
         logger.warning(f"Failed to initialize DAL: {e}")
 
-    # Initialize file change tracker
-    file_change_tracker = FileChangeTracker()
-    logger.info("File change tracker initialized")
-
-    # Initialize async indexer
-    async_indexer: Optional[AsyncIndexer] = None
-    try:
-        async_indexer = AsyncIndexer(
-            storage_backend=dal_instance,
-            file_change_tracker=file_change_tracker
-        )
-        await async_indexer.start()
-        logger.info("Async indexer started")
-    except Exception as e:
-        logger.warning(f"Failed to start async indexer: {e}")
-
-    # Initialize analyzers
-    analyzers = {
-        'ast': ASTAnalyzer(),
-        'callgraph': CallGraphAnalyzer(),
-        'cfg': CFGAnalyzer(),
-        'dfg': DFGAnalyzer(),
-        'slicing': SlicingAnalyzer(),
-    }
+    state = LifespanState(
+        dal=dal_instance,
+        config_manager=config_manager,
+        analyzers={
+            "ast": ASTAnalyzer(),
+            "callgraph": CallGraphAnalyzer(),
+            "cfg": CFGAnalyzer(),
+            "dfg": DFGAnalyzer(),
+            "slicing": SlicingAnalyzer(),
+        },
+    )
     logger.info("Code analyzers initialized")
 
-    # Store in lifespan context
-    server.state = {
-        'dal': dal_instance,
-        'file_change_tracker': file_change_tracker,
-        'async_indexer': async_indexer,
-        'analyzers': analyzers,
-        'config_manager': config_manager,
-        'base_path': None,
-    }
+    server.state = state
 
-    yield
+    try:
+        yield state
+    finally:
+        logger.info("Shutting down LeIndex MCP server...")
 
-    # Cleanup
-    logger.info("Shutting down LeIndex MCP server...")
+        if state.async_indexer:
+            try:
+                await state.async_indexer.stop()
+                logger.info("Async indexer stopped")
+            except Exception as e:
+                logger.error(f"Error stopping async indexer: {e}")
 
-    if async_indexer:
-        try:
-            await async_indexer.stop()
-            logger.info("Async indexer stopped")
-        except Exception as e:
-            logger.error(f"Error stopping async indexer: {e}")
+        if state.file_change_tracker:
+            try:
+                state.file_change_tracker.flush()
+                logger.info("File change tracker flushed")
+            except Exception as e:
+                logger.error(f"Error flushing file change tracker: {e}")
 
-    if file_change_tracker:
-        try:
-            file_change_tracker.flush()
-            logger.info("File change tracker flushed")
-        except Exception as e:
-            logger.error(f"Error flushing file change tracker: {e}")
-
-    logger.info("LeIndex MCP server shutdown complete")
-
-
+        logger.info("LeIndex MCP server shutdown complete")
 # ============================================================================
 # MCP Server Initialization
 # ============================================================================
@@ -143,16 +207,24 @@ if MCP_AVAILABLE:
         name="leindex",
         lifespan=indexer_lifespan
     )
+
+    def mcp_tool():
+        return mcp.tool()
 else:
     logger.warning("MCP not available, server will be disabled")
     mcp = None
+
+    def mcp_tool():
+        def decorator(func):
+            return func
+        return decorator
 
 
 # ============================================================================
 # MCP Tools: Project Management
 # ============================================================================
 
-@mcp.tool()
+@mcp_tool()
 async def set_project_path(project_path: str, ctx: Context) -> Dict[str, Any]:
     """
     Set the project path for indexing and search operations.
@@ -163,6 +235,8 @@ async def set_project_path(project_path: str, ctx: Context) -> Dict[str, Any]:
     Returns:
         Status dictionary with success/error information
     """
+    state = _get_lifespan_state(ctx)
+
     if not os.path.exists(project_path):
         return {
             "success": False,
@@ -175,8 +249,7 @@ async def set_project_path(project_path: str, ctx: Context) -> Dict[str, Any]:
             "error": f"Path is not a directory: {project_path}"
         }
 
-    # Store in lifespan context
-    ctx.request_context.lifespan_context.base_path = project_path
+    await _ensure_project_initialized(state, project_path)
 
     logger.info(f"Project path set to: {project_path}")
 
@@ -187,7 +260,7 @@ async def set_project_path(project_path: str, ctx: Context) -> Dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp_tool()
 async def index_project(ctx: Context) -> Dict[str, Any]:
     """
     Index the current project directory.
@@ -198,9 +271,8 @@ async def index_project(ctx: Context) -> Dict[str, Any]:
     Returns:
         Status dictionary with indexing statistics
     """
-    base_path = ctx.request_context.lifespan_context.base_path
-    dal = ctx.request_context.lifespan_context.dal
-    async_indexer = ctx.request_context.lifespan_context.async_indexer
+    state = _get_lifespan_state(ctx)
+    base_path = state.base_path
 
     if not base_path:
         return {
@@ -208,21 +280,29 @@ async def index_project(ctx: Context) -> Dict[str, Any]:
             "error": "Project path not set. Use set_project_path first."
         }
 
-    if not async_indexer:
+    if not state.async_indexer:
         return {
             "success": False,
             "error": "Async indexer not available"
         }
 
     try:
-        # Trigger indexing
-        result = await async_indexer.index_project(base_path)
+        tasks = [
+            state.async_indexer.enqueue_change(
+                file_path=path,
+                change_type="index",
+                priority=IndexingPriority.NORMAL
+            )
+            async for path in _collect_index_targets(base_path, state.ignore_matcher)
+        ]
+        await asyncio.gather(*tasks)
+        await state.async_indexer.wait_for_completion()
 
         return {
             "success": True,
-            "files_indexed": result.get('files_indexed', 0),
-            "errors": result.get('errors', []),
-            "duration_seconds": result.get('duration', 0)
+            "files_indexed": len(tasks),
+            "errors": [],
+            "duration_seconds": 0
         }
     except Exception as e:
         logger.error(f"Error indexing project: {e}")
@@ -236,7 +316,7 @@ async def index_project(ctx: Context) -> Dict[str, Any]:
 # MCP Tools: Search
 # ============================================================================
 
-@mcp.tool()
+@mcp_tool()
 async def search_code(
     query: str,
     limit: int = 10,
@@ -255,8 +335,9 @@ async def search_code(
     Returns:
         Search results with file paths, scores, and content snippets
     """
-    base_path = ctx.request_context.lifespan_context.base_path
-    dal = ctx.request_context.lifespan_context.dal
+    state = _get_lifespan_state(ctx)
+    base_path = state.base_path
+    dal = state.dal
 
     if not base_path:
         return {
@@ -264,15 +345,15 @@ async def search_code(
             "error": "Project path not set. Use set_project_path first."
         }
 
-    if not dal:
+    search_backend = _select_search_backend(dal)
+    if not search_backend:
         return {
             "success": False,
-            "error": "Storage backend not available"
+            "error": "Search backend not available"
         }
 
     try:
-        # Perform search via DAL
-        results = dal.search(query, limit=limit)
+        results = search_backend.search_files(query)
 
         return {
             "success": True,
@@ -292,7 +373,7 @@ async def search_code(
 # MCP Tools: Code Analysis
 # ============================================================================
 
-@mcp.tool()
+@mcp_tool()
 async def analyze_file(
     file_path: str,
     layers: List[str] = None,
@@ -381,7 +462,7 @@ async def analyze_file(
 # MCP Tools: File History
 # ============================================================================
 
-@mcp.tool()
+@mcp_tool()
 async def get_file_history(
     file_path: str,
     ctx: Context = None
@@ -398,13 +479,21 @@ async def get_file_history(
     Returns:
         File history with changes and metadata
     """
-    base_path = ctx.request_context.lifespan_context.base_path
-    file_change_tracker = ctx.request_context.lifespan_context.file_change_tracker
+    state = _get_lifespan_state(ctx)
+    base_path = state.base_path
+    dal = state.dal
+    file_change_tracker = state.file_change_tracker
 
     if not base_path:
         return {
             "success": False,
             "error": "Project path not set. Use set_project_path first."
+        }
+
+    if not file_change_tracker:
+        return {
+            "success": False,
+            "error": "File change tracker not available"
         }
 
     try:

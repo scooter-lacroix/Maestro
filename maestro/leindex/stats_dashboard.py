@@ -13,7 +13,7 @@ This module provides comprehensive statistics about:
 - Usage analytics
 """
 
-import os
+import sys
 import json
 import time
 import asyncio
@@ -237,9 +237,9 @@ class DashboardCLI:
 
     def print_header(self, title: str):
         """Print a formatted header."""
-        print("\n" + "=" * 60)
-        print(f"  {title}")
-        print("=" * 60)
+        print("\n" + "=" * 60, file=sys.stderr)
+        print(f"  {title}", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
 
     def print_health(self, stats: DashboardStats):
         """Print backend health status."""
@@ -250,40 +250,40 @@ class DashboardCLI:
             status_color = "\033[92m" if health.is_healthy else "\033[91m"
             reset = "\033[0m"
 
-            print(f"\n[{status_color}{status_icon}{reset}] {name.upper()}")
-            print(f"  Status:        {'Healthy' if health.is_healthy else 'Unhealthy'}")
-            print(f"  Response Time: {health.response_time_ms:.0f}ms")
-            print(f"  Last Checked:  {health.last_checked}")
+            print(f"\n[{status_color}{status_icon}{reset}] {name.upper()}", file=sys.stderr)
+            print(f"  Status:        {'Healthy' if health.is_healthy else 'Unhealthy'}", file=sys.stderr)
+            print(f"  Response Time: {health.response_time_ms:.0f}ms", file=sys.stderr)
+            print(f"  Last Checked:  {health.last_checked}", file=sys.stderr)
 
             if health.error_message:
-                print(f"  Error:         {health.error_message}")
+                print(f"  Error:         {health.error_message}", file=sys.stderr)
 
             if health.details:
-                print("  Details:")
+                print("  Details:", file=sys.stderr)
                 for key, value in health.details.items():
-                    print(f"    {key}: {value}")
+                    print(f"    {key}: {value}", file=sys.stderr)
 
     def print_indices(self, stats: DashboardStats):
         """Print index statistics."""
         self.print_header("Index Statistics")
 
         if not stats.indices:
-            print("\nNo indices found.")
+            print("\nNo indices found.", file=sys.stderr)
             return
 
         for name, index in stats.indices.items():
-            print(f"\n{name}:")
-            print(f"  Documents:     {index.document_count:,}")
-            print(f"  Size:          {self.format_size(index.size_bytes)}")
-            print(f"  Health:        {index.health_status}")
-            print(f"  Last Update:   {index.last_update}")
+            print(f"\n{name}:", file=sys.stderr)
+            print(f"  Documents:     {index.document_count:,}", file=sys.stderr)
+            print(f"  Size:          {self.format_size(index.size_bytes)}", file=sys.stderr)
+            print(f"  Health:        {index.health_status}", file=sys.stderr)
+            print(f"  Last Update:   {index.last_update}", file=sys.stderr)
 
             if index.total_indexed > 0:
-                print(f"  Total Indexed: {index.total_indexed:,}")
-                print(f"  Avg Time:      {index.avg_index_time_ms:.0f}ms")
+                print(f"  Total Indexed: {index.total_indexed:,}", file=sys.stderr)
+                print(f"  Avg Time:      {index.avg_index_time_ms:.0f}ms", file=sys.stderr)
 
             if index.error_count > 0:
-                print(f"  Errors:        {index.error_count}")
+                print(f"  Errors:        {index.error_count}", file=sys.stderr)
 
     def print_summary(self, stats: DashboardStats):
         """Print overall summary."""
@@ -296,11 +296,11 @@ class DashboardCLI:
         total_docs = sum(idx.document_count for idx in stats.indices.values())
         total_size = sum(idx.size_bytes for idx in stats.indices.values())
 
-        print(f"\nOverall Status:  [{status_color}{status_icon}{reset}] {stats.overall_status.upper()}")
-        print(f"Uptime:          {self.format_duration(stats.uptime_seconds)}")
-        print(f"Total Documents: {total_docs:,}")
-        print(f"Total Size:      {self.format_size(total_size)}")
-        print(f"Last Updated:    {stats.last_updated}")
+        print(f"\nOverall Status:  [{status_color}{status_icon}{reset}] {stats.overall_status.upper()}", file=sys.stderr)
+        print(f"Uptime:          {self.format_duration(stats.uptime_seconds)}", file=sys.stderr)
+        print(f"Total Documents: {total_docs:,}", file=sys.stderr)
+        print(f"Total Size:      {self.format_size(total_size)}", file=sys.stderr)
+        print(f"Last Updated:    {stats.last_updated}", file=sys.stderr)
 
     async def show_stats(self, watch: bool = False, interval: int = 5):
         """
@@ -316,7 +316,7 @@ class DashboardCLI:
 
                 # Clear screen for watch mode
                 if watch:
-                    os.system("clear" if os.name != "nt" else "cls")
+                    print("\033c", end="", file=sys.stderr)
 
                 self.print_summary(stats)
                 self.print_health(stats)
@@ -325,11 +325,11 @@ class DashboardCLI:
                 if not watch:
                     break
 
-                print(f"\nRefreshing every {interval}s... (Ctrl+C to exit)")
+                print(f"\nRefreshing every {interval}s... (Ctrl+C to exit)", file=sys.stderr)
                 await asyncio.sleep(interval)
 
         except KeyboardInterrupt:
-            print("\n\nExiting dashboard.")
+            print("\n\nExiting dashboard.", file=sys.stderr)
 
     async def show_json(self):
         """Show statistics in JSON format."""
