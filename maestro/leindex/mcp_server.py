@@ -36,7 +36,7 @@ from .storage.dal_factory import get_dal_instance
 from .storage.storage_interface import DALInterface
 from .incremental_indexer import IncrementalIndexer
 from .file_change_tracker import FileChangeTracker
-from .async_indexer import AsyncIndexer
+from .async_indexer import AsyncBatchIndexer as AsyncIndexer
 from .config_manager import ConfigManager
 from .constants import SETTINGS_DIR
 from .ignore_patterns import IgnorePatternMatcher
