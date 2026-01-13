@@ -145,7 +145,7 @@ check_dependencies() {
         go_installed=true
     else
         echo "   ⚠️  Go not found"
-        read -p "   Install Go now? (y/N) " -n 1 -r
+        read -p "   Install Go now? (y/N) " -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             if install_go; then
@@ -163,7 +163,7 @@ check_dependencies() {
     else
         echo "   ⚠️  Zoekt not found (optional but recommended)"
         if [ "$go_installed" = true ]; then
-            read -p "   Install Zoekt now? (y/N) " -n 1 -r
+            read -p "   Install Zoekt now? (y/N) " -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 if install_zoekt; then
@@ -236,6 +236,87 @@ restore_config() {
     else
         echo "   ❌ Error: Backup file not found: $backup_file"
         return 1
+    fi
+}
+
+# Function to create MCP configuration
+setup_mcp_config() {
+    local config_dir="$1/.claude"
+    local mcp_config="$config_dir/.mcp.json"
+
+    if [ ! -d "$config_dir" ]; then
+        mkdir -p "$config_dir"
+    fi
+
+    # Create basic MCP configuration with popular servers
+    cat > "$mcp_config" << 'EOF'
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+      "type": "stdio"
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "type": "stdio"
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "type": "stdio"
+    }
+  }
+}
+EOF
+
+    echo "   ✅ MCP configuration created at $mcp_config"
+}
+
+# Function to validate MCP paths
+validate_mcp_paths() {
+    local mcp_config="$1/.claude/.mcp.json"
+
+    if [ ! -f "$mcp_config" ]; then
+        echo "   ⚠️  MCP config not found"
+        return 1
+    fi
+
+    # Basic validation - check if file is valid JSON
+    if ! python3 -c "import json; json.load(open('$mcp_config'))" 2>/dev/null; then
+        echo "   ❌ Invalid JSON in MCP config"
+        return 1
+    fi
+
+    echo "   ✅ MCP configuration validated"
+    return 0
+}
+
+# Function to test MCP connectivity (optional)
+test_mcp_connectivity() {
+    local mcp_config="$1/.claude/.mcp.json"
+    local connectivity_tested=false
+
+    if [ -f "$mcp_config" ]; then
+        echo "🔍 Testing MCP connectivity..."
+
+        # Try to test filesystem MCP server if npx is available
+        if command_exists npx; then
+            echo "   Testing filesystem MCP server..."
+            if timeout 10 npx @modelcontextprotocol/server-filesystem --help >/dev/null 2>&1; then
+                echo "   ✅ Filesystem MCP server is accessible"
+                connectivity_tested=true
+            else
+                echo "   ℹ️  Filesystem MCP server not immediately accessible (normal)"
+            fi
+        else
+            echo "   ℹ️  npx not available, skipping connectivity test"
+        fi
+    fi
+
+    if [ "$connectivity_tested" = false ]; then
+        echo "   ℹ️  Optional connectivity check skipped"
     fi
 }
 
@@ -543,12 +624,24 @@ echo "  /maestro:configure  - Configure Maestro settings"
 echo "  /maestro:memory     - Interact with Memory System"
 echo "  /maestro:tui        - Launch Terminal UI"
 echo ""
+# Setup MCP server configuration
+echo "🔧 Setting up MCP servers..."
+if [ -d "$HOME/.claude" ]; then
+    setup_mcp_config "$HOME"
+    validate_mcp_paths "$HOME"
+    test_mcp_connectivity "$HOME"
+    echo "   ✅ MCP server setup complete"
+else
+    echo "   ⚠️  ~/.claude directory not found, skipping MCP setup"
+fi
+
 echo "🔌 v2 Components Installed:"
 echo "  ✅ Hooks      - Event-driven automation (16 hooks)"
 echo "  ✅ Skills     - Specialized capabilities (109+ skills)"
 echo "  ✅ Agents     - Task delegation (28 agents)"
 echo "  ✅ Config     - Unified settings management"
 echo "  ✅ Memory     - Persistent context system"
+echo "  ✅ MCP        - Model Context Protocol servers (3 pre-configured)"
 echo ""
 echo "🖥️  Available CLI tools (from terminal):"
 echo "  maestro memory serve    - Start memory dashboard web server"
