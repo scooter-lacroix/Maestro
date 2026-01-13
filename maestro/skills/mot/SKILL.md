@@ -139,42 +139,36 @@ grep -oE '"command":\s*"[^"]*\.sh"' .maestro/settings.json 2>/dev/null | \
 ```bash
 echo "=== MEMORY SYSTEM ==="
 
-# Check DATABASE_URL
-if [ -z "$DATABASE_URL" ]; then
-  echo "FAIL: DATABASE_URL not set"
+# Check SQLite Database
+DB_PATH="$HOME/.maestro/memory.db"
+if [ ! -f "$DB_PATH" ]; then
+  echo "FAIL: SQLite database not found at $DB_PATH"
 else
-  echo "PASS: DATABASE_URL is set"
+  echo "PASS: SQLite database found"
 
-  # Test connection
-  if psql "$DATABASE_URL" -c "SELECT 1" > /dev/null 2>&1; then
-    echo "PASS: PostgreSQL reachable"
-
-    # Check pgvector
-    if psql "$DATABASE_URL" -c "SELECT extname FROM pg_extension WHERE extname='vector'" 2>/dev/null | grep -q vector; then
-      echo "PASS: pgvector extension installed"
-    else
-      echo "FAIL: pgvector extension not installed"
-    fi
-
-    # Check table exists
-    if psql "$DATABASE_URL" -c "\d archival_memory" > /dev/null 2>&1; then
-      echo "PASS: archival_memory table exists"
-
-      # Count learnings
-      COUNT=$(psql "$DATABASE_URL" -t -c "SELECT COUNT(*) FROM archival_memory" 2>/dev/null | xargs)
-      echo "INFO: $COUNT learnings stored"
-    else
-      echo "FAIL: archival_memory table missing"
-    fi
+  # Test connection and WAL mode
+  if sqlite3 "$DB_PATH" "PRAGMA journal_mode;" | grep -q "wal"; then
+    echo "PASS: SQLite reachable and WAL mode enabled"
   else
-    echo "FAIL: PostgreSQL not reachable"
+    echo "FAIL: SQLite WAL mode not enabled"
   fi
+
+  # Check sqlite-vec
+  # This requires a python check usually
+fi
+
+# Check DuckDB Analytics
+DUCKDB_PATH="$HOME/.maestro/analytics.duckdb"
+if [ ! -f "$DUCKDB_PATH" ]; then
+  echo "WARN: DuckDB analytics not found at $DUCKDB_PATH"
+else
+  echo "PASS: DuckDB analytics found"
 fi
 
 # Check Python dependencies
 echo "Checking Python dependencies..."
-(cd opc && uv run python -c "import psycopg2; import pgvector; import sentence_transformers" 2>/dev/null) && \
-  echo "PASS: Python dependencies available" || \
+(cd opc && uv run python -c "import sqlite3; import duckdb; import numpy" 2>/dev/null) && \
+  echo "PASS: Python dependencies (sqlite3, duckdb, numpy) available" || \
   echo "WARN: Some Python dependencies missing"
 ```
 

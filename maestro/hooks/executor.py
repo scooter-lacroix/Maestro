@@ -9,9 +9,36 @@ import json
 import sys
 import os
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from loguru import logger
+
+from maestro.memory.utils.detector import detect_project
+
+
+def get_python_executable() -> str:
+    """
+    Get the appropriate Python executable for cross-platform compatibility.
+
+    Priority order:
+    1. python3 (Unix-like systems)
+    2. python (Windows, some Unix systems)
+    3. sys.executable (fallback)
+
+    Returns:
+        Path to Python executable
+    """
+    # Try python3 first (Unix-like systems)
+    if shutil.which("python3"):
+        return "python3"
+
+    # Try python next (Windows, some Unix systems)
+    if shutil.which("python"):
+        return "python"
+
+    # Fallback to current Python executable
+    return sys.executable
 
 
 class HookExecutor:
@@ -28,12 +55,20 @@ class HookExecutor:
         Args:
             hooks_dir: Directory containing hooks (default: maestro/hooks)
         """
+        # Set up local hooks directory
         if hooks_dir is None:
             maestro_root = Path(__file__).parent.parent
             hooks_dir = maestro_root / "hooks"
 
         self.hooks_dir = Path(hooks_dir)
         self._hooks_cache: Dict[str, List[Path]] = {}
+
+        # Set up global hooks directory (~/.claude/plugins/maestro/hooks)
+        self.global_hooks_dir = Path.home() / ".claude" / "plugins" / "maestro" / "hooks"
+
+        # Detect project root for CWD
+        project_info = detect_project()
+        self.project_root = project_info.project_path if project_info else os.getcwd()
 
     def _discover_hooks(self, phase: str) -> List[Path]:
         """
@@ -43,24 +78,31 @@ class HookExecutor:
             phase: Hook phase (e.g., "session-start", "pre-tool-use")
 
         Returns:
-            List of hook file paths
+            List of hook file paths (combined local and global)
         """
         if phase in self._hooks_cache:
             return self._hooks_cache[phase]
 
-        phase_dir = self.hooks_dir / phase
-
-        if not phase_dir.exists():
-            self._hooks_cache[phase] = []
-            return []
-
         hooks = []
-        for hook_file in phase_dir.glob("*.py"):
-            if hook_file.name != "__init__.py":
-                hooks.append(hook_file)
+        seen_names = set()
+
+        # 1. Discover local hooks
+        local_phase_dir = self.hooks_dir / phase
+        if local_phase_dir.exists():
+            for hook_file in local_phase_dir.glob("*.py"):
+                if hook_file.name != "__init__.py":
+                    hooks.append(hook_file)
+                    seen_names.add(hook_file.name)
+
+        # 2. Discover global hooks (avoiding duplicates)
+        global_phase_dir = self.global_hooks_dir / phase
+        if global_phase_dir.exists():
+            for hook_file in global_phase_dir.glob("*.py"):
+                if hook_file.name != "__init__.py" and hook_file.name not in seen_names:
+                    hooks.append(hook_file)
 
         self._hooks_cache[phase] = sorted(hooks)
-        return hooks
+        return self._hooks_cache[phase]
 
     def execute_hook(
         self,
@@ -79,20 +121,27 @@ class HookExecutor:
         Returns:
             Output data from the hook
         """
+        # Try local first
         hook_path = self.hooks_dir / phase / f"{hook_name}.py"
+
+        # Fallback to global
+        if not hook_path.exists():
+            hook_path = self.global_hooks_dir / phase / f"{hook_name}.py"
 
         if not hook_path.exists():
             logger.warning(f"Hook not found: {phase}/{hook_name}")
             return input_data.copy()
 
         try:
-            # Run the hook as a subprocess
+            # Run the hook as a subprocess with cross-platform Python executable
+            python_exe = get_python_executable()
             result = subprocess.run(
-                [sys.executable, str(hook_path)],
+                [python_exe, str(hook_path)],
                 input=json.dumps(input_data),
                 capture_output=True,
                 text=True,
                 timeout=30,
+                cwd=self.project_root,  # Ensure execution from project root
             )
 
             if result.returncode != 0:

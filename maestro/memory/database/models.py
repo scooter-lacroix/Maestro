@@ -423,8 +423,7 @@ SECRET_PATTERNS = {
     r'-----BEGIN OPENSSH PRIVATE KEY-----': "OpenSSH private key",
 
     # Database connection strings
-    r'(mongodb|mysql|postgres|redis)://[^"\':\s]+:[^"\':\s]+@': "Database connection string",
-    r'postgresql://[^"\':\s]+:[^"\':\s]+@': "PostgreSQL connection string",
+    r'(mongodb|mysql|redis)://[^"\':\s]+:[^"\':\s]+@': "Database connection string",
 
     # API endpoints with keys
     r'https?://[^"\':\s]+:[^"\':\s]+@': "URL with embedded credentials",

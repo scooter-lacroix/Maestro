@@ -78,7 +78,7 @@ func isSocketAlive(socketPath string) bool {
 
 func NewSocketProxy(ctx context.Context, name, command string, args []string, env map[string]string) (*SocketProxy, error) {
 	ctx, cancel := context.WithCancel(ctx)
-	socketPath := filepath.Join("/tmp", fmt.Sprintf("maestro-mcp-%s.sock", name))
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("maestro-mcp-%s.sock", name))
 
 	// Check if socket already exists and is alive (another maestro-tui instance owns it)
 	if isSocketAlive(socketPath) {

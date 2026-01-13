@@ -23,6 +23,7 @@ from .search.ripgrep import RipgrepStrategy
 from .search.ag import AgStrategy
 from .search.grep import GrepStrategy
 from .search.basic import BasicSearchStrategy
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,19 +89,19 @@ class ProjectSettings:
 
             # Create leindex directory
             temp_base_dir = os.path.join(system_temp, SETTINGS_DIR)
-            logger.debug("Code indexer directory path: {temp_base_dir}")
+            logger.debug(f"Code indexer directory path: {temp_base_dir}")
 
             if not os.path.exists(temp_base_dir):
-                logger.debug("Creating code indexer directory: {temp_base_dir}")
+                logger.debug(f"Creating code indexer directory: {temp_base_dir}")
                 os.makedirs(temp_base_dir, exist_ok=True)
-                logger.debug("Code indexer directory created: {temp_base_dir}")
+                logger.debug(f"Code indexer directory created: {temp_base_dir}")
             else:
-                logger.debug("Code indexer directory already exists: {temp_base_dir}")
+                logger.debug(f"Code indexer directory already exists: {temp_base_dir}")
         except Exception as e:
-            logger.debug("Error setting up temporary directory: {e}")
+            logger.debug(f"Error setting up temporary directory: {e}")
             # If unable to create temporary directory, use .leindex in current directory
             temp_base_dir = os.path.join(os.getcwd(), ".leindex")
-            logger.debug("Using fallback directory: {temp_base_dir}")
+            logger.debug(f"Using fallback directory: {temp_base_dir}")
             if not os.path.exists(temp_base_dir):
                 os.makedirs(temp_base_dir, exist_ok=True)
 
@@ -110,52 +111,52 @@ class ProjectSettings:
                 # Use hash of project path as unique identifier
                 path_hash = hashlib.md5(base_path.encode()).hexdigest()
                 self.settings_path = os.path.join(temp_base_dir, path_hash)
-                logger.debug("Using project-specific directory: {self.settings_path}")
+                logger.debug(f"Using project-specific directory: {self.settings_path}")
             else:
                 # If no base path provided, use a default directory
                 self.settings_path = os.path.join(temp_base_dir, "default")
-                logger.debug("Using default directory: {self.settings_path}")
+                logger.debug(f"Using default directory: {self.settings_path}")
 
             self.ensure_settings_dir()
         except Exception as e:
-            logger.debug("Error setting up project settings: {e}")
+            logger.debug(f"Error setting up project settings: {e}")
             # If error occurs, use .leindex in current directory as fallback
             fallback_dir = os.path.join(os.getcwd(), ".leindex",
                                       "default" if not base_path else hashlib.md5(base_path.encode()).hexdigest())
-            logger.debug("Using fallback directory: {fallback_dir}")
+            logger.debug(f"Using fallback directory: {fallback_dir}")
             self.settings_path = fallback_dir
             if not os.path.exists(fallback_dir):
                 os.makedirs(fallback_dir, exist_ok=True)
 
     def ensure_settings_dir(self):
         """Ensure settings directory exists"""
-        logger.debug("Checking project settings directory: {self.settings_path}")
+        logger.debug(f"Checking project settings directory: {self.settings_path}")
 
         try:
             if not os.path.exists(self.settings_path):
-                logger.debug("Creating project settings directory: {self.settings_path}")
+                logger.debug(f"Creating project settings directory: {self.settings_path}")
                 # Create directory structure
                 os.makedirs(self.settings_path, exist_ok=True)
-                logger.debug("Project settings directory created: {self.settings_path}")
+                logger.debug(f"Project settings directory created: {self.settings_path}")
             else:
-                logger.debug("Project settings directory already exists: {self.settings_path}")
+                logger.debug(f"Project settings directory already exists: {self.settings_path}")
 
             # Check if directory is writable
             if not os.access(self.settings_path, os.W_OK):
-                logger.debug("Warning: No write access to project settings directory: {self.settings_path}")
+                logger.debug(f"Warning: No write access to project settings directory: {self.settings_path}")
                 # If directory is not writable, use .leindex in current directory as fallback
                 fallback_dir = os.path.join(os.getcwd(), ".leindex",
                                           os.path.basename(self.settings_path))
-                logger.debug("Using fallback directory: {fallback_dir}")
+                logger.debug(f"Using fallback directory: {fallback_dir}")
                 self.settings_path = fallback_dir
                 if not os.path.exists(fallback_dir):
                     os.makedirs(fallback_dir, exist_ok=True)
         except Exception as e:
-            logger.debug("Error ensuring settings directory: {e}")
+            logger.debug(f"Error ensuring settings directory: {e}")
             # If unable to create settings directory, use .leindex in current directory
             fallback_dir = os.path.join(os.getcwd(), ".leindex",
                                       "default" if not self.base_path else hashlib.md5(self.base_path.encode()).hexdigest())
-            logger.debug("Using fallback directory: {fallback_dir}")
+            logger.debug(f"Using fallback directory: {fallback_dir}")
             self.settings_path = fallback_dir
             if not os.path.exists(fallback_dir):
                 os.makedirs(fallback_dir, exist_ok=True)
@@ -168,7 +169,7 @@ class ProjectSettings:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             return path
         except Exception as e:
-            logger.debug("Error getting config path: {e}")
+            logger.debug(f"Error getting config path: {e}")
             # If error occurs, use file in current directory as fallback
             return os.path.join(os.getcwd(), CONFIG_FILE)
 
@@ -180,7 +181,7 @@ class ProjectSettings:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             return path
         except Exception as e:
-            logger.debug("Error getting index path: {e}")
+            logger.debug(f"Error getting index path: {e}")
             # If error occurs, use file in current directory as fallback
             return os.path.join(os.getcwd(), INDEX_FILE)
 
@@ -192,7 +193,7 @@ class ProjectSettings:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             return path
         except Exception as e:
-            logger.debug("Error getting cache path: {e}")
+            logger.debug(f"Error getting cache path: {e}")
             # If error occurs, use file in current directory as fallback
             return os.path.join(os.getcwd(), CACHE_FILE)
 
@@ -204,7 +205,7 @@ class ProjectSettings:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             return path
         except Exception as e:
-            logger.debug("Error getting metadata path: {e}")
+            logger.debug(f"Error getting metadata path: {e}")
             # If error occurs, use file in current directory as fallback
             return os.path.join(os.getcwd(), METADATA_FILE)
 
@@ -229,10 +230,10 @@ class ProjectSettings:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
 
-            logger.debug("Config saved to: {config_path}")
+            logger.debug(f"Config saved to: {config_path}")
             return config
         except Exception as e:
-            logger.debug("Error saving config: {e}")
+            logger.debug(f"Error saving config: {e}")
             return config
 
     def load_config(self):
@@ -251,17 +252,17 @@ class ProjectSettings:
                 try:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         config = json.load(f)
-                    logger.debug("Config loaded from: {config_path}")
+                    logger.debug(f"Config loaded from: {config_path}")
                     return config
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    logger.debug("Error parsing config file: {e}")
+                    logger.debug(f"Error parsing config file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
             else:
-                logger.debug("Config file does not exist: {config_path}")
+                logger.debug(f"Config file does not exist: {config_path}")
             return {}
         except Exception as e:
-            logger.debug("Error loading config: {e}")
+            logger.debug(f"Error loading config: {e}")
             return {}
 
     def save_index(self, file_index):
@@ -272,36 +273,36 @@ class ProjectSettings:
         """
         try:
             index_path = self.get_index_path()
-            logger.debug("Saving index to: {index_path}")
+            logger.debug(f"Saving index to: {index_path}")
 
             # Ensure directory exists
             dir_path = os.path.dirname(index_path)
             if not os.path.exists(dir_path):
-                logger.debug("Creating directory: {dir_path}")
+                logger.debug(f"Creating directory: {dir_path}")
                 os.makedirs(dir_path, exist_ok=True)
 
             # Check if directory is writable
             if not os.access(dir_path, os.W_OK):
-                logger.debug("Warning: Directory is not writable: {dir_path}")
+                logger.debug(f"Warning: Directory is not writable: {dir_path}")
                 # Use current directory as fallback
                 index_path = os.path.join(os.getcwd(), INDEX_FILE)
-                logger.debug("Using fallback path: {index_path}")
+                logger.debug(f"Using fallback path: {index_path}")
 
             with open(index_path, 'wb') as f:
                 pickle.dump(file_index, f)
 
-            logger.debug("Index saved successfully to: {index_path}")
+            logger.debug(f"Index saved successfully to: {index_path}")
         except Exception as e:
-            logger.debug("Error saving index: {e}")
+            logger.debug(f"Error saving index: {e}")
             # Try saving to current directory
             try:
                 fallback_path = os.path.join(os.getcwd(), INDEX_FILE)
-                logger.debug("Trying fallback path: {fallback_path}")
+                logger.debug(f"Trying fallback path: {fallback_path}")
                 with open(fallback_path, 'wb') as f:
                     pickle.dump(file_index, f)
-                logger.debug("Index saved to fallback path: {fallback_path}")
+                logger.debug(f"Index saved to fallback path: {fallback_path}")
             except Exception as e2:
-                logger.debug("Error saving index to fallback path: {e2}")
+                logger.debug(f"Error saving index to fallback path: {e2}")
 
     def load_index(self):
         """Load file index
@@ -320,31 +321,31 @@ class ProjectSettings:
                 try:
                     with open(index_path, 'rb') as f:
                         index = pickle.load(f)
-                    logger.debug("Index loaded successfully from: {index_path}")
+                    logger.debug(f"Index loaded successfully from: {index_path}")
                     return index
                 except (pickle.PickleError, EOFError) as e:
-                    logger.debug("Error parsing index file: {e}")
+                    logger.debug(f"Error parsing index file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
                 except Exception as e:
-                    logger.debug("Unexpected error loading index: {e}")
+                    logger.debug(f"Unexpected error loading index: {e}")
                     return {}
             else:
                 # Try loading from current directory
                 fallback_path = os.path.join(os.getcwd(), INDEX_FILE)
                 if os.path.exists(fallback_path):
-                    logger.debug("Trying fallback path: {fallback_path}")
+                    logger.debug(f"Trying fallback path: {fallback_path}")
                     try:
                         with open(fallback_path, 'rb') as f:
                             index = pickle.load(f)
-                        logger.debug("Index loaded from fallback path: {fallback_path}")
+                        logger.debug(f"Index loaded from fallback path: {fallback_path}")
                         return index
                     except Exception as e:
-                        logger.debug("Error loading index from fallback path: {e}")
+                        logger.debug(f"Error loading index from fallback path: {e}")
 
             return {}
         except Exception as e:
-            logger.debug("Error in load_index: {e}")
+            logger.debug(f"Error in load_index: {e}")
             return {}
 
     def save_cache(self, content_cache):
@@ -355,36 +356,36 @@ class ProjectSettings:
         """
         try:
             cache_path = self.get_cache_path()
-            logger.debug("Saving cache to: {cache_path}")
+            logger.debug(f"Saving cache to: {cache_path}")
 
             # Ensure directory exists
             dir_path = os.path.dirname(cache_path)
             if not os.path.exists(dir_path):
-                logger.debug("Creating directory: {dir_path}")
+                logger.debug(f"Creating directory: {dir_path}")
                 os.makedirs(dir_path, exist_ok=True)
 
             # Check if directory is writable
             if not os.access(dir_path, os.W_OK):
-                logger.debug("Warning: Directory is not writable: {dir_path}")
+                logger.debug(f"Warning: Directory is not writable: {dir_path}")
                 # Use current directory as fallback
                 cache_path = os.path.join(os.getcwd(), CACHE_FILE)
-                logger.debug("Using fallback path: {cache_path}")
+                logger.debug(f"Using fallback path: {cache_path}")
 
             with open(cache_path, 'wb') as f:
                 pickle.dump(content_cache, f)
 
-            logger.debug("Cache saved successfully to: {cache_path}")
+            logger.debug(f"Cache saved successfully to: {cache_path}")
         except Exception as e:
-            logger.debug("Error saving cache: {e}")
+            logger.debug(f"Error saving cache: {e}")
             # Try saving to current directory
             try:
                 fallback_path = os.path.join(os.getcwd(), CACHE_FILE)
-                logger.debug("Trying fallback path: {fallback_path}")
+                logger.debug(f"Trying fallback path: {fallback_path}")
                 with open(fallback_path, 'wb') as f:
                     pickle.dump(content_cache, f)
-                logger.debug("Cache saved to fallback path: {fallback_path}")
+                logger.debug(f"Cache saved to fallback path: {fallback_path}")
             except Exception as e2:
-                logger.debug("Error saving cache to fallback path: {e2}")
+                logger.debug(f"Error saving cache to fallback path: {e2}")
 
     def load_cache(self):
         """Load content cache
@@ -403,31 +404,31 @@ class ProjectSettings:
                 try:
                     with open(cache_path, 'rb') as f:
                         cache = pickle.load(f)
-                    logger.debug("Cache loaded successfully from: {cache_path}")
+                    logger.debug(f"Cache loaded successfully from: {cache_path}")
                     return cache
                 except (pickle.PickleError, EOFError) as e:
-                    logger.debug("Error parsing cache file: {e}")
+                    logger.debug(f"Error parsing cache file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
                 except Exception as e:
-                    logger.debug("Unexpected error loading cache: {e}")
+                    logger.debug(f"Unexpected error loading cache: {e}")
                     return {}
             else:
                 # Try loading from current directory
                 fallback_path = os.path.join(os.getcwd(), CACHE_FILE)
                 if os.path.exists(fallback_path):
-                    logger.debug("Trying fallback path: {fallback_path}")
+                    logger.debug(f"Trying fallback path: {fallback_path}")
                     try:
                         with open(fallback_path, 'rb') as f:
                             cache = pickle.load(f)
-                        logger.debug("Cache loaded from fallback path: {fallback_path}")
+                        logger.debug(f"Cache loaded from fallback path: {fallback_path}")
                         return cache
                     except Exception as e:
-                        logger.debug("Error loading cache from fallback path: {e}")
+                        logger.debug(f"Error loading cache from fallback path: {e}")
 
             return {}
         except Exception as e:
-            logger.debug("Error in load_cache: {e}")
+            logger.debug(f"Error in load_cache: {e}")
             return {}
 
     def save_metadata(self, metadata):
@@ -438,36 +439,36 @@ class ProjectSettings:
         """
         try:
             metadata_path = self.get_metadata_path()
-            logger.debug("Saving metadata to: {metadata_path}")
+            logger.debug(f"Saving metadata to: {metadata_path}")
 
             # Ensure directory exists
             dir_path = os.path.dirname(metadata_path)
             if not os.path.exists(dir_path):
-                logger.debug("Creating directory: {dir_path}")
+                logger.debug(f"Creating directory: {dir_path}")
                 os.makedirs(dir_path, exist_ok=True)
 
             # Check if directory is writable
             if not os.access(dir_path, os.W_OK):
-                logger.debug("Warning: Directory is not writable: {dir_path}")
+                logger.debug(f"Warning: Directory is not writable: {dir_path}")
                 # Use current directory as fallback
                 metadata_path = os.path.join(os.getcwd(), METADATA_FILE)
-                logger.debug("Using fallback path: {metadata_path}")
+                logger.debug(f"Using fallback path: {metadata_path}")
 
             with open(metadata_path, 'wb') as f:
                 pickle.dump(metadata, f)
 
-            logger.debug("Metadata saved successfully to: {metadata_path}")
+            logger.debug(f"Metadata saved successfully to: {metadata_path}")
         except Exception as e:
-            logger.debug("Error saving metadata: {e}")
+            logger.debug(f"Error saving metadata: {e}")
             # Try saving to current directory
             try:
                 fallback_path = os.path.join(os.getcwd(), METADATA_FILE)
-                logger.debug("Trying fallback path: {fallback_path}")
+                logger.debug(f"Trying fallback path: {fallback_path}")
                 with open(fallback_path, 'wb') as f:
                     pickle.dump(metadata, f)
-                logger.debug("Metadata saved to fallback path: {fallback_path}")
+                logger.debug(f"Metadata saved to fallback path: {fallback_path}")
             except Exception as e2:
-                logger.debug("Error saving metadata to fallback path: {e2}")
+                logger.debug(f"Error saving metadata to fallback path: {e2}")
 
     def load_metadata(self):
         """Load file metadata
@@ -486,42 +487,42 @@ class ProjectSettings:
                 try:
                     with open(metadata_path, 'rb') as f:
                         metadata = pickle.load(f)
-                    logger.debug("Metadata loaded successfully from: {metadata_path}")
+                    logger.debug(f"Metadata loaded successfully from: {metadata_path}")
                     return metadata
                 except (pickle.PickleError, EOFError) as e:
-                    logger.debug("Error parsing metadata file: {e}")
+                    logger.debug(f"Error parsing metadata file: {e}")
                     # If file is corrupted, return empty dict
                     return {}
                 except Exception as e:
-                    logger.debug("Unexpected error loading metadata: {e}")
+                    logger.debug(f"Unexpected error loading metadata: {e}")
                     return {}
             else:
                 # Try loading from current directory
                 fallback_path = os.path.join(os.getcwd(), METADATA_FILE)
                 if os.path.exists(fallback_path):
-                    logger.debug("Trying fallback path: {fallback_path}")
+                    logger.debug(f"Trying fallback path: {fallback_path}")
                     try:
                         with open(fallback_path, 'rb') as f:
                             metadata = pickle.load(f)
-                        logger.debug("Metadata loaded from fallback path: {fallback_path}")
+                        logger.debug(f"Metadata loaded from fallback path: {fallback_path}")
                         return metadata
                     except Exception as e:
-                        logger.debug("Error loading metadata from fallback path: {e}")
+                        logger.debug(f"Error loading metadata from fallback path: {e}")
 
             return {}
         except Exception as e:
-            logger.debug("Error in load_metadata: {e}")
+            logger.debug(f"Error in load_metadata: {e}")
             return {}
 
     def clear(self):
         """Clear all settings and cache files"""
         try:
-            logger.debug("Clearing settings directory: {self.settings_path}")
+            logger.debug(f"Clearing settings directory: {self.settings_path}")
 
             if os.path.exists(self.settings_path):
                 # Check if directory is writable
                 if not os.access(self.settings_path, os.W_OK):
-                    logger.debug("Warning: Directory is not writable: {self.settings_path}")
+                    logger.debug(f"Warning: Directory is not writable: {self.settings_path}")
                     return
 
                 # Delete all files in the directory
@@ -531,20 +532,20 @@ class ProjectSettings:
                         try:
                             if os.path.isfile(file_path):
                                 os.unlink(file_path)
-                                logger.debug("Deleted file: {file_path}")
+                                logger.debug(f"Deleted file: {file_path}")
                             elif os.path.isdir(file_path):
                                 shutil.rmtree(file_path)
-                                logger.debug("Deleted directory: {file_path}")
+                                logger.debug(f"Deleted directory: {file_path}")
                         except Exception as e:
-                            logger.debug("Error deleting {file_path}: {e}")
+                            logger.debug(f"Error deleting {file_path}: {e}")
                 except Exception as e:
-                    logger.debug("Error listing directory: {e}")
+                    logger.debug(f"Error listing directory: {e}")
 
-                print("Settings directory cleared successfully")
+                logger.info("Settings directory cleared successfully")
             else:
-                logger.debug("Settings directory does not exist: {self.settings_path}")
+                logger.debug(f"Settings directory does not exist: {self.settings_path}")
         except Exception as e:
-            logger.debug("Error clearing settings: {e}")
+            logger.debug(f"Error clearing settings: {e}")
 
     def get_stats(self):
         """Get statistics for the settings directory
@@ -553,7 +554,7 @@ class ProjectSettings:
             dict: Dictionary containing file sizes and update times
         """
         try:
-            logger.debug("Getting stats for settings directory: {self.settings_path}")
+            logger.debug(f"Getting stats for settings directory: {self.settings_path}")
 
             stats = {
                 'settings_path': self.settings_path,
@@ -600,7 +601,7 @@ class ProjectSettings:
 
             return stats
         except Exception as e:
-            logger.debug("Error getting stats: {e}")
+            logger.debug(f"Error getting stats: {e}")
             return {
                 'error': str(e),
                 'settings_path': self.settings_path,
@@ -634,10 +635,10 @@ class ProjectSettings:
         """
         Force a refresh of the available search tools list.
         """
-        print("Refreshing available search strategies...")
+        logger.info("Refreshing available search strategies...")
         self.available_strategies = _get_available_strategies()
-        logger.debug("Available strategies found: {[s.name for s in self.available_strategies]}")
-    
+        logger.debug(f"Available strategies found: {[s.name for s in self.available_strategies]}")
+
     def get_config_manager(self) -> ConfigManager:
         """Get ConfigManager instance with project-specific overrides.
 
@@ -681,7 +682,7 @@ class ProjectSettings:
 
             return get_effective_memory_config(self.base_path)
         except Exception as e:
-            logger.debug("Error loading project memory config: {e}")
+            logger.debug(f"Error loading project memory config: {e}")
             # Return defaults if project config fails
             return {
                 "estimated_mb": 256,  # Global default

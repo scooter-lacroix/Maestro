@@ -81,7 +81,8 @@ class HandoffHandler:
         'investigation_topic', 'findings', 'hypotheses', 'tests_run',
         'next_investigation_steps', 'title', 'description', 'current_state',
         'achievements', 'blockers', 'action_items', 'summary',
-        'context', 'metadata', 'state', 'progress', 'errors', 'warnings'
+        'context', 'metadata', 'state', 'progress', 'errors', 'warnings',
+        'goal', 'now', 'next'  # CCv3 Feature Adoption: YAML goal/now/next schema
     }
 
     def __init__(self, session: Session):
@@ -861,3 +862,34 @@ class HandoffTemplate:
             **extra_context,
         }
         return context
+
+    @staticmethod
+    def goal_now_next_handoff(
+        goal: str,
+        now: str,
+        next_step: str,
+        context: Optional[Dict[str, Any]] = None,
+        **extra_context: Any,
+    ) -> Dict[str, Any]:
+        """
+        Create a handoff using the standardized goal/now/next schema (CCv3 Feature Adoption).
+
+        Args:
+            goal: Current objective or goal
+            now: In-progress work or current status
+            next_step: Planned next steps
+            context: Optional additional context
+            **extra_context: Additional context
+
+        Returns:
+            Handoff context dictionary with goal/now/next structure
+        """
+        context_dict = {
+            "handoff_type": "goal_now_next",
+            "goal": goal,
+            "now": now,
+            "next": next_step,
+            **(context or {}),
+            **extra_context,
+        }
+        return context_dict

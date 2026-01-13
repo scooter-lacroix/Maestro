@@ -48,3 +48,21 @@ This file tracks all major tracks for the project. Each track has its own detail
 **Total Tasks**: 51 - All Complete
 **Tzar Issues**: 31/31 resolved (100%)
 **Concurrency Tests**: 11/11 passing (100%)
+
+---
+
+## [~] Track: Maestro v2 Post-Merge Refinements (Master Track)
+*Link: [./maestro/tracks/v2-refinements_20260112/](./maestro/tracks/v2-refinements_20260112/)*
+
+**Description**: Comprehensive refinements implementing all recommendations from PRE_MERGE_ANALYSIS_REPORT.md - installer improvements, cross-platform fixes, DuckDB+SQLite migration, LeIndex integration, and CC-v3 feature adoption.
+
+**Type**: Master Orchestration Track
+
+**Sub-Tracks**:
+- [~] 01-installer-refinements (Priority 1 - Foundation)
+- [~] 02-cross-platform-fixes (Priority 2 - Bug Fixes)
+- [ ] 03-duckdb-sqlite-migration (Priority 3 - Infrastructure)
+- [ ] 04-leindex-integration (Priority 4 - Search & Analysis)
+- [ ] 05-ccv3-feature-adoption (Priority 5 - Enhancements)
+
+**Execution**: `/maestro:orchestrate v2-refinements_20260112`

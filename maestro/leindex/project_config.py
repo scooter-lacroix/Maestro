@@ -27,7 +27,10 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import yaml
 
-from .config.global_config import GlobalConfigManager
+try:
+    from .config.global_config import GlobalConfigManager
+except ImportError:
+    GlobalConfigManager = None
 
 
 logger = logging.getLogger(__name__)
@@ -146,7 +149,11 @@ class ProjectConfigManager:
         """
         self.project_path = Path(project_path).resolve()
         self.config_path = self.project_path / self.CONFIG_DIRNAME / self.CONFIG_FILENAME
-        self.global_config_manager = GlobalConfigManager()
+        if GlobalConfigManager is None:
+            self.global_config_manager = None
+            logger.warning("Global config unavailable; using defaults")
+        else:
+            self.global_config_manager = GlobalConfigManager()
 
         # Cache for loaded config
         self._config_cache: Optional[ProjectConfig] = None
@@ -246,12 +253,15 @@ class ProjectConfigManager:
                 - is_overridden: True if project overrode any defaults
         """
         project_config = self.get_config()
-        global_config = self.global_config_manager.get_config()
 
         # Determine effective values
         effective_mb = project_config.memory.estimated_mb
         if effective_mb is None:
-            effective_mb = global_config.projects.estimated_mb
+            if self.global_config_manager is None:
+                effective_mb = 256
+            else:
+                global_config = self.global_config_manager.get_config()
+                effective_mb = global_config.projects.estimated_mb
 
         effective_priority = project_config.memory.priority
 

@@ -156,6 +156,7 @@ def get_query_cache() -> QueryResultCache:
         _global_cache = QueryResultCache()
     return _global_cache
 
+from maestro.memory.database.backends import UnifiedStorageBackend
 from maestro.memory.database.models import (
     Memory,
     MemoryCategory,
@@ -259,7 +260,13 @@ class DatabaseManager:
         """Enable or disable query caching globally."""
         cls._use_cache = enabled
 
-    def __init__(self, session: ORMSession, user_id: Optional[str] = None, use_cache: Optional[bool] = None) -> None:
+    def __init__(
+        self,
+        session: ORMSession,
+        user_id: Optional[str] = None,
+        use_cache: Optional[bool] = None,
+        backend: Optional[UnifiedStorageBackend] = None
+    ) -> None:
         """
         Initialize the manager with a database session
 
@@ -269,11 +276,13 @@ class DatabaseManager:
             session: SQLAlchemy session
             user_id: Optional user/agent ID for audit logging
             use_cache: Enable/disable caching for this instance (default: global setting)
+            backend: Optional UnifiedStorageBackend for OLAP queries
         """
         self.session = session
         self._user_id = user_id or self._default_user_id
         self._use_cache = use_cache if use_cache is not None else self._use_cache
         self._cache = get_query_cache() if self._use_cache else None
+        self.backend = backend
 
         # Issue #31: Initialize thread tracking attributes
         self._cleanup_thread: Optional[Thread] = None
@@ -282,6 +291,14 @@ class DatabaseManager:
     def _get_user_id(self) -> str:
         """Get the user ID for audit logging."""
         return self._user_id or "system"
+
+    def query_analytics(self, query: str, **kwargs):
+        """Execute an OLAP query via DuckDB if backend is available."""
+        if not self.backend:
+            logger.warning("Analytics query attempted but no backend available.")
+            # Fallback to SQLite via session if possible, or raise
+            return self.session.execute(text(query), kwargs)
+        return self.backend.query_analytics(query, **kwargs)
 
     @contextmanager
     def _transaction(self, check_disk_space: bool = True) -> Generator[None, None, None]:
@@ -1818,24 +1835,36 @@ def get_manager(
         engine.dispose()
 
 
-def get_managers(db_path: Optional[str] = None) -> Dict[str, DatabaseManager]:
+def get_managers(
+    db_path: Optional[str] = None,
+    duckdb_path: Optional[str] = None,
+    backend: Optional[UnifiedStorageBackend] = None
+) -> Dict[str, DatabaseManager]:
     """
-    Get all manager instances with a shared session
+    Get all manager instances with a shared session and optional backend.
 
     Args:
-        db_path: Optional database path
+        db_path: Optional SQLite database path
+        duckdb_path: Optional DuckDB database path
+        backend: Optional existing UnifiedStorageBackend
 
     Returns:
         Dictionary of manager instances
     """
-    from maestro.memory.database.models import get_session
+    from maestro.memory.database.models import create_tables, get_session
 
-    session = get_session(db_path=db_path)
+    if backend is None:
+        backend = UnifiedStorageBackend(db_path=db_path, duckdb_path=duckdb_path)
+        backend.initialize()
+        # Ensure tables are created in SQLite
+        create_tables(db_path=backend.db_path)
+
+    session = backend.get_session()
 
     return {
-        "memory": MemoryManager(session),
-        "namespace": NamespaceManager(session),
-        "session": SessionManager(session),
-        "project": ProjectManager(session),
-        "track": TrackManager(session),
+        "memory": MemoryManager(session, backend=backend),
+        "namespace": NamespaceManager(session, backend=backend),
+        "session": SessionManager(session, backend=backend),
+        "project": ProjectManager(session, backend=backend),
+        "track": TrackManager(session, backend=backend),
     }

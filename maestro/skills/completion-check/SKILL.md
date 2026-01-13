@@ -33,14 +33,14 @@ Infrastructure is not done when the code is written - it's done when it's wired 
 3. **Verify database connections** - Ensure infrastructure uses the right backend:
    ```bash
    # Check connection strings
-   grep -r "postgresql://" src/
-   grep -r "sqlite:" src/  # Should NOT find if PostgreSQL expected
+   grep -r "sqlite:///" src/
+   grep -r "duckdb" src/
    ```
 
 4. **Test end-to-end** - Run the feature and verify infrastructure is invoked:
    ```bash
    # Add debug logging
-   echo "DEBUG: DAG spawn invoked" >> /tmp/debug.log
+   echo "DEBUG: UnifiedStorageBackend initialized" >> /tmp/debug.log
 
    # Trigger feature
    uv run python -m my_feature

@@ -199,7 +199,7 @@ type ProxyInfo struct {
 // DiscoverExistingSockets scans for existing pool sockets owned by another maestro-tui instance
 // and registers them so this instance can use them too. Returns count of discovered sockets.
 func (p *Pool) DiscoverExistingSockets() int {
-	pattern := filepath.Join("/tmp", "maestro-mcp-*.sock")
+	pattern := filepath.Join(os.TempDir(), "maestro-mcp-*.sock")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		log.Printf("[Pool] Failed to scan for existing sockets: %v", err)
