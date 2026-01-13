@@ -326,6 +326,27 @@ fi
 # Copy hooks (v2 component)
 echo "📋 Copying hooks..."
 if [ -d "$SCRIPT_DIR/maestro/hooks" ]; then
+    # Check for TypeScript hooks that need building
+    if [ -f "$SCRIPT_DIR/maestro/hooks/package.json" ]; then
+        echo "📦 Detected package.json in hooks directory. Building TypeScript hooks..."
+        if command_exists npm; then
+            echo "   Running npm install..."
+            if (cd "$SCRIPT_DIR/maestro/hooks" && npm install --quiet 2>/dev/null); then
+                echo "   Running npm run build..."
+                if (cd "$SCRIPT_DIR/maestro/hooks" && npm run build --quiet 2>/dev/null); then
+                    echo "   ✅ TypeScript hooks built successfully"
+                else
+                    echo "   ⚠️  Warning: TypeScript hook build failed"
+                fi
+            else
+                echo "   ⚠️  Warning: npm install for hooks failed"
+            fi
+        else
+            echo "   ⚠️  Warning: npm not found. Skipping TypeScript hook build."
+            echo "   Please install Node.js and npm to build hooks manually."
+        fi
+    fi
+
     mkdir -p ~/.claude/plugins/maestro/hooks
     cp -r "$SCRIPT_DIR/maestro/hooks"/* ~/.claude/plugins/maestro/hooks/
     echo "   ✅ Hooks installed ($(find "$SCRIPT_DIR/maestro/hooks" -name "*.py" | wc -l) hook files)"
