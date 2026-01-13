@@ -197,6 +197,62 @@ check_dependencies() {
 # Check dependencies before proceeding
 check_dependencies
 
+# Function to backup existing configuration
+backup_config() {
+    local config_dir="$HOME/.claude"
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="$HOME/.claude.backup.${timestamp}.tar.gz"
+
+    if [ -d "$config_dir" ]; then
+        echo ""
+        echo "📦 Backing up existing configuration..."
+        if tar -czf "$backup_file" -C "$HOME" ".claude" 2>/dev/null; then
+            echo "   ✅ Backup created: $backup_file"
+        else
+            echo "   ⚠️  Warning: Backup failed. Continuing without backup..."
+        fi
+    fi
+}
+
+# Function to restore configuration
+restore_config() {
+    local backup_file="$1"
+    local config_dir="$HOME/.claude"
+
+    if [ -f "$backup_file" ]; then
+        echo ""
+        echo "🔄 Restoring configuration from $backup_file..."
+        # Create backup of current before restore if it exists
+        if [ -d "$config_dir" ]; then
+            mv "$config_dir" "${config_dir}.pre-restore.$(date +%Y%m%d_%H%M%S)"
+        fi
+
+        if tar -xzf "$backup_file" -C "$HOME"; then
+            echo "   ✅ Restore complete"
+        else
+            echo "   ❌ Restore failed"
+            return 1
+        fi
+    else
+        echo "   ❌ Error: Backup file not found: $backup_file"
+        return 1
+    fi
+}
+
+# Handle arguments
+if [[ "$1" == "--restore" ]]; then
+    if [ -n "$2" ]; then
+        restore_config "$2"
+        exit 0
+    else
+        echo "Usage: $0 --restore <backup_file>"
+        exit 1
+    fi
+fi
+
+# Perform backup before installation
+backup_config
+
 # Create a temporary directory for downloading the repository
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
