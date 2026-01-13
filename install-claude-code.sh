@@ -440,7 +440,7 @@ install_zoekt() {
     local web_pid=$!
 
     {
-        go install github.com/sourcegraph/zoekt/cmd/zoekt-indexer@latest 2>&1 | while IFS= read -r line; do
+        go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest 2>&1 | while IFS= read -r line; do
             if [[ "$line" =~ "go:" ]]; then
                 printf "\r${C}  →${NC} Building: ${line:0:55}...      " 2>/dev/null
             fi
@@ -466,7 +466,7 @@ install_zoekt() {
 
         # Check if binaries exist at their install location
         local webserver_bin="$gopath_bin/zoekt-webserver"
-        local indexer_bin="$gopath_bin/zoekt-indexer"
+        local indexer_bin="$gopath_bin/zoekt-git-index"
 
         local webserver_ok=false
         local indexer_ok=false
@@ -480,7 +480,7 @@ install_zoekt() {
         if [[ -f "$indexer_bin" && -x "$indexer_bin" ]]; then
             indexer_ok=true
         else
-            print_warning "zoekt-indexer not found at: ${indexer_bin}"
+            print_warning "zoekt-git-index not found at: ${indexer_bin}"
         fi
 
         if $webserver_ok && $indexer_ok; then
@@ -517,7 +517,7 @@ install_zoekt() {
         echo ""
         echo -e "${Y}  💡 Manual installation:${NC}"
         echo "     ${C}go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest${NC}"
-        echo "     ${C}go install github.com/sourcegraph/zoekt/cmd/zoekt-indexer@latest${NC}"
+        echo "     ${C}go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest${NC}"
         return 1
     fi
 }
@@ -558,10 +558,10 @@ backup_config() {
                 --exclude="*.pyc" \
                 "$config_dir/" "$temp_backup_dir/.claude/" > /dev/null 2>&1
         else
-            # Fallback without rsync (use /bin/cp to bypass interactive alias)
-            /bin/cp -R "$config_dir/commands" "$temp_backup_dir/.claude/" 2>/dev/null || true
-            /bin/cp -R "$config_dir/maestro-templates" "$temp_backup_dir/.claude/" 2>/dev/null || true
-            /bin/cp -R "$config_dir/plugins" "$temp_backup_dir/.claude/" 2>/dev/null || true
+            # Fallback without rsync
+            cp -R "$config_dir/commands" "$temp_backup_dir/.claude/" 2>/dev/null || true
+            cp -R "$config_dir/maestro-templates" "$temp_backup_dir/.claude/" 2>/dev/null || true
+            cp -R "$config_dir/plugins" "$temp_backup_dir/.claude/" 2>/dev/null || true
         fi
 
         # Now tar the filtered content
@@ -768,7 +768,7 @@ main() {
         local icon="$2"
         local action="$3"
 
-        ((component++))
+        component=$((component + 1))
         printf "\r${BM}  [$component/$total_components]${NC} ${icon}  ${BW}${name}...${NC}   " 2>/dev/null
 
         if eval "$action" > /dev/null 2>&1; then
@@ -868,7 +868,7 @@ WRAPPER_EOF
 
     if [ -f "$mcp_config" ]; then
         local timestamp=$(date +%Y%m%d_%H%M%S)
-        /bin/cp "$mcp_config" "${mcp_config}.backup.${timestamp}"
+        cp "$mcp_config" "${mcp_config}.backup.${timestamp}"
         print_info "Backed up existing MCP config"
     fi
 
