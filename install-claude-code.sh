@@ -768,7 +768,7 @@ main() {
         local icon="$2"
         local action="$3"
 
-        ((component++))
+        component=$((component + 1))
         printf "\r${BM}  [$component/$total_components]${NC} ${icon}  ${BW}${name}...${NC}   " 2>/dev/null
 
         if eval "$action" > /dev/null 2>&1; then
