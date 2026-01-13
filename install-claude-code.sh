@@ -558,10 +558,10 @@ backup_config() {
                 --exclude="*.pyc" \
                 "$config_dir/" "$temp_backup_dir/.claude/" > /dev/null 2>&1
         else
-            # Fallback without rsync
-            cp -R "$config_dir/commands" "$temp_backup_dir/.claude/" 2>/dev/null || true
-            cp -R "$config_dir/maestro-templates" "$temp_backup_dir/.claude/" 2>/dev/null || true
-            cp -R "$config_dir/plugins" "$temp_backup_dir/.claude/" 2>/dev/null || true
+            # Fallback without rsync (use /bin/cp to bypass interactive alias)
+            /bin/cp -R "$config_dir/commands" "$temp_backup_dir/.claude/" 2>/dev/null || true
+            /bin/cp -R "$config_dir/maestro-templates" "$temp_backup_dir/.claude/" 2>/dev/null || true
+            /bin/cp -R "$config_dir/plugins" "$temp_backup_dir/.claude/" 2>/dev/null || true
         fi
 
         # Now tar the filtered content
@@ -780,29 +780,29 @@ main() {
 
     print_header "🔧 Installing Components" "⚙️"
 
-    # Commands
-    install_component "Commands" "📋" "mkdir -p ~/.claude/commands && cp '$SCRIPT_DIR/claude-code/commands/maestro'*.md ~/.claude/commands/"
+    # Commands (use /bin/cp to bypass interactive alias)
+    install_component "Commands" "📋" "mkdir -p ~/.claude/commands && /bin/cp '$SCRIPT_DIR/claude-code/commands/maestro'*.md ~/.claude/commands/"
 
-    # Templates
-    install_component "Templates" "📝" "mkdir -p ~/.claude/maestro-templates && cp '$SCRIPT_DIR/claude-code/templates/workflow.md' ~/.claude/maestro-templates/ && mkdir -p ~/.claude/maestro-templates/code_styleguides && cp '$SCRIPT_DIR/claude-code/templates/code_styleguides'/*.md ~/.claude/maestro-templates/code_styleguides/"
+    # Templates (use /bin/cp to bypass interactive alias)
+    install_component "Templates" "📝" "mkdir -p ~/.claude/maestro-templates && /bin/cp '$SCRIPT_DIR/claude-code/templates/workflow.md' ~/.claude/maestro-templates/ && mkdir -p ~/.claude/maestro-templates/code_styleguides && /bin/cp '$SCRIPT_DIR/claude-code/templates/code_styleguides/'*.md ~/.claude/maestro-templates/code_styleguides/"
 
-    # Plugin
-    install_component "Plugin" "🔌" "mkdir -p ~/.claude/plugins/maestro && [ -f '$SCRIPT_DIR/plugin.json' ] && cp '$SCRIPT_DIR/plugin.json' ~/.claude/plugins/maestro/"
+    # Plugin (use /bin/cp to bypass interactive alias)
+    install_component "Plugin" "🔌" "mkdir -p ~/.claude/plugins/maestro && [ -f '$SCRIPT_DIR/plugin.json' ] && /bin/cp '$SCRIPT_DIR/plugin.json' ~/.claude/plugins/maestro/"
 
-    # Hooks
-    install_component "Hooks" "🪝" "mkdir -p ~/.claude/plugins/maestro/hooks && [ -d '$SCRIPT_DIR/maestro/hooks' ] && cp -r '$SCRIPT_DIR/maestro/hooks'/* ~/.claude/plugins/maestro/hooks/"
+    # Hooks (use /bin/cp to bypass interactive alias)
+    install_component "Hooks" "🪝" "mkdir -p ~/.claude/plugins/maestro/hooks && [ -d '$SCRIPT_DIR/maestro/hooks' ] && /bin/cp -r '$SCRIPT_DIR/maestro/hooks/'* ~/.claude/plugins/maestro/hooks/"
 
-    # Skills
-    install_component "Skills" "🎓" "mkdir -p ~/.claude/plugins/maestro/skills && [ -d '$SCRIPT_DIR/maestro/skills' ] && cp -r '$SCRIPT_DIR/maestro/skills'/* ~/.claude/plugins/maestro/skills/"
+    # Skills (use /bin/cp to bypass interactive alias)
+    install_component "Skills" "🎓" "mkdir -p ~/.claude/plugins/maestro/skills && [ -d '$SCRIPT_DIR/maestro/skills' ] && /bin/cp -r '$SCRIPT_DIR/maestro/skills/'* ~/.claude/plugins/maestro/skills/"
 
-    # Agents
-    install_component "Agents" "🤖" "mkdir -p ~/.claude/plugins/maestro/agents && [ -d '$SCRIPT_DIR/maestro/agents' ] && cp -r '$SCRIPT_DIR/maestro/agents'/* ~/.claude/plugins/maestro/agents/"
+    # Agents (use /bin/cp to bypass interactive alias)
+    install_component "Agents" "🤖" "mkdir -p ~/.claude/plugins/maestro/agents && [ -d '$SCRIPT_DIR/maestro/agents' ] && /bin/cp -r '$SCRIPT_DIR/maestro/agents/'* ~/.claude/plugins/maestro/agents/"
 
-    # Config
-    install_component "Config Module" "⚙️" "mkdir -p ~/.claude/plugins/maestro/config && [ -d '$SCRIPT_DIR/maestro/config' ] && cp -r '$SCRIPT_DIR/maestro/config'/* ~/.claude/plugins/maestro/config/"
+    # Config (use /bin/cp to bypass interactive alias)
+    install_component "Config Module" "⚙️" "mkdir -p ~/.claude/plugins/maestro/config && [ -d '$SCRIPT_DIR/maestro/config' ] && /bin/cp -r '$SCRIPT_DIR/maestro/config/'* ~/.claude/plugins/maestro/config/"
 
-    # Critical Think
-    install_component "Critical Think" "🧠" "mkdir -p ~/.claude/maestro-templates && [ -d '$SCRIPT_DIR/maestro/critical_think/templates' ] && cp '$SCRIPT_DIR/maestro/critical_think/templates'/*.md ~/.claude/maestro-templates/"
+    # Critical Think (use /bin/cp to bypass interactive alias)
+    install_component "Critical Think" "🧠" "mkdir -p ~/.claude/maestro-templates && [ -d '$SCRIPT_DIR/maestro/critical_think/templates' ] && /bin/cp '$SCRIPT_DIR/maestro/critical_think/templates/'*.md ~/.claude/maestro-templates/"
 
     # ─────────────────────────────────────────────────────────────────────
     # PHASE 5: PYTHON CLI INSTALLATION & PATH SETUP
@@ -819,7 +819,7 @@ main() {
         rm -rf "$install_dir/maestro"
 
         echo -e "${C}  →${NC} Copying source to ${Y}${install_dir}${NC}..."
-        cp -r "$SCRIPT_DIR/maestro" "$install_dir/"
+        /bin/cp -r "$SCRIPT_DIR/maestro" "$install_dir/"
 
         # Create wrapper
         mkdir -p ~/.local/bin
@@ -868,7 +868,7 @@ WRAPPER_EOF
 
     if [ -f "$mcp_config" ]; then
         local timestamp=$(date +%Y%m%d_%H%M%S)
-        cp "$mcp_config" "${mcp_config}.backup.${timestamp}"
+        /bin/cp "$mcp_config" "${mcp_config}.backup.${timestamp}"
         print_info "Backed up existing MCP config"
     fi
 
