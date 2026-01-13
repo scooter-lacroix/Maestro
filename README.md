@@ -112,6 +112,35 @@ maestro memory serve
 # Visit http://localhost:18765
 ```
 
+### TLDR & LeIndex
+
+Powerful code analysis and search capabilities (ported from llm-tldr):
+
+- **5-Layer Code Analysis**:
+  - Layer 1 (AST): Extract functions, classes, imports
+  - Layer 2 (Call Graph): Who calls what
+  - Layer 3 (Control Flow): Code complexity and decision points
+  - Layer 4 (Data Flow): Where data goes
+  - Layer 5 (Program Slicing): What affects a line
+
+- **Automatic Hooks**: Context injection during your sessions
+- **Full-Text + Semantic Search**: Fast code search with intelligent results
+- **95% Token Reduction**: Optimized context for LLM consumption
+
+Access via slash commands:
+```bash
+/maestro:tldr ast src/auth.py           # Analyze structure
+/maestro:tldr callers authenticate      # See who calls a function
+/maestro:tldr cfg src/utils.py          # Analyze complexity
+/maestro:leindex search "auth"          # Search code
+```
+
+Or via CLI:
+```bash
+leindex-search "authentication pattern"
+leindex stats
+```
+
 ### Metacognitive Analysis
 
 Native Claude Code integration for systematic analysis and quality assurance:
@@ -397,7 +426,9 @@ These commands work within Claude Code/OpenCode sessions:
 | `/maestro:implement [track]` | Execute implementation plan |
 | `/maestro:status` | Display progress across all tracks |
 | `/maestro:revert [track\|phase\|task]` | Revert previous work |
-| `/maestro:configure` | Configure Maestro settings |
+| `/maestro:configure` | Configure Maestro settings and features |
+| `/maestro:tldr <command>` | 5-layer code analysis (AST, callgraph, CFG, DFG, slicing) |
+| `/maestro:leindex <command>` | Code indexing and search (full-text + semantic) |
 | `/maestro:memory serve` | Start memory dashboard server (requires CLI installation) |
 | `/maestro:memory status` | Show memory system statistics (requires CLI installation) |
 

@@ -203,6 +203,111 @@ Revert previous work.
 /maestro:revert password-reset
 ```
 
+### `/maestro:tldr <command>`
+
+Access Maestro's 5-layer code analysis system (TLDR) for intelligent code understanding.
+
+**When to use**: Understanding code structure, complexity, and relationships
+
+**Features**:
+- **Layer 1 (AST)**: Extract functions, classes, imports
+- **Layer 2 (Call Graph)**: Who calls what
+- **Layer 3 (Control Flow)**: Code complexity and decision points
+- **Layer 4 (Data Flow)**: Where data goes
+- **Layer 5 (Program Slicing)**: What affects a line
+
+**Commands**:
+```bash
+# Analyze file structure
+/maestro:tldr ast src/auth.py
+
+# See who calls a function
+/maestro:tldr callers authenticate_user
+
+# Analyze complexity
+/maestro:tldr cfg src/utils.py
+
+# Get LLM-ready context
+/maestro:tldr context main.py
+
+# Search by behavior
+/maestro:tldr search "database connection"
+```
+
+**Automatic Integration**: TLDR hooks run automatically during your sessions, injecting relevant context before code edits.
+
+### `/maestro:leindex <command>`
+
+Access LeIndex - Maestro's powerful code indexing and search system.
+
+**When to use**: Fast full-text and semantic code search
+
+**Features**:
+- Full-text search (Tantivy BM25)
+- Semantic search (vector embeddings)
+- 5-layer code analysis
+- File change tracking
+
+**Commands**:
+```bash
+# Search code
+/maestro:leindex search "authentication"
+
+# RAG-style Q&A
+/maestro:leindex answer "How is auth handled?"
+
+# Analyze file
+/maestro:leindex analyze src/auth.py
+
+# Index status
+/maestro:leindex status
+```
+
+**CLI Tools** (outside Claude Code):
+```bash
+leindex-search "pattern"
+leindex stats
+```
+
+## TLDR & LeIndex Overview
+
+Maestro includes powerful code analysis and search capabilities that work both **automatically** (via hooks) and **manually** (via commands).
+
+### Automatic Features (Always Active)
+
+TLDR and LeIndex work behind the scenes during your sessions:
+
+1. **TLDR Context Injection**: Before you edit code, relevant context is automatically prepared
+2. **Smart Search**: Code searches use semantic understanding, not just text matching
+3. **File Read Optimization**: When you read files, TLDR provides optimized summaries
+
+You don't need to do anything - these features are automatically available.
+
+### Manual Features (When Needed)
+
+Use slash commands for direct access:
+
+| Your Question | Use This Command |
+|---------------|------------------|
+| "What functions are in this file?" | `/maestro:tldr ast <file>` |
+| "Who calls this function?" | `/maestro:tldr callers <func>` |
+| "How complex is this code?" | `/maestro:tldr cfg <file>` |
+| "Where does this data go?" | `/maestro:tldr dfg <file>` |
+| "What affects this line?" | `/maestro:tldr slice <file> <line>` |
+| "Search for behavior" | `/maestro:leindex search "<query>"` |
+| "Give Claude optimal context" | `/maestro:tldr context <target>` |
+
+### Integration with llm-tldr
+
+If you're familiar with [llm-tldr](https://github.com/parcadei/llm-tldr), Maestro TLDR provides equivalent functionality:
+
+| llm-tldr Command | Maestro TLDR Equivalent |
+|------------------|-------------------------|
+| `tldr warm .` | `/maestro:tldr warm .` |
+| `tldr context main --project .` | `/maestro:tldr context main.py` |
+| `tldr impact helper_func` | `/maestro:tldr impact helper_func` |
+| `tldr semantic "database"` | `/maestro:tldr search "database"` |
+
 ## Project Structure
 
 After setup, your project will have:

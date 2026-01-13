@@ -72,6 +72,7 @@ AskUserQuestion:
    > 2. **Analysis Frequency**: Configure when Critical Think analysis runs (before/during/after stages)
    > 3. **claude-hud Integration**: Enable native token/cost tracking in your statusline
    > 4. **Agent Setup**: Automatically create specialized agents for CLI tools (gemini, qwen, codex)
+   > 5. **TLDR & LeIndex**: Configure code analysis and search features
    >
    > These settings will be saved to a global configuration file for use across all Maestro projects.
    > - **Linux/macOS**: `~/.claude/maestro.local.md`
@@ -535,7 +536,97 @@ AskUserQuestion:
 
 ---
 
-### 2.6 Global Enable/Disable Flags
+### 2.6 TLDR & LeIndex Configuration
+
+**PROTOCOL: Configure TLDR code analysis and LeIndex search integration.**
+
+1. **Explain TLDR & LeIndex:**
+   > "Maestro includes powerful code analysis and search capabilities:
+   >
+   > **TLDR (Too Long; Didn't Read)** - 5-layer code analysis system:
+   > - Layer 1 (AST): Extract functions, classes, imports
+   > - Layer 2 (Call Graph): Who calls what
+   > - Layer 3 (Control Flow): Code complexity and decision points
+   > - Layer 4 (Data Flow): Where data goes
+   > - Layer 5 (Program Slicing): What affects a line
+   >
+   > **LeIndex** - Fast code indexing and search:
+   > - Full-text search (Tantivy BM25)
+   > - Semantic search (vector embeddings)
+   > - 5-layer code analysis
+   > - File change tracking
+   >
+   > These features run **automatically via hooks** during your sessions:
+   > - TLDR context is injected before editing code
+   > - Smart search uses semantic understanding
+   > - File reads provide optimized context"
+
+2. **Check MCP Integration:**
+   - Ask if user wants to enable LeIndex MCP server:
+   ```
+   AskUserQuestion:
+     question: "Enable LeIndex MCP server for deep integration?"
+     header: "LeIndex MCP"
+     options:
+       - label: "Yes, enable LeIndex MCP"
+         description: "Enable MCP server for code search and analysis"
+       - label: "No, skip MCP setup"
+         description: "TLDR hooks work automatically, MCP is optional"
+     multiSelect: false
+   ```
+
+3. **If Yes - Configure LeIndex MCP:**
+   - Check if LeIndex MCP is configured in `.mcp.json`
+   - Add LeIndex to MCP configuration if not present
+   - Provide MCP configuration example
+
+4. **Display Feature Status:**
+   > "TLDR & LeIndex Status:
+   >
+   > **Automatic Features (always active):**
+   > - ✅ TLDR context injection (pre-edit hooks)
+   > - ✅ Smart search (semantic understanding)
+   > - ✅ File read optimization
+   >
+   > **Manual Access (via slash commands):**
+   > - `/maestro:tldr <command>` - Access 5-layer analysis
+   > - `/maestro:leindex <command>` - Code search and indexing
+   >
+   > **CLI Tools (outside Claude Code):**
+   > - `leindex-search "<query>"` - Search code
+   > - `leindex stats` - Index statistics
+   >
+   > **Python API:**
+   > ```python
+   > from maestro.tldr import TLRDAnalyzer, get_relevant_context
+   > ```"
+
+5. **Provide Quick Examples:**
+   > "Quick Start Examples:
+   >
+   > **Search for code by behavior:**
+   > ```bash
+   > /maestro:leindex search "authentication"
+   > ```
+   >
+   > **Understand who calls a function:**
+   > ```bash
+   > /maestro:tldr callers authenticate_user
+   > ```
+   >
+   > **Get LLM-ready context:**
+   > ```bash
+   > /maestro:tldr context main.py
+   > ```
+   >
+   > **Analyze code complexity:**
+   > ```bash
+   > /maestro:tldr cfg src/auth.py
+   > ```"
+
+---
+
+### 2.7 Global Enable/Disable Flags
 
 **PROTOCOL: Configure global enable/disable flags.**
 
@@ -740,6 +831,10 @@ AskUserQuestion:
    > - Agents Created: <count> of <total>
    > - CLI Tools Available: <list>
    >
+   > **TLDR & LeIndex:**
+   > - Automatic Hooks: <enabled>
+   > - LeIndex MCP: <enabled/disabled>
+   >
    > Configuration saved to the global Maestro configuration file."
 
 2. **Provide Next Steps:**
@@ -748,7 +843,9 @@ AskUserQuestion:
    > - Run `/maestro:status` to check current progress
    > - Run `/maestro:implement` to start implementing tracks
    > - Run `/maestro:configure` again to change settings at any time
-   > - Use specialized agents directly or let Maestro delegate automatically"
+   > - Use specialized agents directly or let Maestro delegate automatically
+   > - Try `/maestro:tldr` for 5-layer code analysis
+   > - Try `/maestro:leindex` for code search and indexing"
 
 3. **Explain Override Behavior:**
    > "Settings are applied in this order (later overrides earlier):
@@ -932,6 +1029,11 @@ agent_setup:
     rovo-dev: created
     opus-specialist: created
 
+tldr_leindex:
+  automatic_hooks: true
+  leindex_mcp_enabled: true
+  indexing_enabled: true
+
 global_flags:
   critical_think_enabled: true
   native_integration: true
@@ -958,11 +1060,12 @@ This file contains global Maestro settings...
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2026-01-05
-**Status**: Enhanced with Agent Setup
+**Document Version**: 2.1
+**Last Updated**: 2026-01-13
+**Status**: Enhanced with TLDR & LeIndex Configuration
 
 **Version History:**
+- v2.1 (2026-01-13): Added TLDR & LeIndex configuration with automatic hooks and MCP integration
 - v2.0 (2026-01-05): Added automated agent creation for CLI tools (gemini, qwen, codex) with environment detection for both Claude Code and OpenCode
 - v1.0 (2026-01-04): Initial configuration protocol with model selection, analysis frequency, and claude-hud integration
 
