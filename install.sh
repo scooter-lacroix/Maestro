@@ -695,12 +695,15 @@ add_editor_to_rc() {
     # Always add to both bashrc and zshrc if they exist
     for shell_rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
         if [[ -f "$shell_rc" ]]; then
-            if ! grep -q "export EDITOR=" "$shell_rc" 2>/dev/null; then
-                echo "" >> "$shell_rc"
-                echo "# Maestro EDITOR" >> "$shell_rc"
-                echo "export EDITOR=$editor" >> "$shell_rc"
-                echo -e "${C}  →${NC} Added EDITOR=$editor to ${Y}$shell_rc${NC}"
-            fi
+            # Remove any existing Maestro EDITOR entry
+            sed -i '/# Maestro EDITOR/d' "$shell_rc" 2>/dev/null
+            sed -i '/export EDITOR=.*# set by Maestro/d' "$shell_rc" 2>/dev/null
+            
+            # Append the new one at the end to ensure it takes precedence
+            echo "" >> "$shell_rc"
+            echo "# Maestro EDITOR" >> "$shell_rc"
+            echo "export EDITOR=$editor # set by Maestro" >> "$shell_rc"
+            echo -e "${C}  →${NC} Configured EDITOR=$editor in ${Y}$shell_rc${NC}"
         fi
     done
 }
@@ -938,8 +941,7 @@ show_star_prompt() {
     echo -e "${M}  │${NC}  It helps others discover the project and motivates development.  ${M}│${NC}"
     echo -e "${M}  ╰──────────────────────────────────────────────────────────────────╯${NC}"
     echo ""
-    echo -ne "  ${W}Would you like to star the Maestro repo now? [y/N]${NC} "
-    read -r response
+    read -p "  Would you like to star the Maestro repo now? [y/N] " response
     
     if [[ $response =~ ^[Yy]$ ]]; then
         if command -v gh &> /dev/null; then
@@ -1350,6 +1352,12 @@ main() {
 MAESTRO_ROOT="$HOME/.claude/plugins/maestro/lib"
 RUST_TUI="$HOME/.local/bin/maestro-tui"
 
+# Ensure EDITOR is what the user selected even if shell not reloaded
+if [[ -f "$HOME/.bashrc" && -z "$EDITOR" ]]; then
+    export EDITOR=$(grep -oP 'export EDITOR=\K[^ ]+' "$HOME/.bashrc" | tail -1)
+fi
+export EDITOR=${EDITOR:-fresh}
+
 if [ "$1" = "tui" ]; then
     if [ -f "$RUST_TUI" ]; then
         # Pass 'tui' subcommand to the Rust binary
@@ -1367,10 +1375,10 @@ elif [ "$1" = "memory" ]; then
         python3 -m maestro.memory.cli "$@"
     fi
 else
+    # Default to Python CLI for other commands
     cd "$MAESTRO_ROOT"
     python3 -m maestro.cli "$@"
 fi
-
 WRAPPER_EOF
         chmod +x ~/.local/bin/maestro
         print_success "CLI wrapper created: ~/.local/bin/maestro"
