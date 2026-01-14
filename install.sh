@@ -841,21 +841,194 @@ select_cli_tools() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 🗑️ UNINSTALL FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+uninstall_maestro() {
+    clear_screen
+    echo -e "${BR}"
+    echo "╔══════════════════════════════════════════════════════════════════╗"
+    echo "║                    🗑️  MAESTRO UNINSTALLER                       ║"
+    echo "╚══════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    echo -e "${BY}  This will remove Maestro and all its components.${NC}"
+    echo ""
+    echo -e "${W}  The following will be removed:${NC}"
+    echo -e "    ${C}→${NC} ~/.local/bin/maestro"
+    echo -e "    ${C}→${NC} ~/.local/bin/maestro-tui"
+    echo -e "    ${C}→${NC} ~/.claude/plugins/maestro/"
+    echo -e "    ${C}→${NC} ~/.claude/maestro-templates/"
+    echo -e "    ${C}→${NC} ~/.claude/commands/maestro*.md"
+    echo ""
+    echo -e "${Y}  Continue with uninstall? [y/N] ${NC}"
+    read -r response
+    
+    if [[ ! $response =~ ^[Yy]$ ]]; then
+        print_info "Uninstall cancelled."
+        exit 0
+    fi
+    
+    echo ""
+    print_header "🗑️ Removing Maestro Components" "🗑️"
+    
+    local removed=0
+    
+    # Remove binaries
+    if [[ -f "$HOME/.local/bin/maestro" ]]; then
+        rm -f "$HOME/.local/bin/maestro"
+        print_success "Removed ~/.local/bin/maestro"
+        ((removed++))
+    fi
+    
+    if [[ -f "$HOME/.local/bin/maestro-tui" ]]; then
+        rm -f "$HOME/.local/bin/maestro-tui"
+        print_success "Removed ~/.local/bin/maestro-tui"
+        ((removed++))
+    fi
+    
+    # Remove plugin directory
+    if [[ -d "$HOME/.claude/plugins/maestro" ]]; then
+        rm -rf "$HOME/.claude/plugins/maestro"
+        print_success "Removed ~/.claude/plugins/maestro/"
+        ((removed++))
+    fi
+    
+    # Remove templates
+    if [[ -d "$HOME/.claude/maestro-templates" ]]; then
+        rm -rf "$HOME/.claude/maestro-templates"
+        print_success "Removed ~/.claude/maestro-templates/"
+        ((removed++))
+    fi
+    
+    # Remove commands
+    local cmd_count=$(ls "$HOME/.claude/commands/maestro"*.md 2>/dev/null | wc -l)
+    if [[ $cmd_count -gt 0 ]]; then
+        rm -f "$HOME/.claude/commands/maestro"*.md
+        print_success "Removed $cmd_count maestro command files"
+        ((removed++))
+    fi
+    
+    echo ""
+    if [[ $removed -gt 0 ]]; then
+        echo -e "${BG}╔══════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${BG}║              ✅ MAESTRO UNINSTALLED SUCCESSFULLY                 ║${NC}"
+        echo -e "${BG}╚══════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        print_info "Note: PATH/EDITOR entries in ~/.bashrc and ~/.zshrc were not removed."
+        print_info "You can manually remove lines starting with '# Maestro' if desired."
+    else
+        print_warning "No Maestro components were found to remove."
+    fi
+    echo ""
+    
+    exit 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ⭐ GITHUB STAR PROMPT
+# ─────────────────────────────────────────────────────────────────────────────
+
+show_star_prompt() {
+    echo ""
+    echo -e "${M}  ╭──────────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${M}  │${NC}  ${BY}⭐ Enjoying Maestro?${NC}                                            ${M}│${NC}"
+    echo -e "${M}  │${NC}                                                                    ${M}│${NC}"
+    echo -e "${M}  │${NC}  If Maestro helped your workflow, consider starring the repo!     ${M}│${NC}"
+    echo -e "${M}  │${NC}  It helps others discover the project and motivates development.  ${M}│${NC}"
+    echo -e "${M}  ╰──────────────────────────────────────────────────────────────────╯${NC}"
+    echo ""
+    echo -e "${W}  Would you like to star the Maestro repo now? [y/N] ${NC}"
+    read -r response
+    
+    if [[ $response =~ ^[Yy]$ ]]; then
+        if command -v gh &> /dev/null; then
+            if gh repo star scooter-lacroix/Maestro 2>/dev/null; then
+                echo ""
+                print_success "Thank you for starring Maestro! 🌟"
+                echo -e "${C}  →${NC} You're now part of the Maestro community!"
+            else
+                echo ""
+                print_warning "Could not star the repo. You may need to authenticate with: gh auth login"
+                print_info "Or star manually: ${C}https://github.com/scooter-lacroix/Maestro${NC}"
+            fi
+        else
+            echo ""
+            print_info "GitHub CLI (gh) not installed."
+            print_info "Star the repo here: ${C}https://github.com/scooter-lacroix/Maestro${NC}"
+            
+            # Offer to open in browser
+            if command -v xdg-open &> /dev/null; then
+                echo -e "${W}  Open in browser? [y/N] ${NC}"
+                read -r open_response
+                if [[ $open_response =~ ^[Yy]$ ]]; then
+                    xdg-open "https://github.com/scooter-lacroix/Maestro" 2>/dev/null &
+                fi
+            fi
+        fi
+    fi
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ❓ HELP FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+show_help() {
+    echo -e "${BC}Maestro Installer${NC} - Your AI-Powered Project Orchestrator"
+    echo ""
+    echo -e "${BW}Usage:${NC}"
+    echo "  ./install.sh [OPTIONS]"
+    echo ""
+    echo -e "${BW}Options:${NC}"
+    echo -e "  ${C}(no flags)${NC}       Fresh install of Maestro"
+    echo -e "  ${C}--upgrade${NC}        Upgrade existing installation"
+    echo -e "  ${C}--uninstall${NC}      Remove Maestro completely"
+    echo -e "  ${C}--restore FILE${NC}   Restore from a backup file"
+    echo -e "  ${C}--help${NC}           Show this help message"
+    echo ""
+    echo -e "${BW}Examples:${NC}"
+    echo "  ./install.sh                    # Fresh install"
+    echo "  ./install.sh --upgrade          # Upgrade keeping config"
+    echo "  ./install.sh --uninstall        # Complete removal"
+    echo "  ./install.sh --restore ~/.claude.backup.tar.gz"
+    echo ""
+    exit 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 🎯 MAIN INSTALLATION FLOW
 # ─────────────────────────────────────────────────────────────────────────────
 
 main() {
+    # Handle flags before showing banner
+    case "$1" in
+        --help|-h)
+            show_help
+            ;;
+        --uninstall)
+            uninstall_maestro
+            ;;
+        --upgrade)
+            export MAESTRO_UPGRADE=true
+            ;;
+        --restore)
+            show_banner
+            if [ -n "$2" ]; then
+                restore_config "$2"
+                exit 0
+            else
+                print_error "Usage: $0 --restore <backup_file>"
+                exit 1
+            fi
+            ;;
+    esac
+    
     show_banner
-
-    # Check for --restore flag
-    if [[ "$1" == "--restore" ]]; then
-        if [ -n "$2" ]; then
-            restore_config "$2"
-            exit 0
-        else
-            print_error "Usage: $0 --restore <backup_file>"
-            exit 1
-        fi
+    
+    # Show upgrade notice if upgrading
+    if [[ "$MAESTRO_UPGRADE" == "true" ]]; then
+        echo -e "${BY}  📦 UPGRADE MODE${NC} - Updating existing installation...\n"
     fi
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1306,7 +1479,11 @@ EOF
 
     echo -e "${G}  ✨ Your AI orchestra awaits, Maestro! Let's create something beautiful. ✨${NC}"
     echo ""
+    
+    # Show star prompt
+    show_star_prompt
 }
+
 
 # Run main
 main "$@"
