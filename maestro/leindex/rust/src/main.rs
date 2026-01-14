@@ -1,0 +1,125 @@
+//! Maestro CLI - Main entry point
+//!
+//! Pure Rust implementation of the Maestro command-line interface.
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+mod cli;
+
+use cli::{analyze, memory, tui};
+
+/// Maestro - AI-Powered Project Orchestrator
+#[derive(Parser)]
+#[command(name = "maestro")]
+#[command(author = "Maestro Team")]
+#[command(version = "2.0.0")]
+#[command(about = "Spec-driven development framework for AI-assisted software engineering")]
+#[command(long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Analyze source code files
+    Analyze {
+        /// File or directory to analyze
+        path: PathBuf,
+
+        /// Output format: json, llm, ultra
+        #[arg(short, long, default_value = "llm")]
+        format: String,
+
+        /// Language (auto-detected if not specified)
+        #[arg(short, long)]
+        language: Option<String>,
+
+        /// Analysis type: ast, callgraph, cfg, dfg, slicing, all
+        #[arg(short, long, default_value = "all")]
+        analysis: String,
+    },
+
+    /// Maestro Memory System operations
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommands,
+    },
+
+    /// Launch Maestro Terminal UI
+    Tui,
+}
+
+#[derive(Subcommand)]
+enum MemoryCommands {
+    /// Start the Maestro Memory Dashboard web server
+    Serve {
+        /// Port to run the dashboard on
+        #[arg(short, long, default_value = "18765")]
+        port: u16,
+
+        /// Host to bind the dashboard to
+        #[arg(short = 'H', long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// Path to database file
+        #[arg(short, long)]
+        db: Option<PathBuf>,
+
+        /// Enable debug mode
+        #[arg(long)]
+        debug: bool,
+    },
+
+    /// Show Maestro memory system status
+    Status {
+        /// Path to database file
+        #[arg(short, long)]
+        db: Option<PathBuf>,
+    },
+
+    /// Scan directories for Maestro projects
+    Scan {
+        /// Directories to scan
+        paths: Vec<PathBuf>,
+
+        /// Maximum depth to scan
+        #[arg(short, long, default_value = "5")]
+        depth: usize,
+    },
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("maestro=info".parse()?)
+        )
+        .init();
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Analyze { path, format, language, analysis } => {
+            analyze::run(path, format, language, analysis).await
+        }
+        Commands::Memory { command } => match command {
+            MemoryCommands::Serve { port, host, db, debug } => {
+                memory::serve(port, host, db, debug).await
+            }
+            MemoryCommands::Status { db } => {
+                memory::status(db).await
+            }
+            MemoryCommands::Scan { paths, depth } => {
+                memory::scan(paths, depth).await
+            }
+        },
+        Commands::Tui => {
+            tui::run().await
+        }
+    }
+}

@@ -161,3 +161,7 @@ opencode/skill/maestro/README.md
 maestro/tui/maestro-tui
 maestro/tui/test_env_setup.sh
 nanobanana-output/
+
+# Rust build artifacts
+maestro/leindex/rust/target/
+target/

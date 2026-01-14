@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+source "${ZIDE_DIR}/bin/lib/findLayoutConfig.sh"
+
+read -r -d '' HELP_TEXT << EOF
+Usage: $(basename "$0") [OPTIONS] <working_dir>
+
+Optional Parameters:
+	<working_dir>         Optionally specify a working directory to open the file
+	                      picker into.
+
+Options:
+  -h, --help            Show this help message and exit.
+  -c, --command         Command used to open files in \`$EDITOR\`
+  -p, --picker          File picker to use. Available file pickers are listed in
+                        bin/lib. Setting this will override the ZIDE_FILE_PICKER
+                        env var.
+
+Environment Variables:
+  ZIDE_FILE_PICKER      File picker to use, needs to be declared in your \$PATH.
+  ZIDE_USE_YAZI_CONFIG  By default (empty), will use the yazi.toml file in this
+                        project when using yazi as your picker. The config file
+                        in this project automatically puts yazi into a
+                        single-pane mode. To disable this behavior, set this to
+                        false. If you with to point to a custom config directory
+                        location, set this to that value.
+
+Description:
+  Wrapper around file pickers that sets \`zide-edit\` as the \`$EDITOR\` so that
+  files open in the editor pane.
+EOF
+
+# Function to display the help text
+show_help() {
+  echo "$HELP_TEXT"
+}
+
+# Program to use as a picker
+picker=""
+# Command to perform on the paths, available commands will be based on your editor
+command=""
+
+# Parse command-line options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    -c|--command)
+      if [[ -n "$2" && "$2" != -* ]]; then
+        command="$2"
+        shift 2
+      else
+        echo "Error: --command requires a non-empty value."
+        exit 1
+      fi
+      ;;
+    -p|--picker)
+      if [[ -n "$2" && "$2" != -* ]]; then
+        picker="$2"
+        shift 2
+      else
+        echo "Error: --picker requires a non-empty value."
+        exit 1
+      fi
+      ;;
+    -*)
+      echo "Unknown option: $1"
+      echo "Use --help or -h for usage information."
+      exit 1
+      ;;
+    *)
+      # Stop processing options when a positional parameter is encountered
+      break
+      ;;
+  esac
+done
+
+# Read picker defaults from env var or hard-coded default if a flag not passed
+picker=${picker:-${ZIDE_FILE_PICKER:-"yazi"}}
+working_dir=${1}
+
+if ! command -v ${picker} &> /dev/null; then
+  echo "Error: '${picker}' is not installed or not in your PATH." >&2
+  exit 1
+fi
+
+envs="EDITOR='zide-edit'"
+if [[ "${picker}" == "yazi" && "${ZIDE_USE_YAZI_CONFIG}" != "false" ]]; then
+  yaziConfigDir="${ZIDE_USE_YAZI_CONFIG:-${ZIDE_DIR}/yazi}"
+  envs="${envs} YAZI_CONFIG_HOME=${yaziConfigDir}"
+fi
+
+if [[ "${picker}" == "lf" && "${ZIDE_USE_LF_CONFIG}" != "false" ]]; then
+  lfConfigDir="${ZIDE_USE_LF_CONFIG:-${ZIDE_DIR}}"
+  envs="${envs} LF_CONFIG_HOME=${lfConfigDir}"
+fi
+
+env -S "${envs}" ${picker} ${working_dir}

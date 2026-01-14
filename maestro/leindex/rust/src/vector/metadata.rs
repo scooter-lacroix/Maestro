@@ -1,0 +1,201 @@
+//! Vector Metadata
+//!
+//! Metadata structures for vectors and index.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// Default embedding dimension (CodeRankEmbed)
+pub const DEFAULT_EMBEDDING_DIM: usize = 768;
+
+/// Supported embedding models
+pub const SUPPORTED_MODELS: &[(&str, usize)] = &[
+    ("nomic-ai/CodeRankEmbed", 768),
+    ("all-MiniLM-L6-v2", 384),
+    ("BAAI/bge-small-en-v1.5", 384),
+];
+
+/// Supported backends
+pub const SUPPORTED_BACKENDS: &[&str] = &["hnsw", "diskann"];
+
+/// Security limits
+pub const MAX_VECTORS: usize = 10_000_000;
+pub const MAX_QUERY_LENGTH: usize = 8192;
+pub const MAX_TOP_K: usize = 1000;
+pub const MAX_CONTENT_SIZE: usize = 50 * 1024 * 1024; // 50MB
+
+/// Metadata for a vector in the index
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorMetadata {
+    pub file_path: String,
+    pub chunk_index: i32,
+    pub start_line: Option<i32>,
+    pub end_line: Option<i32>,
+    pub chunk_type: ChunkType,
+    pub parent_context: Option<String>,
+    pub embedding_model: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl VectorMetadata {
+    pub fn new(file_path: &str, chunk_index: i32) -> Self {
+        Self {
+            file_path: file_path.to_string(),
+            chunk_index,
+            start_line: None,
+            end_line: None,
+            chunk_type: ChunkType::Text,
+            parent_context: None,
+            embedding_model: "nomic-ai/CodeRankEmbed".to_string(),
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn with_lines(mut self, start: i32, end: i32) -> Self {
+        self.start_line = Some(start);
+        self.end_line = Some(end);
+        self
+    }
+
+    pub fn with_type(mut self, chunk_type: ChunkType) -> Self {
+        self.chunk_type = chunk_type;
+        self
+    }
+
+    pub fn with_context(mut self, context: &str) -> Self {
+        self.parent_context = Some(context.to_string());
+        self
+    }
+}
+
+/// Types of code chunks
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChunkType {
+    Function,
+    Class,
+    Module,
+    Import,
+    Comment,
+    Text,
+    Other,
+}
+
+impl Default for ChunkType {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+/// Index-level metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexMetadata {
+    pub version: String,
+    pub backend: String,
+    pub model: String,
+    pub dimension: usize,
+    pub vector_count: usize,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for IndexMetadata {
+    fn default() -> Self {
+        Self {
+            version: "1.0".to_string(),
+            backend: "hnsw".to_string(),
+            model: "nomic-ai/CodeRankEmbed".to_string(),
+            dimension: DEFAULT_EMBEDDING_DIM,
+            vector_count: 0,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
+/// Search result from vector store
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub vector_id: String,
+    pub score: f32,
+    pub metadata: VectorMetadata,
+    pub content: Option<String>,
+}
+
+/// Configuration for HNSW backend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HnswConfig {
+    pub graph_degree: usize,
+    pub build_complexity: usize,
+    pub search_complexity: usize,
+}
+
+impl Default for HnswConfig {
+    fn default() -> Self {
+        Self {
+            graph_degree: 32,
+            build_complexity: 64,
+            search_complexity: 32,
+        }
+    }
+}
+
+/// Retry configuration with exponential backoff
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    pub enabled: bool,
+    pub max_retries: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+    pub exponential_base: f64,
+    pub jitter: bool,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_retries: 5,
+            initial_delay_ms: 1000,
+            max_delay_ms: 60000,
+            exponential_base: 2.0,
+            jitter: true,
+        }
+    }
+}
+
+impl RetryConfig {
+    /// Calculate delay for a retry attempt
+    pub fn calculate_delay(&self, attempt: u32) -> u64 {
+        let delay = (self.initial_delay_ms as f64
+            * self.exponential_base.powi(attempt as i32)) as u64;
+        let delay = delay.min(self.max_delay_ms);
+
+        if self.jitter {
+            let jitter = (delay as f64 * 0.25 * rand::random()) as u64;
+            delay.saturating_add(jitter)
+        } else {
+            delay
+        }
+    }
+}
+
+// Use a simple random for jitter (avoiding extra dependency)
+mod rand {
+    pub fn random() -> f64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hasher};
+        
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        
+        // Hash the nanos to get a pseudo-random distribution
+        let mut hasher = DefaultHasher::new();
+        hasher.write_u128(nanos);
+        let h = hasher.finish();
+        
+        (h as f64) / (u64::MAX as f64)
+    }
+}

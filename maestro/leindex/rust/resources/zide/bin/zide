@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+
+# Figure out where zide is installed based on where the script lives
+if command -v readlink >/dev/null 2>&1; then
+  script_dir=$(dirname "$(readlink -f "$0")")
+else
+  script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+fi
+
+export ZIDE_DIR=$(dirname "$script_dir")
+
+read -r -d '' HELP_TEXT << EOF
+Usage: $(basename "$0") [OPTIONS] <working_dir> <layout>
+
+Optional Parameters:
+  <working_dir>        Working directory to open in, defaults to `pwd`
+  <layout>             Layout to use from this project's \`layouts/\` directory
+
+Options:
+  -h, --help           Show this help message and exit.
+  -p, --picker         File picker to use. Available file pickers are listed in
+                       bin/lib. Equivalent to setting ZIDE_FILE_PICKER env var.
+  -n, --name           Optional name to give the newly opened session or tab.
+                       Will name the session when starting Zide from outside an
+                       existing Zellij session, or name a tab if launching from
+                       inside an existing session.
+  -N                   Name newly opened session or tab using the cwd basename.
+                       Will name the session when starting Zide from outside an
+                       existing Zellij session, or name a tab if launching from
+                       inside an existing session. Ignored if the -n, --name
+                       flag is used.
+
+Environment Variables:
+  ZIDE_DEFAULT_LAYOUT  Default zide layout to use from the \`layouts/\`
+                       directory.
+  ZIDE_ALWAYS_NAME     If true, will always use the basename of the target
+                       directory as the name of the tab/session when starting.
+
+Description:
+  Start using Zellij in an IDE layout. The command will do one of two things:
+    1. If you're not currently in a Zellij session, it'll start one
+    2. If you're in an existing Zellij session, it'll create a new tab
+
+  Zide will start with a default layout consisting of a vertical split of panes
+  with Yazi on the left occupying a small slice of it, and \`$EDITOR\` on the
+  right occupying the rest, with your current working directory set as the
+  directory in both \`$EDITOR\` and Yazi.
+
+  Passing in a working directory will ensure that Yazi, your editor, and any
+  future panes are all working in the same directory. By default, it'll use the
+  current working directory from which you're calling the command.
+EOF
+
+# Function to display the help text
+show_help() {
+  echo "$HELP_TEXT"
+}
+
+# Parse command-line options
+name=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    -p|--picker)
+      if [[ -n "$2" && "$2" != -* ]]; then
+        picker="$2"
+        shift 2
+      else
+        echo "Error: --picker requires a non-empty value."
+        exit 1
+      fi
+      ;;
+    -n|--name)
+      if [[ -n "$2" && "$2" != -* ]]; then
+        name="$2"
+        shift 2
+      else
+        echo "Error: --name requires a non-empty value."
+        exit 1
+      fi
+      ;;
+    -N)
+      if [[ -z "${name}" ]]; then
+        name="__basename__"
+      fi
+      shift
+      ;;
+    -*)
+      echo "Unknown option: $1"
+      echo "Use --help or -h for usage information."
+      exit 1
+      ;;
+    *)
+      # Stop processing options when a positional parameter is encountered
+      break
+      ;;
+  esac
+done
+
+if [[ -z "${name}" && "${ZIDE_ALWAYS_NAME:-false}" == "true" ]]; then
+  name="__basename__"
+fi
+
+# Optional params
+# 
+# Working directory to open in, defaults to pwd
+cwd="$(cd ${1:-$(pwd)} && pwd) "
+# Available layouts can be found in the zide layouts/ directory
+layout=${2:-${ZIDE_DEFAULT_LAYOUT:-"default"}} 
+# Default session/tab name to the basename of the provided dir if -N flag set
+if [[ "${name}" == "__basename__" ]]; then
+  name="$(basename ${cwd})"
+fi
+
+# Export location of the zide project files for further use
+export ZIDE_FILE_PICKER=${picker:-${ZIDE_FILE_PICKER}}
+export ZIDE_CURRENT_LAYOUT="${layout}"
+export ZIDE_ORIGINAL_EDITOR="${EDITOR}"
+export ZIDE_TAB_NAME="${name}"
+export ZIDE_LAYOUT_DIR="${ZIDE_LAYOUT_DIR:-${ZIDE_DIR}/layouts}"
+
+layout_path="${ZIDE_LAYOUT_DIR}/${layout}"
+if [ -n "$ZELLIJ" ]; then
+  zellij action new-tab --cwd $cwd --layout "${layout_path}"
+  zide-rename
+else
+  # There's a bug when using zellij options --default-cwd where the CWD isn't working for floating
+  # panes defined in the layout, so instead we'll use pushd to change the working dir before
+  # starting zellij, and change it back when we exit
+  pushd $cwd > /dev/null
+    zellij --layout "${layout_path}"
+  popd > /dev/null
+fi

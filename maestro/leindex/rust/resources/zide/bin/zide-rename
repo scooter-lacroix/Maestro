@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+read -r -d '' HELP_TEXT << EOF
+Usage: $(basename "$0") <name>
+
+Parameters:
+  <name>                Layout to use from this project's \`layouts/\` directory
+
+Options:
+  -h, --help            Show this help message and exit.
+
+Environment Variables:
+  ZIDE_TAB_NAME         If no name parameter is provided, will try reading from
+                        this env var.
+
+Description:
+  Rename the current zellij tab. If you provide __basename__ as the <name>
+  parameter, it'll use the basename of the current directory as the name.
+  If you provide no name, then it's a no-op.
+EOF
+
+# Function to display the help text
+show_help() {
+  echo "$HELP_TEXT"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+  esac
+done
+
+name="${1:-${ZIDE_TAB_NAME}}"
+# Default session/tab name to the basename of the provided dir if -N flag set
+if [[ "${name}" == "__basename__" ]]; then
+  name="$(basename $(pwd))"
+fi
+
+if [[ -n "${name}" ]]; then
+  zellij action rename-tab "${name}"
+fi
+
+if [[ -n "${name}" ]]; then
+  # Do our best to name the session, but swallow any errors if it fails
+  zellij action rename-session "${name}" 2> /dev/null
+fi
+
+unset ZIDE_TAB_NAME
