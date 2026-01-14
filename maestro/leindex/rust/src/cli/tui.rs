@@ -681,15 +681,26 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 }
                             }
                             (_, KeyCode::Tab) => {
-                                if app.tab_index == 1 {
-                                    app.preview_focused = !app.preview_focused;
-                                    app.status_message = if app.preview_focused { "Preview focused. Scroll with Arrows/PgUp/PgDn." } else { "List focused." }.to_string();
-                                } else {
-                                    app.tab_index = (app.tab_index + 1) % 5;
-                                }
+                                app.tab_index = (app.tab_index + 1) % 5;
+                                app.preview_focused = false; // Reset focus when switching tabs
                             }
                             (_, KeyCode::BackTab) => {
                                 app.tab_index = if app.tab_index == 0 { 4 } else { app.tab_index - 1 };
+                                app.preview_focused = false;
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
+                                if app.tab_index == 1 {
+                                    app.preview_focused = !app.preview_focused;
+                                    app.status_message = if app.preview_focused { "Preview focused. Scroll with Arrows/PgUp/PgDn." } else { "List focused." }.to_string();
+                                }
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('o')) => {
+                                app.tab_index = if app.tab_index == 0 { 4 } else { app.tab_index - 1 };
+                                app.preview_focused = false;
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('i')) => {
+                                app.tab_index = (app.tab_index + 1) % 5;
+                                app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
                                 if app.preview_focused {

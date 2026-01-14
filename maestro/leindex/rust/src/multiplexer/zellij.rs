@@ -35,9 +35,14 @@ impl ZellijMultiplexer {
         cmd.env("PATH", new_path);
 
         // Crucial: Fix the missing EDITOR error by ensuring it's set
-        if std::env::var("EDITOR").is_err() {
-            cmd.env("EDITOR", "vi"); // Fallback to vi if not set
-        }
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
+            info!("EDITOR not set, defaulting to 'fresh' for Maestro");
+            "fresh".to_string()
+        });
+        cmd.env("EDITOR", &editor);
+        cmd.env("ZIDE_ORIGINAL_EDITOR", &editor);
+
+        info!("Zide using editor: {} (from EDITOR env or default)", editor);
 
         // Run blocking so TUI pauses and Zide takes over the terminal
         cmd.status()
