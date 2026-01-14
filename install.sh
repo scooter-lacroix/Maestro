@@ -938,19 +938,38 @@ show_star_prompt() {
     echo -e "${M}  │${NC}  It helps others discover the project and motivates development.  ${M}│${NC}"
     echo -e "${M}  ╰──────────────────────────────────────────────────────────────────╯${NC}"
     echo ""
-    echo -e "${W}  Would you like to star the Maestro repo now? [y/N] ${NC}"
+    echo -ne "  ${W}Would you like to star the Maestro repo now? [y/N]${NC} "
     read -r response
     
     if [[ $response =~ ^[Yy]$ ]]; then
         if command -v gh &> /dev/null; then
-            if gh repo star scooter-lacroix/Maestro 2>/dev/null; then
-                echo ""
+            echo ""
+            # Use gh api for more reliable starring
+            local star_result
+            star_result=$(gh api -X PUT /user/starred/scooter-lacroix/Maestro 2>&1)
+            local star_status=$?
+            
+            if [[ $star_status -eq 0 ]]; then
                 print_success "Thank you for starring Maestro! 🌟"
-                echo -e "${C}  →${NC} You're now part of the Maestro community!"
+                echo -e "  ${C}→${NC} You're now part of the Maestro community!"
             else
-                echo ""
-                print_warning "Could not star the repo. You may need to authenticate with: gh auth login"
-                print_info "Or star manually: ${C}https://github.com/scooter-lacroix/Maestro${NC}"
+                # Check if already starred (204 is success, empty response)
+                if gh api /user/starred/scooter-lacroix/Maestro 2>/dev/null; then
+                    print_success "You've already starred Maestro! 🌟"
+                else
+                    print_warning "Could not star the repo automatically."
+                    print_info "You may need to run: ${C}gh auth refresh -s read:user${NC}"
+                    print_info "Or star manually: ${C}https://github.com/scooter-lacroix/Maestro${NC}"
+                    
+                    # Offer browser fallback
+                    if command -v xdg-open &> /dev/null; then
+                        echo -ne "  ${W}Open in browser to star? [y/N]${NC} "
+                        read -r open_response
+                        if [[ $open_response =~ ^[Yy]$ ]]; then
+                            xdg-open "https://github.com/scooter-lacroix/Maestro" 2>/dev/null &
+                        fi
+                    fi
+                fi
             fi
         else
             echo ""
@@ -959,7 +978,7 @@ show_star_prompt() {
             
             # Offer to open in browser
             if command -v xdg-open &> /dev/null; then
-                echo -e "${W}  Open in browser? [y/N] ${NC}"
+                echo -ne "  ${W}Open in browser? [y/N]${NC} "
                 read -r open_response
                 if [[ $open_response =~ ^[Yy]$ ]]; then
                     xdg-open "https://github.com/scooter-lacroix/Maestro" 2>/dev/null &
@@ -968,6 +987,7 @@ show_star_prompt() {
         fi
     fi
     echo ""
+
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1332,19 +1352,25 @@ RUST_TUI="$HOME/.local/bin/maestro-tui"
 
 if [ "$1" = "tui" ]; then
     if [ -f "$RUST_TUI" ]; then
-        exec "$RUST_TUI" "${@:2}"
+        # Pass 'tui' subcommand to the Rust binary
+        exec "$RUST_TUI" tui "${@:2}"
     else
         echo "Error: maestro-tui binary not found at $RUST_TUI"
         echo "Run the installer to build: ./install.sh"
         exit 1
     fi
 elif [ "$1" = "memory" ]; then
-    cd "$MAESTRO_ROOT"
-    python3 -m maestro.memory.cli "$@"
+    if [ -f "$RUST_TUI" ]; then
+        exec "$RUST_TUI" memory "${@:2}"
+    else
+        cd "$MAESTRO_ROOT"
+        python3 -m maestro.memory.cli "$@"
+    fi
 else
     cd "$MAESTRO_ROOT"
     python3 -m maestro.cli "$@"
 fi
+
 WRAPPER_EOF
         chmod +x ~/.local/bin/maestro
         print_success "CLI wrapper created: ~/.local/bin/maestro"
