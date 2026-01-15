@@ -138,7 +138,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     steps.push(Step {
         name: "The Crescendo - Frontend".to_string(),
         description: "Building Maestro Memory Dashboard...".to_string(),
-        command: "cd maestro/memory/frontend && npm install && npm run build".to_string(),
+        command: "cd ../../memory/frontend && npm install && npm run build".to_string(),
     });
 
     let total = steps.len();

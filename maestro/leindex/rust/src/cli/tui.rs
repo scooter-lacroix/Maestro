@@ -466,7 +466,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 
                                                 // Move all uncategorized sessions to this new group
                                                 if let Ok(sessions) = svc.list_sessions() {
-                                                    for mut s in sessions {
+                                                    for s in sessions {
                                                         if s.group_path.is_none() {
                                                             let _ = svc.update_session_group(&s.session_id, Some(new_path.clone()));
                                                         }
