@@ -195,4 +195,14 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     }
 
     let _ = tx.send(SetupEvent::Finished);
+
+    // Persist configuration
+    let persistent_config = leindex_analyzers::config::Config {
+        editor: config.editor.clone(),
+        install_path: config.install_path.clone(),
+        selected_tools: config.selected_tools.clone(),
+    };
+    if let Err(e) = persistent_config.save() {
+        let _ = tx.send(SetupEvent::Error(format!("Failed to save config: {}", e)));
+    }
 }

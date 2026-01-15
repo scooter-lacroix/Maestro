@@ -17,6 +17,7 @@ use std::io;
 
 use leindex_analyzers::memory::MemoryService;
 use leindex_analyzers::multiplexer::TmuxMultiplexer;
+use leindex_analyzers::config::Config;
 
 pub async fn run() -> Result<()> {
     // Setup terminal
@@ -97,6 +98,7 @@ struct App {
     project_explorer_path: Option<String>,
     project_explorer_selected: usize,
     explorer_items: Vec<String>,
+    config: Config,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -174,6 +176,8 @@ struct Stats {
 
 impl App {
     fn new(service: Option<&MemoryService>) -> Self {
+        let config = Config::load();
+        std::env::set_var("EDITOR", &config.editor);
         let mut app = Self {
             tab_index: 0,
             should_quit: false,
@@ -218,10 +222,10 @@ impl App {
             new_group_category: String::new(),
             project_explorer_path: None,
             project_explorer_selected: 0,
-            explorer_items: Vec::new(),
-        };
 
-        // Load live data if service available
+            explorer_items: Vec::new(),
+            config,
+        };
         if let Some(svc) = service {
             if let Ok(projects) = svc.list_projects() {
                 app.projects = projects.iter().map(|p| ProjectInfo {
@@ -317,11 +321,29 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                     }
                 }
                 if let Ok(groups) = svc.list_session_groups() { 
+                    // Merge strategy to preserve expansion state
                     if groups.len() != app.groups.len() {
+                        // If count changed, full update but try to preserve expansion by path
+                        let old_states: std::collections::HashMap<String, bool> = app.groups.iter().map(|g| (g.path.clone(), g.is_expanded)).collect();
                         app.groups = groups;
+                        for g in &mut app.groups {
+                            if let Some(expanded) = old_states.get(&g.path) {
+                                g.is_expanded = *expanded;
+                            }
+                        }
                         app.refresh_session_entries();
                     } else {
-                        app.groups = groups;
+                        // If count same, just update metadata but keep local expansion state
+                         for new_g in groups {
+                            if let Some(existing) = app.groups.iter_mut().find(|g| g.path == new_g.path) {
+                                existing.name = new_g.name;
+                                existing.category = new_g.category;
+                                existing.sort_order = new_g.sort_order;
+                                existing.parent_id = new_g.parent_id;
+                                // Do NOT overwrite is_expanded from DB if we want local control, 
+                                // OR ensure DB update happens on toggle.
+                            }
+                        }
                     }
                 }
                 if let Ok(mcp) = svc.list_mcp_servers() { app.mcp_servers = mcp; }
@@ -813,6 +835,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             }
                             _ => {}
                         }
+
                     } else if app.show_help {
                         if matches!(key.code, KeyCode::Char('/') | KeyCode::Esc) {
                             app.show_help = false;
@@ -1071,7 +1094,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             (_, KeyCode::Left) => {
                                 if app.tab_index == 2 && app.preview_focused {
                                     if let Some(current) = &app.project_explorer_path {
-                                        let mut path = std::path::PathBuf::from(current);
+                                        let path = std::path::PathBuf::from(current);
                                         if let Some(parent) = path.parent() {
                                             app.project_explorer_path = Some(parent.to_string_lossy().to_string());
                                             app.project_explorer_selected = 0;
@@ -1093,7 +1116,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             }
                             (_, KeyCode::Backspace) if app.tab_index == 2 && app.preview_focused => {
                                 if let Some(current) = &app.project_explorer_path {
-                                    let mut path = std::path::PathBuf::from(current.replace("~", &std::env::var("HOME").unwrap_or_default()));
+                                    let path = std::path::PathBuf::from(current.replace("~", &std::env::var("HOME").unwrap_or_default()));
                                     if let Some(parent) = path.parent() {
                                         app.project_explorer_path = Some(parent.to_string_lossy().to_string());
                                         app.project_explorer_selected = 0;
@@ -1954,6 +1977,7 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
         let para = Paragraph::new(text).block(block);
         frame.render_widget(para, area);
     } else {
+        // Project List (Left)
         let items: Vec<ListItem> = app.projects.iter().map(|p| {
             ListItem::new(vec![
                 Line::from(vec![
@@ -1964,39 +1988,35 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
                     Span::styled("    ", Style::default()),
                     Span::styled(&p.path, Style::default().fg(Color::DarkGray)),
                 ]),
+                Line::from(""),
             ])
         }).collect();
 
         let list = List::new(items)
             .block(block)
-            .highlight_style(Style::default().bg(Color::Rgb(40, 40, 60)).fg(Color::White).bold());
+            .highlight_style(Style::default().bg(Color::Rgb(30, 30, 50)).fg(Color::Yellow).bold())
+            .highlight_symbol(">> ");
         frame.render_stateful_widget(list, chunks[0], &mut app.project_state);
 
-        // Right side: Project Explorer (File Tree)
-        let explorer_block = Block::default()
+        // File Preview / "Yazi" Column (Right)
+        let preview_block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .title(" 🌲 Project Explorer ")
-            .title_style(Style::default().fg(Color::Green));
+            .title(if app.preview_focused { " 📂 File Explorer (Focused) " } else { " 📂 File Explorer " })
+            .border_style(if app.preview_focused { Style::default().fg(Color::Yellow) } else { Style::default().fg(Color::DarkGray) });
 
         if let Some(i) = app.project_state.selected() {
             let project = &app.projects[i];
             let current_path = app.project_explorer_path.clone().unwrap_or_else(|| project.path.clone());
             let expanded_path = current_path.replace("~", &std::env::var("HOME").unwrap_or_default());
-            let mut items = Vec::new();
-            
-            // Add root info
-            items.push(ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(format!("  Browsing: {}", project.name), Style::default().fg(Color::Yellow).bold()),
-                ]),
-                Line::from(vec![
-                    Span::styled(format!("  Path:     {}", current_path), Style::default().fg(Color::DarkGray).italic()),
-                ]),
-                Line::from(""),
-            ]));
+
+
+
+
 
             // List directory contents
+            let mut file_items = Vec::new();
+
             if let Ok(entries) = std::fs::read_dir(&expanded_path) {
                 let mut dir_entries: Vec<_> = entries.flatten().collect();
                 dir_entries.sort_by_key(|e| (!e.path().is_dir(), e.file_name()));
@@ -2015,21 +2035,21 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
                         Style::default().fg(color)
                     };
 
-                    items.push(ListItem::new(Line::from(vec![
+                    file_items.push(ListItem::new(Line::from(vec![
                         Span::styled(format!("    {} ", icon), style),
                         Span::styled(file_name, style),
                     ])));
                 }
                 if dir_entries.len() > 30 {
-                    items.push(ListItem::new(Line::from(vec![
+                    file_items.push(ListItem::new(Line::from(vec![
                         Span::styled(format!("    ... and {} more items", dir_entries.len() - 30), Style::default().fg(Color::DarkGray).italic()),
                     ])));
                 }
             } else {
-                items.push(ListItem::new(Span::styled("  Error reading directory. (Path might not exist or need expansion)", Style::default().fg(Color::Red))));
+                file_items.push(ListItem::new(Span::styled("  Error reading directory. (Path might not exist or need expansion)", Style::default().fg(Color::Red))));
             }
             
-            let list = List::new(items).block(explorer_block);
+            let list = List::new(file_items).block(preview_block);
             frame.render_widget(list, chunks[1]);
         }
  else {
@@ -2037,8 +2057,13 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
                 Line::from(""),
                 Line::from("  Select a project to explore its files."),
                 Line::from(""),
-                Line::from("  Press Enter to open in Zide (Editor)."),
-            ]).block(explorer_block).alignment(Alignment::Center);
+                Line::from("  Press Enter to open in:"),
+                 Line::from(vec![
+                    Span::styled(format!("  {} ", app.config.editor.to_uppercase()), Style::default().fg(Color::Green).bold()),
+                ]),
+                Line::from(""),
+                Line::from("  (Use 'Space' on installer to change editor)"),
+            ]).block(preview_block).alignment(Alignment::Center);
             frame.render_widget(para, chunks[1]);
         }
     }

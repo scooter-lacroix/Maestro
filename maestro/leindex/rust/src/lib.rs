@@ -11,34 +11,37 @@
 //! - Layer 4: DFG - Data flow analysis
 //! - Layer 5: Slicing - Program dependence
 
+pub mod api;
 pub mod ast_analyzer;
 pub mod callgraph;
 pub mod cfg;
+pub mod config;
 pub mod dfg;
-pub mod slicing;
-pub mod token_format;
 pub mod language;
+pub mod memory;
 pub mod multi_lang_ast;
 pub mod multi_lang_callgraph;
 pub mod multi_lang_cfg;
 pub mod multi_lang_dfg;
 pub mod multi_lang_slicing;
-pub mod memory;
-pub mod api;
-pub mod vector;
 pub mod multiplexer;
+pub mod slicing;
+pub mod token_format;
+pub mod vector;
 
 pub use ast_analyzer::*;
 pub use callgraph::*;
 pub use cfg::*;
 pub use dfg::{FunctionDataFlow as PythonFunctionDataFlow, *};
-pub use slicing::*;
-pub use token_format::*;
 pub use language::*;
 pub use multi_lang_ast::*;
 pub use multi_lang_callgraph::*;
 pub use multi_lang_cfg::*;
-pub use multi_lang_dfg::{FunctionDataFlow as MultiLangFunctionDataFlow, MultiLangDFGResult, MultiLangDFGAnalyzer};
+pub use multi_lang_dfg::{
+    FunctionDataFlow as MultiLangFunctionDataFlow, MultiLangDFGAnalyzer, MultiLangDFGResult,
+};
 pub use multi_lang_slicing::*;
+pub use slicing::*;
+pub use token_format::*;
 
 pub const MAX_FILE_SIZE: usize = 1048576; // 1MB
