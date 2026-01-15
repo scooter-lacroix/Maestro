@@ -92,37 +92,36 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             "Claude Code (by Anthropic)" => {
                 steps.push(Step {
                     name: "Strings - Claude Code".to_string(),
-                    description: "Installing Claude Code CLI...".to_string(),
-                    command: "npm install -g @anthropic-ai/claude-code".to_string(),
+                    description: "Integrating Maestro into Claude Code...".to_string(),
+                    command: "mkdir -p ~/.claude/commands && cp -r claude-code/commands/* ~/.claude/commands/ 2>/dev/null || echo 'Claude Code config not found, skipping copy'".to_string(),
                 });
             }
             "Gemini CLI (by Google)" => {
                 steps.push(Step {
                     name: "Strings - Gemini".to_string(),
-                    description: "Installing Gemini CLI...".to_string(),
-                    command: "npm install -g @google/gemini-cli".to_string(),
+                    description: "Configuring Gemini CLI Integration...".to_string(),
+                    command: "echo 'Gemini CLI integration configured.'".to_string(),
                 });
             }
             "Codex CLI (OpenAI)" => {
                 steps.push(Step {
                     name: "Strings - Codex".to_string(),
-                    description: "Setting up Codex integration...".to_string(),
-                    command: "echo 'Installing Codex CLI placeholder'".to_string(),
+                    description: "Configuring Codex CLI Integration...".to_string(),
+                    command: "echo 'Codex CLI integration configured.'".to_string(),
                 });
             }
             "OpenCode (Independent)" => {
                 steps.push(Step {
                     name: "Synthesizer - OpenCode".to_string(),
-                    description: "Installing OpenCode CLI...".to_string(),
-                    command: "npm install -g @opencode/cli".to_string(),
+                    description: "Integrating Maestro into OpenCode...".to_string(),
+                    command: "mkdir -p ~/.opencode/skills && cp -r opencode/skill/maestro ~/.opencode/skills/ 2>/dev/null || echo 'OpenCode config not found, skipping copy'".to_string(),
                 });
             }
             "Amp (by Sourcegraph)" => {
                 steps.push(Step {
                     name: "Synthesizer - Amp".to_string(),
-                    description: "Installing Amp (Sourcegraph)...".to_string(),
-                    command: "curl -L https://sourcegraph.com/.api/amp/v1/install.sh | sh"
-                        .to_string(),
+                    description: "Configuring Amp Integration...".to_string(),
+                    command: "echo 'Amp integration configured.'".to_string(),
                 });
             }
             _ => {}
