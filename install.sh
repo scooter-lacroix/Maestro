@@ -1368,11 +1368,23 @@ main() {
         fi
         
         if [[ -n "$rust_dir" && -f "$rust_dir/Cargo.toml" ]]; then
-            print_step "1" "3" "Building high-performance Rust Core..."
-            (cd "$rust_dir" && cargo build --release) > /dev/null 2>&1
-            mkdir -p "$MAESTRO_HOME/bin"
-            cp "$rust_dir/target/release/maestro" "$MAESTRO_HOME/bin/maestro-tui"
-            print_success "Rust Core built: $MAESTRO_HOME/bin/maestro-tui"
+            print_step "1" "3" "Building high-performance Rust Core (this may take a minute)"
+            
+            # Run build with spinner and log output
+            local log_file="$TMP_DIR/rust_build.log"
+            if (cd "$rust_dir" && cargo build --release) > "$log_file" 2>&1; then
+                mkdir -p "$MAESTRO_HOME/bin"
+                if [ -f "$rust_dir/target/release/maestro" ]; then
+                    cp "$rust_dir/target/release/maestro" "$MAESTRO_HOME/bin/maestro-tui"
+                    print_success "Rust Core built: $MAESTRO_HOME/bin/maestro-tui"
+                else
+                    print_warning "Rust binary not found after build"
+                fi
+            else
+                print_warning "Rust Core build failed"
+                echo -e "  ${Y}→${NC} See ${BW}${log_file}${NC} for details."
+                print_info "Continuing with legacy engine only..."
+            fi
         else
             print_warning "Rust source not found - Core build skipped"
         fi
