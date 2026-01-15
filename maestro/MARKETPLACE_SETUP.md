@@ -50,7 +50,7 @@ This document describes the setup process for publishing Maestro to the Claude C
 
 ```bash
 # Step 1: Run installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 
 # Step 2: Run setup
 /maestro:setup
@@ -81,20 +81,19 @@ Templates are present in `/home/stan/Prod/maestro/claude-code/templates/`:
 
 ### Installation Script
 
-The installer at `/home/stan/Prod/maestro/install-claude-code.sh`:
+The installer at `/home/stan/Prod/maestro/install.sh`:
 
-1. Creates `~/.claude/commands/` directory
-2. Copies all command files to commands directory
-3. Creates `~/.claude/maestro-templates/` directory
-4. Copies templates to templates directory
-5. Provides clear installation feedback
+1. Detects and configures for multiple CLI tools (Claude, Sourcegraph Amp, etc.)
+2. Creates appropriate plugin and command directories per tool
+3. Installs global binaries to `~/.maestro` for high performance
+4. Updates PATH and shell configuration automatically
 
 ## Marketplace Submission Checklist
 
 ### Plugin Requirements
 
 - ✅ **plugin.json** - Complete metadata file in repository root
-- ✅ **Installation** - One-line installer (`install-claude-code.sh`)
+- ✅ **Installation** - Unified installer (`install.sh`)
 - ✅ **Documentation** - Comprehensive README with usage examples
 - ✅ **License** - MIT License (see LICENSE file)
 - ✅ **Tests** - Test suite demonstrating functionality (237 tests)
@@ -145,11 +144,11 @@ To register Maestro with the official Claude Code marketplace:
      "description": "Spec-driven development with automatic agent selection and TDD enforcement",
      "author": "scooter-lacroix",
      "license": "MIT",
-     "claude_code": {
-       "supported": true,
-       "min_version": "1.0.0",
-       "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash"
-     },
+      "claude_code": {
+        "supported": true,
+        "min_version": "1.0.0",
+        "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash"
+      },
      "categories": ["Development", "Testing", "Workflow", "Productivity"],
      "keywords": ["development", "framework", "spec-driven", "tdd", "testing", "agent", "memory"]
    }
@@ -172,9 +171,9 @@ For self-hosted marketplace installation:
      "plugins": [
        {
          "name": "maestro",
-         "repository": "https://github.com/scooter-lacroix/Maestro",
-         "version": "2.0.0",
-         "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash"
+          "repository": "https://github.com/scooter-lacroix/Maestro",
+          "version": "2.0.0",
+          "install_command": "curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash"
        }
      ]
    }
@@ -202,7 +201,7 @@ ls -la /home/stan/Prod/maestro/claude-code/templates/
 
 ```bash
 # Test installer locally
-bash -x install-claude-code.sh
+bash -x install.sh
 
 # Verify installation
 ls -la ~/.claude/commands/maestro*.md
@@ -219,7 +218,7 @@ The README now shows:
 /plugin install maestro
 
 # Alternative: Manual Installation
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 ```
 
 ### 4. Test Marketplace Commands

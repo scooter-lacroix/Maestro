@@ -219,19 +219,19 @@ Then run the setup command in Claude Code:
 
 ### Full Installation (Slash Commands + CLI Tools)
 
-For the complete Maestro experience including the TUI and web dashboard:
+For the complete Maestro experience including the TUI and web dashboard for **Claude Code**, **Sourcegraph Amp**, **OpenCode**, **Gemini CLI**, and **Codex**:
 
 ```bash
 # One-line installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 
 # Or manually clone and install
 git clone https://github.com/scooter-lacroix/Maestro.git
 cd Maestro
-./install-claude-code.sh
+./install.sh
 ```
 
-Then in Claude Code:
+Then in Claude Code or your selected tool:
 ```
 /maestro:setup
 ```
@@ -242,16 +242,12 @@ Then in Claude Code:
 - `maestro memory status` - Memory system statistics
 - Full CLI with all features
 
-### For OpenCode
+### For Other Agents (OpenCode, Gemini, etc.)
+
+Maestro's unified installer automatically detects and configures all supported agents. Simply run:
 
 ```bash
-# One-line installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash
-
-# Or manually
-git clone https://github.com/scooter-lacroix/Maestro.git
-cd Maestro
-./install-opencode.sh
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 ```
 
 Then in OpenCode:

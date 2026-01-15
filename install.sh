@@ -310,8 +310,24 @@ find_go_binary() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📦 INSTALLATION FUNCTIONS
+# 🛠️ CLI TOOL CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Global Maestro home for shared binaries and state
+MAESTRO_HOME="$HOME/.maestro"
+mkdir -p "$MAESTRO_HOME"
+
+get_tool_config_dir() {
+    local tool="$1"
+    case "$tool" in
+        claude)   echo "$HOME/.claude" ;;
+        amp)      echo "$HOME/.amp" ;; # Sourcegraph Amp
+        opencode) echo "$HOME/.opencode" ;;
+        gemini)   echo "$HOME/.gemini" ;;
+        codex)    echo "$HOME/.codex" ;;
+        *)        echo "$HOME/.claude" ;;
+    esac
+}
 
 install_go() {
     local os=$(detect_os)
@@ -810,7 +826,7 @@ select_cli_tools() {
     echo -e "  ${G}2)${NC} ${BW}OpenCode${NC}         ${W}(Open-source AI coding tool)${NC}"
     echo -e "  ${G}3)${NC} ${BW}Gemini CLI${NC}       ${W}(Google's Gemini for terminal)${NC}"
     echo -e "  ${G}4)${NC} ${BW}Codex${NC}            ${W}(OpenAI Codex CLI)${NC}"
-    echo -e "  ${G}5)${NC} ${BW}AMP${NC}              ${W}(Amplify AI assistant)${NC}"
+    echo -e "  ${G}5)${NC} ${BW}Sourcegraph Amp${NC}  ${W}(Sourcegraph's agentic CLI)${NC}"
     echo -e "  ${G}6)${NC} ${BW}All${NC}              ${W}(Configure for all tools)${NC}"
     echo ""
     echo -e "  ${Y}Enter comma-separated numbers (e.g., 1,2,3) or 6 for all:${NC}"
@@ -877,7 +893,7 @@ uninstall_maestro() {
     
     local removed=0
     
-    # Remove binaries
+    # Remove binaries and global home
     if [[ -f "$HOME/.local/bin/maestro" ]]; then
         rm -f "$HOME/.local/bin/maestro"
         print_success "Removed ~/.local/bin/maestro"
@@ -889,28 +905,39 @@ uninstall_maestro() {
         print_success "Removed ~/.local/bin/maestro-tui"
         ((removed++))
     fi
-    
-    # Remove plugin directory
-    if [[ -d "$HOME/.claude/plugins/maestro" ]]; then
-        rm -rf "$HOME/.claude/plugins/maestro"
-        print_success "Removed ~/.claude/plugins/maestro/"
+
+    if [[ -d "$MAESTRO_HOME" ]]; then
+        rm -rf "$MAESTRO_HOME"
+        print_success "Removed $MAESTRO_HOME"
         ((removed++))
     fi
     
-    # Remove templates
-    if [[ -d "$HOME/.claude/maestro-templates" ]]; then
-        rm -rf "$HOME/.claude/maestro-templates"
-        print_success "Removed ~/.claude/maestro-templates/"
-        ((removed++))
-    fi
-    
-    # Remove commands
-    local cmd_count=$(ls "$HOME/.claude/commands/maestro"*.md 2>/dev/null | wc -l)
-    if [[ $cmd_count -gt 0 ]]; then
-        rm -f "$HOME/.claude/commands/maestro"*.md
-        print_success "Removed $cmd_count maestro command files"
-        ((removed++))
-    fi
+    # Remove from all possible tool directories
+    local tools=("claude" "amp" "opencode" "gemini" "codex")
+    for tool in "${tools[@]}"; do
+        local tool_dir=$(get_tool_config_dir "$tool")
+        if [[ -d "$tool_dir" ]]; then
+            # Plugins
+            if [[ -d "$tool_dir/plugins/maestro" ]]; then
+                rm -rf "$tool_dir/plugins/maestro"
+                print_success "Removed $tool_dir/plugins/maestro/"
+                ((removed++))
+            fi
+            # Templates
+            if [[ -d "$tool_dir/maestro-templates" ]]; then
+                rm -rf "$tool_dir/maestro-templates"
+                print_success "Removed $tool_dir/maestro-templates/"
+                ((removed++))
+            fi
+            # Commands
+            local cmd_count=$(ls "$tool_dir/commands/maestro"*.md 2>/dev/null | wc -l)
+            if [[ $cmd_count -gt 0 ]]; then
+                rm -f "$tool_dir/commands/maestro"*.md
+                print_success "Removed $cmd_count files from $tool_dir/commands/"
+                ((removed++))
+            fi
+        fi
+    done
     
     echo ""
     if [[ $removed -gt 0 ]]; then
@@ -1266,27 +1293,72 @@ main() {
     # PHASE 4: INSTALL COMPONENTS
     # ─────────────────────────────────────────────────────────────────────
 
-    local component=0
-    local total_components=8
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 4: INSTALL COMPONENTS SPREAD ACROSS TOOLS
+    # ─────────────────────────────────────────────────────────────────────
 
-    install_component() {
-        local name="$1"
-        local icon="$2"
-        local action="$3"
+    local total_tools=${#SELECTED_TOOLS[@]}
+    local current_tool_idx=0
 
-        component=$((component + 1))
-        printf "\r${BM}  [$component/$total_components]${NC} ${icon}  ${BW}${name}...${NC}   " 2>/dev/null
+    for tool in "${SELECTED_TOOLS[@]}"; do
+        current_tool_idx=$((current_tool_idx + 1))
+        local target_dir=$(get_tool_config_dir "$tool")
+        
+        print_header "🔧 Configuring for tool: ${Y}${tool}${NC} (${target_dir})" "⚙️"
+        
+        local component=0
+        local total_components=8
 
-        if eval "$action" > /dev/null 2>&1; then
-            printf "\r${G}  ✓ [$component/$total_components]${NC} ${icon}  ${BW}${name}${NC}      \n" 2>/dev/null
-        else
-            printf "\r${Y}  ⚠ [$component/$total_components]${NC} ${icon}  ${BW}${name} (skipped)${NC}      \n" 2>/dev/null
-        fi
-    }
+        install_component() {
+            local name="$1"
+            local icon="$2"
+            local action="$3"
 
-    print_header "🔧 Installing Components" "⚙️"
+            component=$((component + 1))
+            printf "\r${BM}  [$component/$total_components]${NC} ${icon}  ${BW}${name}...${NC}   " 2>/dev/null
 
-    # Maestro Rust Binary - try multiple possible locations
+            if eval "$action" > /dev/null 2>&1; then
+                printf "\r${G}  ✓ [$component/$total_components]${NC} ${icon}  ${BW}${name}${NC}      \n" 2>/dev/null
+            else
+                printf "\r${Y}  ⚠ [$component/$total_components]${NC} ${icon}  ${BW}${name} (skipped)${NC}      \n" 2>/dev/null
+            fi
+        }
+
+        # Ensure tool config directory exists
+        mkdir -p "$target_dir"
+
+        # Commands
+        install_component "Commands" "📋" "mkdir -p '$target_dir/commands' && /bin/cp '$SCRIPT_DIR/claude-code/commands/maestro'*.md '$target_dir/commands/'"
+
+        # Templates
+        install_component "Templates" "📝" "mkdir -p '$target_dir/maestro-templates' && /bin/cp '$SCRIPT_DIR/claude-code/templates/workflow.md' '$target_dir/maestro-templates/' && mkdir -p '$target_dir/maestro-templates/code_styleguides' && /bin/cp '$SCRIPT_DIR/claude-code/templates/code_styleguides/'*.md '$target_dir/maestro-templates/code_styleguides/'"
+
+        # Plugin
+        install_component "Plugin" "🔌" "mkdir -p '$target_dir/plugins/maestro' && [ -f '$SCRIPT_DIR/plugin.json' ] && /bin/cp '$SCRIPT_DIR/plugin.json' '$target_dir/plugins/maestro/'"
+
+        # Hooks
+        install_component "Hooks" "🪝" "mkdir -p '$target_dir/plugins/maestro/hooks' && [ -d '$SCRIPT_DIR/maestro/hooks' ] && /bin/cp -r '$SCRIPT_DIR/maestro/hooks/'* '$target_dir/plugins/maestro/hooks/'"
+
+        # Skills
+        install_component "Skills" "🎓" "mkdir -p '$target_dir/plugins/maestro/skills' && [ -d '$SCRIPT_DIR/maestro/skills' ] && /bin/cp -r '$SCRIPT_DIR/maestro/skills/'* '$target_dir/plugins/maestro/skills/'"
+
+        # Agents
+        install_component "Agents" "🤖" "mkdir -p '$target_dir/plugins/maestro/agents' && [ -d '$SCRIPT_DIR/maestro/agents' ] && /bin/cp -r '$SCRIPT_DIR/maestro/agents/'* '$target_dir/plugins/maestro/agents/'"
+
+        # Config
+        install_component "Config Module" "⚙️" "mkdir -p '$target_dir/plugins/maestro/config' && [ -d '$SCRIPT_DIR/maestro/config' ] && /bin/cp -r '$SCRIPT_DIR/maestro/config/'* '$target_dir/plugins/maestro/config/'"
+
+        # Critical Think
+        install_component "Critical Think" "🧠" "mkdir -p '$target_dir/maestro-templates' && [ -d '$SCRIPT_DIR/maestro/critical_think/templates' ] && /bin/cp '$SCRIPT_DIR/maestro/critical_think/templates/'*.md '$target_dir/maestro-templates/'"
+    done
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 5: MAESTRO CORE BINARY & WRAPPERS (Shared ~/.maestro)
+    # ─────────────────────────────────────────────────────────────────────
+
+    print_header "🦀 Maestro Core & Global Setup" "🦀"
+
+    # Maestro TUI (Rust)
     if $rust_installed; then
         local rust_dir=""
         if [[ -d "$SCRIPT_DIR/maestro/leindex/rust" ]]; then
@@ -1296,63 +1368,33 @@ main() {
         fi
         
         if [[ -n "$rust_dir" && -f "$rust_dir/Cargo.toml" ]]; then
-            install_component "Maestro TUI (Rust)" "🦀" "cd '$rust_dir' && cargo build --release && mkdir -p ~/.local/bin && cp target/release/maestro ~/.local/bin/maestro-tui"
+            print_step "1" "3" "Building high-performance Rust Core..."
+            (cd "$rust_dir" && cargo build --release) > /dev/null 2>&1
+            mkdir -p "$MAESTRO_HOME/bin"
+            cp "$rust_dir/target/release/maestro" "$MAESTRO_HOME/bin/maestro-tui"
+            print_success "Rust Core built: $MAESTRO_HOME/bin/maestro-tui"
         else
-            print_warning "Rust source not found - TUI build skipped"
+            print_warning "Rust source not found - Core build skipped"
         fi
-    else
-        print_error "Cannot install Maestro TUI without Rust"
     fi
 
-    # Commands (use /bin/cp to bypass interactive alias)
-    install_component "Commands" "📋" "mkdir -p ~/.claude/commands && /bin/cp '$SCRIPT_DIR/claude-code/commands/maestro'*.md ~/.claude/commands/"
-
-    # Templates (use /bin/cp to bypass interactive alias)
-    install_component "Templates" "📝" "mkdir -p ~/.claude/maestro-templates && /bin/cp '$SCRIPT_DIR/claude-code/templates/workflow.md' ~/.claude/maestro-templates/ && mkdir -p ~/.claude/maestro-templates/code_styleguides && /bin/cp '$SCRIPT_DIR/claude-code/templates/code_styleguides/'*.md ~/.claude/maestro-templates/code_styleguides/"
-
-    # Plugin (use /bin/cp to bypass interactive alias)
-    install_component "Plugin" "🔌" "mkdir -p ~/.claude/plugins/maestro && [ -f '$SCRIPT_DIR/plugin.json' ] && /bin/cp '$SCRIPT_DIR/plugin.json' ~/.claude/plugins/maestro/"
-
-    # Hooks (use /bin/cp to bypass interactive alias)
-    install_component "Hooks" "🪝" "mkdir -p ~/.claude/plugins/maestro/hooks && [ -d '$SCRIPT_DIR/maestro/hooks' ] && /bin/cp -r '$SCRIPT_DIR/maestro/hooks/'* ~/.claude/plugins/maestro/hooks/"
-
-    # Skills (use /bin/cp to bypass interactive alias)
-    install_component "Skills" "🎓" "mkdir -p ~/.claude/plugins/maestro/skills && [ -d '$SCRIPT_DIR/maestro/skills' ] && /bin/cp -r '$SCRIPT_DIR/maestro/skills/'* ~/.claude/plugins/maestro/skills/"
-
-    # Agents (use /bin/cp to bypass interactive alias)
-    install_component "Agents" "🤖" "mkdir -p ~/.claude/plugins/maestro/agents && [ -d '$SCRIPT_DIR/maestro/agents' ] && /bin/cp -r '$SCRIPT_DIR/maestro/agents/'* ~/.claude/plugins/maestro/agents/"
-
-    # Config (use /bin/cp to bypass interactive alias)
-    install_component "Config Module" "⚙️" "mkdir -p ~/.claude/plugins/maestro/config && [ -d '$SCRIPT_DIR/maestro/config' ] && /bin/cp -r '$SCRIPT_DIR/maestro/config/'* ~/.claude/plugins/maestro/config/"
-
-    # Critical Think (use /bin/cp to bypass interactive alias)
-    install_component "Critical Think" "🧠" "mkdir -p ~/.claude/maestro-templates && [ -d '$SCRIPT_DIR/maestro/critical_think/templates' ] && /bin/cp '$SCRIPT_DIR/maestro/critical_think/templates/'*.md ~/.claude/maestro-templates/"
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PHASE 5: PYTHON CLI INSTALLATION & PATH SETUP
-    # ─────────────────────────────────────────────────────────────────────
-
-    print_header "🦀 CLI & Legacy Python Support" "🦀"
-
+    # Python Support Library
     if [ -d "$SCRIPT_DIR/maestro" ]; then
-        print_info "Installing Maestro Python package..."
+        print_step "2" "3" "Installing Maestro Legacy Engine..."
+        local lib_dir="$MAESTRO_HOME/lib"
+        mkdir -p "$lib_dir"
+        cp -r "$SCRIPT_DIR/maestro" "$lib_dir/"
+        print_success "Legacy Engine installed: $lib_dir"
 
-        # Create permanent location
-        local install_dir="$HOME/.claude/plugins/maestro/lib"
-        mkdir -p "$install_dir"
-        rm -rf "$install_dir/maestro"
-
-        echo -e "${C}  →${NC} Copying source to ${Y}${install_dir}${NC}..."
-        cp -r "$SCRIPT_DIR/maestro" "$install_dir/"
-
-        # Create wrapper
-        mkdir -p ~/.local/bin
-        cat > ~/.local/bin/maestro << 'WRAPPER_EOF'
+        # Global CLI wrapper
+        mkdir -p "$HOME/.local/bin"
+        cat > "$HOME/.local/bin/maestro" << 'WRAPPER_EOF'
 #!/bin/bash
-MAESTRO_ROOT="$HOME/.claude/plugins/maestro/lib"
-RUST_TUI="$HOME/.local/bin/maestro-tui"
+MAESTRO_HOME="$HOME/.maestro"
+RUST_TUI="$MAESTRO_HOME/bin/maestro-tui"
+PYTHON_LIB="$MAESTRO_HOME/lib"
 
-# Ensure EDITOR is what the user selected even if shell not reloaded
+# Ensure EDITOR is available
 if [[ -f "$HOME/.bashrc" && -z "$EDITOR" ]]; then
     export EDITOR=$(grep -oP 'export EDITOR=\K[^ ]+' "$HOME/.bashrc" | tail -1)
 fi
@@ -1360,58 +1402,54 @@ export EDITOR=${EDITOR:-fresh}
 
 if [ "$1" = "tui" ]; then
     if [ -f "$RUST_TUI" ]; then
-        # Pass 'tui' subcommand to the Rust binary
         exec "$RUST_TUI" tui "${@:2}"
     else
         echo "Error: maestro-tui binary not found at $RUST_TUI"
-        echo "Run the installer to build: ./install.sh"
         exit 1
     fi
 elif [ "$1" = "memory" ]; then
     if [ -f "$RUST_TUI" ]; then
         exec "$RUST_TUI" memory "${@:2}"
     else
-        cd "$MAESTRO_ROOT"
+        cd "$PYTHON_LIB"
         python3 -m maestro.memory.cli "$@"
     fi
 else
-    # Default to Python CLI for other commands
-    cd "$MAESTRO_ROOT"
+    cd "$PYTHON_LIB"
     python3 -m maestro.cli "$@"
 fi
 WRAPPER_EOF
-        chmod +x ~/.local/bin/maestro
-        print_success "CLI wrapper created: ~/.local/bin/maestro"
+        chmod +x "$HOME/.local/bin/maestro"
+        
+        # Also provide maestro-tui symlink for direct access
+        ln -sf "$MAESTRO_HOME/bin/maestro-tui" "$HOME/.local/bin/maestro-tui" 2>/dev/null
+        
+        print_success "Global wrappers created: ~/.local/bin/maestro"
 
-
-        # Add to PATH automatically for current session and RC file
+        # Update PATH if needed
         if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-            echo ""
-            print_info "Adding ~/.local/bin to PATH..."
             add_to_path "$HOME/.local/bin"
-            echo -e "${G}  ✅ PATH updated for current session and $(detect_shell)rc${NC}"
-            echo ""
         fi
-    else
-        print_warning "maestro directory not found - CLI installation skipped"
     fi
 
     # ─────────────────────────────────────────────────────────────────────
-    # PHASE 6: MCP CONFIGURATION
+    # PHASE 6: MCP CONFIGURATION SYNC
     # ─────────────────────────────────────────────────────────────────────
 
-    print_header "🌐 MCP Configuration" "🌐"
+    print_header "🌐 Syncing MCP Configs" "🌐"
+    
+    for tool in "${SELECTED_TOOLS[@]}"; do
+        local tool_dir=$(get_tool_config_dir "$tool")
+        local mcp_config="$tool_dir/.mcp.json"
+        
+        print_info "Configuring MCP for ${tool}..."
+        mkdir -p "$tool_dir"
 
-    local mcp_config="$HOME/.claude/.mcp.json"
-    mkdir -p "$HOME/.claude"
+        if [ -f "$mcp_config" ]; then
+            cp "$mcp_config" "${mcp_config}.backup.$(date +%Y%m%d_%H%M%S)"
+        fi
 
-    if [ -f "$mcp_config" ]; then
-        local timestamp=$(date +%Y%m%d_%H%M%S)
-        cp "$mcp_config" "${mcp_config}.backup.${timestamp}"
-        print_info "Backed up existing MCP config"
-    fi
-
-    cat > "$mcp_config" << 'MCP_EOF'
+        cat > "$mcp_config" << 'MCP_EOF'
 {
   "mcpServers": {
     "filesystem": {
@@ -1432,8 +1470,8 @@ WRAPPER_EOF
   }
 }
 MCP_EOF
-
-    print_success "MCP configuration created"
+    done
+    print_success "MCP configurations synced across selected tools"
 
     # ─────────────────────────────────────────────────────────────────────
     # PHASE 7: COMPLETION & SUMMARY
