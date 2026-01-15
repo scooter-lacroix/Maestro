@@ -71,9 +71,15 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             }
             "Tmux / Tmux-RS" => {
                 steps.push(Step {
-                    name: "Percussion - Tmux".to_string(),
-                    description: "Setting up Tmux and building Tmux-RS...".to_string(),
-                    command: "sudo apt-get install -y tmux && cd maestro/leindex/rust/tmux-rs && cargo build --release".to_string(),
+                    name: "Percussion - Dependencies".to_string(),
+                    description: "Installing Tmux dependencies...".to_string(),
+                    command: "sudo apt-get install -y libncurses-dev libevent-dev tmux".to_string(),
+                });
+
+                steps.push(Step {
+                    name: "Percussion - Tmux-RS".to_string(),
+                    description: "Installing Tmux-RS from Crates.io...".to_string(),
+                    command: "cargo install tmux-rs".to_string(),
                 });
             }
             "Yazi (Terminal File Manager)" => {
