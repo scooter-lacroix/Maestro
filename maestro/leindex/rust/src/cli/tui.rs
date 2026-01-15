@@ -93,6 +93,10 @@ struct App {
     new_track_title: String,
     new_track_is_master: bool,
     new_group_category: String,
+    // Project Explorer state
+    project_explorer_path: Option<String>,
+    project_explorer_selected: usize,
+    explorer_items: Vec<String>,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -212,6 +216,9 @@ impl App {
             new_track_title: String::new(),
             new_track_is_master: true,
             new_group_category: String::new(),
+            project_explorer_path: None,
+            project_explorer_selected: 0,
+            explorer_items: Vec::new(),
         };
 
         // Load live data if service available
@@ -451,11 +458,30 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
                                     InputMode::RenameGroupCategory => {
                                         if let (Some(svc), Some(path)) = (service.as_ref(), app.target_group_path.take()) {
-                                            let _ = svc.update_group_name(&path, &app.rename_buffer);
-                                            let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
-                                            let _ = svc.update_group_category(&path, category);
-                                            app.status_message = format!("Group '{}' updated", app.rename_buffer);
+                                            if path == "uncategorized" {
+                                                // Create a new real group instead of updating pseudo-group
+                                                let new_path = format!("/{}", app.rename_buffer.trim().to_lowercase().replace(' ', "_"));
+                                                let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
+                                                let _ = svc.create_session_group(&app.rename_buffer, &new_path, category);
+                                                
+                                                // Move all uncategorized sessions to this new group
+                                                if let Ok(sessions) = svc.list_sessions() {
+                                                    for mut s in sessions {
+                                                        if s.group_path.is_none() {
+                                                            let _ = svc.update_session_group(&s.session_id, Some(new_path.clone()));
+                                                        }
+                                                    }
+                                                }
+                                                app.status_message = format!("Created group '{}' and moved uncategorized sessions.", app.rename_buffer);
+                                            } else {
+                                                let _ = svc.update_group_name(&path, &app.rename_buffer);
+                                                let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
+                                                let _ = svc.update_group_category(&path, category);
+                                                app.status_message = format!("Group '{}' updated", app.rename_buffer);
+                                            }
+
                                             if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
+                                            if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
                                             app.refresh_session_entries();
                                         }
                                         app.target_group_path = None;
@@ -924,12 +950,18 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         None => 0,
                                     };
                                     app.mcp_state.select(Some(i));
-                                } else if app.tab_index == 2 { // Projects Tab
-                                    let i = match app.project_state.selected() {
-                                        Some(i) => if i >= app.projects.len().saturating_sub(1) { 0 } else { i + 1 },
-                                        None => 0,
-                                    };
-                                    app.project_state.select(Some(i));
+                                } else if app.tab_index == 2 { // Projects
+                                    if app.preview_focused {
+                                        app.project_explorer_selected = (app.project_explorer_selected + 1) % app.explorer_items.len().max(1);
+                                    } else {
+                                        let i = match app.project_state.selected() {
+                                            Some(i) => if i >= app.projects.len().saturating_sub(1) { 0 } else { i + 1 },
+                                            None => 0,
+                                        };
+                                        app.project_state.select(Some(i));
+                                        app.project_explorer_path = None;
+                                        app.project_explorer_selected = 0;
+                                    }
                                 } else if app.tab_index == 1 { // Sessions Tab
                                     let i = match app.session_state.selected() {
                                         Some(i) => if i >= app.session_entries.len().saturating_sub(1) { 0 } else { i + 1 },
@@ -958,11 +990,17 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     };
                                     app.mcp_state.select(Some(i));
                                 } else if app.tab_index == 2 { // Projects Tab
-                                    let i = match app.project_state.selected() {
-                                        Some(i) => if i == 0 { app.projects.len().saturating_sub(1) } else { i - 1 },
-                                        None => 0,
-                                    };
-                                    app.project_state.select(Some(i));
+                                    if app.preview_focused {
+                                        app.project_explorer_selected = if app.project_explorer_selected == 0 { app.explorer_items.len().saturating_sub(1) } else { app.project_explorer_selected - 1 };
+                                    } else {
+                                        let i = match app.project_state.selected() {
+                                            Some(i) => if i == 0 { app.projects.len().saturating_sub(1) } else { i - 1 },
+                                            None => 0,
+                                        };
+                                        app.project_state.select(Some(i));
+                                        app.project_explorer_path = None;
+                                        app.project_explorer_selected = 0;
+                                    }
                                 } else if app.tab_index == 1 { // Sessions Tab
                                     let i = match app.session_state.selected() {
                                         Some(i) => if i == 0 { app.session_entries.len().saturating_sub(1) } else { i - 1 },
@@ -999,6 +1037,71 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 if app.tab_index == 3 { // Analysis tab
                                     app.input_mode = InputMode::AnalysisPrompt;
                                 }
+                            }
+                            (_, KeyCode::Right) => {
+                                if app.tab_index == 2 && app.preview_focused {
+                                    if let (Some(_), Some(path)) = (app.project_state.selected(), &app.project_explorer_path) {
+                                        if let Some(item_name) = app.explorer_items.get(app.project_explorer_selected) {
+                                            let mut new_path = std::path::PathBuf::from(path.replace("~", &std::env::var("HOME").unwrap_or_default()));
+                                            new_path.push(item_name);
+                                            if new_path.is_dir() {
+                                                app.project_explorer_path = Some(new_path.to_string_lossy().to_string());
+                                                app.project_explorer_selected = 0;
+                                            } else {
+                                                let _ = terminal.clear();
+                                                let _ = std::process::Command::new("hx").arg(new_path).status();
+                                                let _ = terminal.clear();
+                                            }
+                                        }
+                                    }
+                                } else if app.tab_index == 1 {
+                                    if let Some(i) = app.session_state.selected() {
+                                        if let Some(SessionEntry::Group(g)) = app.session_entries.get(i) {
+                                            if !g.is_expanded {
+                                                if let Some(group) = app.groups.iter_mut().find(|group| group.path == g.path) {
+                                                    group.is_expanded = true;
+                                                    if let Some(svc) = service.as_ref() { let _ = svc.update_group_expansion(&group.path, true); }
+                                                    app.refresh_session_entries();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            (_, KeyCode::Left) => {
+                                if app.tab_index == 2 && app.preview_focused {
+                                    if let Some(current) = &app.project_explorer_path {
+                                        let mut path = std::path::PathBuf::from(current);
+                                        if let Some(parent) = path.parent() {
+                                            app.project_explorer_path = Some(parent.to_string_lossy().to_string());
+                                            app.project_explorer_selected = 0;
+                                        }
+                                    }
+                                } else if app.tab_index == 1 {
+                                    if let Some(i) = app.session_state.selected() {
+                                        if let Some(SessionEntry::Group(g)) = app.session_entries.get(i) {
+                                            if g.is_expanded {
+                                                if let Some(group) = app.groups.iter_mut().find(|group| group.path == g.path) {
+                                                    group.is_expanded = false;
+                                                    if let Some(svc) = service.as_ref() { let _ = svc.update_group_expansion(&group.path, false); }
+                                                    app.refresh_session_entries();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            (_, KeyCode::Backspace) if app.tab_index == 2 && app.preview_focused => {
+                                if let Some(current) = &app.project_explorer_path {
+                                    let mut path = std::path::PathBuf::from(current.replace("~", &std::env::var("HOME").unwrap_or_default()));
+                                    if let Some(parent) = path.parent() {
+                                        app.project_explorer_path = Some(parent.to_string_lossy().to_string());
+                                        app.project_explorer_selected = 0;
+                                    }
+                                }
+                            }
+                            (_, KeyCode::Char('e')) if app.tab_index == 2 => {
+                                app.preview_focused = !app.preview_focused;
                             }
                             (_, KeyCode::Enter) => {
                                 if app.tab_index == 2 { // Projects Tab
@@ -1878,32 +1981,43 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
 
         if let Some(i) = app.project_state.selected() {
             let project = &app.projects[i];
+            let current_path = app.project_explorer_path.clone().unwrap_or_else(|| project.path.clone());
+            let expanded_path = current_path.replace("~", &std::env::var("HOME").unwrap_or_default());
             let mut items = Vec::new();
             
             // Add root info
             items.push(ListItem::new(vec![
                 Line::from(vec![
-                    Span::styled(format!("  Project: {}", project.name), Style::default().fg(Color::Yellow).bold()),
+                    Span::styled(format!("  Browsing: {}", project.name), Style::default().fg(Color::Yellow).bold()),
                 ]),
                 Line::from(vec![
-                    Span::styled(format!("  Path:    {}", project.path), Style::default().fg(Color::DarkGray).italic()),
+                    Span::styled(format!("  Path:     {}", current_path), Style::default().fg(Color::DarkGray).italic()),
                 ]),
                 Line::from(""),
             ]));
 
             // List directory contents
-            if let Ok(entries) = std::fs::read_dir(&project.path) {
+            if let Ok(entries) = std::fs::read_dir(&expanded_path) {
                 let mut dir_entries: Vec<_> = entries.flatten().collect();
                 dir_entries.sort_by_key(|e| (!e.path().is_dir(), e.file_name()));
 
-                for entry in dir_entries.iter().take(30) {
+                app.explorer_items = dir_entries.iter().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+
+                for (idx, entry) in dir_entries.iter().enumerate().take(30) {
                     let file_name = entry.file_name().to_string_lossy().to_string();
                     let is_dir = entry.path().is_dir();
                     let icon = if is_dir { "📁" } else { "📄" };
                     let color = if is_dir { Color::Blue } else { Color::White };
+                    
+                    let style = if app.preview_focused && idx == app.project_explorer_selected {
+                        Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(color)
+                    };
+
                     items.push(ListItem::new(Line::from(vec![
-                        Span::styled(format!("    {} ", icon), Style::default().fg(color)),
-                        Span::styled(file_name, Style::default().fg(color)),
+                        Span::styled(format!("    {} ", icon), style),
+                        Span::styled(file_name, style),
                     ])));
                 }
                 if dir_entries.len() > 30 {
@@ -1912,12 +2026,13 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
                     ])));
                 }
             } else {
-                items.push(ListItem::new(Span::styled("  Error reading directory.", Style::default().fg(Color::Red))));
+                items.push(ListItem::new(Span::styled("  Error reading directory. (Path might not exist or need expansion)", Style::default().fg(Color::Red))));
             }
             
             let list = List::new(items).block(explorer_block);
             frame.render_widget(list, chunks[1]);
-        } else {
+        }
+ else {
             let para = Paragraph::new(vec![
                 Line::from(""),
                 Line::from("  Select a project to explore its files."),
@@ -2088,6 +2203,10 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                         Line::from(vec![
                             Span::styled(format!("  {} ", icon), Style::default().fg(Color::Yellow)),
                             Span::styled(&g.name, Style::default().bold().fg(Color::White)),
+                            Span::styled(
+                                if let Some(cat) = &g.category { format!(" [{}]", cat) } else { "".to_string() },
+                                Style::default().fg(Color::Cyan)
+                            ),
                             Span::styled(format!(" ({})", g.path), Style::default().fg(Color::DarkGray).italic()),
                         ]),
                     ]));
