@@ -18,53 +18,115 @@ pub struct Step {
 pub struct Config {
     pub install_path: String,
     pub editor: String,
-    pub include_tooling: bool,
+    pub selected_tools: Vec<String>,
 }
 
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
-    let mut steps = vec![
-        Step {
-            name: "The Overture".to_string(),
-            description: format!("Preparing stage at {}...", config.install_path),
-            command: format!("mkdir -p {} && sleep 1", config.install_path),
-        },
-        Step {
-            name: "Woodwinds".to_string(),
-            description: "Installing basic utilities (curl, unzip, build-essential)...".to_string(),
-            command: "sudo apt-get update && sudo apt-get install -y curl unzip build-essential pkg-config libssl-dev".to_string(),
-        },
-    ];
+    let mut steps = Vec::new();
 
-    if config.include_tooling {
+    steps.push(Step {
+        name: "The Overture".to_string(),
+        description: format!("Preparing stage at {}...", config.install_path),
+        command: format!("mkdir -p {} && sleep 1", config.install_path),
+    });
+
+    steps.push(Step {
+        name: "Woodwinds".to_string(),
+        description: "Installing basic utilities (curl, unzip, build-essential)...".to_string(),
+        command: "sudo apt-get update && sudo apt-get install -y curl unzip build-essential pkg-config libssl-dev".to_string(),
+    });
+
+    if config.editor == "fresh" {
         steps.push(Step {
-            name: "Brass Section".to_string(),
-            description: "Synchronizing Go environment...".to_string(),
-            command: "sudo apt-get install -y golang-go".to_string(),
-        });
-        steps.push(Step {
-            name: "Percussion".to_string(),
-            description: "Setting up Tmux...".to_string(),
-            command: "sudo apt-get install -y tmux".to_string(),
+            name: "The Fresh Script".to_string(),
+            description: "Installing FRESH (https://github.com/sinelaw/fresh)...".to_string(),
+            command: "curl https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh".to_string(),
         });
     }
 
-    steps.extend(vec![
-        Step {
-            name: "Bass Note".to_string(),
-            description: "Ensuring Yazi (File Picker) is present...".to_string(),
-            command: "command -v yazi > /dev/null 2>&1 || sudo apt-get install -y yazi > /dev/null 2>&1 || cargo install --locked yazi-fm yazi-cli".to_string(),
-        },
-        Step {
-            name: "Conductor's Baton".to_string(),
-            description: format!("Setting default editor to {}...", config.editor),
-            command: "sleep 0.5".to_string(), // Placeholder for config write
-        },
-        Step {
-            name: "The Crescendo".to_string(),
-            description: "Compiling the Maestro Core...".to_string(),
-            command: "cargo build --release".to_string(),
-        },
-    ]);
+    // Handle Tooling Granularly
+    for tool in &config.selected_tools {
+        match tool.as_str() {
+            "Go Language (for Zoekt)" => {
+                steps.push(Step {
+                    name: "Brass Section - Go".to_string(),
+                    description: "Synchronizing Go environment...".to_string(),
+                    command: "sudo apt-get install -y golang-go".to_string(),
+                });
+            }
+            "Zoekt (Fast Code Search)" => {
+                steps.push(Step {
+                    name: "Brass Section - Zoekt".to_string(),
+                    description: "Installing Zoekt code search...".to_string(),
+                    command: "go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest && go install github.com/sourcegraph/zoekt/cmd/zoekt-indexer@latest".to_string(),
+                });
+            }
+            "Tmux / Tmux-RS" => {
+                steps.push(Step {
+                    name: "Percussion - Tmux".to_string(),
+                    description: "Setting up Tmux and building Tmux-RS...".to_string(),
+                    command: "sudo apt-get install -y tmux && cd maestro/leindex/rust/tmux-rs && cargo build --release".to_string(),
+                });
+            }
+            "Yazi (Terminal File Manager)" => {
+                steps.push(Step {
+                    name: "Bass Note - Yazi".to_string(),
+                    description: "Ensuring Yazi is present...".to_string(),
+                    command: "command -v yazi > /dev/null 2>&1 || sudo apt-get install -y yazi > /dev/null 2>&1 || cargo install --locked yazi-fm yazi-cli".to_string(),
+                });
+            }
+            "Claude Code (by Anthropic)" => {
+                steps.push(Step {
+                    name: "Strings - Claude Code".to_string(),
+                    description: "Installing Claude Code CLI...".to_string(),
+                    command: "npm install -g @anthropic-ai/claude-code".to_string(),
+                });
+            }
+            "Gemini CLI (by Google)" => {
+                steps.push(Step {
+                    name: "Strings - Gemini".to_string(),
+                    description: "Installing Gemini CLI...".to_string(),
+                    command: "npm install -g @google/gemini-cli".to_string(),
+                });
+            }
+            "Codex CLI (OpenAI)" => {
+                steps.push(Step {
+                    name: "Strings - Codex".to_string(),
+                    description: "Setting up Codex integration...".to_string(),
+                    command: "echo 'Installing Codex CLI placeholder'".to_string(),
+                });
+            }
+            "OpenCode (Independent)" => {
+                steps.push(Step {
+                    name: "Synthesizer - OpenCode".to_string(),
+                    description: "Installing OpenCode CLI...".to_string(),
+                    command: "npm install -g @opencode/cli".to_string(),
+                });
+            }
+            "Amp (by Sourcegraph)" => {
+                steps.push(Step {
+                    name: "Synthesizer - Amp".to_string(),
+                    description: "Installing Amp (Sourcegraph)...".to_string(),
+                    command: "curl -L https://sourcegraph.com/.api/amp/v1/install.sh | sh"
+                        .to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    // Final Maestro Components
+    steps.push(Step {
+        name: "The Crescendo - Core".to_string(),
+        description: "Compiling the Maestro Rust Core (Analyzers)...".to_string(),
+        command: "cargo build --release".to_string(),
+    });
+
+    steps.push(Step {
+        name: "The Crescendo - Frontend".to_string(),
+        description: "Building Maestro Memory Dashboard...".to_string(),
+        command: "cd maestro/memory/frontend && npm install && npm run build".to_string(),
+    });
 
     let total = steps.len();
     for (i, step) in steps.into_iter().enumerate() {

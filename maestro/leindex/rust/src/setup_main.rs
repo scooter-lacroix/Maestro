@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -32,8 +32,10 @@ struct App {
     // Config options
     install_path: String,
     editor: String,
-    include_tooling: bool,
-    config_selection: usize, // 0: path, 1: editor, 2: tooling
+    // Granular tool selection
+    tool_selections: Vec<(String, bool)>,
+    config_selection: usize, // 0: path, 1: editor, 2: tools..., N: star, N+1: confirm
+    starred: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -63,8 +65,19 @@ fn main() -> Result<(), io::Error> {
         error: None,
         install_path: "~/.maestro".to_string(),
         editor: "hx".to_string(),
-        include_tooling: true,
+        tool_selections: vec![
+            ("Go Language (for Zoekt)".to_string(), true),
+            ("Zoekt (Fast Code Search)".to_string(), true),
+            ("Tmux / Tmux-RS".to_string(), true),
+            ("Yazi (Terminal File Manager)".to_string(), true),
+            ("Claude Code (by Anthropic)".to_string(), true),
+            ("Gemini CLI (by Google)".to_string(), true),
+            ("Codex CLI (OpenAI)".to_string(), true),
+            ("OpenCode (Independent)".to_string(), true),
+            ("Amp (by Sourcegraph)".to_string(), true),
+        ],
         config_selection: 0,
+        starred: true,
     };
 
     let res = run_app(&mut terminal, app);
@@ -131,12 +144,17 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         if app.phase == Phase::Overture {
                             app.phase = Phase::Tuning;
                         } else if app.phase == Phase::Tuning {
-                            // On the last item, confirmation progresses to Performance
-                            if app.config_selection == 3 {
+                            let total_options = 3 + app.tool_selections.len() + 1; // Path, Editor, Star, Tools, Confirm
+                            if app.config_selection == total_options - 1 {
                                 let config = setup::Config {
                                     install_path: app.install_path.clone(),
                                     editor: app.editor.clone(),
-                                    include_tooling: app.include_tooling,
+                                    selected_tools: app
+                                        .tool_selections
+                                        .iter()
+                                        .filter(|(_, s)| *s)
+                                        .map(|(n, _)| n.clone())
+                                        .collect(),
                                 };
                                 let (tx, rx) = mpsc::channel();
                                 app.receiver = Some(rx);
@@ -145,7 +163,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                 });
                                 app.phase = Phase::Performance;
                             } else {
-                                app.config_selection = (app.config_selection + 1) % 4;
+                                app.config_selection = (app.config_selection + 1) % total_options;
                             }
                         } else if app.phase == Phase::Ovation {
                             app.should_quit = true;
@@ -153,8 +171,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     }
                     KeyCode::Up => {
                         if app.phase == Phase::Tuning {
+                            let total_options = 3 + app.tool_selections.len() + 1;
                             app.config_selection = if app.config_selection == 0 {
-                                3
+                                total_options - 1
                             } else {
                                 app.config_selection - 1
                             };
@@ -162,21 +181,27 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     }
                     KeyCode::Down => {
                         if app.phase == Phase::Tuning {
-                            app.config_selection = (app.config_selection + 1) % 4;
+                            let total_options = 3 + app.tool_selections.len() + 1;
+                            app.config_selection = (app.config_selection + 1) % total_options;
                         }
                     }
                     KeyCode::Char(' ') | KeyCode::Right => {
                         if app.phase == Phase::Tuning {
                             match app.config_selection {
                                 1 => {
-                                    let editors = ["hx", "nvim", "vim", "code"];
+                                    let editors = ["hx", "nvim", "vim", "code", "fresh"];
                                     let current_idx =
                                         editors.iter().position(|&e| e == app.editor).unwrap_or(0);
                                     app.editor =
                                         editors[(current_idx + 1) % editors.len()].to_string();
                                 }
-                                2 => {
-                                    app.include_tooling = !app.include_tooling;
+                                idx if idx >= 2 && idx < 2 + app.tool_selections.len() => {
+                                    let tool_idx = idx - 2;
+                                    app.tool_selections[tool_idx].1 =
+                                        !app.tool_selections[tool_idx].1;
+                                }
+                                idx if idx == 2 + app.tool_selections.len() => {
+                                    app.starred = !app.starred;
                                 }
                                 _ => {}
                             }
@@ -186,6 +211,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         if app.phase == Phase::Tuning && app.config_selection == 0 {
                             app.install_path.pop();
                         }
+                    }
+                    KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.should_quit = true;
                     }
                     KeyCode::Char(c) => {
                         if app.phase == Phase::Tuning && app.config_selection == 0 {
@@ -310,102 +338,122 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
         .split(area);
 
     f.render_widget(
-        Paragraph::new("🎼 Tuning the Orchestra...")
+        Paragraph::new("🛠 THE TUNING PHASE 🛠")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Yellow)),
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
         areas[0],
     );
 
-    let config_area = centered_rect(60, 50, areas[1]);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" System Configuration ")
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan));
-    f.render_widget(block, config_area);
+    let mut items = vec![
+        ListItem::new(vec![
+            Line::from("  Installation Path:"),
+            Line::from(vec![Span::styled(
+                format!("    > {}", app.install_path),
+                if app.config_selection == 0 {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            )]),
+        ]),
+        ListItem::new(vec![
+            Line::from("  Preferred Editor:"),
+            Line::from(vec![Span::styled(
+                format!(
+                    "    ← {} → (Press Space/Right to cycle)",
+                    app.editor.to_uppercase()
+                ),
+                if app.config_selection == 1 {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            )]),
+        ]),
+        ListItem::new(Line::from("  Include Tooling (Space to toggle):")),
+    ];
 
-    let inner = config_area.inner(ratatui::layout::Margin {
-        vertical: 2,
-        horizontal: 2,
-    });
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-        ])
-        .split(inner);
+    // Add granular tool selections
+    for (idx, (name, selected)) in app.tool_selections.iter().enumerate() {
+        let sel_idx = 2 + idx;
+        let checkbox = if *selected { " [X] " } else { " [ ] " };
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            format!("    {}{}", checkbox, name),
+            if app.config_selection == sel_idx {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            },
+        )])));
+    }
 
-    // 1. Installation Path
-    let path_style = if app.config_selection == 0 {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::White)
-    };
-    f.render_widget(
-        Paragraph::new(format!("  Installation Path: {}", app.install_path)).style(path_style),
-        rows[0],
-    );
+    // Star the repo item
+    let star_idx = 2 + app.tool_selections.len();
+    let star_check = if app.starred { " ⭐ " } else { " ☆ " };
+    items.push(ListItem::new(vec![
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!("  {} Star the Maestro on GitHub", star_check),
+            if app.config_selection == star_idx {
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            },
+        )]),
+    ]));
 
-    // 2. Editor Choice
-    let editor_style = if app.config_selection == 1 {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::White)
-    };
-    f.render_widget(
-        Paragraph::new(format!(
-            "  Preferred Editor:  {}  (Space to toggle)",
-            app.editor
-        ))
-        .style(editor_style),
-        rows[1],
-    );
+    // Confirmation button
+    let confirm_idx = 3 + app.tool_selections.len();
+    items.push(ListItem::new(vec![
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "  [ STRIKE THE FIRST CHORD (Launch Installation) ]",
+            if app.config_selection == confirm_idx {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Green)
+            },
+        )]),
+    ]));
 
-    // 3. Tooling
-    let tool_style = if app.config_selection == 2 {
-        Style::default().fg(Color::Black).bg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::White)
-    };
-    let tool_val = if app.include_tooling {
-        "Enabled [X]"
-    } else {
-        "Disabled [ ]"
-    };
-    f.render_widget(
-        Paragraph::new(format!(
-            "  Include Tooling:   {}  (Space to toggle)",
-            tool_val
-        ))
-        .style(tool_style),
-        rows[2],
-    );
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" System Configuration ")
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .style(Style::default().fg(Color::White));
 
-    // 4. Confirm
-    let confirm_style = if app.config_selection == 3 {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::Green)
-    };
-    f.render_widget(
-        Paragraph::new("  >>> STRIKE THE FIRST CHORD (Launch Installation) <<<")
-            .alignment(Alignment::Center)
-            .style(confirm_style),
-        rows[3],
-    );
+    f.render_widget(list, centered_rect(70, 70, areas[1]));
 
-    let help = Paragraph::new(
-        "Use [↑/↓] to navigate, [Type] to edit path, [Space/Right] to toggle, [ENTER] to confirm.",
-    )
-    .alignment(Alignment::Center)
-    .style(Style::default().fg(Color::DarkGray));
-    f.render_widget(help, areas[2]);
+    let footer = Paragraph::new(vec![Line::from(vec![
+        Span::styled(" ↑/↓: Navigate ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" Space/→: Toggle ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" Enter: Confirm ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" Ctrl+Q: Quit ", Style::default().fg(Color::Red)),
+    ])])
+    .alignment(Alignment::Center);
+    f.render_widget(footer, areas[2]);
 }
 
 fn render_performance(f: &mut Frame, app: &mut App, area: Rect) {
