@@ -56,9 +56,17 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             }
             "Zoekt (Fast Code Search)" => {
                 steps.push(Step {
+                    name: "Brass Section - Ctags".to_string(),
+                    description: "Installing Universal Ctags (Required for Zoekt)...".to_string(),
+                    command:
+                        "sudo apt-get install -y universal-ctags || sudo apt-get install -y ctags"
+                            .to_string(),
+                });
+
+                steps.push(Step {
                     name: "Brass Section - Zoekt".to_string(),
-                    description: "Installing Zoekt code search...".to_string(),
-                    command: "go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest && go install github.com/sourcegraph/zoekt/cmd/zoekt-indexer@latest".to_string(),
+                    description: "Installing Zoekt Search Engine...".to_string(),
+                    command: "go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest && go install github.com/sourcegraph/zoekt/cmd/zoekt-indexserver@latest && go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest".to_string(),
                 });
             }
             "Tmux / Tmux-RS" => {
