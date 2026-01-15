@@ -1,15 +1,15 @@
 //! Legacy Migration Logic
-//! 
+//!
 //! Handles importing data from the Go TUI's JSON-based storage into SQLite.
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
-use std::fs;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use std::fs;
+use std::path::PathBuf;
 use tracing::{info, warn};
 
-use super::models::{Session, SessionStatus, SessionGroup};
+use super::models::{Session, SessionGroup, SessionStatus};
 use super::service::MemoryService;
 
 #[derive(Debug, Deserialize)]
@@ -53,10 +53,13 @@ impl LegacyMigrator {
             return Ok(0);
         }
 
-        info!("Found legacy sessions at {}, starting migration...", legacy_path.display());
+        info!(
+            "Found legacy sessions at {}, starting migration...",
+            legacy_path.display()
+        );
         let content = fs::read_to_string(&legacy_path)?;
-        let data: StorageData = serde_json::from_str(&content)
-            .context("Failed to parse legacy sessions.json")?;
+        let data: StorageData =
+            serde_json::from_str(&content).context("Failed to parse legacy sessions.json")?;
 
         let mut migrated_count = 0;
 
@@ -67,6 +70,7 @@ impl LegacyMigrator {
                     id: 0,
                     name: g.name,
                     path: g.path,
+                    category: None,
                     is_expanded: g.expanded,
                     sort_order: g.order,
                     parent_id: None,
@@ -99,7 +103,9 @@ impl LegacyMigrator {
                 status,
                 multiplexer_session: Some(inst.tmux_session),
                 started_at: Self::parse_iso8601(&inst.created_at).unwrap_or_else(|_| Utc::now()),
-                last_accessed_at: inst.last_accessed_at.and_then(|s| Self::parse_iso8601(&s).ok()),
+                last_accessed_at: inst
+                    .last_accessed_at
+                    .and_then(|s| Self::parse_iso8601(&s).ok()),
                 ended_at: None,
                 metadata: None,
             };
@@ -109,8 +115,11 @@ impl LegacyMigrator {
             }
         }
 
-        info!("Successfully migrated {} sessions to SQLite", migrated_count);
-        
+        info!(
+            "Successfully migrated {} sessions to SQLite",
+            migrated_count
+        );
+
         // Optionally rename the old file to avoid re-migration
         let backup_path = legacy_path.with_extension("json.migrated");
         if let Err(e) = fs::rename(&legacy_path, &backup_path) {

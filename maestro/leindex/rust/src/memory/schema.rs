@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS session_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     path TEXT NOT NULL UNIQUE,
+    category TEXT,
     is_expanded INTEGER DEFAULT 1,
     sort_order INTEGER DEFAULT 0,
     parent_id INTEGER REFERENCES session_groups(id) ON DELETE CASCADE
@@ -149,11 +150,16 @@ CREATE INDEX IF NOT EXISTS idx_namespaces_owner ON agent_namespaces(owner_type, 
 /// Migrations for schema updates
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", "-- Already created in CREATE_TABLES_SQL"),
-    ("002_add_indexes", r#"
+    (
+        "002_add_indexes",
+        r#"
         CREATE INDEX IF NOT EXISTS idx_memories_project_track ON memories(project_id, track_id);
         CREATE INDEX IF NOT EXISTS idx_memories_category_importance ON memories(category, importance);
-    "#),
-    ("003_tui_consolidation", r#"
+    "#,
+    ),
+    (
+        "003_tui_consolidation",
+        r#"
         -- For existing sessions table, we need to add a few columns if they don't exist
         -- But easiest is to drop and recreate for now during dev, OR use safer ALTERs
         -- We'll use safe ALTERs for production-ready migrations
@@ -187,5 +193,12 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
             client_count INTEGER DEFAULT 0,
             last_started_at TEXT
         );
-    "#),
+    "#,
+    ),
+    (
+        "004_group_categorization",
+        r#"
+        ALTER TABLE session_groups ADD COLUMN category TEXT;
+    "#,
+    ),
 ];

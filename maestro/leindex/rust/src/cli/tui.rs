@@ -92,6 +92,7 @@ struct App {
     new_project_tool: String,
     new_track_title: String,
     new_track_is_master: bool,
+    new_group_category: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -101,7 +102,6 @@ enum InputMode {
     NewSessionPath,
     NewSessionTool,
     SessionSwitcher,
-    RenameSession,
     RenameGroup,
     ForkSession,
     KillConfirm,
@@ -118,6 +118,8 @@ enum InputMode {
     NewProjectTool,
     NewTrackTitle,
     NewTrackType,
+    NewGroupCategory,
+    RenameGroupCategory,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
@@ -209,6 +211,7 @@ impl App {
             new_project_tool: String::new(),
             new_track_title: String::new(),
             new_track_is_master: true,
+            new_group_category: String::new(),
         };
 
         // Load live data if service available
@@ -272,6 +275,7 @@ impl App {
                 id: -1, // Special ID
                 name: "[Uncategorized]".to_string(),
                 path: "uncategorized".to_string(),
+                category: None,
                 is_expanded: true,
                 sort_order: 9999,
                 parent_id: None,
@@ -442,27 +446,21 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         app.input_mode = InputMode::Normal;
                                     }
 
-                                    InputMode::RenameSession | InputMode::RenameGroup => {
-                                        if let Some(svc) = service.as_ref() {
-                                            if app.input_mode == InputMode::RenameSession {
-                                                if let Some(id) = app.target_session_id.take() {
-                                                    let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
-                                                    let _ = manager.rename_session(&id, &app.rename_buffer);
-                                                    app.status_message = format!("Session renamed to {}", app.rename_buffer);
-                                                }
-                                            } else {
-                                                if let Some(path) = app.target_group_path.take() {
-                                                    let _ = svc.update_group_name(&path, &app.rename_buffer);
-                                                    app.status_message = format!("Group renamed to {}", app.rename_buffer);
-                                                    if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
-                                                }
-                                            }
-                                            if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
+                                    InputMode::RenameGroup => {
+                                        app.input_mode = InputMode::RenameGroupCategory;
+                                    }
+                                    InputMode::RenameGroupCategory => {
+                                        if let (Some(svc), Some(path)) = (service.as_ref(), app.target_group_path.take()) {
+                                            let _ = svc.update_group_name(&path, &app.rename_buffer);
+                                            let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
+                                            let _ = svc.update_group_category(&path, category);
+                                            app.status_message = format!("Group '{}' updated", app.rename_buffer);
+                                            if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
                                             app.refresh_session_entries();
                                         }
-                                        app.target_session_id = None;
                                         app.target_group_path = None;
                                         app.rename_buffer.clear();
+                                        app.new_group_category.clear();
                                         app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::ForkSession => {
@@ -519,14 +517,19 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
 
                                     InputMode::NewGroupTitle => {
+                                        app.input_mode = InputMode::NewGroupCategory;
+                                    }
+                                    InputMode::NewGroupCategory => {
                                         if let Some(svc) = service.as_ref() {
-                                            let path = format!("/{}", app.rename_buffer.to_lowercase().replace(' ', "_"));
-                                            let _ = svc.create_session_group(&app.rename_buffer, &path);
+                                            let path = format!("/{}", app.rename_buffer.trim().to_lowercase().replace(' ', "_"));
+                                            let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
+                                            let _ = svc.create_session_group(&app.rename_buffer, &path, category);
                                             app.status_message = format!("Group '{}' created", app.rename_buffer);
                                             if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
                                             app.refresh_session_entries();
                                         }
                                         app.rename_buffer.clear();
+                                        app.new_group_category.clear();
                                         app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::MoveToGroup => {
@@ -634,7 +637,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 match app.input_mode {
                                     InputMode::NewSessionTitle => { app.new_session_title.pop(); }
                                     InputMode::NewSessionPath => { app.new_session_path.pop(); }
-                                    InputMode::RenameSession | InputMode::RenameGroup | InputMode::ForkSession => {
+                                    InputMode::RenameGroup | InputMode::ForkSession => {
                                         app.rename_buffer.pop();
                                     }
                                     InputMode::KillConfirm => {
@@ -669,7 +672,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             app.new_session_tool = tools[(pos + 1) % tools.len()].to_string();
                                         }
                                     }
-                                    InputMode::RenameSession | InputMode::RenameGroup | InputMode::ForkSession | InputMode::NewGroupTitle | InputMode::MoveToGroup => app.rename_buffer.push(c),
+                                    InputMode::RenameGroup | InputMode::ForkSession | InputMode::NewGroupTitle | InputMode::MoveToGroup => app.rename_buffer.push(c),
                                     InputMode::NewProjectName => app.new_project_name.push(c),
                                     InputMode::NewProjectPath => app.new_project_path.push(c),
                                     InputMode::NewProjectTool => app.new_project_tool.push(c),
@@ -753,6 +756,15 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         None => 0,
                                     };
                                     app.switcher_state.select(Some(i));
+                                } else if app.input_mode == InputMode::McpMenu {
+                                    app.mcp_menu_option = match app.mcp_menu_option {
+                                        McpOption::StartStop => McpOption::Pause,
+                                        McpOption::Pause => McpOption::Logs,
+                                        McpOption::Logs => McpOption::Add,
+                                        McpOption::Add => McpOption::Remove,
+                                        McpOption::Remove => McpOption::Install,
+                                        McpOption::Install => McpOption::StartStop,
+                                    };
                                 }
                             }
                             KeyCode::Up => {
@@ -762,6 +774,15 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         None => 0,
                                     };
                                     app.switcher_state.select(Some(i));
+                                } else if app.input_mode == InputMode::McpMenu {
+                                    app.mcp_menu_option = match app.mcp_menu_option {
+                                        McpOption::StartStop => McpOption::Install,
+                                        McpOption::Pause => McpOption::StartStop,
+                                        McpOption::Logs => McpOption::Pause,
+                                        McpOption::Add => McpOption::Logs,
+                                        McpOption::Remove => McpOption::Add,
+                                        McpOption::Install => McpOption::Remove,
+                                    };
                                 }
                             }
                             _ => {}
@@ -816,9 +837,10 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 app.hub_search_buffer.clear();
                                                 app.input_mode = InputMode::SessionHub;
                                             }
-                                            Some(SessionEntry::Group(g)) => {
+                                             Some(SessionEntry::Group(g)) => {
                                                 app.target_group_path = Some(g.path.clone());
                                                 app.rename_buffer = g.name.clone();
+                                                app.new_group_category = g.category.clone().unwrap_or_default();
                                                 app.input_mode = InputMode::RenameGroup;
                                             }
                                             _ => {}
@@ -959,6 +981,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 if app.tab_index == 1 {
                                     app.input_mode = InputMode::NewGroupTitle;
                                     app.rename_buffer.clear();
+                                    app.new_group_category.clear();
                                 }
                             }
                             (_, KeyCode::Char('m')) => {
@@ -1000,6 +1023,9 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 SessionEntry::Group(g) => {
                                                     if let Some(group) = app.groups.iter_mut().find(|group| group.path == g.path) {
                                                         group.is_expanded = !group.is_expanded;
+                                                        if let Some(svc) = service.as_ref() {
+                                                            let _ = svc.update_group_expansion(&group.path, group.is_expanded);
+                                                        }
                                                         app.refresh_session_entries();
                                                     }
                                                 }
@@ -1042,7 +1068,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('/')) => app.show_help = true,
+                            (KeyModifiers::CONTROL, KeyCode::Char('/')) => app.show_help = true,
                             (_, KeyCode::Char('n')) => {
                                 app.input_mode = InputMode::NewSessionTitle;
                                 // Auto-fill path if a project is selected
@@ -1113,7 +1139,6 @@ fn ui(frame: &mut Frame, app: &mut App) {
         4 => render_memory(frame, chunks[1], app),
         _ => {}
     }
-
     // Footer
     let footer = Paragraph::new(vec![
         Line::from(vec![
@@ -1129,6 +1154,11 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Span::raw(" Switch "),
             Span::styled(" / ", Style::default().bg(Color::Yellow).fg(Color::Black)),
             Span::raw(" Help "),
+            if std::env::var("ZELLIJ").is_ok() {
+                Span::styled(" [Zellij Active: Ctrl+G for menu] ", Style::default().fg(Color::Yellow).bold())
+            } else {
+                Span::raw("")
+            },
             Span::styled(" q ", Style::default().bg(Color::Red).fg(Color::White)),
             Span::raw(" Quit"),
         ])
@@ -1157,7 +1187,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
         render_new_project_modal(frame, app);
     } else if matches!(app.input_mode, InputMode::NewTrackTitle | InputMode::NewTrackType) {
         render_new_track_modal(frame, app);
-    } else if matches!(app.input_mode, InputMode::RenameSession | InputMode::RenameGroup | InputMode::ForkSession | InputMode::KillConfirm | InputMode::DeleteConfirm | InputMode::NewGroupTitle | InputMode::MoveToGroup) {
+    } else if matches!(app.input_mode, InputMode::NewGroupTitle | InputMode::NewGroupCategory | InputMode::RenameGroup | InputMode::RenameGroupCategory) {
+        render_group_modal(frame, app);
+    } else if matches!(app.input_mode, InputMode::ForkSession | InputMode::KillConfirm | InputMode::DeleteConfirm | InputMode::MoveToGroup) {
         render_action_modal(frame, app);
     } else if matches!(app.input_mode, InputMode::NewSessionTitle | InputMode::NewSessionPath | InputMode::NewSessionTool) {
         render_input_modal(frame, app);
@@ -1173,7 +1205,6 @@ fn render_action_modal(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
 
     let (title, prompt, value) = match app.input_mode {
-        InputMode::RenameSession => (" Rename Session ", "New Title:", Some(&app.rename_buffer)),
         InputMode::RenameGroup => (" Rename Group ", "New Name:", Some(&app.rename_buffer)),
         InputMode::ForkSession => (" Fork Session ", "Fork Name:", Some(&app.rename_buffer)),
         InputMode::KillConfirm => (" Kill Session ", "Are you sure? (y/n)", None),
@@ -1358,16 +1389,24 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.sessions.is_empty() {
         session_rows.push(Line::from("  No active sessions"));
     } else {
-        // Group sessions by group name for Dashboard
-        let mut grouped: std::collections::HashMap<String, Vec<&leindex_analyzers::memory::models::Session>> = std::collections::HashMap::new();
+        // Group sessions by group path but display group name
+        let mut grouped: std::collections::BTreeMap<String, Vec<&leindex_analyzers::memory::models::Session>> = std::collections::BTreeMap::new();
         for s in &app.sessions {
-            let g = s.group_path.as_deref().unwrap_or("[Uncategorized]").to_string();
+            let g = s.group_path.as_deref().unwrap_or("uncategorized").to_string();
             grouped.entry(g).or_default().push(s);
         }
         
-        for (group_name, sessions) in grouped {
+        for (group_path, sessions) in grouped {
+            let display_name = if group_path == "uncategorized" {
+                "[Uncategorized]".to_string()
+            } else {
+                app.groups.iter().find(|g| g.path == group_path)
+                    .map(|g| g.name.clone())
+                    .unwrap_or_else(|| group_path.clone())
+            };
+
             session_rows.push(Line::from(vec![
-                Span::styled(format!("  [{}]", group_name), Style::default().fg(Color::Cyan).bold()),
+                Span::styled(format!("  [{}]", display_name), Style::default().fg(Color::Cyan).bold()),
             ]));
             for s in sessions.iter().take(3) {
                 let status_icon = match s.status {
@@ -1427,7 +1466,7 @@ fn render_help_modal(frame: &mut Frame, app: &App) {
         Line::from(vec![Span::styled(" GLOBAL CONTROLS:", Style::default().fg(Color::Yellow).bold())]),
         Line::from(vec![Span::styled("   Tab / S-Tab   ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Cycle Tabs / Focus Preview (e.g. 1->2->3)")]),
         Line::from(vec![Span::styled("   ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Navigate / Scroll Preview")]),
-        Line::from(vec![Span::styled("   /             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Toggle This Modal")]),
+        Line::from(vec![Span::styled("   Ctrl + /      ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Toggle This Modal")]),
         Line::from(vec![Span::styled("   q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),  Span::raw(" Quit Maestro Cockpit")]),
         Line::from(""),
         Line::from(vec![Span::styled(" DASHBOARD (Tab 1):", Style::default().fg(Color::Yellow).bold())]),
@@ -1600,6 +1639,55 @@ fn render_new_project_modal(frame: &mut Frame, app: &App) {
     frame.render_widget(block, area);
 }
 
+fn render_group_modal(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 40, frame.area());
+    frame.render_widget(Clear, area);
+    
+    let step = match app.input_mode {
+        InputMode::NewGroupTitle | InputMode::RenameGroup => 1,
+        InputMode::NewGroupCategory | InputMode::RenameGroupCategory => 2,
+        _ => 1,
+    };
+
+    let title = if matches!(app.input_mode, InputMode::RenameGroup | InputMode::RenameGroupCategory) {
+        " RENAME GROUP WIZARD "
+    } else {
+        " NEW GROUP WIZARD "
+    };
+
+    let block = Block::default()
+        .title(format!(" {} (Step {} of 2) ", title, step))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .style(Style::default().bg(Color::Rgb(10, 20, 15)));
+    
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints([
+            Constraint::Length(3), // Name
+            Constraint::Length(3), // Category
+            Constraint::Min(0),    // Help/Hint
+        ])
+        .split(area);
+
+    let name_style = if step == 1 { Style::default().fg(Color::Yellow).bold() } else { Style::default().fg(Color::DarkGray) };
+    let name = Paragraph::new(app.rename_buffer.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 1. GROUP NAME ").border_style(name_style));
+    frame.render_widget(name, chunks[0]);
+
+    let cat_style = if step == 2 { Style::default().fg(Color::Cyan).bold() } else { Style::default().fg(Color::DarkGray) };
+    let cat = Paragraph::new(app.new_group_category.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 2. CATEGORY (e.g. Work, Personal, Research) ").border_style(cat_style));
+    frame.render_widget(cat, chunks[1]);
+
+    let hint = Paragraph::new("Press 'Enter' to confirm step, 'Esc' to cancel\n\nGroups help you organize your coding sessions.")
+        .alignment(Alignment::Center);
+    frame.render_widget(hint, chunks[2]);
+    frame.render_widget(block, area);
+}
+
 fn render_new_track_modal(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 30, frame.area());
     frame.render_widget(Clear, area);
@@ -1741,13 +1829,17 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
-
 fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(" 🚀 Projects ")
         .title_style(Style::default().fg(Color::Cyan));
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
 
     if app.projects.is_empty() {
         let text = vec![
@@ -1775,7 +1867,65 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
         let list = List::new(items)
             .block(block)
             .highlight_style(Style::default().bg(Color::Rgb(40, 40, 60)).fg(Color::White).bold());
-        frame.render_stateful_widget(list, area, &mut app.project_state);
+        frame.render_stateful_widget(list, chunks[0], &mut app.project_state);
+
+        // Right side: Project Explorer (File Tree)
+        let explorer_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" 🌲 Project Explorer ")
+            .title_style(Style::default().fg(Color::Green));
+
+        if let Some(i) = app.project_state.selected() {
+            let project = &app.projects[i];
+            let mut items = Vec::new();
+            
+            // Add root info
+            items.push(ListItem::new(vec![
+                Line::from(vec![
+                    Span::styled(format!("  Project: {}", project.name), Style::default().fg(Color::Yellow).bold()),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  Path:    {}", project.path), Style::default().fg(Color::DarkGray).italic()),
+                ]),
+                Line::from(""),
+            ]));
+
+            // List directory contents
+            if let Ok(entries) = std::fs::read_dir(&project.path) {
+                let mut dir_entries: Vec<_> = entries.flatten().collect();
+                dir_entries.sort_by_key(|e| (!e.path().is_dir(), e.file_name()));
+
+                for entry in dir_entries.iter().take(30) {
+                    let file_name = entry.file_name().to_string_lossy().to_string();
+                    let is_dir = entry.path().is_dir();
+                    let icon = if is_dir { "📁" } else { "📄" };
+                    let color = if is_dir { Color::Blue } else { Color::White };
+                    items.push(ListItem::new(Line::from(vec![
+                        Span::styled(format!("    {} ", icon), Style::default().fg(color)),
+                        Span::styled(file_name, Style::default().fg(color)),
+                    ])));
+                }
+                if dir_entries.len() > 30 {
+                    items.push(ListItem::new(Line::from(vec![
+                        Span::styled(format!("    ... and {} more items", dir_entries.len() - 30), Style::default().fg(Color::DarkGray).italic()),
+                    ])));
+                }
+            } else {
+                items.push(ListItem::new(Span::styled("  Error reading directory.", Style::default().fg(Color::Red))));
+            }
+            
+            let list = List::new(items).block(explorer_block);
+            frame.render_widget(list, chunks[1]);
+        } else {
+            let para = Paragraph::new(vec![
+                Line::from(""),
+                Line::from("  Select a project to explore its files."),
+                Line::from(""),
+                Line::from("  Press Enter to open in Zide (Editor)."),
+            ]).block(explorer_block).alignment(Alignment::Center);
+            frame.render_widget(para, chunks[1]);
+        }
     }
 }
 

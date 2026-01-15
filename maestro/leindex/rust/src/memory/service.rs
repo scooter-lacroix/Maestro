@@ -512,7 +512,7 @@ impl MemoryService {
         self.db.with_connection(|conn| {
             let existing = conn
                 .query_row(
-                    "SELECT id, name, path, is_expanded, sort_order, parent_id 
+                    "SELECT id, name, path, category, is_expanded, sort_order, parent_id 
                  FROM session_groups WHERE path = ?",
                     [&group.path],
                     |row| {
@@ -520,9 +520,10 @@ impl MemoryService {
                             id: row.get(0)?,
                             name: row.get(1)?,
                             path: row.get(2)?,
-                            is_expanded: row.get::<_, i32>(3)? == 1,
-                            sort_order: row.get(4)?,
-                            parent_id: row.get(5)?,
+                            category: row.get(3)?,
+                            is_expanded: row.get::<_, i32>(4)? == 1,
+                            sort_order: row.get(5)?,
+                            parent_id: row.get(6)?,
                         })
                     },
                 )
@@ -533,11 +534,12 @@ impl MemoryService {
             }
 
             conn.execute(
-                "INSERT INTO session_groups (name, path, is_expanded, sort_order, parent_id)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO session_groups (name, path, category, is_expanded, sort_order, parent_id)
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 params![
                     group.name,
                     group.path,
+                    group.category,
                     if group.is_expanded { 1 } else { 0 },
                     group.sort_order,
                     group.parent_id,
@@ -590,7 +592,7 @@ impl MemoryService {
     pub fn list_session_groups(&self) -> Result<Vec<SessionGroup>> {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, path, is_expanded, sort_order, parent_id 
+                "SELECT id, name, path, category, is_expanded, sort_order, parent_id 
                  FROM session_groups ORDER BY sort_order, name",
             )?;
 
@@ -600,9 +602,10 @@ impl MemoryService {
                         id: row.get(0)?,
                         name: row.get(1)?,
                         path: row.get(2)?,
-                        is_expanded: row.get::<_, i32>(3)? == 1,
-                        sort_order: row.get(4)?,
-                        parent_id: row.get(5)?,
+                        category: row.get(3)?,
+                        is_expanded: row.get::<_, i32>(4)? == 1,
+                        sort_order: row.get(5)?,
+                        parent_id: row.get(6)?,
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -618,6 +621,28 @@ impl MemoryService {
             conn.execute(
                 "UPDATE session_groups SET name = ? WHERE path = ?",
                 params![new_name, group_path],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Update a session group's expansion state
+    pub fn update_group_expansion(&self, group_path: &str, is_expanded: bool) -> Result<()> {
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE session_groups SET is_expanded = ? WHERE path = ?",
+                params![if is_expanded { 1 } else { 0 }, group_path],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Update a session group's category
+    pub fn update_group_category(&self, group_path: &str, category: Option<String>) -> Result<()> {
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE session_groups SET category = ? WHERE path = ?",
+                params![category, group_path],
             )?;
             Ok(())
         })
@@ -650,11 +675,16 @@ impl MemoryService {
 
     // ========================================================================
     /// Create a new session group
-    pub fn create_session_group(&self, name: &str, path: &str) -> Result<()> {
+    pub fn create_session_group(
+        &self,
+        name: &str,
+        path: &str,
+        category: Option<String>,
+    ) -> Result<()> {
         self.db.with_connection(|conn| {
             conn.execute(
-                "INSERT INTO session_groups (name, path, is_expanded, sort_order) VALUES (?, ?, 1, 0)",
-                params![name, path],
+                "INSERT INTO session_groups (name, path, category, is_expanded, sort_order) VALUES (?, ?, ?, 1, 0)",
+                params![name, path, category],
             )?;
             Ok(())
         })

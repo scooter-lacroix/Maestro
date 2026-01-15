@@ -258,6 +258,7 @@ pub struct SessionGroup {
     pub id: i64,
     pub name: String,
     pub path: String,
+    pub category: Option<String>,
     pub is_expanded: bool,
     pub sort_order: i32,
     pub parent_id: Option<i64>,

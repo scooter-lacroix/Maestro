@@ -4,10 +4,10 @@
 //! Optimized for concurrent access with thread-safe operations.
 
 use anyhow::{Context, Result};
+use dashmap::DashMap;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use dashmap::DashMap;
 use tracing::info;
 
 use super::schema::CREATE_TABLES_SQL;
@@ -32,24 +32,24 @@ impl DatabaseManager {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create database directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create database directory")?;
         }
 
         info!("Opening database: {}", path.display());
-        
-        let conn = Connection::open(&path)
-            .context("Failed to open database")?;
+
+        let conn = Connection::open(&path).context("Failed to open database")?;
 
         // Enable WAL mode and Foreign Keys for better concurrent performance and integrity
-        conn.execute_batch("
+        conn.execute_batch(
+            "
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
             PRAGMA cache_size=10000;
             PRAGMA foreign_keys=ON;
             PRAGMA busy_timeout=5000;
-        ")
-            .context("Failed to set pragmas")?;
+        ",
+        )
+        .context("Failed to set pragmas")?;
 
         Ok(Self {
             db_path: path,
@@ -60,10 +60,42 @@ impl DatabaseManager {
 
     /// Initialize database schema
     pub fn initialize(&self) -> Result<()> {
-        let conn = self.connection.lock().unwrap();
+        let mut conn = self.connection.lock().unwrap();
         conn.execute_batch(CREATE_TABLES_SQL)
             .context("Failed to create tables")?;
+
+        // Run migrations
+        self.run_migrations(&mut conn)?;
+
         info!("Database initialized successfully");
+        Ok(())
+    }
+
+    fn run_migrations(&self, conn: &mut Connection) -> Result<()> {
+        use super::schema::MIGRATIONS;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)",
+            [],
+        )?;
+
+        for (version, sql) in MIGRATIONS {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)",
+                [version],
+                |row| row.get(0),
+            )?;
+
+            if !exists {
+                info!("Running migration: {}", version);
+                conn.execute_batch(sql)
+                    .context(format!("Failed to run migration {}", version))?;
+                conn.execute(
+                    "INSERT INTO schema_migrations (version) VALUES (?)",
+                    [version],
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -91,11 +123,7 @@ impl DatabaseManager {
     }
 
     /// Get cached value or compute it
-    pub fn cached_or_compute<F>(
-        &self,
-        key: &str,
-        compute: F,
-    ) -> Result<serde_json::Value>
+    pub fn cached_or_compute<F>(&self, key: &str, compute: F) -> Result<serde_json::Value>
     where
         F: FnOnce() -> Result<serde_json::Value>,
     {
@@ -117,7 +145,9 @@ impl DatabaseManager {
     pub fn stats(&self) -> Result<DbStats> {
         self.with_connection(|conn| {
             let project_count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM maestro_projects", [], |row| row.get(0))
+                .query_row("SELECT COUNT(*) FROM maestro_projects", [], |row| {
+                    row.get(0)
+                })
                 .unwrap_or(0);
 
             let track_count: i64 = conn
@@ -164,10 +194,10 @@ mod tests {
     fn test_database_creation() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        
+
         let db = DatabaseManager::new(Some(db_path.clone())).unwrap();
         db.initialize().unwrap();
-        
+
         assert!(db_path.exists());
     }
 
@@ -175,10 +205,10 @@ mod tests {
     fn test_database_stats() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
-        
+
         let db = DatabaseManager::new(Some(db_path)).unwrap();
         db.initialize().unwrap();
-        
+
         let stats = db.stats().unwrap();
         assert_eq!(stats.project_count, 0);
     }
