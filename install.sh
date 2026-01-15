@@ -31,6 +31,13 @@
 
 set -e
 
+# Ensure we are running in bash
+if [ -z "$BASH_VERSION" ]; then
+    echo "Error: This script must be run with bash."
+    echo "Please run as: ./install.sh or bash install.sh"
+    exit 1
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🎨 COLOR PALETTE & VISUAL STYLING (zsh compatible)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1086,18 +1093,6 @@ main() {
     
     select_cli_tools
 
-
-    # Check for --restore flag
-    if [[ "$1" == "--restore" ]]; then
-        if [ -n "$2" ]; then
-            restore_config "$2"
-            exit 0
-        else
-            print_error "Usage: $0 --restore <backup_file>"
-            exit 1
-        fi
-    fi
-
     # ─────────────────────────────────────────────────────────────────────
     # PHASE 1: DEPENDENCY CHECK
     # ─────────────────────────────────────────────────────────────────────
@@ -1165,6 +1160,7 @@ main() {
             print_info "Skipping Zoekt - Memory System will use fallback search mode"
         fi
     fi
+
     # Check Rust
     echo
     local rust_installed=false
@@ -1202,7 +1198,6 @@ main() {
         fi
     fi
 
-
     # Check Yazi
     echo
     if command_exists yazi; then
@@ -1231,7 +1226,6 @@ main() {
     # ─────────────────────────────────────────────────────────────────────
 
     backup_config
-
 
     # ─────────────────────────────────────────────────────────────────────
     # PHASE 3: DOWNLOAD & INSTALL
@@ -1290,15 +1284,28 @@ main() {
     SCRIPT_DIR="$TMP_DIR"
 
     # ─────────────────────────────────────────────────────────────────────
-    # PHASE 4: INSTALL COMPONENTS
-    # ─────────────────────────────────────────────────────────────────────
-
-    # ─────────────────────────────────────────────────────────────────────
     # PHASE 4: INSTALL COMPONENTS SPREAD ACROSS TOOLS
     # ─────────────────────────────────────────────────────────────────────
 
     local total_tools=${#SELECTED_TOOLS[@]}
     local current_tool_idx=0
+
+    # Define install_component outside the tool loop to avoid re-declaration syntax issues
+    install_component() {
+        local name="$1"
+        local icon="$2"
+        local action="$3"
+        local comp_idx="$4"
+        local total_comp="$5"
+
+        printf "\r${BM}  [$comp_idx/$total_comp]${NC} ${icon}  ${BW}${name}...${NC}   " 2>/dev/null
+
+        if eval "$action" > /dev/null 2>&1; then
+            printf "\r${G}  ✓ [$comp_idx/$total_comp]${NC} ${icon}  ${BW}${name}${NC}      \n" 2>/dev/null
+        else
+            printf "\r${Y}  ⚠ [$comp_idx/$total_comp]${NC} ${icon}  ${BW}${name} (skipped)${NC}      \n" 2>/dev/null
+        fi
+    }
 
     for tool in "${SELECTED_TOOLS[@]}"; do
         current_tool_idx=$((current_tool_idx + 1))
@@ -1309,47 +1316,40 @@ main() {
         local component=0
         local total_components=8
 
-        install_component() {
-            local name="$1"
-            local icon="$2"
-            local action="$3"
-
-            component=$((component + 1))
-            printf "\r${BM}  [$component/$total_components]${NC} ${icon}  ${BW}${name}...${NC}   " 2>/dev/null
-
-            if eval "$action" > /dev/null 2>&1; then
-                printf "\r${G}  ✓ [$component/$total_components]${NC} ${icon}  ${BW}${name}${NC}      \n" 2>/dev/null
-            else
-                printf "\r${Y}  ⚠ [$component/$total_components]${NC} ${icon}  ${BW}${name} (skipped)${NC}      \n" 2>/dev/null
-            fi
-        }
-
         # Ensure tool config directory exists
         mkdir -p "$target_dir"
 
         # Commands
-        install_component "Commands" "📋" "mkdir -p '$target_dir/commands' && /bin/cp '$SCRIPT_DIR/claude-code/commands/maestro'*.md '$target_dir/commands/'"
+        component=$((component + 1))
+        install_component "Commands" "📋" "mkdir -p '$target_dir/commands' && /bin/cp '$SCRIPT_DIR/claude-code/commands/maestro'*.md '$target_dir/commands/'" "$component" "$total_components"
 
         # Templates
-        install_component "Templates" "📝" "mkdir -p '$target_dir/maestro-templates' && /bin/cp '$SCRIPT_DIR/claude-code/templates/workflow.md' '$target_dir/maestro-templates/' && mkdir -p '$target_dir/maestro-templates/code_styleguides' && /bin/cp '$SCRIPT_DIR/claude-code/templates/code_styleguides/'*.md '$target_dir/maestro-templates/code_styleguides/'"
+        component=$((component + 1))
+        install_component "Templates" "📝" "mkdir -p '$target_dir/maestro-templates' && /bin/cp '$SCRIPT_DIR/claude-code/templates/workflow.md' '$target_dir/maestro-templates/' && mkdir -p '$target_dir/maestro-templates/code_styleguides' && /bin/cp '$SCRIPT_DIR/claude-code/templates/code_styleguides/'*.md '$target_dir/maestro-templates/code_styleguides/'" "$component" "$total_components"
 
         # Plugin
-        install_component "Plugin" "🔌" "mkdir -p '$target_dir/plugins/maestro' && [ -f '$SCRIPT_DIR/plugin.json' ] && /bin/cp '$SCRIPT_DIR/plugin.json' '$target_dir/plugins/maestro/'"
+        component=$((component + 1))
+        install_component "Plugin" "🔌" "mkdir -p '$target_dir/plugins/maestro' && [ -f '$SCRIPT_DIR/plugin.json' ] && /bin/cp '$SCRIPT_DIR/plugin.json' '$target_dir/plugins/maestro/'" "$component" "$total_components"
 
         # Hooks
-        install_component "Hooks" "🪝" "mkdir -p '$target_dir/plugins/maestro/hooks' && [ -d '$SCRIPT_DIR/maestro/hooks' ] && /bin/cp -r '$SCRIPT_DIR/maestro/hooks/'* '$target_dir/plugins/maestro/hooks/'"
+        component=$((component + 1))
+        install_component "Hooks" "🪝" "mkdir -p '$target_dir/plugins/maestro/hooks' && [ -d '$SCRIPT_DIR/maestro/hooks' ] && /bin/cp -r '$SCRIPT_DIR/maestro/hooks/'* '$target_dir/plugins/maestro/hooks/'" "$component" "$total_components"
 
         # Skills
-        install_component "Skills" "🎓" "mkdir -p '$target_dir/plugins/maestro/skills' && [ -d '$SCRIPT_DIR/maestro/skills' ] && /bin/cp -r '$SCRIPT_DIR/maestro/skills/'* '$target_dir/plugins/maestro/skills/'"
+        component=$((component + 1))
+        install_component "Skills" "🎓" "mkdir -p '$target_dir/plugins/maestro/skills' && [ -d '$SCRIPT_DIR/maestro/skills' ] && /bin/cp -r '$SCRIPT_DIR/maestro/skills/'* '$target_dir/plugins/maestro/skills/'" "$component" "$total_components"
 
         # Agents
-        install_component "Agents" "🤖" "mkdir -p '$target_dir/plugins/maestro/agents' && [ -d '$SCRIPT_DIR/maestro/agents' ] && /bin/cp -r '$SCRIPT_DIR/maestro/agents/'* '$target_dir/plugins/maestro/agents/'"
+        component=$((component + 1))
+        install_component "Agents" "🤖" "mkdir -p '$target_dir/plugins/maestro/agents' && [ -d '$SCRIPT_DIR/maestro/agents' ] && /bin/cp -r '$SCRIPT_DIR/maestro/agents/'* '$target_dir/plugins/maestro/agents/'" "$component" "$total_components"
 
         # Config
-        install_component "Config Module" "⚙️" "mkdir -p '$target_dir/plugins/maestro/config' && [ -d '$SCRIPT_DIR/maestro/config' ] && /bin/cp -r '$SCRIPT_DIR/maestro/config/'* '$target_dir/plugins/maestro/config/'"
+        component=$((component + 1))
+        install_component "Config Module" "⚙️" "mkdir -p '$target_dir/plugins/maestro/config' && [ -d '$SCRIPT_DIR/maestro/config' ] && /bin/cp -r '$SCRIPT_DIR/maestro/config/'* '$target_dir/plugins/maestro/config/'" "$component" "$total_components"
 
         # Critical Think
-        install_component "Critical Think" "🧠" "mkdir -p '$target_dir/maestro-templates' && [ -d '$SCRIPT_DIR/maestro/critical_think/templates' ] && /bin/cp '$SCRIPT_DIR/maestro/critical_think/templates/'*.md '$target_dir/maestro-templates/'"
+        component=$((component + 1))
+        install_component "Critical Think" "🧠" "mkdir -p '$target_dir/maestro-templates' && [ -d '$SCRIPT_DIR/maestro/critical_think/templates' ] && /bin/cp '$SCRIPT_DIR/maestro/critical_think/templates/'*.md '$target_dir/maestro-templates/'" "$component" "$total_components"
     done
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1359,7 +1359,7 @@ main() {
     print_header "🦀 Maestro Core & Global Setup" "🦀"
 
     # Maestro TUI (Rust)
-    if $rust_installed; then
+    if [ "$rust_installed" = true ]; then
         local rust_dir=""
         if [[ -d "$SCRIPT_DIR/maestro/leindex/rust" ]]; then
             rust_dir="$SCRIPT_DIR/maestro/leindex/rust"
@@ -1545,7 +1545,6 @@ EOF
     echo -e "${G}  ╰──────────────────────────────────────────────────────────────────╯${NC}"
     echo ""
 
-
     echo -e "${M}  📖 Documentation:${NC} ${C}https://github.com/scooter-lacroix/Maestro${NC}"
     echo ""
 
@@ -1555,7 +1554,6 @@ EOF
     # Show star prompt
     show_star_prompt
 }
-
 
 # Run main
 main "$@"
