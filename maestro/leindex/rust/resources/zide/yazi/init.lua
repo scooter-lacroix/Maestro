@@ -3,8 +3,15 @@ function Tab:layout()
     local area = self._area
     if not area then return end
     
-    local r = MANAGER.ratio
-    if not r then return end
+    local r_raw = MANAGER.ratio
+    if not r_raw or #r_raw < 3 then r_raw = { 1, 1, 2 } end
+    
+    local r = {
+        parent = r_raw[1],
+        current = r_raw[2],
+        preview = r_raw[3],
+        all = r_raw[1] + r_raw[2] + r_raw[3]
+    }
 
     if area.w > 80 then
         self._chunks = ui.Layout()
@@ -34,4 +41,11 @@ function Tab:layout()
             })
             :split(area)
     end
+end
+
+-- Navigation Hints for Zide
+function Status:children_render()
+	return {
+		ui.Span(" [Enter] Open  [Tab] Switch Pane  [q] Quit Zide "):fg("magenta"):bold()
+	}
 end

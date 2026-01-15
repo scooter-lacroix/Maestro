@@ -80,8 +80,18 @@ struct App {
     preview_focused: bool,
     preview_scroll: u16,
     hub_search_buffer: String,
+    hub_focus: HubFocus,
+    // Dashboard MCP menu state
+    mcp_menu_option: McpOption,
+    target_mcp_name: Option<String>,
     // Projects tab state
     project_view_open: bool,
+    // Phase 15 state
+    new_project_name: String,
+    new_project_path: String,
+    new_project_tool: String,
+    new_track_title: String,
+    new_track_is_master: bool,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -101,6 +111,32 @@ enum InputMode {
     SessionHub,
     NewGroupTitle,
     MoveToGroup,
+    McpMenu,
+    // Phase 15 additions
+    NewProjectName,
+    NewProjectPath,
+    NewProjectTool,
+    NewTrackTitle,
+    NewTrackType,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+enum HubFocus {
+    #[default]
+    Rename,
+    Group,
+    Search,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+enum McpOption {
+    #[default]
+    StartStop,
+    Pause,
+    Logs,
+    Add,
+    Remove,
+    Install,
 }
 
 #[derive(Clone)]
@@ -165,7 +201,15 @@ impl App {
             preview_focused: false,
             preview_scroll: 0,
             hub_search_buffer: String::new(),
+            hub_focus: HubFocus::Rename,
+            mcp_menu_option: McpOption::StartStop,
+            target_mcp_name: None,
             project_view_open: false,
+            new_project_name: String::new(),
+            new_project_path: String::new(),
+            new_project_tool: String::new(),
+            new_track_title: String::new(),
+            new_track_is_master: true,
         };
 
         // Load live data if service available
@@ -222,10 +266,18 @@ impl App {
             }
         }
 
-        // Add Uncategorized header if needed
+        // Add Uncategorized as a selectable Group if sessions exist
         let has_uncategorized = self.sessions.iter().any(|s| s.group_path.is_none());
         if has_uncategorized {
-            entries.push(SessionEntry::Header("Uncategorized".to_string()));
+            let uncategorized_group = leindex_analyzers::memory::models::SessionGroup {
+                id: -1, // Special ID
+                name: "[Uncategorized]".to_string(),
+                path: "uncategorized".to_string(),
+                is_expanded: true,
+                sort_order: 9999,
+                parent_id: None,
+            };
+            entries.push(SessionEntry::Group(uncategorized_group));
             for session in self.sessions.iter().filter(|s| s.group_path.is_none()) {
                 entries.push(SessionEntry::Session(session.clone()));
             }
@@ -492,19 +544,89 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::SessionHub => {
-                                        // Hub 'Enter' can commit rename if buffer changed
-                                        if let Some(svc) = service.as_ref() {
-                                            if let Some(id) = app.target_session_id.clone() {
-                                                let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
-                                                let _ = manager.rename_session(&id, &app.rename_buffer);
-                                                if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
-                                                app.refresh_session_entries();
+                                        match app.hub_focus {
+                                            HubFocus::Rename => {
+                                                if let Some(svc) = service.as_ref() {
+                                                    if let Some(id) = app.target_session_id.clone() {
+                                                        let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
+                                                        let _ = manager.rename_session(&id, &app.rename_buffer);
+                                                        if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
+                                                        app.refresh_session_entries();
+                                                        app.status_message = "Session renamed".to_string();
+                                                    }
+                                                }
+                                                app.input_mode = InputMode::Normal;
+                                            }
+                                            HubFocus::Group => {
+                                                // Jump to MoveToGroup logic
+                                                app.input_mode = InputMode::MoveToGroup;
+                                                app.rename_buffer.clear();
+                                            }
+                                            HubFocus::Search => {
+                                                // Just lose focus or stay? Enter usually commits. 
+                                                // User says it "terminates the session". 
+                                                // I'll make it just return to normal for now to avoid accidental kills.
+                                                app.input_mode = InputMode::Normal;
                                             }
                                         }
-                                        app.input_mode = InputMode::Normal;
                                     }
 
-                                    _ => app.input_mode = InputMode::Normal,
+                                    InputMode::McpMenu => {
+                                        if let (Some(svc), Some(name)) = (service.as_ref(), app.target_mcp_name.as_ref()) {
+                                            match app.mcp_menu_option {
+                                                McpOption::StartStop => {
+                                                    if let Some(mut mcp) = app.mcp_servers.iter().find(|m| &m.name == name).cloned() {
+                                                        mcp.status = if mcp.status == leindex_analyzers::memory::models::McpStatus::Running {
+                                                            leindex_analyzers::memory::models::McpStatus::Stopped
+                                                        } else {
+                                                            leindex_analyzers::memory::models::McpStatus::Running
+                                                        };
+                                                        let _ = svc.update_mcp_server(mcp);
+                                                        app.status_message = format!("MCP server '{}' status toggled", name);
+                                                    }
+                                                }
+                                                McpOption::Remove => {
+                                                    let _ = svc.delete_mcp_server(name);
+                                                    app.status_message = format!("MCP server '{}' removed", name);
+                                                }
+                                                McpOption::Pause => {
+                                                    app.status_message = format!("Pause not implemented for MCP '{}' yet", name);
+                                                }
+                                                _ => {}
+                                            }
+                                            if let Ok(mcp_list) = svc.list_mcp_servers() { app.mcp_servers = mcp_list; }
+                                        }
+                                        app.input_mode = InputMode::Normal;
+                                        app.target_mcp_name = None;
+                                    }
+
+                                    InputMode::NewProjectName => {
+                                        app.input_mode = InputMode::NewProjectPath;
+                                    }
+                                    InputMode::NewProjectPath => {
+                                        app.input_mode = InputMode::NewProjectTool;
+                                    }
+                                    InputMode::NewProjectTool => {
+                                        // Commit New Project
+                                        let name = app.new_project_name.clone();
+                                        let path = app.new_project_path.clone();
+                                        let tool = app.new_project_tool.clone();
+                                        // Execute /maestro:setup via terminal or service
+                                        app.status_message = format!("Initializing project '{}' at {} with tool {}...", name, path, tool);
+                                        // In a real impl, we'd spawn a background task for /maestro:setup
+                                        app.input_mode = InputMode::Normal;
+                                    }
+                                    InputMode::NewTrackTitle => {
+                                        app.input_mode = InputMode::NewTrackType;
+                                    }
+                                    InputMode::NewTrackType => {
+                                        // Commit New Track
+                                        let title = app.new_track_title.clone();
+                                        let is_master = app.new_track_is_master;
+                                        app.status_message = format!("Creating {} track: {}...", if is_master { "master" } else { "direct" }, title);
+                                        // Execute /maestro:newTrack
+                                        app.input_mode = InputMode::Normal;
+                                    }
                                 }
                             }
                             KeyCode::Esc => app.input_mode = InputMode::Normal,
@@ -519,11 +641,18 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         app.target_session_id = None;
                                         app.input_mode = InputMode::Normal;
                                     }
-                                    InputMode::AnalysisPrompt | InputMode::SessionHub => {
-                                        if app.input_mode == InputMode::AnalysisPrompt {
-                                            app.analysis_input.pop();
-                                        } else {
-                                            app.hub_search_buffer.pop();
+                                    InputMode::AnalysisPrompt => {
+                                        app.analysis_input.pop();
+                                    }
+                                    InputMode::NewProjectName => { app.new_project_name.pop(); }
+                                    InputMode::NewProjectPath => { app.new_project_path.pop(); }
+                                    InputMode::NewProjectTool => { app.new_project_tool.pop(); }
+                                    InputMode::NewTrackTitle => { app.new_track_title.pop(); }
+                                    InputMode::SessionHub => {
+                                        match app.hub_focus {
+                                            HubFocus::Rename => { app.rename_buffer.pop(); }
+                                            HubFocus::Search => { app.hub_search_buffer.pop(); }
+                                            _ => {}
                                         }
                                     }
                                     _ => {}
@@ -541,9 +670,24 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         }
                                     }
                                     InputMode::RenameSession | InputMode::RenameGroup | InputMode::ForkSession | InputMode::NewGroupTitle | InputMode::MoveToGroup => app.rename_buffer.push(c),
+                                    InputMode::NewProjectName => app.new_project_name.push(c),
+                                    InputMode::NewProjectPath => app.new_project_path.push(c),
+                                    InputMode::NewProjectTool => app.new_project_tool.push(c),
+                                    InputMode::NewTrackTitle => app.new_track_title.push(c),
+                                    InputMode::NewTrackType => {
+                                        if c == ' ' {
+                                            app.new_track_is_master = !app.new_track_is_master;
+                                        }
+                                    }
                                     InputMode::SessionHub => {
-                                        app.hub_search_buffer.push(c);
-                                        // Trigger search logic or live filter here
+                                        match app.hub_focus {
+                                            HubFocus::Rename => app.rename_buffer.push(c),
+                                            HubFocus::Search => {
+                                                app.hub_search_buffer.push(c);
+                                                // Trigger live search logic here if needed
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if c == 'y' || c == 'Y' {
@@ -578,6 +722,30 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     _ => {}
                                 }
                             }
+                            KeyCode::Tab => {
+                                match app.input_mode {
+                                    InputMode::SessionHub => {
+                                        app.hub_focus = match app.hub_focus {
+                                            HubFocus::Rename => HubFocus::Group,
+                                            HubFocus::Group => HubFocus::Search,
+                                            HubFocus::Search => HubFocus::Rename,
+                                        };
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                match app.input_mode {
+                                    InputMode::SessionHub => {
+                                        app.hub_focus = match app.hub_focus {
+                                            HubFocus::Rename => HubFocus::Search,
+                                            HubFocus::Group => HubFocus::Rename,
+                                            HubFocus::Search => HubFocus::Group,
+                                        };
+                                    }
+                                    _ => {}
+                                }
+                            }
                             KeyCode::Down => {
                                 if app.input_mode == InputMode::SessionSwitcher {
                                     let i = match app.switcher_state.selected() {
@@ -604,6 +772,21 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                         }
                     } else {
                         match (key.modifiers, key.code) {
+                            (_, KeyCode::Char('p')) => {
+                                if app.tab_index == 2 { // Projects
+                                    app.input_mode = InputMode::NewProjectName;
+                                    app.new_project_name.clear();
+                                    app.new_project_path = std::env::current_dir().unwrap_or_default().to_string_lossy().to_string();
+                                    app.new_project_tool.clear();
+                                }
+                            }
+                            (_, KeyCode::Char('t')) => {
+                                if app.tab_index == 2 { // Projects
+                                    app.input_mode = InputMode::NewTrackTitle;
+                                    app.new_track_title.clear();
+                                    app.new_track_is_master = true;
+                                }
+                            }
                             (_, KeyCode::Char('q')) => {
                                 if app.project_view_open {
                                     app.project_view_open = false;
@@ -703,7 +886,16 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
-                                if app.preview_focused {
+                                if app.input_mode == InputMode::McpMenu {
+                                    app.mcp_menu_option = match app.mcp_menu_option {
+                                        McpOption::StartStop => McpOption::Pause,
+                                        McpOption::Pause => McpOption::Logs,
+                                        McpOption::Logs => McpOption::Add,
+                                        McpOption::Add => McpOption::Remove,
+                                        McpOption::Remove => McpOption::Install,
+                                        McpOption::Install => McpOption::StartStop,
+                                    };
+                                } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
                                 } else if app.tab_index == 0 { // Dashboard (MCP Pool)
                                     let i = match app.mcp_state.selected() {
@@ -736,7 +928,16 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 app.scroll = app.scroll.saturating_add(1);
                             }
                             (_, KeyCode::Up) => {
-                                if app.preview_focused {
+                                if app.input_mode == InputMode::McpMenu {
+                                    app.mcp_menu_option = match app.mcp_menu_option {
+                                        McpOption::StartStop => McpOption::Install,
+                                        McpOption::Pause => McpOption::StartStop,
+                                        McpOption::Logs => McpOption::Pause,
+                                        McpOption::Add => McpOption::Logs,
+                                        McpOption::Remove => McpOption::Add,
+                                        McpOption::Install => McpOption::Remove,
+                                    };
+                                } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
                                 } else if app.tab_index == 0 { // Dashboard
                                     let i = match app.mcp_state.selected() {
@@ -838,18 +1039,12 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
 
 
                             (_, KeyCode::Char('s')) => {
-                                if app.tab_index == 0 { // MCP Control
+                                if app.tab_index == 0 { // Dashboard (MCP)
                                     if let Some(i) = app.mcp_state.selected() {
-                                        if let Some(mut mcp) = app.mcp_servers.get(i).cloned() {
-                                            mcp.status = if mcp.status == leindex_analyzers::memory::models::McpStatus::Running {
-                                                leindex_analyzers::memory::models::McpStatus::Stopped
-                                            } else {
-                                                leindex_analyzers::memory::models::McpStatus::Running
-                                            };
-                                            if let Some(svc) = service.as_ref() {
-                                                let _ = svc.update_mcp_server(mcp);
-                                                if let Ok(mcp_list) = svc.list_mcp_servers() { app.mcp_servers = mcp_list; }
-                                            }
+                                        if let Some(mcp) = app.mcp_servers.get(i) {
+                                            app.target_mcp_name = Some(mcp.name.clone());
+                                            app.input_mode = InputMode::McpMenu;
+                                            app.mcp_menu_option = McpOption::StartStop;
                                         }
                                     }
                                 } else {
@@ -977,6 +1172,12 @@ fn ui(frame: &mut Frame, app: &mut App) {
         render_switcher_modal(frame, app);
     } else if app.input_mode == InputMode::SessionHub {
         render_session_hub_modal(frame, app);
+    } else if app.input_mode == InputMode::McpMenu {
+        render_mcp_menu(frame, app);
+    } else if matches!(app.input_mode, InputMode::NewProjectName | InputMode::NewProjectPath | InputMode::NewProjectTool) {
+        render_new_project_modal(frame, app);
+    } else if matches!(app.input_mode, InputMode::NewTrackTitle | InputMode::NewTrackType) {
+        render_new_track_modal(frame, app);
     } else if matches!(app.input_mode, InputMode::RenameSession | InputMode::RenameGroup | InputMode::ForkSession | InputMode::KillConfirm | InputMode::DeleteConfirm | InputMode::NewGroupTitle | InputMode::MoveToGroup) {
         render_action_modal(frame, app);
     } else if matches!(app.input_mode, InputMode::NewSessionTitle | InputMode::NewSessionPath | InputMode::NewSessionTool) {
@@ -1178,18 +1379,29 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.sessions.is_empty() {
         session_rows.push(Line::from("  No active sessions"));
     } else {
-        for s in app.sessions.iter().take(5) {
-            let status_icon = match s.status {
-                leindex_analyzers::memory::models::SessionStatus::Running => Span::styled(" * ", Style::default().fg(Color::Green)),
-                leindex_analyzers::memory::models::SessionStatus::Terminated => Span::styled(" x ", Style::default().fg(Color::Red)),
-                leindex_analyzers::memory::models::SessionStatus::Waiting => Span::styled(" ◒ ", Style::default().fg(Color::Yellow)),
-                _ => Span::styled(" o ", Style::default().fg(Color::Gray)),
-            };
+        // Group sessions by group name for Dashboard
+        let mut grouped: std::collections::HashMap<String, Vec<&leindex_analyzers::memory::models::Session>> = std::collections::HashMap::new();
+        for s in &app.sessions {
+            let g = s.group_name.as_deref().unwrap_or("[Uncategorized]").to_string();
+            grouped.entry(g).or_default().push(s);
+        }
+        
+        for (group_name, sessions) in grouped {
             session_rows.push(Line::from(vec![
-                status_icon,
-                Span::styled(&s.title, Style::default().bold()),
-                Span::styled(format!(" ({})", s.tool.as_deref().unwrap_or("unknown")), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("  [{}]", group_name), Style::default().fg(Color::Cyan).bold()),
             ]));
+            for s in sessions.iter().take(3) {
+                let status_icon = match s.status {
+                    leindex_analyzers::memory::models::SessionStatus::Running => Span::styled("   * ", Style::default().fg(Color::Green)),
+                    leindex_analyzers::memory::models::SessionStatus::Terminated => Span::styled("   x ", Style::default().fg(Color::Red)),
+                    leindex_analyzers::memory::models::SessionStatus::Waiting => Span::styled("   ◒ ", Style::default().fg(Color::Yellow)),
+                    _ => Span::styled("   o ", Style::default().fg(Color::Gray)),
+                };
+                session_rows.push(Line::from(vec![
+                    status_icon,
+                    Span::styled(&s.title, Style::default()),
+                ]));
+            }
         }
     }
     let sessions = Paragraph::new(session_rows).block(session_block);
@@ -1233,24 +1445,35 @@ fn render_help_modal(frame: &mut Frame) {
 
     let text = vec![
         Line::from(""),
-        Line::from(vec![Span::styled("  Tab / S-Tab   ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Cycle Tabs / Focus Preview")]),
-        Line::from(vec![Span::styled("  ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Navigate / Scroll Preview")]),
-        Line::from(vec![Span::styled("  n             ", Style::default().fg(Color::Green).bold()), Span::raw(" New Session Wizard")]),
-        Line::from(vec![Span::styled("  Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Attach / Expand / Hub Save")]),
-        Line::from(vec![Span::styled("  r             ", Style::default().fg(Color::Yellow).bold()), Span::raw(" Session Hub / Rename Group")]),
-        Line::from(vec![Span::styled("  G             ", Style::default().fg(Color::Green).bold()), Span::raw(" Create New Group")]),
-        Line::from(vec![Span::styled("  m             ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Move Session to Group")]),
-        Line::from(vec![Span::styled("  s / x         ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Toggle / Remove MCP (Dash)")]),
-        Line::from(vec![Span::styled("  k             ", Style::default().fg(Color::Red).bold()), Span::raw(" Kill tmux Session")]),
-        Line::from(vec![Span::styled("  Alt + D       ", Style::default().fg(Color::Red).bold()), Span::raw(" PERMANENT DELETE Session/Group")]),
-        Line::from(vec![Span::styled("  f             ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Fork Session (Quick)")]),
-        Line::from(vec![Span::styled("  a             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Enter Analysis Command Hub")]),
-        Line::from(vec![Span::styled("  /             ", Style::default().fg(Color::Yellow).bold()), Span::raw(" Toggle This Modal")]),
-        Line::from(vec![Span::styled("  Esc           ", Style::default().fg(Color::DarkGray).bold()), Span::raw(" Close Modals / Exit Prompt")]),
-        Line::from(vec![Span::styled("  q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),  Span::raw(" Quit Maestro Cockpit")]),
+        Line::from(vec![Span::styled(" GLOBAL CONTROLS:", Style::default().fg(Color::Yellow).bold())]),
+        Line::from(vec![Span::styled("   Tab / S-Tab   ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Cycle Tabs / Focus Preview (e.g. 1->2->3)")]),
+        Line::from(vec![Span::styled("   ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Navigate / Scroll Preview")]),
+        Line::from(vec![Span::styled("   /             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Toggle This Modal")]),
+        Line::from(vec![Span::styled("   q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),  Span::raw(" Quit Maestro Cockpit")]),
+        Line::from(""),
+        Line::from(vec![Span::styled(" DASHBOARD (Tab 1):", Style::default().fg(Color::Yellow).bold())]),
+        Line::from(vec![Span::styled("   s             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" MCP Server Menu (Start/Stop, Add, Remove)")]),
+        Line::from(vec![Span::styled("   x             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Quick Remove MCP Server")]),
+        Line::from(""),
+        Line::from(vec![Span::styled(" SESSIONS (Tab 2):", Style::default().fg(Color::Yellow).bold())]),
+        Line::from(vec![Span::styled("   n             ", Style::default().fg(Color::Green).bold()), Span::raw(" New Session Wizard (Title, Path, Tool)")]),
+        Line::from(vec![Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Attach to tmux Session")]),
+        Line::from(vec![Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Session Hub (Rename, Move, Search history)")]),
+        Line::from(vec![Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Focus Preview Pane (for scrolling history)")]),
+        Line::from(vec![Span::styled("   m             ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Move Session to Group / Create New Group")]),
+        Line::from(vec![Span::styled("   G             ", Style::default().fg(Color::Green).bold()), Span::raw(" Create Standalone Group")]),
+        Line::from(vec![Span::styled("   k             ", Style::default().fg(Color::Red).bold()), Span::raw(" Kill tmux Session Process")]),
+        Line::from(vec![Span::styled("   Alt + D       ", Style::default().fg(Color::Red).bold()), Span::raw(" PURMANENT DELETE Session/Group from DB")]),
+        Line::from(vec![Span::styled("   f             ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Fork Session (Clone state to new session)")]),
+        Line::from(""),
+        Line::from(vec![Span::styled(" PROJECTS (Tab 3):", Style::default().fg(Color::Yellow).bold())]),
+        Line::from(vec![Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Open Zide (File Picker + Editor)")]),
+        Line::from(""),
+        Line::from(vec![Span::styled(" ANALYSIS (Tab 4):", Style::default().fg(Color::Yellow).bold())]),
+        Line::from(vec![Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Enter Analysis Command Box")]),
         Line::from(""),
         Line::from("  ---------------------------------- "),
-        Line::from("  Maestro TUI Cockpit v2.0-beta-6 "),
+        Line::from(format!("  Maestro TUI Cockpit v2.0-beta-8  {}", if (app.frame_count / 30) % 2 == 0 { "⚡" } else { "  " })),
     ];
 
     let para = Paragraph::new(text).block(block).alignment(Alignment::Left);
@@ -1274,38 +1497,173 @@ fn render_session_hub_modal(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .margin(2)
         .constraints([
-            Constraint::Length(3), // Title / Rename
-            Constraint::Length(3), // Group Assignment
-            Constraint::Min(0),    // Workspace Search
-            Constraint::Length(3), // Console Search Input
+            Constraint::Length(3), // RENAME
+            Constraint::Length(3), // GROUP
+            Constraint::Min(0),    // PREVIEW
+            Constraint::Length(3), // SEARCH
         ])
         .split(area);
 
-    let _session_name = app.target_session_id.as_ref().unwrap_or(&"Unknown".to_string());
-    
     // Rename Box
+    let rename_style = if app.hub_focus == HubFocus::Rename { Style::default().fg(Color::Yellow).bold() } else { Style::default() };
+    let rename_title = if app.hub_focus == HubFocus::Rename { ">> RENAME (Enter to Commit) " } else { " RENAME " };
     let rename = Paragraph::new(app.rename_buffer.as_str())
-        .block(Block::default().borders(Borders::ALL).title(" RENAME (Enter to Commit) "));
+        .block(Block::default().borders(Borders::ALL).title(rename_title).border_style(rename_style));
     frame.render_widget(rename, chunks[0]);
 
     // Group Box
+    let group_style = if app.hub_focus == HubFocus::Group { Style::default().fg(Color::Cyan).bold() } else { Style::default() };
+    let group_title = if app.hub_focus == HubFocus::Group { ">> GROUP ASSIGNMENT (Enter to change) " } else { " GROUP ASSIGNMENT " };
     let group = Paragraph::new("Current: /default (Press 'm' to Move)")
-        .block(Block::default().borders(Borders::ALL).title(" GROUP ASSIGNMENT "));
+        .block(Block::default().borders(Borders::ALL).title(group_title).border_style(group_style));
     frame.render_widget(group, chunks[1]);
     
     // Search Results / Pane Preview
-    let search_title = format!(" Pane History Search: '{}' ", app.hub_search_buffer);
     let preview = Paragraph::new(app.session_preview_content.as_str())
-        .block(Block::default().borders(Borders::ALL).title(search_title))
+        .block(Block::default().borders(Borders::ALL).title(" PANE HISTORY PREVIEW / SEARCH RESULTS "))
         .wrap(Wrap { trim: false });
     frame.render_widget(preview, chunks[2]);
 
     // Search Input
-    let search_input = Paragraph::new(app.hub_search_buffer.as_str())
-        .block(Block::default().borders(Borders::ALL).title(" SEARCH IN PANE (Type to filter) "));
+    let search_style = if app.hub_focus == HubFocus::Search { Style::default().fg(Color::Magenta).bold() } else { Style::default() };
+    let search_title = if app.hub_focus == HubFocus::Search { ">> SEARCH IN PANE (Type to filter) " } else { " SEARCH IN PANE " };
+    let search_content = if app.hub_focus == HubFocus::Search { format!("{}_", app.hub_search_buffer) } else { app.hub_search_buffer.clone() };
+    let search_input = Paragraph::new(search_content)
+        .block(Block::default().borders(Borders::ALL).title(search_title).border_style(search_style));
     frame.render_widget(search_input, chunks[3]);
 }
 
+fn render_mcp_menu(frame: &mut Frame, app: &App) {
+    let area = centered_rect(40, 40, frame.area());
+    frame.render_widget(Clear, area);
+    
+    let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
+    let block = Block::default()
+        .title(format!(" MCP: {} ", name))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .style(Style::default().bg(Color::Rgb(20, 20, 35)));
+    
+    let options = vec![
+        (McpOption::StartStop, "▶/■ Start/Stop Server"),
+        (McpOption::Pause, "⏸ Pause Connection"),
+        (McpOption::Logs, "📋 View Server Logs"),
+        (McpOption::Add, "➕ Add New Server"),
+        (McpOption::Remove, "❌ Remove from Pool"),
+        (McpOption::Install, "🛠️ Install Component"),
+    ];
+
+    let mut list_items = Vec::new();
+    for (opt, label) in options {
+        let style = if app.mcp_menu_option == opt {
+            Style::default().fg(Color::Yellow).bold().bg(Color::Rgb(40, 40, 60))
+        } else {
+            Style::default()
+        };
+        list_items.push(ListItem::new(vec![Line::from(vec![
+            Span::styled(if app.mcp_menu_option == opt { " >> " } else { "    " }, style),
+            Span::styled(label, style),
+        ])]));
+    }
+
+    let list = List::new(list_items).block(block);
+    frame.render_widget(list, area);
+}
+
+fn render_new_project_modal(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 40, frame.area());
+    frame.render_widget(Clear, area);
+    
+    let step = match app.input_mode {
+        InputMode::NewProjectName => 1,
+        InputMode::NewProjectPath => 2,
+        InputMode::NewProjectTool => 3,
+        _ => 1,
+    };
+
+    let block = Block::default()
+        .title(format!(" NEW PROJECT WIZARD (Step {} of 3) ", step))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .style(Style::default().bg(Color::Rgb(15, 10, 20)));
+    
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints([
+            Constraint::Length(3), // Name
+            Constraint::Length(3), // Path
+            Constraint::Length(3), // Tool
+            Constraint::Min(0),    // Help/Hint
+        ])
+        .split(area);
+
+    let name_style = if step == 1 { Style::default().fg(Color::Yellow).bold() } else { Style::default().fg(Color::DarkGray) };
+    let name = Paragraph::new(app.new_project_name.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 1. PROJECT NAME ").border_style(name_style));
+    frame.render_widget(name, chunks[0]);
+
+    let path_style = if step == 2 { Style::default().fg(Color::Cyan).bold() } else { Style::default().fg(Color::DarkGray) };
+    let path = Paragraph::new(app.new_project_path.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 2. TARGET PATH (Enter for current) ").border_style(path_style));
+    frame.render_widget(path, chunks[1]);
+
+    let tool_style = if step == 3 { Style::default().fg(Color::Magenta).bold() } else { Style::default().fg(Color::DarkGray) };
+    let tool = Paragraph::new(app.new_project_tool.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 3. INITIAL TOOL (None/claude/gemini) ").border_style(tool_style));
+    frame.render_widget(tool, chunks[2]);
+
+    let hint = Paragraph::new("Press 'Enter' to confirm step, 'Esc' to cancel\n\nThis will run /maestro:setup in the target directory.")
+        .alignment(Alignment::Center);
+    frame.render_widget(hint, chunks[3]);
+    frame.render_widget(block, area);
+}
+
+fn render_new_track_modal(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 30, frame.area());
+    frame.render_widget(Clear, area);
+    
+    let step = match app.input_mode {
+        InputMode::NewTrackTitle => 1,
+        InputMode::NewTrackType => 2,
+        _ => 1,
+    };
+
+    let block = Block::default()
+        .title(format!(" NEW TRACK WIZARD (Step {} of 2) ", step))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .style(Style::default().bg(Color::Rgb(10, 15, 20)));
+    
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints([
+            Constraint::Length(3), // Title
+            Constraint::Length(3), // Type
+            Constraint::Min(0),    // Help/Hint
+        ])
+        .split(area);
+
+    let title_style = if step == 1 { Style::default().fg(Color::Yellow).bold() } else { Style::default().fg(Color::DarkGray) };
+    let title = Paragraph::new(app.new_track_title.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 1. TRACK TITLE ").border_style(title_style));
+    frame.render_widget(title, chunks[0]);
+
+    let type_style = if step == 2 { Style::default().fg(Color::Cyan).bold() } else { Style::default().fg(Color::DarkGray) };
+    let type_text = if app.new_track_is_master { "[X] Master Track  [ ] Direct Track" } else { "[ ] Master Track  [X] Direct Track" };
+    let track_type = Paragraph::new(type_text)
+        .block(Block::default().borders(Borders::ALL).title(" 2. TRACK TYPE (Space to toggle) ").border_style(type_style));
+    frame.render_widget(track_type, chunks[1]);
+
+    let hint = Paragraph::new("Press 'Enter' to confirm, 'Esc' to cancel\n\nThis will run /maestro:newTrack in the project.")
+        .alignment(Alignment::Center);
+    frame.render_widget(hint, chunks[2]);
+    frame.render_widget(block, area);
+}
 fn render_input_modal(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 20, frame.area());
     let block = Block::default()
