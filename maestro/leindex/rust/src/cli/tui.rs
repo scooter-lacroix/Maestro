@@ -143,7 +143,6 @@ enum McpOption {
 enum SessionEntry {
     Group(leindex_analyzers::memory::models::SessionGroup),
     Session(leindex_analyzers::memory::models::Session),
-    Header(String),
 }
 
 #[derive(Clone)]
@@ -388,7 +387,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     InputMode::NewSessionTool => {
                                         app.is_spawning = true;
                                         app.status_message = format!("Spawning {} session...", app.new_session_tool);
-                                        let _ = terminal.draw(|frame| ui(frame, &mut app));
+                                        // let _ = terminal.draw(|frame| ui(frame, \u0026mut app));
 
                                         if let Some(svc) = service.as_ref() {
                                             let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
@@ -627,6 +626,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         // Execute /maestro:newTrack
                                         app.input_mode = InputMode::Normal;
                                     }
+                                    InputMode::Normal => {}
                                 }
                             }
                             KeyCode::Esc => app.input_mode = InputMode::Normal,
@@ -772,6 +772,12 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                         }
                     } else {
                         match (key.modifiers, key.code) {
+                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
+                                if app.tab_index == 1 {
+                                    app.preview_focused = !app.preview_focused;
+                                    app.status_message = if app.preview_focused { "Preview focused. Scroll with Arrows/PgUp/PgDn." } else { "List focused." }.to_string();
+                                }
+                            }
                             (_, KeyCode::Char('p')) => {
                                 if app.tab_index == 2 { // Projects
                                     app.input_mode = InputMode::NewProjectName;
@@ -855,7 +861,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 app.status_message = format!("Confirm DELETE group '{}' and all sessions? (y/n)", g.name);
                                                 app.input_mode = InputMode::DeleteConfirm;
                                             }
-                                            _ => {}
                                         }
                                     }
                                 } else if app.tab_index == 2 {
@@ -870,12 +875,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             (_, KeyCode::BackTab) => {
                                 app.tab_index = if app.tab_index == 0 { 4 } else { app.tab_index - 1 };
                                 app.preview_focused = false;
-                            }
-                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
-                                if app.tab_index == 1 {
-                                    app.preview_focused = !app.preview_focused;
-                                    app.status_message = if app.preview_focused { "Preview focused. Scroll with Arrows/PgUp/PgDn." } else { "List focused." }.to_string();
-                                }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('o')) => {
                                 app.tab_index = if app.tab_index == 0 { 4 } else { app.tab_index - 1 };
@@ -910,19 +909,10 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     };
                                     app.project_state.select(Some(i));
                                 } else if app.tab_index == 1 { // Sessions Tab
-                                    let mut i = match app.session_state.selected() {
+                                    let i = match app.session_state.selected() {
                                         Some(i) => if i >= app.session_entries.len().saturating_sub(1) { 0 } else { i + 1 },
                                         None => 0,
                                     };
-                                    // Skip non-selectable entries
-                                    while i < app.session_entries.len() {
-                                        match &app.session_entries[i] {
-                                            SessionEntry::Session(_) | SessionEntry::Group(_) => break,
-                                            _ => {
-                                                i = if i >= app.session_entries.len().saturating_sub(1) { 0 } else { i + 1 };
-                                            }
-                                        }
-                                    }
                                     app.session_state.select(Some(i));
                                 }
                                 app.scroll = app.scroll.saturating_add(1);
@@ -952,20 +942,10 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     };
                                     app.project_state.select(Some(i));
                                 } else if app.tab_index == 1 { // Sessions Tab
-                                    let mut i = match app.session_state.selected() {
+                                    let i = match app.session_state.selected() {
                                         Some(i) => if i == 0 { app.session_entries.len().saturating_sub(1) } else { i - 1 },
                                         None => 0,
                                     };
-                                    // Skip non-selectable entries
-                                    while i > 0 || i == 0 {
-                                        match &app.session_entries[i] {
-                                            SessionEntry::Session(_) | SessionEntry::Group(_) => break,
-                                            _ => {
-                                                i = if i == 0 { app.session_entries.len().saturating_sub(1) } else { i - 1 };
-                                            }
-                                        }
-                                        if i == app.session_entries.len().saturating_sub(1) { break; } // Prevent infinite loop if nothing selectable
-                                    }
                                     app.session_state.select(Some(i));
                                 }
                                 app.scroll = app.scroll.saturating_sub(1);
@@ -1030,7 +1010,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                     let _ = terminal.clear(); // Restore terminal state
                                                     app.status_message = format!("Returned from '{}'", s.title);
                                                 }
-                                                _ => {}
                                             }
                                         }
                                     }
@@ -1164,7 +1143,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     // Render Modals
     if app.show_help {
-        render_help_modal(frame);
+        render_help_modal(frame, app);
     }
     
     // Only show these modals if they overlay the main tabs appropriately
@@ -1382,7 +1361,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         // Group sessions by group name for Dashboard
         let mut grouped: std::collections::HashMap<String, Vec<&leindex_analyzers::memory::models::Session>> = std::collections::HashMap::new();
         for s in &app.sessions {
-            let g = s.group_name.as_deref().unwrap_or("[Uncategorized]").to_string();
+            let g = s.group_path.as_deref().unwrap_or("[Uncategorized]").to_string();
             grouped.entry(g).or_default().push(s);
         }
         
@@ -1434,7 +1413,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_stateful_widget(mcp_list, right_chunks[1], &mut app.mcp_state);
 }
 
-fn render_help_modal(frame: &mut Frame) {
+fn render_help_modal(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
     let block = Block::default()
         .title(" Commands Cheat-sheet ")
@@ -1989,7 +1968,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     // Determine if this is the last item in a group (for L-line)
                     let mut branch = " ├─";
                     let is_last_in_group = if let Some(next) = app.session_entries.get(i + 1) {
-                        matches!(next, SessionEntry::Group(_) | SessionEntry::Header(_))
+                        matches!(next, SessionEntry::Group(_))
                     } else {
                         // End of list is also end of group
                         true
@@ -2012,10 +1991,6 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     line_spans.push(Span::styled(format!(" [{}]", s.tool.as_deref().unwrap_or("?")), Style::default().fg(Color::DarkGray)));
 
                     items.push(ListItem::new(vec![Line::from(line_spans)]));
-                }
-                SessionEntry::Header(title) => {
-                    items.push(ListItem::new(vec![Line::from(format!("  [{}]", title))])
-                        .style(Style::default().fg(Color::DarkGray)));
                 }
             }
         }

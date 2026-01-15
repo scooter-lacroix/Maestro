@@ -542,38 +542,45 @@ install_tmux() {
     
     print_info "tmux provides the terminal multiplexer for Maestro TUI"
     
+    local install_success=false
     case $os in
         ubuntu|debian|linuxmint|pop)
             print_step "1" "1" "Installing via apt..."
-            sudo apt-get install -y tmux > /dev/null 2>&1
+            if sudo apt-get install -y tmux > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
         fedora|rhel|centos)
             print_step "1" "1" "Installing via dnf..."
-            sudo dnf install -y tmux > /dev/null 2>&1
+            if sudo dnf install -y tmux > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
         arch)
             print_step "1" "1" "Installing via pacman..."
-            sudo pacman -S --noconfirm tmux > /dev/null 2>&1
+            if sudo pacman -S --noconfirm tmux > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
         macos)
             print_step "1" "1" "Installing via homebrew..."
-            brew install tmux > /dev/null 2>&1
+            if brew install tmux > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
         *)
             print_warning "Unknown OS, trying apt-get..."
-            sudo apt-get install -y tmux > /dev/null 2>&1 || {
-                print_error "Could not install tmux automatically"
-                print_info "Please install tmux manually: https://github.com/tmux/tmux/wiki/Installing"
-                return 1
-            }
+            if sudo apt-get install -y tmux > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
     esac
     
-    if command_exists tmux; then
-        print_success "tmux installed: $(tmux -V)"
+    if [ "$install_success" = true ] || command_exists tmux; then
+        print_success "tmux installed: $(tmux -V 2>/dev/null || echo 'ready')"
     else
-        print_error "tmux installation failed"
-        return 1
+        print_warning "tmux installation encountered issues"
+        print_info "Manual installation recommended for TUI: https://github.com/tmux/tmux/wiki/Installing"
     fi
     return 0
 }
@@ -590,29 +597,48 @@ install_yazi() {
     
     print_info "Yazi provides the file picker for the IDE layout"
     
+    local install_success=false
     case $os in
         arch)
-            sudo pacman -S --noconfirm yazi > /dev/null 2>&1
+            if sudo pacman -S --noconfirm yazi > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
         macos)
-            brew install yazi > /dev/null 2>&1
+            if brew install yazi > /dev/null 2>&1; then
+                install_success=true
+            fi
             ;;
         *)
             if command_exists cargo; then
                 print_step "1" "1" "Installing via cargo (may take a few minutes)..."
-                cargo install --locked yazi-fm yazi-cli > /dev/null 2>&1 && print_success "Yazi installed via cargo" && return 0
+                if cargo install --locked yazi-fm yazi-cli > /dev/null 2>&1; then
+                    install_success=true
+                fi
             fi
-            # Fallback to prebuilt
-            print_step "1" "1" "Downloading prebuilt binary..."
-            curl -Lo /tmp/yazi.zip "https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_64-unknown-linux-gnu.zip" 2>/dev/null
-            unzip -o /tmp/yazi.zip -d /tmp/yazi > /dev/null 2>&1
-            mkdir -p ~/.local/bin
-            mv /tmp/yazi/yazi-x86_64-unknown-linux-gnu/yazi ~/.local/bin/ 2>/dev/null || mv /tmp/yazi/yazi ~/.local/bin/ 2>/dev/null
-            chmod +x ~/.local/bin/yazi
+            
+            if [ "$install_success" = false ]; then
+                # Fallback to prebuilt
+                print_step "1" "1" "Downloading prebuilt binary..."
+                if curl -Lo /tmp/yazi.zip "https://github.com/sxyazi/yazi/releases/latest/download/yazi-x86_64-unknown-linux-gnu.zip" 2>/dev/null; then
+                    if unzip -o /tmp/yazi.zip -d /tmp/yazi > /dev/null 2>&1; then
+                        mkdir -p ~/.local/bin
+                        if mv /tmp/yazi/yazi-x86_64-unknown-linux-gnu/yazi ~/.local/bin/ 2>/dev/null || mv /tmp/yazi/yazi ~/.local/bin/ 2>/dev/null; then
+                            chmod +x ~/.local/bin/yazi
+                            install_success=true
+                        fi
+                    fi
+                fi
+            fi
             ;;
     esac
     
-    print_success "Yazi installed"
+    if [ "$install_success" = true ] || command_exists yazi; then
+        print_success "Yazi installed"
+    else
+        print_warning "Yazi installation failed"
+        print_info "Continuing without Yazi (IDE file picker will be limited)"
+    fi
     return 0
 }
 
@@ -641,47 +667,82 @@ select_editor() {
 
 install_fresh() {
     print_step "1" "1" "Installing fresh editor..."
-    if curl -sSL https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh > /dev/null 2>&1; then
-        print_success "fresh installed"
-        export EDITOR=fresh
-        add_editor_to_rc "fresh"
-    else
-        print_error "fresh installation failed"
-    fi
+    curl -sSL https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh
+    print_success "fresh installed"
+    export EDITOR=fresh
+    add_editor_to_rc "fresh"
 }
 
 install_helix() {
     local os=$(detect_os)
     print_step "1" "1" "Installing helix editor..."
     
+    local installed=false
+    
     case $os in
-        ubuntu|debian|linuxmint|pop)
-            sudo add-apt-repository -y ppa:maveonair/helix-editor > /dev/null 2>&1 || true
-            sudo apt update -qq > /dev/null 2>&1
-            sudo apt install -y helix > /dev/null 2>&1
+        ubuntu|debian|linuxmint|pop|debian-*)
+            # Try APT first
+            sudo apt-get update -qq > /dev/null 2>&1 || true
+            if sudo apt-get install -y helix > /dev/null 2>&1; then
+                installed=true
+            else
+                # Fallback to binary installation as requested
+                print_info "Helix not found in APT, installing from GitHub binary..."
+                
+                # Ensure xz-utils and curl are available
+                sudo apt-get install -y xz-utils curl > /dev/null 2>&1 || true
+                
+                local helix_ver=$(curl -s https://api.github.com/repos/helix-editor/helix/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+                local helix_url="https://github.com/helix-editor/helix/releases/download/${helix_ver}/helix-${helix_ver}-x86_64-linux.tar.xz"
+                
+                print_info "Downloading Helix ${helix_ver}..."
+                curl -Lo /tmp/helix.tar.xz "$helix_url"
+                
+                rm -rf /tmp/helix_extract
+                mkdir -p /tmp/helix_extract
+                tar -xf /tmp/helix.tar.xz -C /tmp/helix_extract
+                
+                local extract_dir=$(ls -d /tmp/helix_extract/helix-*)
+                mkdir -p ~/.local/bin
+                cp "$extract_dir/hx" ~/.local/bin/
+                chmod +x ~/.local/bin/hx
+                
+                # Setup runtime
+                mkdir -p ~/.config/helix
+                rm -rf ~/.config/helix/runtime
+                cp -r "$extract_dir/runtime" ~/.config/helix/
+                
+                # Check for health
+                if ~/.local/bin/hx --version > /dev/null 2>&1; then
+                    installed=true
+                fi
+            fi
             ;;
         fedora|rhel|centos)
-            sudo dnf install -y helix > /dev/null 2>&1
+            sudo dnf install -y helix > /dev/null 2>&1 && installed=true
             ;;
         arch)
-            sudo pacman -S --noconfirm helix > /dev/null 2>&1
+            sudo pacman -S --noconfirm helix > /dev/null 2>&1 && installed=true
             ;;
         macos)
-            brew install helix > /dev/null 2>&1
+            brew install helix > /dev/null 2>&1 && installed=true
             ;;
         *)
             if command_exists snap; then
-                sudo snap install --classic helix > /dev/null 2>&1
-            else
-                print_error "Cannot auto-install helix on this OS"
-                return 1
+                sudo snap install --classic helix > /dev/null 2>&1 && installed=true
             fi
             ;;
     esac
     
-    print_success "helix installed"
-    export EDITOR=hx
-    add_editor_to_rc "hx"
+    if [ "$installed" = true ] || command_exists hx || command_exists helix; then
+        print_success "helix installed"
+        # Determine command name
+        if command_exists hx; then export EDITOR=hx; else export EDITOR=helix; fi
+        add_editor_to_rc "$EDITOR"
+    else
+        print_error "Could not install Helix"
+        exit 1
+    fi
 }
 
 install_neovim() {
@@ -690,20 +751,20 @@ install_neovim() {
     
     case $os in
         ubuntu|debian|linuxmint|pop)
-            sudo apt install -y neovim > /dev/null 2>&1
+            sudo apt-get install -y neovim
             ;;
         fedora|rhel|centos)
-            sudo dnf install -y neovim > /dev/null 2>&1
+            sudo dnf install -y neovim
             ;;
         arch)
-            sudo pacman -S --noconfirm neovim > /dev/null 2>&1
+            sudo pacman -S --noconfirm neovim
             ;;
         macos)
-            brew install neovim > /dev/null 2>&1
+            brew install neovim
             ;;
         *)
             print_error "Cannot auto-install neovim on this OS"
-            return 1
+            exit 1
             ;;
     esac
     
@@ -1368,22 +1429,20 @@ main() {
         fi
         
         if [[ -n "$rust_dir" && -f "$rust_dir/Cargo.toml" ]]; then
-            print_step "1" "3" "Building high-performance Rust Core (this may take a minute)"
+            print_step "1" "3" "Building high-performance Rust Core"
             
-            # Run build with spinner and log output
-            local log_file="$TMP_DIR/rust_build.log"
-            if (cd "$rust_dir" && cargo build --release) > "$log_file" 2>&1; then
-                mkdir -p "$MAESTRO_HOME/bin"
-                if [ -f "$rust_dir/target/release/maestro" ]; then
-                    cp "$rust_dir/target/release/maestro" "$MAESTRO_HOME/bin/maestro-tui"
-                    print_success "Rust Core built: $MAESTRO_HOME/bin/maestro-tui"
-                else
-                    print_warning "Rust binary not found after build"
-                fi
+            (cd "$rust_dir" && cargo build --release)
+            
+            mkdir -p "$MAESTRO_HOME/bin"
+            if [ -f "$rust_dir/target/release/maestro" ]; then
+                cp "$rust_dir/target/release/maestro" "$MAESTRO_HOME/bin/maestro-tui"
+                print_success "Rust Core built: $MAESTRO_HOME/bin/maestro-tui"
+            elif [ -f "$rust_dir/target/release/leindex-analyzers" ]; then
+                cp "$rust_dir/target/release/leindex-analyzers" "$MAESTRO_HOME/bin/maestro-tui"
+                print_success "Rust Core built: $MAESTRO_HOME/bin/maestro-tui"
             else
-                print_warning "Rust Core build failed"
-                echo -e "  ${Y}→${NC} See ${BW}${log_file}${NC} for details."
-                print_info "Continuing with legacy engine only..."
+                print_error "Rust binary not found after build"
+                exit 1
             fi
         else
             print_warning "Rust source not found - Core build skipped"
