@@ -34,6 +34,11 @@ declare -A commands=(
   ["vim_open"]="edit"
   ["vim_hsplit"]="split"
   ["vim_vsplit"]="vsplit"
+
+  ["fresh_cd"]="cd"
+  ["fresh_open"]="open"
+  ["fresh_hsplit"]="hsplit"
+  ["fresh_vsplit"]="vsplit"
 )
   
 getEditorCommand() {

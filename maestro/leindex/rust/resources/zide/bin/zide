@@ -107,12 +107,18 @@ fi
 # Optional params
 # 
 # Working directory to open in, defaults to pwd
-cwd="$(cd ${1:-$(pwd)} && pwd) "
+raw_cwd="${1:-$(pwd)}"
+if [[ "${raw_cwd}" == "~" ]]; then
+  raw_cwd="${HOME}"
+elif [[ "${raw_cwd}" == "~/"* ]]; then
+  raw_cwd="${HOME}/${raw_cwd#~/}"
+fi
+cwd="$(cd "${raw_cwd}" && pwd)"
 # Available layouts can be found in the zide layouts/ directory
 layout=${2:-${ZIDE_DEFAULT_LAYOUT:-"default"}} 
 # Default session/tab name to the basename of the provided dir if -N flag set
 if [[ "${name}" == "__basename__" ]]; then
-  name="$(basename ${cwd})"
+  name="$(basename "${cwd}")"
 fi
 
 # Export location of the zide project files for further use
@@ -124,13 +130,13 @@ export ZIDE_LAYOUT_DIR="${ZIDE_LAYOUT_DIR:-${ZIDE_DIR}/layouts}"
 
 layout_path="${ZIDE_LAYOUT_DIR}/${layout}"
 if [ -n "$ZELLIJ" ]; then
-  zellij action new-tab --cwd $cwd --layout "${layout_path}"
+  zellij action new-tab --cwd "$cwd" --layout "${layout_path}"
   zide-rename
 else
   # There's a bug when using zellij options --default-cwd where the CWD isn't working for floating
   # panes defined in the layout, so instead we'll use pushd to change the working dir before
   # starting zellij, and change it back when we exit
-  pushd $cwd > /dev/null
+  pushd "$cwd" > /dev/null
     zellij --layout "${layout_path}"
   popd > /dev/null
 fi

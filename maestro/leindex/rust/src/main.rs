@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 mod cli;
 
-use cli::{analyze, memory, tui};
+use cli::{analyze, implement, memory, tui};
+use cli::mcp;
+use cli::implement::ImplementSessionTarget;
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -50,6 +52,50 @@ enum Commands {
 
     /// Launch Maestro Terminal UI
     Tui,
+
+    /// Initiate a track implementation in tmux
+    Implement {
+        /// Track command to run (e.g. /maestro:implement)
+        command: String,
+
+        /// Track description (freeform)
+        description: Vec<String>,
+
+        /// Where to run: ask | current | new
+        #[arg(long, value_enum, default_value_t = ImplementSessionTarget::Ask)]
+        session: ImplementSessionTarget,
+
+        /// Tool for new sessions (claude, gemini, opencode, amp, shell, ...)
+        #[arg(long, default_value = "claude")]
+        tool: String,
+
+        /// Working directory / project path for new sessions (defaults to CWD)
+        #[arg(long)]
+        path: Option<PathBuf>,
+
+        /// Title for the new tmux session (defaults to derived from description)
+        #[arg(long)]
+        title: Option<String>,
+    },
+
+    /// MCP pooling, proxying, and tool search
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCommands {
+    /// Start pooled stdio MCP servers on UNIX sockets
+    Serve,
+    /// Bridge stdio to a pooled UNIX socket server
+    Proxy {
+        /// MCP server name
+        name: String,
+    },
+    /// Meta MCP server: tool search + cross-server tool call
+    ToolSearch,
 }
 
 #[derive(Subcommand)]
@@ -121,5 +167,18 @@ async fn main() -> Result<()> {
         Commands::Tui => {
             tui::run().await
         }
+        Commands::Implement {
+            command,
+            description,
+            session,
+            tool,
+            path,
+            title,
+        } => implement::run(command, description, session, tool, path, title).await,
+        Commands::Mcp { command } => match command {
+            McpCommands::Serve => mcp::serve().await,
+            McpCommands::Proxy { name } => mcp::proxy(name).await,
+            McpCommands::ToolSearch => mcp::tool_search().await,
+        },
     }
 }

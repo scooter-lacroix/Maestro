@@ -41,7 +41,9 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
 
 /// Show memory system status
 pub async fn status(db: Option<PathBuf>) -> Result<()> {
-    let db_path = db.unwrap_or_else(|| {
+    use leindex_analyzers::memory::service::MemoryService;
+
+    let db_path = db.clone().unwrap_or_else(|| {
         let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push(".maestro");
         path.push("maestro.db");
@@ -51,28 +53,15 @@ pub async fn status(db: Option<PathBuf>) -> Result<()> {
     println!("📊 Maestro Memory System Status");
     println!();
     
-    if db_path.exists() {
-        println!("   Database: {} ✓", db_path.display());
-        
-        // Open database and get stats
-        let conn = rusqlite::Connection::open(&db_path)?;
-        
-        // Count projects
-        let project_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM maestro_projects", [], |row| row.get(0))
-            .unwrap_or(0);
-        
-        // Count memories
-        let memory_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
-            .unwrap_or(0);
-        
-        println!("   Projects: {}", project_count);
-        println!("   Memories: {}", memory_count);
-    } else {
-        println!("   Database: {} (not found)", db_path.display());
-        println!("   Run 'maestro memory serve' to initialize");
-    }
+    let service = MemoryService::new(db)?;
+    service.initialize()?;
+
+    let db_stats = service.stats()?;
+    
+    println!("   Database: {} ✓", db_path.display());
+    println!("   Projects: {}", db_stats.project_count);
+    println!("   Memories: {}", db_stats.memory_count);
+    println!("   Sessions: {}", db_stats.session_count);
     
     Ok(())
 }

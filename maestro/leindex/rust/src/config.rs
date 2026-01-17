@@ -2,9 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct Config {
     pub editor: String,
     pub install_path: String,
+    pub theme: String,
     pub selected_tools: Vec<String>,
 }
 
@@ -13,6 +15,7 @@ impl Default for Config {
         Self {
             editor: "hx".to_string(),
             install_path: "~/.maestro".to_string(),
+            theme: "catppuccin-mocha".to_string(),
             selected_tools: Vec::new(),
         }
     }

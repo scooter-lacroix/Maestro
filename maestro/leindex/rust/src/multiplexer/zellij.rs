@@ -9,6 +9,20 @@ use tracing::{debug, info};
 pub struct ZellijMultiplexer;
 
 impl ZellijMultiplexer {
+    fn expand_tilde(path: &str) -> String {
+        if path == "~" || path.starts_with("~/") {
+            if let Some(home) = dirs::home_dir() {
+                if path == "~" {
+                    return home.to_string_lossy().to_string();
+                }
+                if let Some(rest) = path.strip_prefix("~/") {
+                    return home.join(rest).to_string_lossy().to_string();
+                }
+            }
+        }
+        path.to_string()
+    }
+
     /// Check if we are currently running inside a Zellij session
     pub fn is_in_zellij() -> bool {
         std::env::var("ZELLIJ").is_ok()
@@ -16,22 +30,53 @@ impl ZellijMultiplexer {
 
     /// Launch Zide for a project
     pub fn spawn_zide(project_path: &str, name: &str) -> Result<()> {
-        // Use bundled resources
-        let zide_dir = "/home/stan/Prod/maestro/maestro/leindex/rust/resources/zide";
+        let project_path = Self::expand_tilde(project_path);
+
+        // Find bundled resources
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let user_zide_path = home.join(".maestro").join("resources").join("zide");
+        let user_zide_str = user_zide_path.to_string_lossy();
+
+        let possible_paths = [
+            "/home/stan/Prod/maestro/maestro/leindex/rust/resources/zide",
+            "/home/stan/Prod/maestro/leindex/rust/resources/zide",
+            &user_zide_str,
+        ];
+
+        let zide_dir = possible_paths
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "/usr/local/share/maestro/zide".to_string());
+
         let zide_bin = format!("{}/bin/zide", zide_dir);
 
-        info!("Launching bundled Zide for {} at {}", name, project_path);
+        info!(
+            "Launching bundled Zide for {} at {} (resources: {})",
+            name, project_path, zide_dir
+        );
 
         let mut cmd = Command::new(&zide_bin);
         cmd.arg("-n").arg(name);
         cmd.arg(project_path);
+        cmd.arg("maestro_yazi.kdl"); // Explicitly add .kdl
 
         // Ensure environment is primed for Zide
-        cmd.env("ZIDE_DIR", zide_dir);
+        cmd.env("ZIDE_DIR", &zide_dir);
 
         // Add Zide bin to PATH so it can find zide-pick, zide-edit etc.
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/stan"));
+        let local_bin = home.join(".local").join("bin");
+        let cargo_bin = home.join(".cargo").join("bin");
         let current_path = std::env::var("PATH").unwrap_or_default();
-        let new_path = format!("{}/bin:{}", zide_dir, current_path);
+        let new_path = format!(
+            "{}/bin:{}:{}:{}:{}",
+            zide_dir,
+            local_bin.to_string_lossy(),
+            cargo_bin.to_string_lossy(),
+            "/usr/local/bin",
+            current_path
+        );
         cmd.env("PATH", new_path);
 
         // Crucial: Fix the missing EDITOR error by ensuring it's set
@@ -95,10 +140,35 @@ impl ZellijMultiplexer {
     pub fn run_in_pane(session_name: &str, command: &str, cwd: Option<&str>) -> Result<()> {
         debug!("Running command in Zellij pane: {}", command);
 
-        // Prepare environment to propagate
-        let zide_dir = "/home/stan/Prod/maestro/maestro/leindex/rust/resources/zide";
+        // Find bundled resources
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let user_zide_path = home.join(".maestro").join("resources").join("zide");
+        let user_zide_str = user_zide_path.to_string_lossy();
+
+        let possible_paths = [
+            "/home/stan/Prod/maestro/maestro/leindex/rust/resources/zide",
+            "/home/stan/Prod/maestro/leindex/rust/resources/zide",
+            &user_zide_str,
+        ];
+
+        let zide_dir = possible_paths
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "/usr/local/share/maestro/zide".to_string());
+
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/stan"));
+        let local_bin = home.join(".local").join("bin");
+        let cargo_bin = home.join(".cargo").join("bin");
         let current_path = std::env::var("PATH").unwrap_or_default();
-        let new_path = format!("{}/bin:{}", zide_dir, current_path);
+        let new_path = format!(
+            "{}/bin:{}:{}:{}:{}",
+            zide_dir,
+            local_bin.to_string_lossy(),
+            cargo_bin.to_string_lossy(),
+            "/usr/local/bin",
+            current_path
+        );
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
         let mut cmd = Command::new("zellij");

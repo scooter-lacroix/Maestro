@@ -13,11 +13,15 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph, Tabs, List, ListItem, BorderType, Clear, Wrap},
 };
-use std::io;
+use std::{collections::HashSet, io, sync::Arc};
 
 use leindex_analyzers::memory::MemoryService;
+use leindex_analyzers::memory::models::McpStatus;
+use leindex_analyzers::memory::McpPool;
 use leindex_analyzers::multiplexer::TmuxMultiplexer;
 use leindex_analyzers::config::Config;
+
+use super::theme::{theme_from_name, Theme, THEMES};
 
 pub async fn run() -> Result<()> {
     // Setup terminal
@@ -27,14 +31,26 @@ pub async fn run() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Initialize service for live data
+    // Initialize service for live data + system-wide integration (MCP + Memory)
     let service = MemoryService::new(None).ok();
-    if let Some(ref s) = service {
+    let mcp_pool: Option<Arc<McpPool>> = if let Some(ref s) = service {
         let _ = s.initialize();
-    }
+        let _ = s.sync_mcp_servers_from_system();
+        let _ = s.sync_memories_from_system();
+
+        // Start pooled MCP servers in the background so all tools can share them.
+        let pool = Arc::new(McpPool::new(s.clone()));
+        let pool_bg = pool.clone();
+        tokio::spawn(async move {
+            let _ = pool_bg.start_all_from_db().await;
+        });
+        Some(pool)
+    } else {
+        None
+    };
 
     // Run app
-    let result = run_app(&mut terminal, service).await;
+    let result = run_app(&mut terminal, service, mcp_pool).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -52,6 +68,8 @@ struct App {
     projects: Vec<ProjectInfo>,
     project_state: ratatui::widgets::ListState,
     memories: Vec<MemoryInfo>,
+    memory_state: ratatui::widgets::ListState,
+    memory_query: String,
     sessions: Vec<leindex_analyzers::memory::models::Session>,
     session_entries: Vec<SessionEntry>,
     session_state: ratatui::widgets::ListState,
@@ -85,6 +103,9 @@ struct App {
     // Dashboard MCP menu state
     mcp_menu_option: McpOption,
     target_mcp_name: Option<String>,
+    mcp_pool: Option<Arc<McpPool>>,
+    mcp_log_lines: Vec<String>,
+    mcp_log_scroll: u16,
     // Projects tab state
     project_view_open: bool,
     // Phase 15 state
@@ -99,6 +120,13 @@ struct App {
     project_explorer_selected: usize,
     explorer_items: Vec<String>,
     config: Config,
+    settings_option: SettingsOption,
+    settings_menu_kind: Option<SettingsMenuKind>,
+    settings_menu_state: ratatui::widgets::ListState,
+    settings_menu_items: Vec<(String, String)>,
+    dash_session_state: ratatui::widgets::ListState,
+    dash_session_entries: Vec<DashSessionEntry>,
+    dash_focus: DashFocus,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -113,11 +141,13 @@ enum InputMode {
     KillConfirm,
     DeleteConfirm,
     AnalysisPrompt,
+    MemorySearch,
     // Phase 11 additions
     SessionHub,
     NewGroupTitle,
     MoveToGroup,
     McpMenu,
+    McpLogs,
     // Phase 15 additions
     NewProjectName,
     NewProjectPath,
@@ -126,6 +156,9 @@ enum InputMode {
     NewTrackType,
     NewGroupCategory,
     RenameGroupCategory,
+    SettingsEditor,
+    SettingsInstallPath,
+    SettingsMenu,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
@@ -147,9 +180,38 @@ enum McpOption {
     Install,
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+enum SettingsOption {
+    #[default]
+    Editor,
+    InstallPath,
+    Theme,
+    Save,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum SettingsMenuKind {
+    Editor,
+    Theme,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+enum DashFocus {
+    #[default]
+    Sessions,
+    Mcp,
+    Tabs,
+}
+
 #[derive(Clone)]
 enum SessionEntry {
     Group(leindex_analyzers::memory::models::SessionGroup),
+    Session(leindex_analyzers::memory::models::Session),
+}
+
+#[derive(Clone)]
+enum DashSessionEntry {
+    GroupHeader { group_path: String },
     Session(leindex_analyzers::memory::models::Session),
 }
 
@@ -175,7 +237,7 @@ struct Stats {
 }
 
 impl App {
-    fn new(service: Option<&MemoryService>) -> Self {
+	    fn new(_service: Option<&MemoryService>, mcp_pool: Option<Arc<McpPool>>) -> Self {
         let config = Config::load();
         std::env::set_var("EDITOR", &config.editor);
         let mut app = Self {
@@ -183,10 +245,12 @@ impl App {
             should_quit: false,
             show_help: false,
             input_mode: InputMode::Normal,
-            projects: Vec::new(),
-            project_state: ratatui::widgets::ListState::default(),
-            memories: Vec::new(),
-            sessions: Vec::new(),
+	            projects: Vec::new(),
+	            project_state: ratatui::widgets::ListState::default(),
+	            memories: Vec::new(),
+	            memory_state: ratatui::widgets::ListState::default(),
+	            memory_query: String::new(),
+	            sessions: Vec::new(),
             session_entries: Vec::new(),
             session_state: ratatui::widgets::ListState::default(),
             groups: Vec::new(),
@@ -213,6 +277,9 @@ impl App {
             hub_focus: HubFocus::Rename,
             mcp_menu_option: McpOption::StartStop,
             target_mcp_name: None,
+            mcp_pool,
+            mcp_log_lines: Vec::new(),
+            mcp_log_scroll: 0,
             project_view_open: false,
             new_project_name: String::new(),
             new_project_path: String::new(),
@@ -223,50 +290,229 @@ impl App {
             project_explorer_path: None,
             project_explorer_selected: 0,
 
-            explorer_items: Vec::new(),
-            config,
-        };
+	            explorer_items: Vec::new(),
+	            config,
+	            settings_option: SettingsOption::Editor,
+	            settings_menu_kind: None,
+	            settings_menu_state: ratatui::widgets::ListState::default(),
+	            settings_menu_items: Vec::new(),
+	            dash_session_state: ratatui::widgets::ListState::default(),
+	            dash_session_entries: Vec::new(),
+	            dash_focus: DashFocus::Sessions,
+	        };
+	        app.mcp_state.select(Some(0));
+	        app.dash_session_state.select(Some(0));
+	        app.memory_state.select(Some(0));
+	        app
+	    }
+
+	    fn theme(&self) -> Theme {
+	        theme_from_name(&self.config.theme)
+	    }
+
+	    fn open_settings_menu(&mut self, kind: SettingsMenuKind) {
+	        self.settings_menu_kind = Some(kind);
+	        self.settings_menu_items = match kind {
+	            SettingsMenuKind::Editor => vec![
+	                ("hx".to_string(), "Helix (hx)".to_string()),
+	                ("nvim".to_string(), "Neovim (nvim)".to_string()),
+	                ("vim".to_string(), "Vim (vim)".to_string()),
+	                ("emacs".to_string(), "Emacs (emacs)".to_string()),
+	                ("nano".to_string(), "Nano (nano)".to_string()),
+	                ("micro".to_string(), "Micro (micro)".to_string()),
+	                ("code".to_string(), "VS Code (code)".to_string()),
+	                ("zed".to_string(), "Zed (zed)".to_string()),
+	                ("custom".to_string(), "Custom...".to_string()),
+	            ],
+	            SettingsMenuKind::Theme => THEMES
+	                .iter()
+	                .map(|(id, label)| (id.to_string(), label.to_string()))
+	                .collect(),
+	        };
+
+	        let current = match kind {
+	            SettingsMenuKind::Editor => self.config.editor.as_str(),
+	            SettingsMenuKind::Theme => self.config.theme.as_str(),
+	        }
+	        .trim()
+	        .to_lowercase();
+
+	        let selected = self
+	            .settings_menu_items
+	            .iter()
+	            .position(|(id, _)| id.to_lowercase() == current)
+	            .unwrap_or(0);
+	        self.settings_menu_state.select(Some(selected));
+	        self.input_mode = InputMode::SettingsMenu;
+	    }
+
+    fn dash_selected_session_id(&self) -> Option<String> {
+        let selected = self.dash_session_state.selected()?;
+        self.dash_session_entries
+            .get(selected)
+            .and_then(|entry| match entry {
+                DashSessionEntry::Session(s) => Some(s.session_id.clone()),
+                DashSessionEntry::GroupHeader { .. } => self
+                    .dash_session_entries
+                    .iter()
+                    .skip(selected + 1)
+                    .find_map(|e| match e {
+                        DashSessionEntry::Session(s) => Some(s.session_id.clone()),
+                        DashSessionEntry::GroupHeader { .. } => None,
+                    }),
+            })
+    }
+
+    fn dash_selected_session(&self) -> Option<&leindex_analyzers::memory::models::Session> {
+        let selected = self.dash_session_state.selected()?;
+        match self.dash_session_entries.get(selected) {
+            Some(DashSessionEntry::Session(s)) => Some(s),
+            Some(DashSessionEntry::GroupHeader { .. }) => self
+                .dash_session_entries
+                .iter()
+                .skip(selected + 1)
+                .find_map(|e| match e {
+                    DashSessionEntry::Session(s) => Some(s),
+                    DashSessionEntry::GroupHeader { .. } => None,
+                }),
+            None => None,
+        }
+    }
+
+    fn dash_first_session_index(&self) -> Option<usize> {
+        self.dash_session_entries
+            .iter()
+            .position(|e| matches!(e, DashSessionEntry::Session(_)))
+    }
+
+    fn dash_select_first_session(&mut self) {
+        if let Some(idx) = self.dash_first_session_index() {
+            self.dash_session_state.select(Some(idx));
+        } else {
+            self.dash_session_state.select(Some(0));
+        }
+    }
+
+    fn dash_select_next_session(&mut self) {
+        let len = self.dash_session_entries.len();
+        if len == 0 {
+            self.dash_session_state.select(Some(0));
+            return;
+        }
+
+        let start = self.dash_session_state.selected().unwrap_or(0);
+        let mut idx = start;
+        for _ in 0..len {
+            idx = if idx >= len.saturating_sub(1) { 0 } else { idx + 1 };
+            if matches!(self.dash_session_entries.get(idx), Some(DashSessionEntry::Session(_))) {
+                self.dash_session_state.select(Some(idx));
+                return;
+            }
+        }
+    }
+
+    fn dash_select_prev_session(&mut self) {
+        let len = self.dash_session_entries.len();
+        if len == 0 {
+            self.dash_session_state.select(Some(0));
+            return;
+        }
+
+        let start = self.dash_session_state.selected().unwrap_or(0);
+        let mut idx = start;
+        for _ in 0..len {
+            idx = if idx == 0 { len.saturating_sub(1) } else { idx - 1 };
+            if matches!(self.dash_session_entries.get(idx), Some(DashSessionEntry::Session(_))) {
+                self.dash_session_state.select(Some(idx));
+                return;
+            }
+        }
+    }
+
+    fn refresh_from_service(&mut self, service: &Option<MemoryService>) {
         if let Some(svc) = service {
             if let Ok(projects) = svc.list_projects() {
-                app.projects = projects.iter().map(|p| ProjectInfo {
+                self.projects = projects.iter().map(|p| ProjectInfo {
                     name: p.project_name.clone(),
                     path: p.project_path.clone(),
                     _track_count: 0,
                 }).collect();
-                app.stats.project_count = app.projects.len();
+                self.stats.project_count = self.projects.len();
             }
 
-            if let Ok(memories) = svc.list_memories(20) {
-                app.memories = memories.iter().map(|m| MemoryInfo {
-                    _id: m.id,
-                    content: m.content.clone(),
-                    category: m.category.to_string(),
-                }).collect();
-            }
+	            let memory_limit = 200usize;
+	            let memories_res = if self.memory_query.trim().is_empty() {
+	                svc.list_memories(memory_limit)
+	            } else {
+	                svc.search_memories(self.memory_query.trim(), memory_limit)
+	            };
+	            if let Ok(memories) = memories_res {
+	                self.memories = memories.iter().map(|m| MemoryInfo {
+	                    _id: m.id,
+	                    content: m.content.clone(),
+	                    category: m.category.to_string(),
+	                }).collect();
+	                if self.memories.is_empty() {
+	                    self.memory_state.select(Some(0));
+	                } else if let Some(sel) = self.memory_state.selected() {
+	                    if sel >= self.memories.len() {
+	                        self.memory_state.select(Some(self.memories.len() - 1));
+	                    }
+	                } else {
+	                    self.memory_state.select(Some(0));
+	                }
+	            }
 
             if let Ok(sessions) = svc.list_sessions() {
-                app.sessions = sessions;
+                self.sessions = sessions;
             }
 
             if let Ok(groups) = svc.list_session_groups() {
-                app.groups = groups;
+                self.groups = groups;
             }
 
             if let Ok(mcp_servers) = svc.list_mcp_servers() {
-                app.mcp_servers = mcp_servers;
+                self.mcp_servers = mcp_servers;
             }
             if let Ok(stats) = svc.stats() {
-                app.stats.memory_count = stats.memory_count;
-                app.stats.track_count = stats.track_count;
+                self.stats.memory_count = stats.memory_count;
+                self.stats.track_count = stats.track_count;
             }
 
-            app.refresh_session_entries();
-        }
+            // Update session statuses via tmux
+            let multiplexer = TmuxMultiplexer::default();
+            multiplexer.refresh_session_cache().ok();
+            for session in &mut self.sessions {
+                if session.status != leindex_analyzers::memory::models::SessionStatus::Terminated {
+                    if !multiplexer.session_exists(&session.session_id) {
+                        session.status = leindex_analyzers::memory::models::SessionStatus::Terminated;
+                    } else {
+                        session.status = leindex_analyzers::memory::models::SessionStatus::Running;
+                    }
+                }
+            }
 
-        app
+            self.refresh_session_entries();
+            self.refresh_dash_session_entries();
+        }
     }
 
     fn refresh_session_entries(&mut self) {
+        #[derive(Clone)]
+        enum SelectedKey {
+            GroupPath(String),
+            SessionId(String),
+        }
+
+        let selected_key = self
+            .session_state
+            .selected()
+            .and_then(|i| self.session_entries.get(i))
+            .map(|entry| match entry {
+                SessionEntry::Group(g) => SelectedKey::GroupPath(g.path.clone()),
+                SessionEntry::Session(s) => SelectedKey::SessionId(s.session_id.clone()),
+            });
+
         let mut entries = Vec::new();
 
         // Add Groups and their sessions
@@ -298,111 +544,149 @@ impl App {
         }
 
         self.session_entries = entries;
+
+        if self.session_entries.is_empty() {
+            self.session_state.select(None);
+            return;
+        }
+
+        if let Some(key) = selected_key {
+            let idx = self.session_entries.iter().position(|e| match (e, &key) {
+                (SessionEntry::Group(g), SelectedKey::GroupPath(path)) => &g.path == path,
+                (SessionEntry::Session(s), SelectedKey::SessionId(id)) => &s.session_id == id,
+                _ => false,
+            });
+            if let Some(idx) = idx {
+                self.session_state.select(Some(idx));
+                return;
+            }
+        }
+
+        let idx = self
+            .session_state
+            .selected()
+            .unwrap_or(0)
+            .min(self.session_entries.len().saturating_sub(1));
+        self.session_state.select(Some(idx));
+    }
+
+    fn refresh_dash_session_entries(&mut self) {
+        let selected_session_id = self.dash_selected_session_id();
+        let mut entries = Vec::new();
+
+        if self.sessions.is_empty() {
+            self.dash_session_entries.clear();
+            self.dash_session_state.select(Some(0));
+            return;
+        }
+
+        let mut sorted_sessions = self.sessions.clone();
+        sorted_sessions.sort_by(|a, b| b.last_accessed_at.cmp(&a.last_accessed_at));
+        let recent_sessions: Vec<_> = sorted_sessions.into_iter().take(20).collect();
+
+        let mut seen_groups: HashSet<String> = HashSet::new();
+        for sess in &recent_sessions {
+            let group_key = sess
+                .group_path
+                .clone()
+                .unwrap_or_else(|| "uncategorized".to_string());
+            if seen_groups.insert(group_key.clone()) {
+                entries.push(DashSessionEntry::GroupHeader {
+                    group_path: group_key.clone(),
+                });
+                for s in recent_sessions
+                    .iter()
+                    .filter(|rs| rs.group_path.clone().unwrap_or_else(|| "uncategorized".to_string()) == group_key)
+                {
+                    entries.push(DashSessionEntry::Session(s.clone()));
+                }
+            }
+        }
+
+        self.dash_session_entries = entries;
+        if let Some(session_id) = selected_session_id {
+            if let Some(idx) = self.dash_session_entries.iter().position(|e| {
+                matches!(e, DashSessionEntry::Session(s) if s.session_id == session_id)
+            }) {
+                self.dash_session_state.select(Some(idx));
+                return;
+            }
+        }
+
+        if let Some(selected) = self.dash_session_state.selected() {
+            if selected >= self.dash_session_entries.len() {
+                self.dash_select_first_session();
+                return;
+            }
+        }
+
+        if self
+            .dash_session_state
+            .selected()
+            .and_then(|i| self.dash_session_entries.get(i))
+            .is_some_and(|e| matches!(e, DashSessionEntry::GroupHeader { .. }))
+        {
+            self.dash_select_first_session();
+            return;
+        }
+
+        if self.dash_session_state.selected().is_none() {
+            self.dash_select_first_session();
+        }
     }
 
 }
 
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryService>) -> Result<()> {
-    let mut app = App::new(service.as_ref());
+fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
+    // If we're already inside a Zellij pane, switching the terminal's alternate
+    // screen can cause rendering glitches. In that case, let the spawned app
+    // manage the terminal as-is.
+    if std::env::var("ZELLIJ").is_ok() {
+        return Ok(());
+    }
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> {
+    if std::env::var("ZELLIJ").is_ok() {
+        return Ok(());
+    }
+    execute!(io::stdout(), EnterAlternateScreen)?;
+    enable_raw_mode()?;
+    Ok(())
+}
+
+async fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    service: Option<MemoryService>,
+    mcp_pool: Option<Arc<McpPool>>,
+) -> Result<()> {
+    let mut app = App::new(service.as_ref(), mcp_pool);
     let mut last_refresh = std::time::Instant::now();
 
     loop {
         terminal.draw(|frame| ui(frame, &mut app))?;
 
-        // Periodic refresh (every 1 second)
-        if last_refresh.elapsed() >= std::time::Duration::from_secs(1) {
-            if let Some(svc) = service.as_ref() {
-                if let Ok(sessions) = svc.list_sessions() { 
-                    if sessions.len() != app.sessions.len() {
-                        app.sessions = sessions;
-                        app.refresh_session_entries();
-                    } else {
-                        app.sessions = sessions;
-                    }
-                }
-                if let Ok(groups) = svc.list_session_groups() { 
-                    // Merge strategy to preserve expansion state
-                    if groups.len() != app.groups.len() {
-                        // If count changed, full update but try to preserve expansion by path
-                        let old_states: std::collections::HashMap<String, bool> = app.groups.iter().map(|g| (g.path.clone(), g.is_expanded)).collect();
-                        app.groups = groups;
-                        for g in &mut app.groups {
-                            if let Some(expanded) = old_states.get(&g.path) {
-                                g.is_expanded = *expanded;
-                            }
-                        }
-                        app.refresh_session_entries();
-                    } else {
-                        // If count same, just update metadata but keep local expansion state
-                         for new_g in groups {
-                            if let Some(existing) = app.groups.iter_mut().find(|g| g.path == new_g.path) {
-                                existing.name = new_g.name;
-                                existing.category = new_g.category;
-                                existing.sort_order = new_g.sort_order;
-                                existing.parent_id = new_g.parent_id;
-                                // Do NOT overwrite is_expanded from DB if we want local control, 
-                                // OR ensure DB update happens on toggle.
-                            }
-                        }
-                    }
-                }
-                if let Ok(mcp) = svc.list_mcp_servers() { app.mcp_servers = mcp; }
-                
-                // MCP Pool Discovery for installed tools
-                if app.mcp_servers.is_empty() {
-                    let tools = vec!["claude", "gemini", "codex", "opencode", "amp"];
-                    for tool in tools {
-                        app.mcp_servers.push(leindex_analyzers::memory::models::McpServer {
-                            id: 0,
-                            name: tool.to_string(),
-                            command: tool.to_string(),
-                            args: Vec::new(),
-                            env: serde_json::json!({}),
-                            status: leindex_analyzers::memory::models::McpStatus::Running,
-                            socket_path: None,
-                            client_count: 1,
-                            last_started_at: Some(chrono::Utc::now()),
-                        });
-                    }
-                }
-
-                if let Ok(memories) = svc.list_memories(20) {
-                    app.memories = memories.iter().map(|m| MemoryInfo {
-                        _id: m.id,
-                        content: m.content.clone(),
-                        category: m.category.to_string(),
-                    }).collect();
-                }
-
-                // Update session statuses via tmux
-                let multiplexer = TmuxMultiplexer::default();
-                multiplexer.refresh_session_cache().ok();
-                for session in &mut app.sessions {
-                    if session.status != leindex_analyzers::memory::models::SessionStatus::Terminated {
-                        if !multiplexer.session_exists(&session.session_id) {
-                            session.status = leindex_analyzers::memory::models::SessionStatus::Terminated;
-                        } else {
-                            session.status = leindex_analyzers::memory::models::SessionStatus::Running;
-                        }
-                    }
-                }
-                app.refresh_session_entries();
-            }
-
-            // Fetch preview for selected session
-            if app.tab_index == 1 {
-                if let Some(i) = app.session_state.selected() {
-                    if let Some(SessionEntry::Session(s)) = app.session_entries.get(i).cloned() {
-                        if let Ok(content) = TmuxMultiplexer::get_pane_content(&s.session_id, 15) {
-                            app.session_preview_content = content;
-                        }
-                    } else {
-                        app.session_preview_content.clear();
-                    }
-                }
-            }
-
+        // Periodic refresh (every 500ms)
+        if last_refresh.elapsed() >= std::time::Duration::from_millis(500) {
+            app.refresh_from_service(&service);
             last_refresh = std::time::Instant::now();
+        }
+
+        // Fetch preview for selected session
+        if app.tab_index == 1 {
+            if let Some(i) = app.session_state.selected() {
+                if let Some(SessionEntry::Session(s)) = app.session_entries.get(i).cloned() {
+                    if let Ok(content) = TmuxMultiplexer::get_pane_content(&s.session_id, 15) {
+                        app.session_preview_content = content;
+                    }
+                } else {
+                    app.session_preview_content.clear();
+                }
+            }
         }
 
         app.frame_count = app.frame_count.wrapping_add(1);
@@ -410,11 +694,12 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
         // High FPS polling (5ms) for 180Hz monitors, floor of 60fps
         if event::poll(std::time::Duration::from_millis(5))? {
             if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+                // Some terminals report Enter as Repeat; treat Press+Repeat as actionable input.
+                if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                     if app.input_mode != InputMode::Normal {
                         match key.code {
-                            KeyCode::Enter => {
-                                match app.input_mode {
+                            KeyCode::Enter | KeyCode::Char('\n') | KeyCode::Char('\r') => {
+	                                match app.input_mode {
                                     InputMode::NewSessionTitle => app.input_mode = InputMode::NewSessionPath,
                                     InputMode::NewSessionPath => app.input_mode = InputMode::NewSessionTool,
                                     InputMode::NewSessionTool => {
@@ -434,6 +719,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 Ok(session) => {
                                                     app.sessions.push(session.clone());
                                                     app.refresh_session_entries();
+                                                    app.refresh_dash_session_entries();
                                                     app.status_message = format!("Session '{}' created. Press Enter on Sessions tab to attach.", session.title);
                                                     app.tab_index = 1;
                                                     let new_idx = app.session_entries.iter().position(|e| {
@@ -467,49 +753,165 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             if let Some(session) = app.sessions.get(i).cloned() {
                                                 app.status_message = format!("Attaching to '{}'... (Ctrl+B d to detach)", session.title);
                                                 let _ = terminal.draw(|frame| ui(frame, &mut app));
-                                                let _ = TmuxMultiplexer::attach(&session.session_id);
+                                                let _ = suspend_fullscreen_app(terminal);
+                                                let res = TmuxMultiplexer::attach(&session.session_id);
+                                                let _ = resume_fullscreen_app(terminal);
                                                 let _ = terminal.clear();
-                                                app.status_message = format!("Returned from '{}'", session.title);
+                                                app.status_message = match res {
+                                                    Ok(()) => format!("Returned from '{}'", session.title),
+                                                    Err(e) => format!("Attach failed: {}", e),
+                                                };
                                             }
                                         }
                                         app.input_mode = InputMode::Normal;
                                     }
 
-                                    InputMode::RenameGroup => {
-                                        app.input_mode = InputMode::RenameGroupCategory;
-                                    }
-                                    InputMode::RenameGroupCategory => {
-                                        if let (Some(svc), Some(path)) = (service.as_ref(), app.target_group_path.take()) {
-                                            if path == "uncategorized" {
-                                                // Create a new real group instead of updating pseudo-group
-                                                let new_path = format!("/{}", app.rename_buffer.trim().to_lowercase().replace(' ', "_"));
-                                                let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
-                                                let _ = svc.create_session_group(&app.rename_buffer, &new_path, category);
-                                                
-                                                // Move all uncategorized sessions to this new group
+                                    InputMode::RenameGroup | InputMode::RenameGroupCategory => {
+                                        let Some(svc) = service.as_ref() else {
+                                            app.status_message =
+                                                "Error: Memory service not available".to_string();
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+
+                                        let Some(old_path) = app.target_group_path.clone() else {
+                                            app.status_message =
+                                                "Error: No group selected to rename".to_string();
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+
+                                        let clean_name = app.rename_buffer.trim();
+                                        if clean_name.is_empty() {
+                                            app.status_message = "Group name cannot be empty".to_string();
+                                            app.input_mode = InputMode::RenameGroup;
+                                            continue;
+                                        }
+
+                                        let category = if app.new_group_category.trim().is_empty() {
+                                            None
+                                        } else {
+                                            Some(app.new_group_category.trim().to_string())
+                                        };
+
+                                        let mut select_group_path: Option<String> = None;
+                                        let mut rename_ok = false;
+
+                                        if old_path == "uncategorized" {
+                                            let new_path =
+                                                format!("/{}", clean_name.to_lowercase().replace(' ', "_"));
+
+                                            let group = leindex_analyzers::memory::models::SessionGroup {
+                                                id: 0,
+                                                name: clean_name.to_string(),
+                                                path: new_path.clone(),
+                                                category: category.clone(),
+                                                is_expanded: true,
+                                                sort_order: 0,
+                                                parent_id: None,
+                                            };
+
+                                            if let Err(e) = svc.get_or_create_session_group(group) {
+                                                app.status_message =
+                                                    format!("Error creating group: {}", e);
+                                                app.input_mode = InputMode::RenameGroup;
+                                            } else {
+                                                let _ = svc.update_group_category(&new_path, category);
+                                                let _ = svc.update_group_expansion(&new_path, true);
+
+                                                let mut moved = 0usize;
                                                 if let Ok(sessions) = svc.list_sessions() {
                                                     for s in sessions {
                                                         if s.group_path.is_none() {
-                                                            let _ = svc.update_session_group(&s.session_id, Some(new_path.clone()));
+                                                            if svc
+                                                                .update_session_group(
+                                                                    &s.session_id,
+                                                                    Some(new_path.clone()),
+                                                                )
+                                                                .is_ok()
+                                                            {
+                                                                moved += 1;
+                                                            }
                                                         }
                                                     }
                                                 }
-                                                app.status_message = format!("Created group '{}' and moved uncategorized sessions.", app.rename_buffer);
-                                            } else {
-                                                let _ = svc.update_group_name(&path, &app.rename_buffer);
-                                                let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
-                                                let _ = svc.update_group_category(&path, category);
-                                                app.status_message = format!("Group '{}' updated", app.rename_buffer);
+
+                                                app.status_message = format!(
+                                                    "Created group '{}' and moved {} sessions.",
+                                                    clean_name, moved
+                                                );
+                                                select_group_path = Some(new_path);
+                                                rename_ok = true;
+                                            }
+                                        } else {
+                                            match svc.rename_group(&old_path, clean_name) {
+                                                Ok(new_path) => {
+                                                    // Extra safety: ensure sessions remain associated even if older DB
+                                                    // rows had mismatched group_path values.
+                                                    if let Ok(sessions) = svc.list_sessions() {
+                                                        for s in sessions {
+                                                            if s.group_path.as_deref()
+                                                                == Some(old_path.as_str())
+                                                            {
+                                                                let _ = svc.update_session_group(
+                                                                    &s.session_id,
+                                                                    Some(new_path.clone()),
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+
+                                                    let _ = svc.update_group_category(&new_path, category);
+                                                    let _ = svc.update_group_expansion(&new_path, true);
+                                                    app.status_message =
+                                                        format!("Group '{}' updated", clean_name);
+                                                    select_group_path = Some(new_path);
+                                                    rename_ok = true;
+                                                }
+                                                Err(e) => {
+                                                    app.status_message =
+                                                        format!("Error renaming group: {}", e);
+                                                    app.input_mode = InputMode::RenameGroup;
+                                                }
+                                            }
+                                        }
+
+                                        if rename_ok {
+                                            // Reload from the database so path changes are reflected in-app.
+                                            if let Ok(groups) = svc.list_session_groups() {
+                                                app.groups = groups;
+                                            }
+                                            if let Ok(sessions) = svc.list_sessions() {
+                                                app.sessions = sessions;
                                             }
 
-                                            if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
-                                            if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
+                                            if let Some(ref group_path) = select_group_path {
+                                                if let Some(group) = app
+                                                    .groups
+                                                    .iter_mut()
+                                                    .find(|g| g.path == *group_path)
+                                                {
+                                                    group.is_expanded = true;
+                                                }
+                                                let _ = svc.update_group_expansion(group_path, true);
+                                            }
+
                                             app.refresh_session_entries();
+                                            app.refresh_dash_session_entries();
+
+                                            if let Some(group_path) = select_group_path {
+                                                if let Some(idx) = app.session_entries.iter().position(|e| {
+                                                    matches!(e, SessionEntry::Group(g) if g.path == group_path)
+                                                }) {
+                                                    app.session_state.select(Some(idx));
+                                                }
+                                            }
+
+                                            app.target_group_path = None;
+                                            app.rename_buffer.clear();
+                                            app.new_group_category.clear();
+                                            app.input_mode = InputMode::Normal;
                                         }
-                                        app.target_group_path = None;
-                                        app.rename_buffer.clear();
-                                        app.new_group_category.clear();
-                                        app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::ForkSession => {
                                         if let Some(svc) = service.as_ref() {
@@ -523,58 +925,438 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             }
                                         }
                                         app.refresh_session_entries();
+                                        app.refresh_dash_session_entries();
                                         app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
                                                 let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
-                                                let _ = manager.kill_session(&id);
-                                                if app.input_mode == InputMode::DeleteConfirm {
-                                                    let _ = svc.delete_session(&id);
-                                                    app.status_message = "Session deleted".to_string();
-                                                } else {
-                                                    app.status_message = "Session killed".to_string();
+                                                match manager.kill_session(&id) {
+                                                    Ok(()) => {
+                                                        if app.input_mode == InputMode::DeleteConfirm {
+                                                            let _ = svc.delete_session(&id);
+                                                            app.status_message = "Session deleted".to_string();
+                                                        } else {
+                                                            app.status_message = "Session killed".to_string();
+                                                        }
+                                                        if let Ok(sessions) = svc.list_sessions() {
+                                                            app.sessions = sessions;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!("Kill failed: {}", e);
+                                                    }
                                                 }
-                                                if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
                                             }
                                         }
                                         app.refresh_session_entries();
+                                        app.refresh_dash_session_entries();
                                         app.input_mode = InputMode::Normal;
                                     }
-                                    InputMode::AnalysisPrompt => {
-                                        let input = app.analysis_input.clone();
+	                                    InputMode::AnalysisPrompt => {
+                                        let input = app.analysis_input.trim().to_string();
                                         if !input.is_empty() {
                                             app.analysis_history.push(format!("> {}", input));
-                                            match input.to_lowercase().split_whitespace().next() {
-                                                Some("analyze") => app.analysis_history.push("  Analyzing structural dependencies... (Searching indexing tree)".to_string()),
-                                                Some("scan") => app.analysis_history.push("  Scanning workspace for project roots...".to_string()),
-                                                Some("stats") => app.analysis_history.push("  Computing repository metrics...".to_string()),
-                                                Some("help") => {
-                                                    app.analysis_history.push("  AVAILABLE COMMANDS:".to_string());
-                                                    app.analysis_history.push("    analyze <path> - Start depth-first structural analysis".to_string());
-                                                    app.analysis_history.push("    scan           - Scan for Maestro projects".to_string());
-                                                    app.analysis_history.push("    stats          - Show repository metrics".to_string());
+                                            let tokens: Vec<&str> = input.split_whitespace().collect();
+                                            let cmd = tokens
+                                                .first()
+                                                .map(|s| s.to_lowercase())
+                                                .unwrap_or_default();
+
+                                            let mut push_block = |text: &str| {
+                                                for line in text.lines() {
+                                                    app.analysis_history.push(line.to_string());
                                                 }
-                                                _ => app.analysis_history.push(format!("  Unknown command: {}. Try 'help'.", input)),
+                                                const MAX_LINES: usize = 500;
+                                                if app.analysis_history.len() > MAX_LINES {
+                                                    let drain = app.analysis_history.len() - MAX_LINES;
+                                                    app.analysis_history.drain(0..drain);
+                                                }
+                                            };
+
+                                            let parse_phase_opts = || {
+                                                let mut opts =
+                                                    leindex_analyzers::five_phase::PhaseOptions::new(
+                                                        std::path::PathBuf::from("."),
+                                                    );
+
+                                                let mut path_set = false;
+                                                let mut i = 1usize;
+                                                while i < tokens.len() {
+                                                    let t = tokens[i];
+                                                    match t {
+                                                        "--mode" | "-m" => {
+                                                            if let Some(v) = tokens.get(i + 1) {
+                                                                opts.mode = leindex_analyzers::token_format::FormatMode::from_str(v);
+                                                                i += 1;
+                                                            }
+                                                        }
+                                                        "--files" | "--max-files" | "-n" => {
+                                                            if let Some(v) = tokens.get(i + 1) {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.max_files = n.max(1);
+                                                                }
+                                                                i += 1;
+                                                            }
+                                                        }
+                                                        "--focus-files" => {
+                                                            if let Some(v) = tokens.get(i + 1) {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.max_focus_files = n.max(1);
+                                                                }
+                                                                i += 1;
+                                                            }
+                                                        }
+                                                        "--top" => {
+                                                            if let Some(v) = tokens.get(i + 1) {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.top_n = n.max(1);
+                                                                }
+                                                                i += 1;
+                                                            }
+                                                        }
+                                                        "--chars" | "--max-chars" => {
+                                                            if let Some(v) = tokens.get(i + 1) {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.max_output_chars = n.max(200);
+                                                                }
+                                                                i += 1;
+                                                            }
+                                                        }
+                                                        t if t.starts_with("--mode=") => {
+                                                            if let Some((_, v)) = t.split_once('=') {
+                                                                opts.mode =
+                                                                    leindex_analyzers::token_format::FormatMode::from_str(v);
+                                                            }
+                                                        }
+                                                        t if t.starts_with("--files=") => {
+                                                            if let Some((_, v)) = t.split_once('=') {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.max_files = n.max(1);
+                                                                }
+                                                            }
+                                                        }
+                                                        t if t.starts_with("--focus-files=") => {
+                                                            if let Some((_, v)) = t.split_once('=') {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.max_focus_files = n.max(1);
+                                                                }
+                                                            }
+                                                        }
+                                                        t if t.starts_with("--top=") => {
+                                                            if let Some((_, v)) = t.split_once('=') {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.top_n = n.max(1);
+                                                                }
+                                                            }
+                                                        }
+                                                        t if t.starts_with("--chars=") => {
+                                                            if let Some((_, v)) = t.split_once('=') {
+                                                                if let Ok(n) = v.parse::<usize>() {
+                                                                    opts.max_output_chars = n.max(200);
+                                                                }
+                                                            }
+                                                        }
+                                                        "ultra" | "u" => {
+                                                            opts.mode = leindex_analyzers::token_format::FormatMode::Ultra
+                                                        }
+                                                        "balanced" | "b" => {
+                                                            opts.mode =
+                                                                leindex_analyzers::token_format::FormatMode::Balanced
+                                                        }
+                                                        "verbose" | "v" => {
+                                                            opts.mode =
+                                                                leindex_analyzers::token_format::FormatMode::Verbose
+                                                        }
+                                                        t if !t.starts_with('-') && !path_set => {
+                                                            opts.root = std::path::PathBuf::from(t);
+                                                            path_set = true;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                    i += 1;
+                                                }
+
+                                                opts
+                                            };
+
+                                            match cmd.as_str() {
+                                                "/phase1" | "/p1" => {
+                                                    let opts = parse_phase_opts();
+                                                    match leindex_analyzers::five_phase::phase1_structural_scan(&opts)
+                                                    {
+                                                        Ok(out) => push_block(&out),
+                                                        Err(e) => push_block(&format!(
+                                                            "Error running /phase1: {}",
+                                                            e
+                                                        )),
+                                                    }
+                                                }
+                                                "/phase2" | "/p2" => {
+                                                    let opts = parse_phase_opts();
+                                                    match leindex_analyzers::five_phase::phase2_dependency_map(&opts) {
+                                                        Ok(out) => push_block(&out),
+                                                        Err(e) => push_block(&format!(
+                                                            "Error running /phase2: {}",
+                                                            e
+                                                        )),
+                                                    }
+                                                }
+                                                "/phase3" | "/p3" => {
+                                                    let opts = parse_phase_opts();
+                                                    match leindex_analyzers::five_phase::phase3_logic_flow(&opts) {
+                                                        Ok(out) => push_block(&out),
+                                                        Err(e) => push_block(&format!(
+                                                            "Error running /phase3: {}",
+                                                            e
+                                                        )),
+                                                    }
+                                                }
+                                                "/phase4" | "/p4" => {
+                                                    let opts = parse_phase_opts();
+                                                    match leindex_analyzers::five_phase::phase4_critical_path(&opts) {
+                                                        Ok(out) => push_block(&out),
+                                                        Err(e) => push_block(&format!(
+                                                            "Error running /phase4: {}",
+                                                            e
+                                                        )),
+                                                    }
+                                                }
+                                                "/phase5" | "/p5" => {
+                                                    let opts = parse_phase_opts();
+                                                    match leindex_analyzers::five_phase::phase5_optimization_report(&opts) {
+                                                        Ok(out) => push_block(&out),
+                                                        Err(e) => push_block(&format!(
+                                                            "Error running /phase5: {}",
+                                                            e
+                                                        )),
+                                                    }
+                                                }
+                                                "analyze" => push_block(
+                                                    "Tip: use /phase1 ./path (ultra, token-efficient) for structural scan.",
+                                                ),
+                                                "scan" => push_block(
+                                                    "Tip: memory scan is available via CLI: `maestro memory scan <paths...>`",
+                                                ),
+                                                "stats" => push_block("Tip: /phase4 and /phase5 include complexity hotspots."),
+                                                "help" | "/help" => {
+                                                    push_block("AVAILABLE COMMANDS:");
+                                                    push_block("  /phase1 [path] [--mode ultra|balanced|verbose] [--files N] [--chars N]");
+                                                    push_block("  /phase2 [path] [--mode ...] [--files N]");
+                                                    push_block("  /phase3 [path] [--mode ...] [--focus-files N]");
+                                                    push_block("  /phase4 [path] [--top N] [--files N]");
+                                                    push_block("  /phase5 [path] [--files N]");
+                                                }
+                                                _ => push_block(&format!(
+                                                    "Unknown command: {}. Try 'help' or '/help'.",
+                                                    input
+                                                )),
                                             }
                                             app.analysis_input.clear();
                                         } else {
                                             app.input_mode = InputMode::Normal;
                                         }
+	                                    }
+	                                    InputMode::MemorySearch => {
+	                                        app.input_mode = InputMode::Normal;
+	                                        app.refresh_from_service(&service);
+	                                    }
+
+                                    InputMode::McpMenu => {
+                                        let Some(svc) = service.as_ref() else {
+                                            app.status_message =
+                                                "Error: Memory service not available".to_string();
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+                                        let Some(name) = app.target_mcp_name.clone() else {
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+
+                                        let server = app
+                                            .mcp_servers
+                                            .iter()
+                                            .find(|s| s.name == name)
+                                            .cloned();
+
+                                        match app.mcp_menu_option {
+                                            McpOption::StartStop => {
+                                                let Some(pool) = app.mcp_pool.clone() else {
+                                                    app.status_message =
+                                                        "MCP pool not available".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+                                                let Some(server) = server else {
+                                                    app.status_message =
+                                                        "MCP server not found".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+
+                                                if server.status == McpStatus::Running {
+                                                    if let Err(e) = pool.stop_server(&name).await {
+                                                        app.status_message =
+                                                            format!("Stop failed: {}", e);
+                                                    } else {
+                                                        app.status_message =
+                                                            format!("Stopped MCP '{}'", name);
+                                                    }
+                                                } else {
+                                                    match pool.start_server_record(&server).await {
+                                                        Ok(socket) => {
+                                                            app.status_message = format!(
+                                                                "Started MCP '{}' at {}",
+                                                                name, socket
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            app.status_message =
+                                                                format!("Start failed: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            McpOption::Pause => {
+                                                app.status_message =
+                                                    format!("MCP '{}' pause not implemented", name);
+                                            }
+                                            McpOption::Logs => {
+                                                let log_path = McpPool::log_path_for(&name);
+                                                let content =
+                                                    std::fs::read_to_string(&log_path).unwrap_or_default();
+                                                app.mcp_log_lines = content
+                                                    .lines()
+                                                    .rev()
+                                                    .take(500)
+                                                    .collect::<Vec<_>>()
+                                                    .into_iter()
+                                                    .rev()
+                                                    .map(|s| s.to_string())
+                                                    .collect();
+                                                app.mcp_log_scroll = 0;
+                                                app.input_mode = InputMode::McpLogs;
+                                                continue;
+                                            }
+                                            McpOption::Add => {
+                                                match svc.sync_mcp_servers_from_system() {
+                                                    Ok(n) => app.status_message = format!(
+                                                        "Discovered {} MCP server(s) from system configs",
+                                                        n
+                                                    ),
+                                                    Err(e) => app.status_message =
+                                                        format!("Discovery failed: {}", e),
+                                                }
+                                            }
+                                            McpOption::Remove => {
+                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                    let _ = pool.stop_server(&name).await;
+                                                }
+                                                let _ = svc.delete_mcp_server(&name);
+                                                app.status_message =
+                                                    format!("Removed MCP '{}' from pool", name);
+                                            }
+                                            McpOption::Install => {
+                                                let discovered = svc
+                                                    .sync_mcp_servers_from_system()
+                                                    .unwrap_or(0);
+                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                    let _ = pool.start_all_from_db().await;
+                                                }
+                                                app.status_message = format!(
+                                                    "MCP pool synced ({} discovered)",
+                                                    discovered
+                                                );
+                                            }
+                                        }
+
+                                        if let Ok(mcp_list) = svc.list_mcp_servers() {
+                                            app.mcp_servers = mcp_list;
+                                        }
+                                        app.input_mode = InputMode::Normal;
+                                        app.target_mcp_name = None;
                                     }
 
-                                    InputMode::NewGroupTitle => {
-                                        app.input_mode = InputMode::NewGroupCategory;
+	                                    InputMode::NewGroupTitle => {
+	                                        app.input_mode = InputMode::NewGroupCategory;
+	                                    }
+                                    InputMode::SettingsEditor => {
+                                        app.config.editor = app.rename_buffer.clone();
+                                        std::env::set_var("EDITOR", &app.config.editor);
+                                        let _ = app.config.save();
+                                        app.input_mode = InputMode::Normal;
+                                        app.status_message = format!("Editor set to '{}'", app.config.editor);
+                                    }
+                                    InputMode::SettingsInstallPath => {
+                                        app.config.install_path = app.rename_buffer.clone();
+                                        let _ = app.config.save();
+                                        app.input_mode = InputMode::Normal;
+                                        app.status_message = format!("Install path set to '{}'", app.config.install_path);
+                                    }
+                                    InputMode::SettingsMenu => {
+                                        let Some(kind) = app.settings_menu_kind else {
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+                                        let idx = app.settings_menu_state.selected().unwrap_or(0);
+                                        let Some((id, _label)) = app.settings_menu_items.get(idx).cloned() else {
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+
+                                        match kind {
+                                            SettingsMenuKind::Editor => {
+                                                if id == "custom" {
+                                                    app.rename_buffer = app.config.editor.clone();
+                                                    app.input_mode = InputMode::SettingsEditor;
+                                                    continue;
+                                                }
+                                                app.config.editor = id.clone();
+                                                std::env::set_var("EDITOR", &app.config.editor);
+                                                let _ = app.config.save();
+                                                app.status_message =
+                                                    format!("Editor set to '{}'", app.config.editor);
+                                            }
+                                            SettingsMenuKind::Theme => {
+                                                app.config.theme = id.clone();
+                                                let _ = app.config.save();
+                                                app.status_message =
+                                                    format!("Theme set to '{}'", app.config.theme);
+                                            }
+                                        }
+
+                                        app.settings_menu_kind = None;
+                                        app.settings_menu_items.clear();
+                                        app.settings_menu_state.select(Some(0));
+                                        app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::NewGroupCategory => {
                                         if let Some(svc) = service.as_ref() {
-                                            let path = format!("/{}", app.rename_buffer.trim().to_lowercase().replace(' ', "_"));
-                                            let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
-                                            let _ = svc.create_session_group(&app.rename_buffer, &path, category);
-                                            app.status_message = format!("Group '{}' created", app.rename_buffer);
-                                            if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
-                                            app.refresh_session_entries();
+                                            let clean_name = app.rename_buffer.trim();
+                                            if !clean_name.is_empty() {
+                                                let path = format!("/{}", clean_name.to_lowercase().replace(' ', "_"));
+                                                let category = if app.new_group_category.trim().is_empty() { None } else { Some(app.new_group_category.clone()) };
+                                                
+                                                // Ensure group exists
+                                                let group = leindex_analyzers::memory::models::SessionGroup {
+                                                    id: 0,
+                                                    name: clean_name.to_string(),
+                                                    path: path.clone(),
+                                                    category: category,
+                                                    is_expanded: true,
+                                                    sort_order: 0,
+                                                    parent_id: None,
+                                                };
+                                                let _ = svc.get_or_create_session_group(group);
+                                                app.status_message = format!("Group '{}' ready", clean_name);
+                                                if let Ok(groups) = svc.list_session_groups() { app.groups = groups; }
+                                                app.refresh_session_entries();
+                                                app.refresh_dash_session_entries();
+                                            }
                                         }
                                         app.rename_buffer.clear();
                                         app.new_group_category.clear();
@@ -588,6 +1370,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 app.status_message = format!("Session moved to group");
                                                 if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
                                                 app.refresh_session_entries();
+                                                app.refresh_dash_session_entries();
                                             }
                                         }
                                         app.rename_buffer.clear();
@@ -602,6 +1385,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                         let _ = manager.rename_session(&id, &app.rename_buffer);
                                                         if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
                                                         app.refresh_session_entries();
+                                                        app.refresh_dash_session_entries();
                                                         app.status_message = "Session renamed".to_string();
                                                     }
                                                 }
@@ -621,34 +1405,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         }
                                     }
 
-                                    InputMode::McpMenu => {
-                                        if let (Some(svc), Some(name)) = (service.as_ref(), app.target_mcp_name.as_ref()) {
-                                            match app.mcp_menu_option {
-                                                McpOption::StartStop => {
-                                                    if let Some(mut mcp) = app.mcp_servers.iter().find(|m| &m.name == name).cloned() {
-                                                        mcp.status = if mcp.status == leindex_analyzers::memory::models::McpStatus::Running {
-                                                            leindex_analyzers::memory::models::McpStatus::Stopped
-                                                        } else {
-                                                            leindex_analyzers::memory::models::McpStatus::Running
-                                                        };
-                                                        let _ = svc.update_mcp_server(mcp);
-                                                        app.status_message = format!("MCP server '{}' status toggled", name);
-                                                    }
-                                                }
-                                                McpOption::Remove => {
-                                                    let _ = svc.delete_mcp_server(name);
-                                                    app.status_message = format!("MCP server '{}' removed", name);
-                                                }
-                                                McpOption::Pause => {
-                                                    app.status_message = format!("Pause not implemented for MCP '{}' yet", name);
-                                                }
-                                                _ => {}
-                                            }
-                                            if let Ok(mcp_list) = svc.list_mcp_servers() { app.mcp_servers = mcp_list; }
-                                        }
-                                        app.input_mode = InputMode::Normal;
-                                        app.target_mcp_name = None;
-                                    }
 
                                     InputMode::NewProjectName => {
                                         app.input_mode = InputMode::NewProjectPath;
@@ -669,33 +1425,65 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     InputMode::NewTrackTitle => {
                                         app.input_mode = InputMode::NewTrackType;
                                     }
-                                    InputMode::NewTrackType => {
-                                        // Commit New Track
-                                        let title = app.new_track_title.clone();
-                                        let is_master = app.new_track_is_master;
-                                        app.status_message = format!("Creating {} track: {}...", if is_master { "master" } else { "direct" }, title);
-                                        // Execute /maestro:newTrack
-                                        app.input_mode = InputMode::Normal;
-                                    }
-                                    InputMode::Normal => {}
-                                }
-                            }
-                            KeyCode::Esc => app.input_mode = InputMode::Normal,
-                            KeyCode::Backspace => {
-                                match app.input_mode {
+	                                    InputMode::NewTrackType => {
+	                                        // Commit New Track
+	                                        let title = app.new_track_title.clone();
+	                                        let is_master = app.new_track_is_master;
+	                                        app.status_message = format!("Creating {} track: {}...", if is_master { "master" } else { "direct" }, title);
+	                                        // Execute /maestro:newTrack
+	                                        app.input_mode = InputMode::Normal;
+	                                    }
+	                                    InputMode::McpLogs => {
+	                                        app.input_mode = InputMode::Normal;
+	                                    }
+	                                    InputMode::Normal => {}
+	                                }
+	                            }
+	                            KeyCode::Esc => {
+	                                match app.input_mode {
+	                                    InputMode::NewGroupTitle
+	                                    | InputMode::NewGroupCategory
+	                                    | InputMode::RenameGroup
+	                                    | InputMode::RenameGroupCategory => {
+	                                        app.rename_buffer.clear();
+	                                        app.new_group_category.clear();
+	                                        app.target_group_path = None;
+	                                    }
+	                                    InputMode::McpLogs => {
+	                                        app.mcp_log_lines.clear();
+	                                        app.mcp_log_scroll = 0;
+	                                        app.target_mcp_name = None;
+	                                    }
+	                                    InputMode::SettingsMenu => {
+	                                        app.settings_menu_kind = None;
+	                                        app.settings_menu_items.clear();
+	                                        app.settings_menu_state.select(Some(0));
+	                                    }
+	                                    _ => {}
+	                                }
+	                                app.input_mode = InputMode::Normal;
+	                            }
+	                            KeyCode::Backspace => {
+	                                match app.input_mode {
                                     InputMode::NewSessionTitle => { app.new_session_title.pop(); }
                                     InputMode::NewSessionPath => { app.new_session_path.pop(); }
-                                    InputMode::RenameGroup | InputMode::ForkSession => {
+                                    InputMode::RenameGroup | InputMode::ForkSession | InputMode::NewGroupTitle | InputMode::SettingsEditor | InputMode::SettingsInstallPath => {
                                         app.rename_buffer.pop();
+                                    }
+                                    InputMode::RenameGroupCategory | InputMode::NewGroupCategory => {
+                                        app.new_group_category.pop();
                                     }
                                     InputMode::KillConfirm => {
                                         app.target_session_id = None;
                                         app.input_mode = InputMode::Normal;
                                     }
-                                    InputMode::AnalysisPrompt => {
-                                        app.analysis_input.pop();
-                                    }
-                                    InputMode::NewProjectName => { app.new_project_name.pop(); }
+	                                    InputMode::AnalysisPrompt => {
+	                                        app.analysis_input.pop();
+	                                    }
+	                                    InputMode::MemorySearch => {
+	                                        app.memory_query.pop();
+	                                    }
+	                                    InputMode::NewProjectName => { app.new_project_name.pop(); }
                                     InputMode::NewProjectPath => { app.new_project_path.pop(); }
                                     InputMode::NewProjectTool => { app.new_project_tool.pop(); }
                                     InputMode::NewTrackTitle => { app.new_track_title.pop(); }
@@ -709,8 +1497,11 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     _ => {}
                                 }
                             }
-                            KeyCode::Char(c) => {
-                                match app.input_mode {
+	                            KeyCode::Char(c) => {
+                                if c == '\n' || c == '\r' {
+                                    continue;
+                                }
+	                                match app.input_mode {
                                     InputMode::NewSessionTitle => app.new_session_title.push(c),
                                     InputMode::NewSessionPath => app.new_session_path.push(c),
                                     InputMode::NewSessionTool => {
@@ -720,7 +1511,8 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             app.new_session_tool = tools[(pos + 1) % tools.len()].to_string();
                                         }
                                     }
-                                    InputMode::RenameGroup | InputMode::ForkSession | InputMode::NewGroupTitle | InputMode::MoveToGroup => app.rename_buffer.push(c),
+                                    InputMode::RenameGroup | InputMode::ForkSession | InputMode::NewGroupTitle | InputMode::MoveToGroup | InputMode::SettingsEditor | InputMode::SettingsInstallPath => app.rename_buffer.push(c),
+                                    InputMode::RenameGroupCategory | InputMode::NewGroupCategory => app.new_group_category.push(c),
                                     InputMode::NewProjectName => app.new_project_name.push(c),
                                     InputMode::NewProjectPath => app.new_project_path.push(c),
                                     InputMode::NewProjectTool => app.new_project_tool.push(c),
@@ -730,7 +1522,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             app.new_track_is_master = !app.new_track_is_master;
                                         }
                                     }
-                                    InputMode::SessionHub => {
+	                                    InputMode::SessionHub => {
                                         match app.hub_focus {
                                             HubFocus::Rename => app.rename_buffer.push(c),
                                             HubFocus::Search => {
@@ -739,20 +1531,31 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             }
                                             _ => {}
                                         }
-                                    }
-                                    InputMode::KillConfirm | InputMode::DeleteConfirm => {
+	                                    }
+	                                    InputMode::MemorySearch => {
+	                                        app.memory_query.push(c);
+	                                    }
+	                                    InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if c == 'y' || c == 'Y' {
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
                                                     let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
-                                                    let _ = manager.kill_session(&id);
-                                                    if app.input_mode == InputMode::DeleteConfirm {
-                                                        let _ = svc.delete_session(&id);
-                                                        app.status_message = "Session deleted".to_string();
-                                                    } else {
-                                                        app.status_message = "Session killed".to_string();
+                                                    match manager.kill_session(&id) {
+                                                        Ok(()) => {
+                                                            if app.input_mode == InputMode::DeleteConfirm {
+                                                                let _ = svc.delete_session(&id);
+                                                                app.status_message = "Session deleted".to_string();
+                                                            } else {
+                                                                app.status_message = "Session killed".to_string();
+                                                            }
+                                                            if let Ok(sessions) = svc.list_sessions() {
+                                                                app.sessions = sessions;
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            app.status_message = format!("Kill failed: {}", e);
+                                                        }
                                                     }
-                                                    if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
                                                 }
                                                 // Group delete logic
                                                 if let Some(path) = app.target_group_path.take() {
@@ -763,6 +1566,8 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 }
                                             }
                                         }
+                                        app.refresh_session_entries();
+                                        app.refresh_dash_session_entries();
                                         app.target_session_id = None;
                                         app.target_group_path = None;
                                         app.input_mode = InputMode::Normal;
@@ -775,6 +1580,18 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             }
                             KeyCode::Tab => {
                                 match app.input_mode {
+                                    InputMode::NewGroupTitle => {
+                                        app.input_mode = InputMode::NewGroupCategory;
+                                    }
+                                    InputMode::NewGroupCategory => {
+                                        app.input_mode = InputMode::NewGroupTitle;
+                                    }
+                                    InputMode::RenameGroup => {
+                                        app.input_mode = InputMode::RenameGroupCategory;
+                                    }
+                                    InputMode::RenameGroupCategory => {
+                                        app.input_mode = InputMode::RenameGroup;
+                                    }
                                     InputMode::SessionHub => {
                                         app.hub_focus = match app.hub_focus {
                                             HubFocus::Rename => HubFocus::Group,
@@ -782,11 +1599,30 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             HubFocus::Search => HubFocus::Rename,
                                         };
                                     }
+                                    InputMode::Normal if app.tab_index == 0 => {
+                                        app.dash_focus = match app.dash_focus {
+                                            DashFocus::Sessions => DashFocus::Mcp,
+                                            DashFocus::Mcp => DashFocus::Tabs,
+                                            DashFocus::Tabs => DashFocus::Sessions,
+                                        };
+                                    }
                                     _ => {}
                                 }
                             }
                             KeyCode::BackTab => {
                                 match app.input_mode {
+                                    InputMode::NewGroupTitle => {
+                                        app.input_mode = InputMode::NewGroupCategory;
+                                    }
+                                    InputMode::NewGroupCategory => {
+                                        app.input_mode = InputMode::NewGroupTitle;
+                                    }
+                                    InputMode::RenameGroup => {
+                                        app.input_mode = InputMode::RenameGroupCategory;
+                                    }
+                                    InputMode::RenameGroupCategory => {
+                                        app.input_mode = InputMode::RenameGroup;
+                                    }
                                     InputMode::SessionHub => {
                                         app.hub_focus = match app.hub_focus {
                                             HubFocus::Rename => HubFocus::Search,
@@ -794,44 +1630,171 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                             HubFocus::Search => HubFocus::Group,
                                         };
                                     }
+                                    InputMode::Normal if app.tab_index == 0 => {
+                                        app.dash_focus = match app.dash_focus {
+                                            DashFocus::Sessions => DashFocus::Tabs,
+                                            DashFocus::Mcp => DashFocus::Sessions,
+                                            DashFocus::Tabs => DashFocus::Mcp,
+                                        };
+                                    }
                                     _ => {}
                                 }
                             }
-                            KeyCode::Down => {
-                                if app.input_mode == InputMode::SessionSwitcher {
-                                    let i = match app.switcher_state.selected() {
-                                        Some(i) => if i >= app.sessions.len().saturating_sub(1) { 0 } else { i + 1 },
-                                        None => 0,
-                                    };
-                                    app.switcher_state.select(Some(i));
-                                } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::StartStop => McpOption::Pause,
-                                        McpOption::Pause => McpOption::Logs,
+	                            KeyCode::Down => {
+	                                if app.input_mode == InputMode::SessionSwitcher {
+	                                    let i = match app.switcher_state.selected() {
+	                                        Some(i) => if i >= app.sessions.len().saturating_sub(1) { 0 } else { i + 1 },
+	                                        None => 0,
+	                                    };
+	                                    app.switcher_state.select(Some(i));
+	                                } else if app.input_mode == InputMode::McpLogs {
+	                                    app.mcp_log_scroll = app.mcp_log_scroll.saturating_add(1);
+	                                } else if app.input_mode == InputMode::SettingsMenu {
+	                                    let len = app.settings_menu_items.len();
+	                                    let i = match app.settings_menu_state.selected() {
+	                                        Some(i) => if i >= len.saturating_sub(1) { 0 } else { i + 1 },
+	                                        None => 0,
+	                                    };
+	                                    app.settings_menu_state.select(Some(i));
+	                                } else if app.input_mode == InputMode::McpMenu {
+	                                    app.mcp_menu_option = match app.mcp_menu_option {
+	                                        McpOption::StartStop => McpOption::Pause,
+	                                        McpOption::Pause => McpOption::Logs,
                                         McpOption::Logs => McpOption::Add,
                                         McpOption::Add => McpOption::Remove,
                                         McpOption::Remove => McpOption::Install,
                                         McpOption::Install => McpOption::StartStop,
                                     };
-                                }
+                                } else if app.preview_focused {
+                                    app.preview_scroll = app.preview_scroll.saturating_add(1);
+                                 } else if app.tab_index == 0 { // Dashboard
+                                     match app.dash_focus {
+                                         DashFocus::Sessions => {
+                                             app.dash_select_next_session();
+                                         }
+                                         DashFocus::Mcp => {
+                                             let i = match app.mcp_state.selected() {
+                                                 Some(i) => if i >= app.mcp_servers.len().saturating_sub(1) { 0 } else { i + 1 },
+                                                 None => 0,
+                                             };
+                                             app.mcp_state.select(Some(i));
+                                         }
+                                         DashFocus::Tabs => {}
+                                     }
+                                 } else if app.tab_index == 2 { // Projects
+                                    if app.preview_focused {
+                                        app.project_explorer_selected = (app.project_explorer_selected + 1) % app.explorer_items.len().max(1);
+                                    } else {
+                                        let i = match app.project_state.selected() {
+                                            Some(i) => if i >= app.projects.len().saturating_sub(1) { 0 } else { i + 1 },
+                                            None => 0,
+                                        };
+                                        app.project_state.select(Some(i));
+                                        app.project_explorer_path = None;
+                                        app.project_explorer_selected = 0;
+                                    }
+	                                 } else if app.tab_index == 1 { // Sessions Tab
+	                                    let i = match app.session_state.selected() {
+	                                        Some(i) => if i >= app.session_entries.len().saturating_sub(1) { 0 } else { i + 1 },
+	                                        None => 0,
+	                                    };
+	                                    app.session_state.select(Some(i));
+	                                } else if app.tab_index == 4 { // Memory
+	                                    let i = match app.memory_state.selected() {
+	                                        Some(i) => {
+	                                            if i >= app.memories.len().saturating_sub(1) {
+	                                                0
+	                                            } else {
+	                                                i + 1
+	                                            }
+	                                        }
+	                                        None => 0,
+	                                    };
+	                                    app.memory_state.select(Some(i));
+	                                } else if app.tab_index == 5 { // Settings
+	                                    app.settings_option = match app.settings_option {
+	                                        SettingsOption::Editor => SettingsOption::Theme,
+	                                        SettingsOption::Theme => SettingsOption::InstallPath,
+	                                        SettingsOption::InstallPath => SettingsOption::Save,
+	                                        SettingsOption::Save => SettingsOption::Editor,
+	                                    };
+	                                }
+                                app.scroll = app.scroll.saturating_add(1);
                             }
-                            KeyCode::Up => {
-                                if app.input_mode == InputMode::SessionSwitcher {
-                                    let i = match app.switcher_state.selected() {
-                                        Some(i) => if i == 0 { app.sessions.len().saturating_sub(1) } else { i - 1 },
-                                        None => 0,
-                                    };
-                                    app.switcher_state.select(Some(i));
-                                } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::StartStop => McpOption::Install,
-                                        McpOption::Pause => McpOption::StartStop,
-                                        McpOption::Logs => McpOption::Pause,
-                                        McpOption::Add => McpOption::Logs,
-                                        McpOption::Remove => McpOption::Add,
-                                        McpOption::Install => McpOption::Remove,
-                                    };
-                                }
+	                            KeyCode::Up => {
+	                                if app.input_mode == InputMode::McpMenu {
+	                                    app.mcp_menu_option = match app.mcp_menu_option {
+	                                        McpOption::StartStop => McpOption::Install,
+	                                        McpOption::Pause => McpOption::StartStop,
+	                                        McpOption::Logs => McpOption::Pause,
+	                                        McpOption::Add => McpOption::Logs,
+	                                        McpOption::Remove => McpOption::Add,
+	                                        McpOption::Install => McpOption::Remove,
+	                                    };
+	                                } else if app.input_mode == InputMode::McpLogs {
+	                                    app.mcp_log_scroll = app.mcp_log_scroll.saturating_sub(1);
+	                                } else if app.input_mode == InputMode::SettingsMenu {
+	                                    let len = app.settings_menu_items.len();
+	                                    let i = match app.settings_menu_state.selected() {
+	                                        Some(i) => if i == 0 { len.saturating_sub(1) } else { i - 1 },
+	                                        None => 0,
+	                                    };
+	                                    app.settings_menu_state.select(Some(i));
+	                                } else if app.preview_focused {
+	                                    app.preview_scroll = app.preview_scroll.saturating_sub(1);
+	                                 } else if app.tab_index == 0 { // Dashboard
+	                                     match app.dash_focus {
+                                         DashFocus::Sessions => {
+                                             app.dash_select_prev_session();
+                                         }
+                                         DashFocus::Mcp => {
+                                             let i = match app.mcp_state.selected() {
+                                                 Some(i) => if i == 0 { app.mcp_servers.len().saturating_sub(1) } else { i - 1 },
+                                                 None => 0,
+                                             };
+                                             app.mcp_state.select(Some(i));
+                                         }
+                                         DashFocus::Tabs => {}
+                                     }
+                                } else if app.tab_index == 2 { // Projects Tab
+                                    if app.preview_focused {
+                                        app.project_explorer_selected = if app.project_explorer_selected == 0 { app.explorer_items.len().saturating_sub(1) } else { app.project_explorer_selected - 1 };
+                                    } else {
+                                        let i = match app.project_state.selected() {
+                                            Some(i) => if i == 0 { app.projects.len().saturating_sub(1) } else { i - 1 },
+                                            None => 0,
+                                        };
+                                        app.project_state.select(Some(i));
+                                        app.project_explorer_path = None;
+                                        app.project_explorer_selected = 0;
+                                    }
+	                                } else if app.tab_index == 1 { // Sessions Tab
+	                                    let i = match app.session_state.selected() {
+	                                        Some(i) => if i == 0 { app.session_entries.len().saturating_sub(1) } else { i - 1 },
+	                                        None => 0,
+	                                    };
+	                                    app.session_state.select(Some(i));
+	                                } else if app.tab_index == 4 { // Memory
+	                                    let i = match app.memory_state.selected() {
+	                                        Some(i) => {
+	                                            if i == 0 {
+	                                                app.memories.len().saturating_sub(1)
+	                                            } else {
+	                                                i - 1
+	                                            }
+	                                        }
+	                                        None => 0,
+	                                    };
+	                                    app.memory_state.select(Some(i));
+	                                } else if app.tab_index == 5 { // Settings
+	                                    app.settings_option = match app.settings_option {
+	                                        SettingsOption::Editor => SettingsOption::Save,
+	                                        SettingsOption::Theme => SettingsOption::Editor,
+	                                        SettingsOption::InstallPath => SettingsOption::Theme,
+	                                        SettingsOption::Save => SettingsOption::InstallPath,
+	                                    };
+	                                }
+                                app.scroll = app.scroll.saturating_sub(1);
                             }
                             _ => {}
                         }
@@ -841,17 +1804,109 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             app.show_help = false;
                         }
                     } else {
-                        match (key.modifiers, key.code) {
-                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
-                                if app.tab_index == 1 {
-                                    app.preview_focused = !app.preview_focused;
-                                    app.status_message = if app.preview_focused { "Preview focused. Scroll with Arrows/PgUp/PgDn." } else { "List focused." }.to_string();
-                                }
-                            }
-                            (_, KeyCode::Char('p')) => {
-                                if app.tab_index == 2 { // Projects
-                                    app.input_mode = InputMode::NewProjectName;
-                                    app.new_project_name.clear();
+	                        match (key.modifiers, key.code) {
+	                            (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
+	                                if app.tab_index == 4 {
+	                                    app.input_mode = InputMode::MemorySearch;
+	                                }
+	                            }
+	                            (KeyModifiers::CONTROL, KeyCode::Char('l')) => {
+	                                if app.tab_index == 4 {
+	                                    app.memory_query.clear();
+	                                    app.refresh_from_service(&service);
+	                                }
+	                            }
+	                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
+	                                if app.tab_index == 1 {
+	                                    app.preview_focused = !app.preview_focused;
+	                                    app.status_message = if app.preview_focused { "Preview focused. Scroll with Arrows/PgUp/PgDn." } else { "List focused." }.to_string();
+	                                }
+	                            }
+	                            (KeyModifiers::ALT, KeyCode::Up) | (KeyModifiers::ALT, KeyCode::Down) => {
+	                                if app.tab_index == 1 {
+	                                    let Some(svc) = service.as_ref() else {
+	                                        app.status_message = "Error: Memory service not available".to_string();
+	                                        continue;
+	                                    };
+
+	                                    let delta: i32 = if matches!(key.code, KeyCode::Up) { -1 } else { 1 };
+	                                    let Some(selected) = app.session_state.selected() else { continue; };
+	                                    let Some(entry) = app.session_entries.get(selected).cloned() else { continue; };
+
+	                                    match entry {
+	                                        SessionEntry::Group(g) => {
+	                                            if g.path == "uncategorized" {
+	                                                app.status_message = "Cannot reorder [Uncategorized]".to_string();
+	                                                continue;
+	                                            }
+
+	                                            let mut paths: Vec<String> =
+	                                                app.groups.iter().map(|gg| gg.path.clone()).collect();
+	                                            let Some(pos) = paths.iter().position(|p| p == &g.path) else {
+	                                                continue;
+	                                            };
+
+	                                            let new_pos = if delta < 0 {
+	                                                pos.checked_sub(1)
+	                                            } else if pos + 1 < paths.len() {
+	                                                Some(pos + 1)
+	                                            } else {
+	                                                None
+	                                            };
+	                                            let Some(new_pos) = new_pos else { continue; };
+
+	                                            paths.swap(pos, new_pos);
+	                                            if svc.reorder_session_groups(&paths).is_ok() {
+	                                                if let Ok(groups) = svc.list_session_groups() {
+	                                                    app.groups = groups;
+	                                                }
+	                                                if let Ok(sessions) = svc.list_sessions() {
+	                                                    app.sessions = sessions;
+	                                                }
+	                                                app.refresh_session_entries();
+	                                                app.refresh_dash_session_entries();
+	                                            }
+	                                        }
+	                                        SessionEntry::Session(s) => {
+	                                            let group_key = s.group_path.clone();
+	                                            let mut ids: Vec<String> = app
+	                                                .sessions
+	                                                .iter()
+	                                                .filter(|ss| ss.group_path == group_key)
+	                                                .map(|ss| ss.session_id.clone())
+	                                                .collect();
+
+	                                            let Some(pos) = ids.iter().position(|id| id == &s.session_id) else {
+	                                                continue;
+	                                            };
+	                                            let new_pos = if delta < 0 {
+	                                                pos.checked_sub(1)
+	                                            } else if pos + 1 < ids.len() {
+	                                                Some(pos + 1)
+	                                            } else {
+	                                                None
+	                                            };
+	                                            let Some(new_pos) = new_pos else { continue; };
+
+	                                            ids.swap(pos, new_pos);
+	                                            if svc
+	                                                .reorder_sessions_in_group(group_key.as_deref(), &ids)
+	                                                .is_ok()
+	                                            {
+	                                                if let Ok(sessions) = svc.list_sessions() {
+	                                                    app.sessions = sessions;
+	                                                }
+	                                                app.refresh_session_entries();
+	                                                app.refresh_dash_session_entries();
+	                                            }
+	                                        }
+	                                    }
+	                                }
+	                            }
+	                            (_, KeyCode::Char('p')) => {
+	                                if app.tab_index == 2 { // Projects
+	                                    app.input_mode = InputMode::NewProjectName;
+	                                    app.new_project_name.clear();
                                     app.new_project_path = std::env::current_dir().unwrap_or_default().to_string_lossy().to_string();
                                     app.new_project_tool.clear();
                                 }
@@ -863,50 +1918,78 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     app.new_track_is_master = true;
                                 }
                             }
-                            (_, KeyCode::Char('q')) => {
-                                if app.project_view_open {
-                                    app.project_view_open = false;
-                                } else {
-                                    app.should_quit = true;
-                                }
-                            }
+                             (KeyModifiers::CONTROL, KeyCode::Char('q')) => {
+                                 // Do nothing, let tmux handle it or avoid accidental TUI quit
+                             }
+                             (_, KeyCode::Char('q')) => {
+                                 if app.project_view_open {
+                                     app.project_view_open = false;
+                                 } else if app.show_help {
+                                     app.show_help = false;
+                                 } else {
+                                     app.should_quit = true;
+                                 }
+                             }
                             (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.should_quit = true,
                             (_, KeyCode::Esc) => {
                                 if app.project_view_open {
                                     app.project_view_open = false;
                                 }
                             }
-                            (_, KeyCode::Char('r')) => {
-                                if app.tab_index == 1 {
-                                    if let Some(i) = app.session_state.selected() {
-                                        match app.session_entries.get(i) {
-                                            Some(SessionEntry::Session(s)) => {
-                                                app.target_session_id = Some(s.session_id.clone());
-                                                app.rename_buffer = s.title.clone();
-                                                app.hub_search_buffer.clear();
-                                                app.input_mode = InputMode::SessionHub;
-                                            }
-                                             Some(SessionEntry::Group(g)) => {
-                                                app.target_group_path = Some(g.path.clone());
-                                                app.rename_buffer = g.name.clone();
-                                                app.new_group_category = g.category.clone().unwrap_or_default();
-                                                app.input_mode = InputMode::RenameGroup;
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                            (_, KeyCode::Char('k')) => {
-                                if app.tab_index == 1 {
-                                    if let Some(i) = app.session_state.selected() {
-                                        if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
-                                            app.target_session_id = Some(s.session_id.clone());
-                                            app.input_mode = InputMode::KillConfirm;
-                                        }
-                                    }
-                                }
-                            }
+	                            (_, KeyCode::Char('r')) => {
+	                                if app.tab_index == 1 {
+	                                    if let Some(i) = app.session_state.selected() {
+	                                        match app.session_entries.get(i) {
+	                                            Some(SessionEntry::Session(s)) => {
+	                                                app.target_session_id = Some(s.session_id.clone());
+	                                                app.rename_buffer = s.title.clone();
+	                                                app.hub_search_buffer.clear();
+	                                                app.input_mode = InputMode::SessionHub;
+	                                            }
+	                                            Some(SessionEntry::Group(g)) => {
+	                                                app.target_group_path = Some(g.path.clone());
+	                                                app.rename_buffer = g.name.clone();
+	                                                app.new_group_category =
+	                                                    g.category.clone().unwrap_or_default();
+	                                                app.input_mode = InputMode::RenameGroup;
+	                                            }
+	                                            _ => {}
+	                                        }
+	                                    }
+	                                } else if app.tab_index == 4 {
+	                                    if let Some(svc) = service.as_ref() {
+	                                        match svc.sync_memories_from_system() {
+	                                            Ok(n) => {
+	                                                app.status_message =
+	                                                    format!("Memory refresh imported {} record(s)", n)
+	                                            }
+	                                            Err(e) => {
+	                                                app.status_message =
+	                                                    format!("Memory refresh failed: {}", e)
+	                                            }
+	                                        }
+	                                        app.refresh_from_service(&service);
+	                                    }
+	                                }
+	                            }
+                             (_, KeyCode::Char('k')) => {
+                                 if app.tab_index == 1 {
+                                     if let Some(i) = app.session_state.selected() {
+                                         if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
+                                             app.target_session_id = Some(s.session_id.clone());
+                                             app.input_mode = InputMode::KillConfirm;
+                                         }
+                                     }
+                                 } else if app.tab_index == 0 && app.dash_focus == DashFocus::Sessions {
+                                     if let Some(session_id) = app
+                                         .dash_selected_session()
+                                         .map(|s| s.session_id.clone())
+                                     {
+                                         app.target_session_id = Some(session_id);
+                                         app.input_mode = InputMode::KillConfirm;
+                                     }
+                                 }
+                             }
                             (_, KeyCode::Char('f')) => {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
@@ -918,44 +2001,86 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
                                 }
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('d')) | (KeyModifiers::ALT, KeyCode::Char('D')) => {
-                                if app.tab_index == 1 {
-                                    if let Some(i) = app.session_state.selected() {
-                                        match &app.session_entries[i] {
-                                            SessionEntry::Session(s) => {
-                                                app.target_session_id = Some(s.session_id.clone());
-                                                app.status_message = format!("Confirm PERMANENT DELETE session '{}'? (y/n)", s.title);
-                                                app.input_mode = InputMode::DeleteConfirm;
-                                            }
-                                            SessionEntry::Group(g) => {
-                                                app.target_group_path = Some(g.path.clone());
-                                                app.status_message = format!("Confirm DELETE group '{}' and all sessions? (y/n)", g.name);
-                                                app.input_mode = InputMode::DeleteConfirm;
-                                            }
-                                        }
-                                    }
-                                } else if app.tab_index == 2 {
+                             (KeyModifiers::ALT, KeyCode::Char('d')) | (KeyModifiers::ALT, KeyCode::Char('D')) | (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                                 if app.tab_index == 1 {
+                                     if let Some(i) = app.session_state.selected() {
+                                         if let Some(entry) = app.session_entries.get(i) {
+                                             match entry {
+                                                 SessionEntry::Session(s) => {
+                                                     app.target_session_id = Some(s.session_id.clone());
+                                                     app.status_message = format!(
+                                                         "Confirm PERMANENT DELETE session '{}'? (y/n)",
+                                                         s.title
+                                                     );
+                                                     app.input_mode = InputMode::DeleteConfirm;
+                                                 }
+                                                 SessionEntry::Group(g) => {
+                                                     app.target_group_path = Some(g.path.clone());
+                                                     app.status_message = format!(
+                                                         "Confirm DELETE group '{}' and all sessions? (y/n)",
+                                                         g.name
+                                                     );
+                                                     app.input_mode = InputMode::DeleteConfirm;
+                                                 }
+                                             }
+                                         }
+                                     }
+                                 } else if app.tab_index == 0 && app.dash_focus == DashFocus::Sessions {
+                                     if let Some((session_id, title)) = app
+                                         .dash_selected_session()
+                                         .map(|s| (s.session_id.clone(), s.title.clone()))
+                                     {
+                                         app.target_session_id = Some(session_id);
+                                         app.status_message = format!(
+                                             "Confirm PERMANENT DELETE session '{}'? (y/n)",
+                                             title
+                                         );
+                                         app.input_mode = InputMode::DeleteConfirm;
+                                     }
+                                 } else if app.tab_index == 2 {
                                     // Project list temporary message 
                                     app.status_message = "Project deletion via TUI coming soon in v2.1".to_string();
                                 }
                             }
                             (_, KeyCode::Tab) => {
-                                app.tab_index = (app.tab_index + 1) % 5;
-                                app.preview_focused = false; // Reset focus when switching tabs
+                                if app.tab_index == 0 {
+                                    match app.dash_focus {
+                                        DashFocus::Sessions => app.dash_focus = DashFocus::Mcp,
+                                        DashFocus::Mcp => app.dash_focus = DashFocus::Tabs,
+                                        DashFocus::Tabs => {
+                                            app.tab_index = 1;
+                                            app.dash_focus = DashFocus::Sessions;
+                                        }
+                                    };
+                                } else {
+                                    app.tab_index = (app.tab_index + 1) % 6;
+                                    app.preview_focused = false;
+                                }
                             }
                             (_, KeyCode::BackTab) => {
-                                app.tab_index = if app.tab_index == 0 { 4 } else { app.tab_index - 1 };
-                                app.preview_focused = false;
+                                if app.tab_index == 0 {
+                                    match app.dash_focus {
+                                        DashFocus::Sessions => {
+                                            app.tab_index = 5;
+                                            app.dash_focus = DashFocus::Sessions;
+                                        }
+                                        DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
+                                        DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
+                                    };
+                                } else {
+                                    app.tab_index = if app.tab_index == 0 { 5 } else { app.tab_index - 1 };
+                                    app.preview_focused = false;
+                                }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('o')) => {
-                                app.tab_index = if app.tab_index == 0 { 4 } else { app.tab_index - 1 };
+                                app.tab_index = if app.tab_index == 0 { 5 } else { app.tab_index - 1 };
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 5;
+                                app.tab_index = (app.tab_index + 1) % 6;
                                 app.preview_focused = false;
                             }
-                            (_, KeyCode::Down) => {
+                             (_, KeyCode::Down) => {
                                 if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
                                         McpOption::StartStop => McpOption::Pause,
@@ -967,13 +2092,21 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     };
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
-                                } else if app.tab_index == 0 { // Dashboard (MCP Pool)
-                                    let i = match app.mcp_state.selected() {
-                                        Some(i) => if i >= app.mcp_servers.len().saturating_sub(1) { 0 } else { i + 1 },
-                                        None => 0,
-                                    };
-                                    app.mcp_state.select(Some(i));
-                                } else if app.tab_index == 2 { // Projects
+                                 } else if app.tab_index == 0 { // Dashboard
+                                     match app.dash_focus {
+                                         DashFocus::Sessions => {
+                                             app.dash_select_next_session();
+                                         }
+                                         DashFocus::Mcp => {
+                                             let i = match app.mcp_state.selected() {
+                                                 Some(i) => if i >= app.mcp_servers.len().saturating_sub(1) { 0 } else { i + 1 },
+                                                 None => 0,
+                                             };
+                                             app.mcp_state.select(Some(i));
+                                         }
+                                         DashFocus::Tabs => {}
+                                     }
+                                 } else if app.tab_index == 2 { // Projects
                                     if app.preview_focused {
                                         app.project_explorer_selected = (app.project_explorer_selected + 1) % app.explorer_items.len().max(1);
                                     } else {
@@ -991,6 +2124,25 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
+                                } else if app.tab_index == 4 { // Memory
+                                    let i = match app.memory_state.selected() {
+                                        Some(i) => {
+                                            if i >= app.memories.len().saturating_sub(1) {
+                                                0
+                                            } else {
+                                                i + 1
+                                            }
+                                        }
+                                        None => 0,
+                                    };
+                                    app.memory_state.select(Some(i));
+                                } else if app.tab_index == 5 { // Settings
+                                    app.settings_option = match app.settings_option {
+                                        SettingsOption::Editor => SettingsOption::Theme,
+                                        SettingsOption::Theme => SettingsOption::InstallPath,
+                                        SettingsOption::InstallPath => SettingsOption::Save,
+                                        SettingsOption::Save => SettingsOption::Editor,
+                                    };
                                 }
                                 app.scroll = app.scroll.saturating_add(1);
                             }
@@ -1007,11 +2159,19 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
                                 } else if app.tab_index == 0 { // Dashboard
-                                    let i = match app.mcp_state.selected() {
-                                        Some(i) => if i == 0 { app.mcp_servers.len().saturating_sub(1) } else { i - 1 },
-                                        None => 0,
-                                    };
-                                    app.mcp_state.select(Some(i));
+                                    match app.dash_focus {
+                                        DashFocus::Sessions => {
+                                            app.dash_select_prev_session();
+                                        }
+                                        DashFocus::Mcp => {
+                                            let i = match app.mcp_state.selected() {
+                                                Some(i) => if i == 0 { app.mcp_servers.len().saturating_sub(1) } else { i - 1 },
+                                                None => 0,
+                                            };
+                                            app.mcp_state.select(Some(i));
+                                        }
+                                         DashFocus::Tabs => {},
+                                    }
                                 } else if app.tab_index == 2 { // Projects Tab
                                     if app.preview_focused {
                                         app.project_explorer_selected = if app.project_explorer_selected == 0 { app.explorer_items.len().saturating_sub(1) } else { app.project_explorer_selected - 1 };
@@ -1024,13 +2184,32 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                         app.project_explorer_path = None;
                                         app.project_explorer_selected = 0;
                                     }
-                                } else if app.tab_index == 1 { // Sessions Tab
-                                    let i = match app.session_state.selected() {
-                                        Some(i) => if i == 0 { app.session_entries.len().saturating_sub(1) } else { i - 1 },
-                                        None => 0,
-                                    };
-                                    app.session_state.select(Some(i));
-                                }
+	                                } else if app.tab_index == 1 { // Sessions Tab
+	                                    let i = match app.session_state.selected() {
+	                                        Some(i) => if i == 0 { app.session_entries.len().saturating_sub(1) } else { i - 1 },
+	                                        None => 0,
+	                                    };
+	                                    app.session_state.select(Some(i));
+	                                } else if app.tab_index == 4 { // Memory
+	                                    let i = match app.memory_state.selected() {
+	                                        Some(i) => {
+	                                            if i == 0 {
+	                                                app.memories.len().saturating_sub(1)
+	                                            } else {
+	                                                i - 1
+	                                            }
+	                                        }
+	                                        None => 0,
+	                                    };
+	                                    app.memory_state.select(Some(i));
+	                                } else if app.tab_index == 5 { // Settings
+	                                    app.settings_option = match app.settings_option {
+	                                        SettingsOption::Editor => SettingsOption::Save,
+	                                        SettingsOption::Theme => SettingsOption::Editor,
+	                                        SettingsOption::InstallPath => SettingsOption::Theme,
+	                                        SettingsOption::Save => SettingsOption::InstallPath,
+	                                    };
+	                                }
                                 app.scroll = app.scroll.saturating_sub(1);
                             }
                             (_, KeyCode::Char('1')) => app.tab_index = 0,
@@ -1048,7 +2227,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                             (_, KeyCode::Char('m')) => {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
-                                        if let SessionEntry::Session(s) = &app.session_entries[i] {
+                                        if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
                                             app.target_session_id = Some(s.session_id.clone());
                                             app.input_mode = InputMode::MoveToGroup;
                                             app.rename_buffer.clear();
@@ -1072,7 +2251,8 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 app.project_explorer_selected = 0;
                                             } else {
                                                 let _ = terminal.clear();
-                                                let _ = std::process::Command::new("hx").arg(new_path).status();
+                                                let editor = &app.config.editor;
+                                                let _ = std::process::Command::new(editor).arg(new_path).status();
                                                 let _ = terminal.clear();
                                             }
                                         }
@@ -1123,23 +2303,79 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
                                 }
                             }
+                            (_, KeyCode::Char('/') | KeyCode::Char('?')) => {
+                                app.show_help = true;
+                            }
                             (_, KeyCode::Char('e')) if app.tab_index == 2 => {
                                 app.preview_focused = !app.preview_focused;
                             }
-                            (_, KeyCode::Enter) => {
-                                if app.tab_index == 2 { // Projects Tab
+                              (_, KeyCode::Enter) => {
+                                  if app.tab_index == 0 { // Dashboard
+                                      match app.dash_focus {
+                                          DashFocus::Sessions => {
+                                              if let Some(s) = app.dash_selected_session().cloned() {
+                                                  app.status_message = format!(
+                                                      "Attaching to '{}'... (Ctrl+B d to detach)",
+                                                      s.title
+                                                  );
+                                                  let _ = terminal.draw(|frame| ui(frame, &mut app));
+                                                  let _ = suspend_fullscreen_app(terminal);
+                                                  let res = TmuxMultiplexer::attach(&s.session_id);
+                                                  let _ = resume_fullscreen_app(terminal);
+                                                  let _ = terminal.clear();
+                                                  app.status_message = match res {
+                                                      Ok(()) => format!("Returned from '{}'", s.title),
+                                                      Err(e) => format!("Attach failed: {}", e),
+                                                  };
+                                              }
+                                          }
+                                          DashFocus::Mcp => {
+                                              if let Some(i) = app.mcp_state.selected() {
+                                                  if let Some(mcp) = app.mcp_servers.get(i) {
+                                                     app.target_mcp_name = Some(mcp.name.clone());
+                                                     app.input_mode = InputMode::McpMenu;
+                                                     app.mcp_menu_option = McpOption::StartStop;
+                                                 }
+                                             }
+                                         }
+                                         DashFocus::Tabs => {}
+                                     }
+	                                 } else if app.tab_index == 5 { // Settings
+	                                    match app.settings_option {
+	                                        SettingsOption::Editor => {
+	                                            app.open_settings_menu(SettingsMenuKind::Editor);
+	                                        }
+	                                        SettingsOption::InstallPath => {
+	                                            app.rename_buffer = app.config.install_path.clone();
+	                                            app.input_mode = InputMode::SettingsInstallPath;
+	                                        }
+	                                        SettingsOption::Theme => {
+	                                            app.open_settings_menu(SettingsMenuKind::Theme);
+	                                        }
+	                                        SettingsOption::Save => {
+	                                            let _ = app.config.save();
+	                                            app.status_message = "Configuration saved to ~/.config/maestro/config.toml".to_string();
+	                                        }
+	                                    }
+	                                } else if app.tab_index == 2 { // Projects Tab
                                     if let Some(i) = app.project_state.selected() {
                                         let project = &app.projects[i].clone();
                                         app.status_message = format!("Launching Zide for {}...", project.name);
                                         let _ = terminal.draw(|frame| ui(frame, &mut app));
-                                        
-                                        match leindex_analyzers::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name) {
-                                            Ok(_) => { 
+
+                                        let _ = suspend_fullscreen_app(terminal);
+                                        let res = leindex_analyzers::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name);
+                                        let _ = resume_fullscreen_app(terminal);
+
+                                        match res {
+                                            Ok(_) => {
                                                 let _ = terminal.clear(); // Ensure screen is clear after Zellij exit
                                                 let _ = terminal.draw(|frame| ui(frame, &mut app));
-                                                app.status_message = format!("Zide launched for {}. Switch to see it.", project.name); 
+                                                app.status_message = format!("Returned from Zide for {}.", project.name);
                                             }
-                                            Err(e) => { app.status_message = format!("Error: {}", e); }
+                                            Err(e) => {
+                                                app.status_message = format!("Error: {}", e);
+                                            }
                                         }
                                     }
                                 } else if app.tab_index == 1 { // Sessions Tab
@@ -1158,9 +2394,14 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                                 SessionEntry::Session(s) => {
                                                     app.status_message = format!("Attaching to '{}'... (Ctrl+B d to detach)", s.title);
                                                     let _ = terminal.draw(|frame| ui(frame, &mut app));
-                                                    let _ = TmuxMultiplexer::attach(&s.session_id);
+                                                    let _ = suspend_fullscreen_app(terminal);
+                                                    let res = TmuxMultiplexer::attach(&s.session_id);
+                                                    let _ = resume_fullscreen_app(terminal);
                                                     let _ = terminal.clear(); // Restore terminal state
-                                                    app.status_message = format!("Returned from '{}'", s.title);
+                                                    app.status_message = match res {
+                                                        Ok(()) => format!("Returned from '{}'", s.title),
+                                                        Err(e) => format!("Attach failed: {}", e),
+                                                    };
                                                 }
                                             }
                                         }
@@ -1194,7 +2435,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
                                 }
                             }
-                            (KeyModifiers::CONTROL, KeyCode::Char('/')) => app.show_help = true,
                             (_, KeyCode::Char('n')) => {
                                 app.input_mode = InputMode::NewSessionTitle;
                                 // Auto-fill path if a project is selected
@@ -1205,25 +2445,21 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('R')) => {
-                                // Manual full refresh
-                                if let Some(svc) = service.as_ref() {
-                                    if let Ok(projects) = svc.list_projects() {
-                                        app.projects = projects.iter().map(|p| ProjectInfo {
-                                            name: p.project_name.clone(),
-                                            path: p.project_path.clone(),
-                                            _track_count: 0,
-                                        }).collect();
-                                    }
-                                    if let Ok(memories) = svc.list_memories(20) {
-                                        app.memories = memories.iter().map(|m| MemoryInfo {
-                                            _id: m.id,
-                                            content: m.content.clone(),
-                                            category: m.category.to_string(),
-                                        }).collect();
-                                    }
-                                }
-                            }
+	                            (_, KeyCode::Char('R')) => {
+	                                // Manual full refresh
+	                                if let Some(svc) = service.as_ref() {
+	                                    let _ = svc.sync_mcp_servers_from_system();
+	                                    let _ = svc.sync_memories_from_system();
+	                                    if let Ok(projects) = svc.list_projects() {
+	                                        app.projects = projects.iter().map(|p| ProjectInfo {
+	                                            name: p.project_name.clone(),
+	                                            path: p.project_path.clone(),
+	                                            _track_count: 0,
+	                                        }).collect();
+	                                    }
+	                                    app.refresh_from_service(&service);
+	                                }
+	                            }
                             _ => {}
                         }
                     }
@@ -1240,6 +2476,12 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, service: Option<MemoryS
 }
 
 fn ui(frame: &mut Frame, app: &mut App) {
+    let theme = app.theme();
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.bg).fg(theme.fg)),
+        frame.area(),
+    );
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -1250,10 +2492,15 @@ fn ui(frame: &mut Frame, app: &mut App) {
         .split(frame.area());
 
     // Header with tabs
-    let tabs = Tabs::new(vec!["Dashboard", "Sessions", "Projects", "Analysis", "Memory"])
-        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" Maestro v2.0 "))
+    let is_focused = app.tab_index == 0 && app.dash_focus == DashFocus::Tabs;
+    let tabs = Tabs::new(vec!["Dashboard", "Sessions", "Projects", "Analysis", "Memory", "Settings"])
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_type(if is_focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if is_focused { Style::default().fg(theme.warning).bold() } else { Style::default().fg(theme.muted) })
+            .title(" Maestro Cockpit v2.0 "))
         .select(app.tab_index)
-        .highlight_style(Style::default().fg(Color::Cyan).bold());
+        .highlight_style(Style::default().fg(theme.accent).bold());
     
     frame.render_widget(tabs, chunks[0]);
 
@@ -1263,6 +2510,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         2 => render_projects(frame, chunks[1], app),
         3 => render_analysis(frame, chunks[1], app),
         4 => render_memory(frame, chunks[1], app),
+        5 => render_settings(frame, app),
         _ => {}
     }
     // Footer
@@ -1303,16 +2551,20 @@ fn ui(frame: &mut Frame, app: &mut App) {
     }
     
     // Only show these modals if they overlay the main tabs appropriately
-    if app.input_mode == InputMode::SessionSwitcher {
-        render_switcher_modal(frame, app);
-    } else if app.input_mode == InputMode::SessionHub {
-        render_session_hub_modal(frame, app);
-    } else if app.input_mode == InputMode::McpMenu {
-        render_mcp_menu(frame, app);
-    } else if matches!(app.input_mode, InputMode::NewProjectName | InputMode::NewProjectPath | InputMode::NewProjectTool) {
-        render_new_project_modal(frame, app);
-    } else if matches!(app.input_mode, InputMode::NewTrackTitle | InputMode::NewTrackType) {
-        render_new_track_modal(frame, app);
+	    if app.input_mode == InputMode::SessionSwitcher {
+	        render_switcher_modal(frame, app);
+	    } else if app.input_mode == InputMode::SessionHub {
+	        render_session_hub_modal(frame, app);
+	    } else if app.input_mode == InputMode::McpMenu {
+	        render_mcp_menu(frame, app);
+	    } else if app.input_mode == InputMode::McpLogs {
+	        render_mcp_logs_modal(frame, app);
+	    } else if app.input_mode == InputMode::SettingsMenu {
+	        render_settings_menu_modal(frame, app);
+	    } else if matches!(app.input_mode, InputMode::NewProjectName | InputMode::NewProjectPath | InputMode::NewProjectTool) {
+	        render_new_project_modal(frame, app);
+	    } else if matches!(app.input_mode, InputMode::NewTrackTitle | InputMode::NewTrackType) {
+	        render_new_track_modal(frame, app);
     } else if matches!(app.input_mode, InputMode::NewGroupTitle | InputMode::NewGroupCategory | InputMode::RenameGroup | InputMode::RenameGroupCategory) {
         render_group_modal(frame, app);
     } else if matches!(app.input_mode, InputMode::ForkSession | InputMode::KillConfirm | InputMode::DeleteConfirm | InputMode::MoveToGroup) {
@@ -1341,11 +2593,17 @@ fn render_action_modal(frame: &mut Frame, app: &App) {
         _ => ("", "", None),
     };
 
+    let theme = app.theme();
+    let title_style = match app.input_mode {
+        InputMode::KillConfirm | InputMode::DeleteConfirm => Style::default().fg(theme.error).bold(),
+        _ => Style::default().fg(theme.warning).bold(),
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .title(title)
-        .title_style(Style::default().fg(Color::Yellow));
+        .title_style(title_style);
 
     let content = if let Some(v) = value {
         format!("{}\n\n> {}", prompt, v)
@@ -1382,6 +2640,7 @@ fn render_spawning_overlay(frame: &mut Frame, app: &App) {
 }
 
 fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -1507,63 +2766,91 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     // Top Right - Recent Sessions
     let session_block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(if app.tab_index == 0 && app.dash_focus == DashFocus::Sessions { BorderType::Double } else { BorderType::Rounded })
         .title(" 🕒 Recent Sessions ")
-        .title_style(Style::default().fg(Color::Blue));
+        .title_style(if app.tab_index == 0 && app.dash_focus == DashFocus::Sessions { Style::default().fg(Color::Blue).bold() } else { Style::default().fg(Color::Blue) });
     
-    let mut session_rows = vec![Line::from("")];
-    if app.sessions.is_empty() {
-        session_rows.push(Line::from("  No active sessions"));
+    let mut session_items = Vec::new();
+    if app.dash_session_entries.is_empty() {
+        session_items.push(ListItem::new("  No active sessions"));
     } else {
-        // Group sessions by group path but display group name
-        let mut grouped: std::collections::BTreeMap<String, Vec<&leindex_analyzers::memory::models::Session>> = std::collections::BTreeMap::new();
-        for s in &app.sessions {
-            let g = s.group_path.as_deref().unwrap_or("uncategorized").to_string();
-            grouped.entry(g).or_default().push(s);
-        }
-        
-        for (group_path, sessions) in grouped {
-            let display_name = if group_path == "uncategorized" {
-                "[Uncategorized]".to_string()
-            } else {
-                app.groups.iter().find(|g| g.path == group_path)
-                    .map(|g| g.name.clone())
-                    .unwrap_or_else(|| group_path.clone())
-            };
+        for entry in &app.dash_session_entries {
+            match entry {
+                DashSessionEntry::GroupHeader { group_path } => {
+                    let group_name = if group_path == "uncategorized" {
+                        "[Uncategorized]".to_string()
+                    } else {
+                        app.groups
+                            .iter()
+                            .find(|g| g.path == *group_path)
+                            .map(|g| g.name.clone())
+                            .unwrap_or_else(|| group_path.to_string())
+                    };
+                    session_items.push(ListItem::new(Line::from(vec![Span::styled(
+                        format!(" 📁 {} ", group_name),
+                        Style::default().fg(Color::Yellow).bold(),
+                    )])));
+                }
+                DashSessionEntry::Session(sess) => {
+                    let status_icon = match sess.status {
+                        leindex_analyzers::memory::models::SessionStatus::Running => {
+                            Span::styled(" ● ", Style::default().fg(Color::Green))
+                        }
+                        leindex_analyzers::memory::models::SessionStatus::Terminated => {
+                            Span::styled(" x ", Style::default().fg(Color::Red))
+                        }
+                        leindex_analyzers::memory::models::SessionStatus::Waiting => {
+                            Span::styled(" ◒ ", Style::default().fg(Color::Yellow))
+                        }
+                        _ => Span::styled(" o ", Style::default().fg(Color::Gray)),
+                    };
 
-            session_rows.push(Line::from(vec![
-                Span::styled(format!("  [{}]", display_name), Style::default().fg(Color::Cyan).bold()),
-            ]));
-            for s in sessions.iter().take(3) {
-                let status_icon = match s.status {
-                    leindex_analyzers::memory::models::SessionStatus::Running => Span::styled("   * ", Style::default().fg(Color::Green)),
-                    leindex_analyzers::memory::models::SessionStatus::Terminated => Span::styled("   x ", Style::default().fg(Color::Red)),
-                    leindex_analyzers::memory::models::SessionStatus::Waiting => Span::styled("   ◒ ", Style::default().fg(Color::Yellow)),
-                    _ => Span::styled("   o ", Style::default().fg(Color::Gray)),
-                };
-                session_rows.push(Line::from(vec![
-                    status_icon,
-                    Span::styled(&s.title, Style::default()),
-                ]));
+                    session_items.push(ListItem::new(Line::from(vec![
+                        Span::raw("   "),
+                        status_icon,
+                        Span::styled(sess.title.clone(), Style::default().bold()),
+                    ])));
+                }
             }
         }
     }
-    let sessions = Paragraph::new(session_rows).block(session_block);
-    frame.render_widget(sessions, right_chunks[0]);
+    let sessions = List::new(session_items)
+        .block(session_block)
+        .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(sessions, right_chunks[0], &mut app.dash_session_state);
 
-    // Bottom Right - MCP Pool
-    let mcp_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .title(" 🕹️ Interactive MCP Pool ")
-        .title_style(Style::default().fg(Color::Cyan).bold())
-        .style(if app.tab_index == 0 { Style::default().fg(Color::Cyan) } else { Style::default() });
-    
-    let mcp_items: Vec<ListItem> = app.mcp_servers.iter().map(|s| {
-        let status_color = if s.status == leindex_analyzers::memory::models::McpStatus::Running { Color::Green } else { Color::Red };
-        ListItem::new(vec![
-            Line::from(vec![
-                Span::styled(format!("  {} ", s.name), Style::default().bold()),
+	    // Bottom Right - MCP Pool
+		    let mcp_block = Block::default()
+		        .borders(Borders::ALL)
+		        .border_type(if app.tab_index == 0 && app.dash_focus == DashFocus::Mcp { BorderType::Double } else { BorderType::Rounded })
+		        .title(" 🕹️ Interactive MCP Pool ")
+		        .title_style(if app.tab_index == 0 && app.dash_focus == DashFocus::Mcp { Style::default().fg(theme.accent).bold() } else { Style::default().fg(theme.accent) });
+
+	    let mcp_chunks = Layout::default()
+	        .direction(Direction::Vertical)
+	        .constraints([Constraint::Length(2), Constraint::Min(0)])
+	        .split(right_chunks[1]);
+
+		    let mcp_info = Paragraph::new(vec![
+		        Line::from(vec![
+		            Span::styled("Tip: ", Style::default().fg(theme.muted)),
+		            Span::styled("Tool Search", Style::default().fg(theme.warning).bold()),
+		            Span::styled(
+		                " is dynamic via `maestro mcp tool-search` (no full tool listing).",
+		                Style::default().fg(theme.muted),
+		            ),
+		        ]),
+		    ])
+	    .block(Block::default())
+	    .wrap(Wrap { trim: true });
+	    frame.render_widget(mcp_info, mcp_chunks[0]);
+
+	    let mcp_items: Vec<ListItem> = app.mcp_servers.iter().map(|s| {
+	        let status_color = if s.status == leindex_analyzers::memory::models::McpStatus::Running { Color::Green } else { Color::Red };
+	        ListItem::new(vec![
+	            Line::from(vec![
+	                Span::styled(format!("  {} ", s.name), Style::default().bold()),
                 Span::styled(format!(" [{}] ", s.status.to_string()), 
                     Style::default().fg(status_color)),
                 Span::styled(format!(" {} active", s.client_count), Style::default().fg(Color::Gray)),
@@ -1571,21 +2858,22 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         ])
     }).collect();
 
-    let mcp_list = List::new(mcp_items)
-        .block(mcp_block)
-        .highlight_style(Style::default().bg(Color::Rgb(30, 30, 50)).fg(Color::White).bold())
-        .highlight_symbol(">> ");
-    frame.render_stateful_widget(mcp_list, right_chunks[1], &mut app.mcp_state);
+		    let mcp_list = List::new(mcp_items)
+		        .block(mcp_block)
+		        .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
+		        .highlight_symbol(">> ");
+		    frame.render_stateful_widget(mcp_list, mcp_chunks[1], &mut app.mcp_state);
 }
 
 fn render_help_modal(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
+    let theme = theme_from_name(&app.config.theme);
     let block = Block::default()
         .title(" Commands Cheat-sheet ")
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(15, 15, 25)));
+        .style(Style::default().bg(theme.panel_bg));
 
     let text = vec![
         Line::from(""),
@@ -1595,20 +2883,24 @@ fn render_help_modal(frame: &mut Frame, app: &App) {
         Line::from(vec![Span::styled("   Ctrl + /      ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Toggle This Modal")]),
         Line::from(vec![Span::styled("   q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),  Span::raw(" Quit Maestro Cockpit")]),
         Line::from(""),
-        Line::from(vec![Span::styled(" DASHBOARD (Tab 1):", Style::default().fg(Color::Yellow).bold())]),
-        Line::from(vec![Span::styled("   s             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" MCP Server Menu (Start/Stop, Add, Remove)")]),
-        Line::from(vec![Span::styled("   x             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Quick Remove MCP Server")]),
+        Line::from(vec![Span::styled("   Dash: k / d   ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Kill / Delete Highlighted Dashboard Session")]),
         Line::from(""),
         Line::from(vec![Span::styled(" SESSIONS (Tab 2):", Style::default().fg(Color::Yellow).bold())]),
         Line::from(vec![Span::styled("   n             ", Style::default().fg(Color::Green).bold()), Span::raw(" New Session Wizard (Title, Path, Tool)")]),
         Line::from(vec![Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Attach to tmux Session")]),
         Line::from(vec![Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Session Hub (Rename, Move, Search history)")]),
         Line::from(vec![Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Focus Preview Pane (for scrolling history)")]),
+        Line::from(vec![Span::styled("   Alt + ↑/↓     ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Reorder group/session (persists to DB)")]),
         Line::from(vec![Span::styled("   m             ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Move Session to Group / Create New Group")]),
         Line::from(vec![Span::styled("   G             ", Style::default().fg(Color::Green).bold()), Span::raw(" Create Standalone Group")]),
         Line::from(vec![Span::styled("   k             ", Style::default().fg(Color::Red).bold()), Span::raw(" Kill tmux Session Process")]),
-        Line::from(vec![Span::styled("   Alt + D       ", Style::default().fg(Color::Red).bold()), Span::raw(" PURMANENT DELETE Session/Group from DB")]),
+        Line::from(vec![Span::styled("   d / Alt + D   ", Style::default().fg(Color::Red).bold()), Span::raw(" PURMANENT DELETE Session/Group from DB")]),
         Line::from(vec![Span::styled("   f             ", Style::default().fg(Color::Magenta).bold()), Span::raw(" Fork Session (Clone state to new session)")]),
+        Line::from(""),
+        Line::from(vec![Span::styled(" MEMORY (Tab 5):", Style::default().fg(Color::Yellow).bold())]),
+        Line::from(vec![Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Search memories (hybrid Tantivy/SQLite)")]),
+        Line::from(vec![Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Clear memory search")]),
+        Line::from(vec![Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Refresh/import system-wide memories")]),
         Line::from(""),
         Line::from(vec![Span::styled(" PROJECTS (Tab 3):", Style::default().fg(Color::Yellow).bold())]),
         Line::from(vec![Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Open Zide (File Picker + Editor)")]),
@@ -1680,6 +2972,7 @@ fn render_session_hub_modal(frame: &mut Frame, app: &App) {
 fn render_mcp_menu(frame: &mut Frame, app: &App) {
     let area = centered_rect(40, 40, frame.area());
     frame.render_widget(Clear, area);
+    let theme = theme_from_name(&app.config.theme);
     
     let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
     let block = Block::default()
@@ -1687,7 +2980,7 @@ fn render_mcp_menu(frame: &mut Frame, app: &App) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(20, 20, 35)));
+        .style(Style::default().bg(theme.panel_bg));
     
     let options = vec![
         (McpOption::StartStop, "▶/■ Start/Stop Server"),
@@ -1713,6 +3006,132 @@ fn render_mcp_menu(frame: &mut Frame, app: &App) {
 
     let list = List::new(list_items).block(block);
     frame.render_widget(list, area);
+}
+
+fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
+    let area = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, area);
+
+    let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
+    let theme = theme_from_name(&app.config.theme);
+    let block = Block::default()
+        .title(format!(" MCP Logs: {} (Esc to close) ", name))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .style(Style::default().bg(theme.panel_bg));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let content = if app.mcp_log_lines.is_empty() {
+        vec![
+            Line::from(""),
+            Line::from("  No logs found."),
+            Line::from(""),
+            Line::from("  Tip: start the server to generate logs."),
+        ]
+    } else {
+        app.mcp_log_lines.iter().map(|l| Line::from(l.as_str())).collect()
+    };
+
+    let para = Paragraph::new(content)
+        .scroll((app.mcp_log_scroll, 0))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, inner);
+}
+
+fn render_settings_menu_modal(frame: &mut Frame, app: &mut App) {
+    let theme = theme_from_name(&app.config.theme);
+    let area = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = match app.settings_menu_kind {
+        Some(SettingsMenuKind::Editor) => " Select Preferred Editor ",
+        Some(SettingsMenuKind::Theme) => " Select Theme ",
+        None => " Select ",
+    };
+
+    let block = Block::default()
+        .title(title)
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .style(Style::default().bg(theme.panel_bg));
+
+    let items: Vec<ListItem> = app
+        .settings_menu_items
+        .iter()
+        .map(|(_, label)| ListItem::new(label.clone()))
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(theme.highlight_bg)
+                .fg(theme.highlight_fg)
+                .bold(),
+        )
+        .highlight_symbol(">> ");
+
+    frame.render_stateful_widget(list, area, &mut app.settings_menu_state);
+}
+
+fn render_settings(frame: &mut Frame, app: &App) {
+    let theme = theme_from_name(&app.config.theme);
+    let area = frame.area();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" ⚙️ SYSTEM SETTINGS ")
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.accent));
+    
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints([
+            Constraint::Length(3), // Editor
+            Constraint::Length(3), // Theme
+            Constraint::Length(3), // Install Path
+            Constraint::Length(3), // Save button
+            Constraint::Min(0),
+        ])
+        .split(inner_area);
+
+    let editor_style = if app.tab_index == 5 && app.settings_option == SettingsOption::Editor { Style::default().fg(theme.warning).bold() } else { Style::default() };
+    let editor = Paragraph::new(app.config.editor.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 📝 PREFERRED EDITOR ").border_style(editor_style));
+    frame.render_widget(editor, chunks[0]);
+
+    let theme_style = if app.tab_index == 5 && app.settings_option == SettingsOption::Theme { Style::default().fg(theme.warning).bold() } else { Style::default() };
+    let theme_name = THEMES
+        .iter()
+        .find(|(id, _)| id.eq_ignore_ascii_case(app.config.theme.as_str()))
+        .map(|(_, label)| *label)
+        .unwrap_or("Custom");
+    let theme_field = Paragraph::new(theme_name)
+        .block(Block::default().borders(Borders::ALL).title(" 🎨 THEME ").border_style(theme_style));
+    frame.render_widget(theme_field, chunks[1]);
+
+    let path_style = if app.tab_index == 5 && app.settings_option == SettingsOption::InstallPath { Style::default().fg(theme.warning).bold() } else { Style::default() };
+    let path = Paragraph::new(app.config.install_path.as_str())
+        .block(Block::default().borders(Borders::ALL).title(" 📁 MAESTRO INSTALL PATH ").border_style(path_style));
+    frame.render_widget(path, chunks[2]);
+
+    let save_style = if app.tab_index == 5 && app.settings_option == SettingsOption::Save { Style::default().bg(theme.success).fg(Color::Black).bold() } else { Style::default().fg(theme.success) };
+    let save = Paragraph::new(" [ SAVE CONFIGURATION ] ")
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL).border_style(save_style));
+    frame.render_widget(save, chunks[3]);
+
+    let help = Paragraph::new("Use ↑/↓ to navigate, Enter to edit selected field. Settings are stored in ~/.config/maestro/config.toml")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(theme.muted));
+    frame.render_widget(help, chunks[4]);
 }
 
 fn render_new_project_modal(frame: &mut Frame, app: &App) {
@@ -1808,7 +3227,7 @@ fn render_group_modal(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title(" 2. CATEGORY (e.g. Work, Personal, Research) ").border_style(cat_style));
     frame.render_widget(cat, chunks[1]);
 
-    let hint = Paragraph::new("Press 'Enter' to confirm step, 'Esc' to cancel\n\nGroups help you organize your coding sessions.")
+    let hint = Paragraph::new("Tab to switch fields, Enter: next/save, Esc to cancel\n\nGroups help you organize your coding sessions.")
         .alignment(Alignment::Center);
     frame.render_widget(hint, chunks[2]);
     frame.render_widget(block, area);
@@ -1902,12 +3321,13 @@ fn render_input_modal(frame: &mut Frame, app: &App) {
 
 fn render_switcher_modal(frame: &mut Frame, app: &mut App) {
     let area = centered_rect(50, 40, frame.area());
+    let theme = app.theme();
     let block = Block::default()
         .title(" Quick Session Switcher ")
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
+        .style(Style::default().bg(theme.panel_bg));
 
     if app.sessions.is_empty() {
         let text = vec![Line::from("  No active sessions.")];
@@ -1928,7 +3348,7 @@ fn render_switcher_modal(frame: &mut Frame, app: &mut App) {
 
         let list = List::new(items)
             .block(block)
-            .highlight_style(Style::default().bg(Color::Rgb(40, 40, 60)).fg(Color::Cyan).bold())
+            .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
             .highlight_symbol(">> ");
         
         frame.render_widget(Clear, area);
@@ -2008,7 +3428,11 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
         if let Some(i) = app.project_state.selected() {
             let project = &app.projects[i];
             let current_path = app.project_explorer_path.clone().unwrap_or_else(|| project.path.clone());
-            let expanded_path = current_path.replace("~", &std::env::var("HOME").unwrap_or_default());
+            let expanded_path = if current_path.starts_with('~') {
+                current_path.replacen('~', &std::env::var("HOME").unwrap_or_default(), 1)
+            } else {
+                current_path.clone()
+            };
 
 
 
@@ -2069,37 +3493,60 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 
-fn render_memory(frame: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
+fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let search_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" 🧠 Memory System ")
-        .title_style(Style::default().fg(Color::Magenta));
+        .title(" 🔎 Memory Search (Ctrl+F, Ctrl+L clear, r refresh) ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let search_text = if app.input_mode == InputMode::MemorySearch {
+        format!("{}█", app.memory_query)
+    } else {
+        app.memory_query.clone()
+    };
+    frame.render_widget(Paragraph::new(search_text).block(search_block), chunks[0]);
+
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" 🧠 Memory Results ")
+        .title_style(Style::default().fg(theme.accent_alt));
 
     if app.memories.is_empty() {
         let text = vec![
             Line::from(""),
             Line::from("  No memories found."),
             Line::from(""),
-            Line::from("  Add memories during your chat session to see them here."),
+            Line::from("  Tip: press 'r' to import system-wide memories."),
         ];
-        let para = Paragraph::new(text).block(block);
-        frame.render_widget(para, area);
-    } else {
-        let items: Vec<ListItem> = app.memories.iter().map(|m| {
-            ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled(format!("[{}] ", m.category), Style::default().fg(Color::Yellow)),
-                    Span::styled(m.content.clone(), Style::default().fg(Color::White)),
-                ]),
-            ])
-        }).collect();
-
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::default().bg(Color::Rgb(40, 40, 60)).fg(Color::White).bold());
-        frame.render_widget(list, area);
+        let para = Paragraph::new(text).block(list_block);
+        frame.render_widget(para, chunks[1]);
+        return;
     }
+
+    let items: Vec<ListItem> = app
+        .memories
+        .iter()
+        .map(|m| {
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("[{}] ", m.category), Style::default().fg(Color::Yellow)),
+                Span::styled(m.content.clone(), Style::default().fg(Color::White)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(list_block)
+        .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(list, chunks[1], &mut app.memory_state);
 }
 
 fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -2112,11 +3559,12 @@ fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
         ])
         .split(area);
 
+    let theme = app.theme();
     let hub_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(" 🚀 Analysis Command Hub ")
-        .title_style(Style::default().fg(Color::Magenta));
+        .title_style(Style::default().fg(theme.accent_alt));
 
     // History View
     let mut history_lines = vec![
@@ -2124,7 +3572,7 @@ fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
             Span::styled(" Maestro Analysis Engine v2.0 READY", Style::default().fg(Color::Green).bold()),
         ]),
         Line::from(vec![
-            Span::styled(" Type 'analyze <path>' to begin. ", Style::default().fg(Color::Gray)),
+            Span::styled(" Type '/phase1 <path>' to begin. ", Style::default().fg(Color::Gray)),
             Span::styled("(Press 'a' to enter Command Hub)", Style::default().fg(Color::DarkGray).italic()),
         ]),
         Line::from(""),
@@ -2132,9 +3580,11 @@ fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let examples = vec![
         Line::from(vec![Span::styled(" EXAMPLES:", Style::default().fg(Color::Yellow).bold())]),
-        Line::from("  $ analyze src/main.rs"),
-        Line::from("  $ scan ."),
-        Line::from("  $ stats --deep"),
+        Line::from("  $ /phase1 . --mode ultra --files 20"),
+        Line::from("  $ /phase2 ."),
+        Line::from("  $ /phase3 . --focus-files 2"),
+        Line::from("  $ /phase4 . --top 10"),
+        Line::from("  $ /phase5 ."),
         Line::from(""),
     ];
     history_lines.extend(examples);
@@ -2397,5 +3847,3 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(preview, chunks[1]);
     }
 }
-
-

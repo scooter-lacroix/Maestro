@@ -37,7 +37,7 @@ impl SessionManager {
         // Construct command if not provided
         let run_cmd = match command {
             Some(c) => Some(c.to_string()),
-            None => Some(self.build_tool_command(tool, project_path)?),
+            None => Some(self.build_tool_command(tool, project_path, &tmux_session.name)?),
         };
 
         // Start the tmux session
@@ -52,6 +52,7 @@ impl SessionManager {
             title: title.to_string(),
             project_path: project_path.to_string(),
             group_path: group_path.map(|s| s.to_string()),
+            sort_order: 0,
             parent_session_id: None,
             command: run_cmd,
             tool: Some(tool.to_string()),
@@ -70,13 +71,15 @@ impl SessionManager {
     }
 
     /// Build the specific command for a tool
-    fn build_tool_command(&self, tool: &str, project_path: &str) -> Result<String> {
+    fn build_tool_command(&self, tool: &str, project_path: &str, session_id: &str) -> Result<String> {
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+        let mcp_config_path = self.write_tool_search_mcp_config(session_id)?;
+        let mcp_config = mcp_config_path.to_string_lossy().to_string();
 
         match tool.to_lowercase().as_str() {
             "claude" => Ok(format!(
-                "export EDITOR={}; cd {} && claude",
-                editor, project_path
+                "export EDITOR={}; cd {} && claude --strict-mcp-config --mcp-config {}",
+                editor, project_path, shell_escape(&mcp_config)
             )),
             "gemini" => Ok(format!(
                 "export EDITOR={}; cd {} && gemini",
@@ -91,7 +94,7 @@ impl SessionManager {
                 editor, project_path
             )),
             "codex" => Ok(format!(
-                "export EDITOR={}; cd {} && codex",
+                "export EDITOR={}; cd {} && codex -c 'mcp_servers={{}}' -c 'mcp_servers.maestro_tool_search.command=\"maestro\"' -c 'mcp_servers.maestro_tool_search.args=[\"mcp\",\"tool-search\"]'",
                 editor, project_path
             )),
             "shell" | _ => {
@@ -99,6 +102,27 @@ impl SessionManager {
                 Ok(format!("export EDITOR={}; cd {}", editor, project_path))
             }
         }
+    }
+
+    fn write_tool_search_mcp_config(&self, session_id: &str) -> Result<std::path::PathBuf> {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "maestro-mcp-config-{}.json",
+            sanitize_filename(session_id)
+        ));
+
+        let config = serde_json::json!({
+            "mcpServers": {
+                "maestro-tool-search": {
+                    "command": "maestro",
+                    "args": ["mcp", "tool-search"],
+                    "type": "stdio"
+                }
+            }
+        });
+
+        std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
+        Ok(path)
     }
 
     /// Attach to an existing session
@@ -157,4 +181,17 @@ impl SessionManager {
 
         Ok(new_session)
     }
+}
+
+fn sanitize_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+fn shell_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", s.replace('\'', "'\"'\"'"))
 }

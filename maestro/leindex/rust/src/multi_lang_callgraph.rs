@@ -528,6 +528,59 @@ impl MultiLangCallGraphAnalyzer {
 
         lines.join("\n")
     }
+
+    /// Convert call graph to ultra-condensed string for maximum token savings
+    pub fn to_ultra_condensed(&self, graph: &MultiLangCallGraph) -> String {
+        let mut lines = Vec::new();
+        let stats = graph.stats();
+
+        lines.push(format!("## CG {} ({})", graph.file_path, graph.language));
+        lines.push(format!(
+            "fn:{} call:{} depth:{}",
+            stats.node_count, stats.edge_count, stats.max_depth
+        ));
+
+        if !graph.entry_points.is_empty() {
+            let eps: Vec<&str> = graph
+                .entry_points
+                .iter()
+                .filter_map(|id| graph.nodes.get(id).map(|n| n.name.as_str()))
+                .take(5)
+                .collect();
+            if !eps.is_empty() {
+                lines.push(format!("ep:{}", eps.join(" ")));
+            }
+        }
+
+        if !graph.edges.is_empty() {
+            let mut shown = 0usize;
+            let mut edges = Vec::new();
+            for edge in &graph.edges {
+                if shown >= 15 {
+                    break;
+                }
+                if let (Some(from), Some(to)) = (graph.nodes.get(&edge.from_id), graph.nodes.get(&edge.to_id)) {
+                    edges.push(format!("{}>{}", from.name, to.name));
+                    shown += 1;
+                }
+            }
+            if !edges.is_empty() {
+                let suffix = if graph.edges.len() > shown {
+                    format!(" +{}", graph.edges.len().saturating_sub(shown))
+                } else {
+                    String::new()
+                };
+                lines.push(format!("e:{}{}", edges.join(" "), suffix));
+            }
+        }
+
+        if !graph.external_calls.is_empty() {
+            let ext: Vec<&str> = graph.external_calls.iter().take(10).map(|s| s.as_str()).collect();
+            lines.push(format!("ext:{}", ext.join(" ")));
+        }
+
+        lines.join("\n")
+    }
 }
 
 impl Default for MultiLangCallGraphAnalyzer {

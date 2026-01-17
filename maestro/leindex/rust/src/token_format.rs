@@ -15,12 +15,27 @@ impl TokenFormatter {
     /// Truncate a string to a maximum length with ellipsis
     pub fn truncate(&self, s: &str, max_len: usize) -> String {
         if s.len() <= max_len {
-            s.to_string()
-        } else if max_len > 3 {
-            format!("{}...", &s[..max_len - 3])
-        } else {
-            s[..max_len].to_string()
+            return s.to_string();
         }
+        if max_len == 0 {
+            return String::new();
+        }
+
+        let (target, suffix) = if max_len > 3 {
+            (max_len - 3, "...")
+        } else {
+            (max_len, "")
+        };
+
+        let mut out = String::with_capacity(max_len);
+        for ch in s.chars() {
+            if out.len() + ch.len_utf8() > target {
+                break;
+            }
+            out.push(ch);
+        }
+        out.push_str(suffix);
+        out
     }
 
     /// Condense/abbreviate a type annotation

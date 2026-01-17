@@ -89,12 +89,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     title TEXT NOT NULL,
     project_path TEXT NOT NULL,
     group_path TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     parent_session_id TEXT,
     command TEXT,
     tool TEXT,
     status TEXT NOT NULL DEFAULT 'idle',
     multiplexer_session TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
     last_accessed_at TEXT,
     ended_at TEXT,
     meta_data TEXT  -- JSON
@@ -118,15 +120,20 @@ CREATE INDEX IF NOT EXISTS idx_groups_path ON session_groups(path);
 CREATE TABLE IF NOT EXISTS mcp_servers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    transport TEXT NOT NULL DEFAULT 'stdio',
     command TEXT NOT NULL,
     args TEXT,  -- JSON array
     env TEXT,   -- JSON object
+    cwd TEXT,
+    url TEXT,
+    headers TEXT, -- JSON object
     status TEXT NOT NULL DEFAULT 'stopped',
     socket_path TEXT,
     client_count INTEGER DEFAULT 0,
     last_started_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_status ON mcp_servers(status);
+CREATE INDEX IF NOT EXISTS idx_mcp_transport ON mcp_servers(transport);
 
 -- Agent Namespaces
 CREATE TABLE IF NOT EXISTS agent_namespaces (
@@ -199,6 +206,29 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "004_group_categorization",
         r#"
         ALTER TABLE session_groups ADD COLUMN category TEXT;
+    "#,
+    ),
+    (
+        "005_mcp_transport",
+        r#"
+        ALTER TABLE mcp_servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'stdio';
+        ALTER TABLE mcp_servers ADD COLUMN url TEXT;
+        ALTER TABLE mcp_servers ADD COLUMN headers TEXT;
+        CREATE INDEX IF NOT EXISTS idx_mcp_transport ON mcp_servers(transport);
+    "#,
+    ),
+    (
+        "006_mcp_cwd",
+        r#"
+        ALTER TABLE mcp_servers ADD COLUMN cwd TEXT;
+    "#,
+    ),
+    (
+        "007_sessions_sort_order",
+        r#"
+        ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE sessions ADD COLUMN updated_at TEXT;
+        CREATE INDEX IF NOT EXISTS idx_sessions_group_sort ON sessions(group_path, sort_order);
     "#,
     ),
 ];

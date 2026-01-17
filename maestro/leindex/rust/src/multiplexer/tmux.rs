@@ -344,7 +344,7 @@ impl TmuxMultiplexer {
         // using a more reliable sequence or just binding C-q if user prefers.
         // User asked for ctrl+shift+q. We'll try to bind it as C-S-q.
         let _ = Command::new("tmux")
-            .args(["bind-key", "-n", "C-S-q", "detach-client"])
+            .args(["bind-key", "-n", "C-q", "detach-client"])
             .output();
 
         // Enable passthrough for modern terminal features (tmux 3.2+)

@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryCategory {
+    General,
+    Knowledge,
+    Preference,
+    Specification,
     Fact,
     Pattern,
     Decision,
@@ -27,6 +31,10 @@ impl Default for MemoryCategory {
 impl std::fmt::Display for MemoryCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::General => write!(f, "general"),
+            Self::Knowledge => write!(f, "knowledge"),
+            Self::Preference => write!(f, "preferences"),
+            Self::Specification => write!(f, "specifications"),
             Self::Fact => write!(f, "fact"),
             Self::Pattern => write!(f, "pattern"),
             Self::Decision => write!(f, "decision"),
@@ -207,6 +215,8 @@ pub struct Session {
     pub title: String,
     pub project_path: String,
     pub group_path: Option<String>,
+    /// Stable ordering within a group (lower first). Falls back to recency when unset.
+    pub sort_order: i32,
     pub parent_session_id: Option<String>,
     pub command: Option<String>,
     pub tool: Option<String>,
@@ -269,13 +279,40 @@ pub struct SessionGroup {
 pub struct McpServer {
     pub id: i64,
     pub name: String,
+    #[serde(default)]
+    pub transport: McpTransport,
     pub command: String,
     pub args: Vec<String>,
     pub env: serde_json::Value,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub headers: Option<serde_json::Value>,
     pub status: McpStatus,
     pub socket_path: Option<String>,
     pub client_count: i32,
     pub last_started_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransport {
+    Stdio,
+    Http,
+}
+
+impl Default for McpTransport {
+    fn default() -> Self {
+        Self::Stdio
+    }
+}
+
+impl std::fmt::Display for McpTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stdio => write!(f, "stdio"),
+            Self::Http => write!(f, "http"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

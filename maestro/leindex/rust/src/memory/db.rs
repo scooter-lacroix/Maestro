@@ -16,6 +16,7 @@ use super::schema::CREATE_TABLES_SQL;
 pub struct DatabaseManager {
     db_path: PathBuf,
     connection: Arc<Mutex<Connection>>,
+    read_only: bool,
     /// Cache for prepared statement results
     cache: DashMap<String, serde_json::Value>,
 }
@@ -37,32 +38,83 @@ impl DatabaseManager {
 
         info!("Opening database: {}", path.display());
 
-        let conn = Connection::open(&path).context("Failed to open database")?;
+        let mut conn = match Connection::open(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                // Graceful degradation: allow read-only mode when the DB is not writable.
+                // This keeps the TUI usable (at least for reads) instead of failing hard.
+                info!(
+                    "Database open failed ({}). Falling back to read-only mode: {}",
+                    e,
+                    path.display()
+                );
+                Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .context("Failed to open database (read-only fallback)")?
+            }
+        };
 
-        // Enable WAL mode and Foreign Keys for better concurrent performance and integrity
-        conn.execute_batch(
-            "
+        let mut read_only = false;
+
+        // Enable WAL mode and Foreign Keys for better concurrent performance and integrity.
+        // If the sandbox/filesystem prevents writes, fall back to read-only mode.
+        let pragmas = "
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
             PRAGMA cache_size=10000;
             PRAGMA foreign_keys=ON;
             PRAGMA busy_timeout=5000;
-        ",
-        )
-        .context("Failed to set pragmas")?;
+        ";
+
+        if let Err(e) = conn.execute_batch(pragmas) {
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("readonly")
+                || msg.contains("read-only")
+                || msg.contains("sqlite_readonly")
+            {
+                info!(
+                    "Database pragmas require write access; using read-only mode: {} ({})",
+                    path.display(),
+                    e
+                );
+                conn =
+                    Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .context("Failed to reopen database (read-only after pragma failure)")?;
+                read_only = true;
+                let _ = conn.execute_batch(
+                    "
+                    PRAGMA query_only=ON;
+                    PRAGMA foreign_keys=ON;
+                    PRAGMA busy_timeout=5000;
+                ",
+                );
+            } else {
+                return Err(e).context("Failed to set pragmas");
+            }
+        }
 
         Ok(Self {
             db_path: path,
             connection: Arc::new(Mutex::new(conn)),
+            read_only,
             cache: DashMap::new(),
         })
     }
 
     /// Initialize database schema
     pub fn initialize(&self) -> Result<()> {
+        if self.read_only {
+            info!(
+                "Database is read-only; skipping schema initialization: {}",
+                self.db_path.display()
+            );
+            return Ok(());
+        }
+
         let mut conn = self.connection.lock().unwrap();
-        conn.execute_batch(CREATE_TABLES_SQL)
-            .context("Failed to create tables")?;
+        // Use lenient execution for the initial schema as well, so that indices
+        // referencing missing columns (to be added by migrations) don't block startup.
+        Self::execute_batch_lenient(&conn, CREATE_TABLES_SQL)
+            .context("Failed to initialize base tables")?;
 
         // Run migrations
         self.run_migrations(&mut conn)?;
@@ -88,12 +140,46 @@ impl DatabaseManager {
 
             if !exists {
                 info!("Running migration: {}", version);
-                conn.execute_batch(sql)
-                    .context(format!("Failed to run migration {}", version))?;
+                match *version {
+                    // These migrations include ALTER TABLE statements that can fail on fresh DBs
+                    // (because CREATE_TABLES_SQL already has the latest schema). Run them
+                    // statement-by-statement and ignore duplicate-column errors so migrations are
+                    // idempotent across schema versions.
+                    "002_add_indexes"
+                    | "003_tui_consolidation"
+                    | "004_group_categorization"
+                    | "005_mcp_transport"
+                    | "006_mcp_cwd"
+                    | "007_sessions_sort_order" => Self::execute_batch_lenient(conn, sql)
+                        .context(format!("Failed to run migration {}", version))?,
+                    _ => conn
+                        .execute_batch(sql)
+                        .context(format!("Failed to run migration {}", version))?,
+                }
                 conn.execute(
                     "INSERT INTO schema_migrations (version) VALUES (?)",
                     [version],
                 )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn is_duplicate_column_error(err: &rusqlite::Error) -> bool {
+        let msg = err.to_string().to_lowercase();
+        msg.contains("duplicate column name") || msg.contains("no such column")
+    }
+
+    fn execute_batch_lenient(conn: &Connection, sql: &str) -> Result<()> {
+        for stmt in sql.split(';') {
+            let stmt = stmt.trim();
+            if stmt.is_empty() {
+                continue;
+            }
+            match conn.execute_batch(stmt) {
+                Ok(()) => {}
+                Err(e) if Self::is_duplicate_column_error(&e) => {}
+                Err(e) => return Err(e).context("SQL statement failed"),
             }
         }
         Ok(())
@@ -118,6 +204,9 @@ impl DatabaseManager {
     where
         F: FnOnce(&mut Connection) -> Result<T>,
     {
+        if self.read_only {
+            anyhow::bail!("Database is read-only: {}", self.db_path.display());
+        }
         let mut conn = self.connection.lock().unwrap();
         f(&mut conn)
     }

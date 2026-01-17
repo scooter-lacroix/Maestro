@@ -315,6 +315,32 @@ impl MultiLangCFGAnalyzer {
 
         lines.join("\n")
     }
+
+    /// Convert to ultra-condensed string for maximum token savings
+    pub fn to_ultra_condensed(&self, result: &MultiLangCFGResult) -> String {
+        let mut lines = Vec::new();
+
+        lines.push(format!("## CFG {} ({})", result.file_path, result.language));
+        lines.push(format!(
+            "fn:{} avg:{:.1} max:{}",
+            result.function_metrics.len(),
+            result.average_complexity,
+            result.max_complexity
+        ));
+
+        if !result.function_metrics.is_empty() {
+            let mut metrics = result.function_metrics.clone();
+            metrics.sort_by(|a, b| b.cyclomatic_complexity.cmp(&a.cyclomatic_complexity));
+            let top: Vec<String> = metrics
+                .iter()
+                .take(10)
+                .map(|m| format!("{}(cc{}@L{})", m.function_name, m.cyclomatic_complexity, m.line))
+                .collect();
+            lines.push(format!("hot:{}", top.join(" ")));
+        }
+
+        lines.join("\n")
+    }
 }
 
 impl Default for MultiLangCFGAnalyzer {

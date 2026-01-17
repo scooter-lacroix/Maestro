@@ -80,7 +80,7 @@ impl LegacyMigrator {
         }
 
         // 2. Migrate Sessions
-        for inst in data.instances {
+        for (idx, inst) in data.instances.into_iter().enumerate() {
             // Map Go status to Rust SessionStatus
             let status = match inst.status.as_str() {
                 "running" => SessionStatus::Running,
@@ -97,6 +97,7 @@ impl LegacyMigrator {
                 title: inst.title,
                 project_path: inst.project_path,
                 group_path: Some(inst.group_path),
+                sort_order: idx as i32,
                 parent_session_id: inst.parent_session_id,
                 command: Some(inst.command),
                 tool: Some(inst.tool),

@@ -81,7 +81,7 @@ done
 picker=${picker:-${ZIDE_FILE_PICKER:-"yazi"}}
 working_dir=${1}
 
-if ! command -v ${picker} &> /dev/null; then
+if ! command -v "${picker}" &> /dev/null; then
   echo "Error: '${picker}' is not installed or not in your PATH." >&2
   exit 1
 fi
@@ -97,4 +97,4 @@ if [[ "${picker}" == "lf" && "${ZIDE_USE_LF_CONFIG}" != "false" ]]; then
   envs="${envs} LF_CONFIG_HOME=${lfConfigDir}"
 fi
 
-env -S "${envs}" ${picker} ${working_dir}
+env -S "${envs}" "${picker}" "${working_dir}"

@@ -1451,7 +1451,7 @@ body.theme-midnight .tabs-close-btn:hover {
 .tabs-content.data-display-detailed .track-detail-item {
   padding: 16px !important;
   font-size: 14px !important;
-  show-all-metadata: true;
+  /* show-all-metadata: true */
 }
 
 .tabs-content.data-display-detailed .memory-detail-content,

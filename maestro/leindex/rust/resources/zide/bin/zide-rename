@@ -36,7 +36,7 @@ done
 name="${1:-${ZIDE_TAB_NAME}}"
 # Default session/tab name to the basename of the provided dir if -N flag set
 if [[ "${name}" == "__basename__" ]]; then
-  name="$(basename $(pwd))"
+  name="$(basename "$(pwd)")"
 fi
 
 if [[ -n "${name}" ]]; then

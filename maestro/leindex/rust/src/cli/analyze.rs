@@ -91,6 +91,7 @@ fn run_callgraph_analysis(source: &str, path: &str, lang: ProgrammingLanguage, f
 
     match format {
         "json" => println!("{}", serde_json::to_string_pretty(&graph).unwrap_or_default()),
+        "ultra" => println!("{}", analyzer.to_ultra_condensed(&graph)),
         _ => println!("{}", analyzer.to_llm_string(&graph)),
     }
 }
@@ -101,6 +102,7 @@ fn run_cfg_analysis(source: &str, path: &str, lang: ProgrammingLanguage, format:
 
     match format {
         "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+        "ultra" => println!("{}", analyzer.to_ultra_condensed(&result)),
         _ => println!("{}", analyzer.to_llm_string(&result)),
     }
 }

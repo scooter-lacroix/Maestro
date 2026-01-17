@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{params, Connection, OpenFlags};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -13,12 +13,13 @@ use tracing::{info, warn};
 use super::db::DatabaseManager;
 use super::models::*;
 use super::scanner::Scanner;
+use super::mcp_discovery;
 
 #[derive(Clone)]
 pub struct MemoryService {
     db: DatabaseManager,
     scanner: Scanner,
-    search_index: Arc<super::search::MemorySearchIndex>,
+    search_index: Option<Arc<super::search::MemorySearchIndex>>,
 }
 
 impl MemoryService {
@@ -26,7 +27,16 @@ impl MemoryService {
     pub fn new(db_path: Option<PathBuf>) -> Result<Self> {
         let db = DatabaseManager::new(db_path.clone())?;
         let search_path = db_path.map(|p| p.parent().unwrap().join("search_index"));
-        let search_index = Arc::new(super::search::MemorySearchIndex::new(search_path)?);
+        let search_index = match super::search::MemorySearchIndex::new(search_path) {
+            Ok(idx) => Some(Arc::new(idx)),
+            Err(e) => {
+                warn!(
+                    "MemorySearchIndex unavailable ({}). Continuing without full-text index.",
+                    e
+                );
+                None
+            }
+        };
 
         Ok(Self {
             db,
@@ -43,6 +53,10 @@ impl MemoryService {
         if let Err(e) = super::migration::LegacyMigrator::migrate(self) {
             warn!("Legacy migration failed: {}", e);
         }
+
+        // System-wide discovery hooks (best-effort).
+        let _ = self.sync_mcp_servers_from_system();
+        let _ = self.sync_memories_from_system();
 
         Ok(())
     }
@@ -282,12 +296,11 @@ impl MemoryService {
             Ok(conn.last_insert_rowid())
         })?;
 
-        // Index in Tantivy
-        if let Err(e) = self
-            .search_index
-            .index_memory(id, content, &category.to_string(), None)
-        {
-            warn!("Failed to index memory in Tantivy: {}", e);
+        // Index in Tantivy (best-effort)
+        if let Some(ref idx) = self.search_index {
+            if let Err(e) = idx.index_memory(id, content, &category.to_string(), None) {
+                warn!("Failed to index memory in Tantivy: {}", e);
+            }
         }
 
         Ok(id)
@@ -296,13 +309,16 @@ impl MemoryService {
     /// Search memories by content (Hybrid Search)
     pub fn search_memories(&self, query: &str, limit: usize) -> Result<Vec<Memory>> {
         // Try Tantivy search for ranked full-text
-        let ids = match self.search_index.search(query, limit) {
-            Ok(ids) if !ids.is_empty() => Some(ids),
-            Ok(_) => None,
-            Err(e) => {
-                warn!("Search index error: {}. Falling back to SQLite.", e);
-                None
-            }
+        let ids = match self.search_index.as_ref() {
+            Some(idx) => match idx.search(query, limit) {
+                Ok(ids) if !ids.is_empty() => Some(ids),
+                Ok(_) => None,
+                Err(e) => {
+                    warn!("Search index error: {}. Falling back to SQLite.", e);
+                    None
+                }
+            },
+            None => None,
         };
 
         self.db.with_connection(|conn| {
@@ -423,6 +439,202 @@ impl MemoryService {
     }
 
     // ========================================================================
+    // System-wide memory discovery
+    // ========================================================================
+
+    /// Import memories from other Maestro/Nexus memory databases on the system.
+    ///
+    /// This makes "system-wide" memories visible in the Maestro TUI memory pane,
+    /// even if they were created by other components/tools.
+    pub fn sync_memories_from_system(&self) -> Result<usize> {
+        let Some(home) = dirs::home_dir() else {
+            return Ok(0);
+        };
+
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        candidates.push(home.join(".maestro/memory.db"));
+
+        // Add a few recent backups (if any) as additional discovery sources.
+        let backups_dir = home.join(".maestro/backups");
+        if let Ok(entries) = std::fs::read_dir(backups_dir) {
+            let mut dbs: Vec<_> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("db"))
+                .collect();
+            dbs.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+            dbs.reverse();
+            dbs.truncate(5);
+            candidates.extend(dbs);
+        }
+
+        let current_db = self.db.path().to_path_buf();
+        let mut imported = 0usize;
+
+        for path in candidates {
+            if !path.exists() {
+                continue;
+            }
+            if path == current_db {
+                continue;
+            }
+
+            let conn = match Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let has_memories: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+            if !has_memories {
+                continue;
+            }
+
+            let mut stmt = match conn.prepare(
+                "SELECT content, summary, category, importance, source, session_id, project_id, track_id,
+                        command, command_context, created_at, expires_at, last_accessed, meta_data, tags
+                 FROM memories",
+            ) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,                 // content
+                    row.get::<_, Option<String>>(1)?,         // summary
+                    row.get::<_, String>(2)?,                 // category
+                    row.get::<_, String>(3)?,                 // importance
+                    row.get::<_, Option<String>>(4)?,         // source
+                    row.get::<_, Option<String>>(5)?,         // session_id
+                    row.get::<_, Option<i64>>(6)?,            // project_id
+                    row.get::<_, Option<i64>>(7)?,            // track_id
+                    row.get::<_, Option<String>>(8)?,         // command
+                    row.get::<_, Option<String>>(9)?,         // command_context
+                    row.get::<_, String>(10)?,                // created_at
+                    row.get::<_, Option<String>>(11)?,        // expires_at
+                    row.get::<_, Option<String>>(12)?,        // last_accessed
+                    row.get::<_, Option<String>>(13)?,        // meta_data
+                    row.get::<_, Option<String>>(14)?,        // tags
+                ))
+            })?;
+
+            for row in rows.flatten() {
+                let (content, summary, category, importance, source, session_id, project_id, track_id, command, command_context, created_at, expires_at, last_accessed, meta_data, tags) =
+                    row;
+
+                // De-dupe: same content + created_at is considered the same memory across stores.
+                let exists = self
+                    .db
+                    .with_connection(|c| {
+                        Ok(c.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM memories WHERE content = ? AND created_at = ?)",
+                            params![&content, &created_at],
+                            |r| r.get::<_, i32>(0),
+                        )?)
+                    })
+                    .unwrap_or(0)
+                    == 1;
+                if exists {
+                    continue;
+                }
+
+                // Tag imports to aid debugging/auditing.
+                let import_source = source.unwrap_or_else(|| format!("import:{}", path.display()));
+
+                let _ = self.db.with_connection(|c| {
+                    c.execute(
+                        "INSERT INTO memories (
+                            content, summary, category, importance, source, session_id,
+                            project_id, track_id, command, command_context,
+                            created_at, expires_at, last_accessed, meta_data, tags
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        params![
+                            content,
+                            summary,
+                            category,
+                            importance,
+                            import_source,
+                            session_id,
+                            project_id,
+                            track_id,
+                            command,
+                            command_context,
+                            created_at,
+                            expires_at,
+                            last_accessed,
+                            meta_data,
+                            tags,
+                        ],
+                    )?;
+                    Ok(())
+                });
+
+                imported += 1;
+            }
+        }
+
+        Ok(imported)
+    }
+
+    // ========================================================================
+    // System-wide MCP discovery
+    // ========================================================================
+
+    /// Discover MCP servers across common tool configs and upsert them into the Maestro pool.
+    pub fn sync_mcp_servers_from_system(&self) -> Result<usize> {
+        let mut discovered = mcp_discovery::discover_system_mcp_servers();
+
+        // Also pick up project-scoped `.mcp.json` files for projects already registered in Maestro.
+        if let Ok(projects) = self.list_projects() {
+            for p in projects {
+                let base = std::path::PathBuf::from(&p.project_path);
+                for file in [base.join(".mcp.json"), base.join("mcp.json")] {
+                    if !file.exists() {
+                        continue;
+                    }
+                    if let Ok(mut extra) = mcp_discovery::discover_from_json_file("project_mcp", &file) {
+                        discovered.append(&mut extra);
+                    }
+                }
+            }
+        }
+
+        // De-dupe by server name (first win).
+        let mut seen = std::collections::HashSet::<String>::new();
+        discovered.retain(|s| seen.insert(s.name.clone()));
+        let mut upserted = 0usize;
+
+        for s in discovered {
+            let server = McpServer {
+                id: 0,
+                name: s.name,
+                transport: s.transport,
+                command: s.command,
+                args: s.args,
+                env: s.env,
+                cwd: s.cwd,
+                url: s.url,
+                headers: s.headers,
+                status: McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            };
+            if self.update_mcp_server(server).is_ok() {
+                upserted += 1;
+            }
+        }
+
+        Ok(upserted)
+    }
+
+    // ========================================================================
     // Session & Group Operations
     // ========================================================================
 
@@ -431,15 +643,16 @@ impl MemoryService {
         self.db.with_connection(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO sessions (
-                    session_id, title, project_path, group_path, parent_session_id,
+                    session_id, title, project_path, group_path, sort_order, parent_session_id,
                     command, tool, status, multiplexer_session, started_at,
                     last_accessed_at, ended_at, meta_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     session.session_id,
                     session.title,
                     session.project_path,
                     session.group_path,
+                    session.sort_order,
                     session.parent_session_id,
                     session.command,
                     session.tool,
@@ -554,10 +767,16 @@ impl MemoryService {
     pub fn list_sessions(&self) -> Result<Vec<Session>> {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, session_id, title, project_path, group_path, parent_session_id,
+                "SELECT id, session_id, title, project_path, group_path, sort_order, parent_session_id,
                         command, tool, status, multiplexer_session, started_at,
                         last_accessed_at, ended_at, meta_data
-                 FROM sessions ORDER BY last_accessed_at DESC, started_at DESC",
+                 FROM sessions
+                 ORDER BY
+                    (group_path IS NULL) ASC,
+                    group_path ASC,
+                    sort_order ASC,
+                    last_accessed_at DESC,
+                    started_at DESC",
             )?;
 
             let sessions = stmt
@@ -568,16 +787,17 @@ impl MemoryService {
                         title: row.get(2)?,
                         project_path: row.get(3)?,
                         group_path: row.get(4)?,
-                        parent_session_id: row.get(5)?,
-                        command: row.get(6)?,
-                        tool: row.get(7)?,
-                        status: parse_session_status(row.get(8)?),
-                        multiplexer_session: row.get(9)?,
-                        started_at: parse_datetime(row.get(10)?),
-                        last_accessed_at: row.get::<_, Option<String>>(11)?.map(parse_datetime),
-                        ended_at: row.get::<_, Option<String>>(12)?.map(parse_datetime),
+                        sort_order: row.get(5)?,
+                        parent_session_id: row.get(6)?,
+                        command: row.get(7)?,
+                        tool: row.get(8)?,
+                        status: parse_session_status(row.get(9)?),
+                        multiplexer_session: row.get(10)?,
+                        started_at: parse_datetime(row.get(11)?),
+                        last_accessed_at: row.get::<_, Option<String>>(12)?.map(parse_datetime),
+                        ended_at: row.get::<_, Option<String>>(13)?.map(parse_datetime),
                         metadata: row
-                            .get::<_, Option<String>>(13)?
+                            .get::<_, Option<String>>(14)?
                             .and_then(|s| serde_json::from_str(&s).ok()),
                     })
                 })?
@@ -613,6 +833,35 @@ impl MemoryService {
 
             Ok(groups)
         })
+    }
+
+    /// Update a session group's name and path, updating associated sessions
+    pub fn rename_group(&self, old_path: &str, new_name: &str) -> Result<String> {
+        let new_path = format!("/{}", new_name.to_lowercase().replace(' ', "_"));
+
+        self.db.with_connection(|conn| {
+            let tx = conn.unchecked_transaction()?;
+
+            // Update the group itself
+            let updated = tx.execute(
+                "UPDATE session_groups SET name = ?, path = ? WHERE path = ?",
+                params![new_name, new_path, old_path],
+            )?;
+            if updated == 0 {
+                return Err(anyhow::anyhow!("Group not found: {}", old_path));
+            }
+
+            // Update all sessions that were in this group
+            tx.execute(
+                "UPDATE sessions SET group_path = ? WHERE group_path = ?",
+                params![new_path, old_path],
+            )?;
+
+            tx.commit()?;
+            Ok(new_path.clone())
+        })?;
+
+        Ok(new_path)
     }
 
     /// Update a session group's name
@@ -659,6 +908,55 @@ impl MemoryService {
         })
     }
 
+    /// Persist a full ordering of session groups (by `path`) into `sort_order`.
+    ///
+    /// The caller should provide the desired order. Any paths not present are left unchanged.
+    pub fn reorder_session_groups(&self, ordered_group_paths: &[String]) -> Result<()> {
+        self.db.with_connection(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            for (idx, path) in ordered_group_paths.iter().enumerate() {
+                tx.execute(
+                    "UPDATE session_groups SET sort_order = ? WHERE path = ?",
+                    params![idx as i32, path],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Persist a full ordering of sessions within a single group into `sort_order`.
+    ///
+    /// `group_path=None` targets uncategorized sessions (`group_path IS NULL`).
+    /// The caller should provide the desired order. Any session IDs not present are left unchanged.
+    pub fn reorder_sessions_in_group(
+        &self,
+        group_path: Option<&str>,
+        ordered_session_ids: &[String],
+    ) -> Result<()> {
+        self.db.with_connection(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            for (idx, session_id) in ordered_session_ids.iter().enumerate() {
+                match group_path {
+                    Some(path) => {
+                        tx.execute(
+                            "UPDATE sessions SET sort_order = ? WHERE session_id = ? AND group_path = ?",
+                            params![idx as i32, session_id, path],
+                        )?;
+                    }
+                    None => {
+                        tx.execute(
+                            "UPDATE sessions SET sort_order = ? WHERE session_id = ? AND group_path IS NULL",
+                            params![idx as i32, session_id],
+                        )?;
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     /// Delete a session group and disconnect its sessions from the group
     pub fn delete_group(&self, group_path: &str) -> Result<()> {
         self.db.with_connection(|conn| {
@@ -695,14 +993,18 @@ impl MemoryService {
         self.db.with_connection(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO mcp_servers (
-                    name, command, args, env, status, socket_path, 
+                    name, transport, command, args, env, cwd, url, headers, status, socket_path,
                     client_count, last_started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     server.name,
+                    server.transport.to_string(),
                     server.command,
                     serde_json::to_string(&server.args).unwrap(),
                     serde_json::to_string(&server.env).unwrap(),
+                    server.cwd,
+                    server.url,
+                    server.headers.map(|h| serde_json::to_string(&h).unwrap()),
                     server.status.to_string(),
                     server.socket_path,
                     server.client_count,
@@ -717,7 +1019,7 @@ impl MemoryService {
     pub fn list_mcp_servers(&self) -> Result<Vec<McpServer>> {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, command, args, env, status, socket_path, 
+                "SELECT id, name, transport, command, args, env, cwd, url, headers, status, socket_path,
                         client_count, last_started_at 
                  FROM mcp_servers ORDER BY name",
             )?;
@@ -727,14 +1029,20 @@ impl MemoryService {
                     Ok(McpServer {
                         id: row.get(0)?,
                         name: row.get(1)?,
-                        command: row.get(2)?,
-                        args: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
-                        env: serde_json::from_str(&row.get::<_, String>(4)?)
+                        transport: parse_mcp_transport(row.get(2)?),
+                        command: row.get(3)?,
+                        args: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
+                        env: serde_json::from_str(&row.get::<_, String>(5)?)
                             .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
-                        status: parse_mcp_status(row.get(5)?),
-                        socket_path: row.get(6)?,
-                        client_count: row.get(7)?,
-                        last_started_at: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+                        cwd: row.get(6)?,
+                        url: row.get(7)?,
+                        headers: row
+                            .get::<_, Option<String>>(8)?
+                            .and_then(|s| serde_json::from_str(&s).ok()),
+                        status: parse_mcp_status(row.get(9)?),
+                        socket_path: row.get(10)?,
+                        client_count: row.get(11)?,
+                        last_started_at: row.get::<_, Option<String>>(12)?.map(parse_datetime),
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -760,6 +1068,13 @@ fn parse_mcp_status(s: String) -> McpStatus {
         "running" => McpStatus::Running,
         "stopped" => McpStatus::Stopped,
         _ => McpStatus::Error,
+    }
+}
+
+fn parse_mcp_transport(s: String) -> McpTransport {
+    match s.as_str() {
+        "http" => McpTransport::Http,
+        _ => McpTransport::Stdio,
     }
 }
 
@@ -807,6 +1122,10 @@ fn parse_datetime(s: String) -> DateTime<Utc> {
 
 fn parse_category(s: String) -> MemoryCategory {
     match s.as_str() {
+        "general" => MemoryCategory::General,
+        "knowledge" => MemoryCategory::Knowledge,
+        "preference" | "preferences" => MemoryCategory::Preference,
+        "specification" | "specifications" => MemoryCategory::Specification,
         "fact" => MemoryCategory::Fact,
         "pattern" => MemoryCategory::Pattern,
         "decision" => MemoryCategory::Decision,
