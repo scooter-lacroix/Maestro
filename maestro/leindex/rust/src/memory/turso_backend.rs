@@ -9,17 +9,23 @@
 //! - **Remote Mode**: Can connect to remote Turso database (future)
 //! - **Connection Pooling**: Manages connection pool for efficient database access
 //! - **LSP State Tracking**: Stores LSP server state for session management
+//! - **OLTP Operations**: CRUD operations for sessions, projects, memories, tracks
 //!
 //! ## Migration Status
 //!
-//! This is a skeleton implementation. Full migration from rusqlite will happen in Phase 2.
+//! Phase 2: OLTP operations migrated from rusqlite to libsql.
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use libsql::{Builder, Database};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use std::future::Future;
+use tracing::{debug, info};
+
+use super::models::{Session, SessionStatus, MaestroProject, Memory, MemoryCategory, MemoryImportance};
 
 /// LSP server status values
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -204,7 +210,7 @@ impl TursoStorageBackend {
 
     /// Initialize database schema
     ///
-    /// This creates the LSP state table. More tables will be added in Phase 2.
+    /// Creates all tables for OLTP operations: LSP servers, sessions, projects, memories, tracks.
     pub async fn initialize(&self) -> Result<()> {
         info!("Initializing Turso database schema");
 
@@ -213,13 +219,23 @@ impl TursoStorageBackend {
             .connect()
             .context("Failed to get connection")?;
 
-        // Create LSP servers table
-        conn.execute(
+        // Create all tables
+        for table_sql in &[
             LSP_SERVERS_TABLE_SQL,
-            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
-        )
-        .await
-        .context("Failed to create LSP servers table")?;
+            SESSIONS_TABLE_SQL,
+            PROJECTS_TABLE_SQL,
+            MEMORIES_TABLE_SQL,
+            TRACKS_TABLE_SQL,
+            SESSION_GROUPS_TABLE_SQL,
+            MCP_SERVERS_TABLE_SQL,
+        ] {
+            conn.execute(
+                table_sql,
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to create table")?;
+        }
 
         info!("Turso database schema initialized successfully");
         Ok(())
@@ -250,7 +266,7 @@ impl TursoStorageBackend {
     /// This method checks if the backend is shut down before attempting to get a connection.
     pub async fn with_connection<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&libsql::Connection) -> Result<T> + Send + 'static,
+        F: FnOnce(libsql::Connection) -> Pin<Box<dyn Future<Output = Result<T>> + Send>> + Send + 'static,
         T: Send + 'static,
     {
         if self.is_shutdown() {
@@ -261,7 +277,7 @@ impl TursoStorageBackend {
             .database
             .connect()
             .context("Failed to get connection")?;
-        f(&conn)
+        f(conn).await
     }
 
     /// Shutdown the backend gracefully
@@ -297,6 +313,613 @@ impl TursoStorageBackend {
     pub async fn with_defaults() -> Result<Self> {
         Self::new(None, None).await
     }
+
+    // ========================================================================
+    // Session CRUD Operations
+    // ========================================================================
+
+    /// Insert a new session
+    pub async fn insert_session(&self, session: &Session) -> Result<i64> {
+        let session_id = session.session_id.clone();
+        let title = session.title.clone();
+        let project_path = session.project_path.clone();
+        let group_path = session.group_path.clone().unwrap_or_default();
+        let sort_order = session.sort_order;
+        let parent_session_id = session.parent_session_id.clone().unwrap_or_default();
+        let command = session.command.clone().unwrap_or_default();
+        let tool = session.tool.clone().unwrap_or_default();
+        let status = session.status.as_str().to_string();
+        let multiplexer_session = session.multiplexer_session.clone().unwrap_or_default();
+        let started_at = session.started_at.to_rfc3339();
+        let last_accessed_at = session.last_accessed_at.map(|d| d.to_rfc3339()).unwrap_or_default();
+        let ended_at = session.ended_at.map(|d| d.to_rfc3339()).unwrap_or_default();
+        let metadata = serde_json::to_string(&session.metadata).unwrap_or_default();
+
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "INSERT INTO sessions (session_id, title, project_path, group_path, sort_order,
+                     parent_session_id, command, tool, status, multiplexer_session, started_at,
+                     last_accessed_at, ended_at, metadata)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    libsql::params_from_iter([
+                        libsql::Value::Text(session_id),
+                        libsql::Value::Text(title),
+                        libsql::Value::Text(project_path),
+                        libsql::Value::Text(group_path),
+                        libsql::Value::Integer(sort_order as i64),
+                        libsql::Value::Text(parent_session_id),
+                        libsql::Value::Text(command),
+                        libsql::Value::Text(tool),
+                        libsql::Value::Text(status),
+                        libsql::Value::Text(multiplexer_session),
+                        libsql::Value::Text(started_at),
+                        libsql::Value::Text(last_accessed_at),
+                        libsql::Value::Text(ended_at),
+                        libsql::Value::Text(metadata),
+                    ]),
+                )
+                .await
+                .context("Failed to insert session")?;
+
+                Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+    }
+
+    /// Get a session by session_id
+    pub async fn get_session(&self, session_id: &str) -> Result<Option<Session>> {
+        let session_id = session_id.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT id, session_id, title, project_path, group_path, sort_order,
+                         parent_session_id, command, tool, status, multiplexer_session,
+                         started_at, last_accessed_at, ended_at, metadata
+                         FROM sessions WHERE session_id = ?",
+                    )
+                    .await
+                    .context("Failed to prepare session query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([libsql::Value::Text(session_id)]))
+                    .await
+                    .context("Failed to query session")?;
+
+                // Get the first row if exists
+                if let Ok(Some(row)) = result.next().await {
+                    Ok(Some(Session {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        title: row.get(2)?,
+                        project_path: row.get(3)?,
+                        group_path: row.get(4)?,
+                        sort_order: row.get(5)?,
+                        parent_session_id: row.get(6)?,
+                        command: row.get(7)?,
+                        tool: row.get(8)?,
+                        status: SessionStatus::from_str(row.get::<String>(9)?.as_str())
+                            .unwrap_or(SessionStatus::Idle),
+                        multiplexer_session: row.get(10)?,
+                        started_at: parse_datetime(row.get::<String>(11)?),
+                        last_accessed_at: row.get::<Option<String>>(12)?.map(|s| parse_datetime(s)),
+                        ended_at: row.get::<Option<String>>(13)?.map(|s| parse_datetime(s)),
+                        metadata: row.get::<Option<String>>(14)?
+                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                    }))
+                } else {
+                    Ok(None)
+                }
+            })
+        })
+        .await
+    }
+
+    /// List all sessions
+    pub async fn list_sessions(&self) -> Result<Vec<Session>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT id, session_id, title, project_path, group_path, sort_order,
+                         parent_session_id, command, tool, status, multiplexer_session,
+                         started_at, last_accessed_at, ended_at, metadata
+                         FROM sessions ORDER BY sort_order, started_at",
+                    )
+                    .await
+                    .context("Failed to prepare sessions list query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query sessions")?;
+
+                let mut sessions = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    sessions.push(Session {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        title: row.get(2)?,
+                        project_path: row.get(3)?,
+                        group_path: row.get(4)?,
+                        sort_order: row.get(5)?,
+                        parent_session_id: row.get(6)?,
+                        command: row.get(7)?,
+                        tool: row.get(8)?,
+                        status: SessionStatus::from_str(row.get::<String>(9)?.as_str())
+                            .unwrap_or(SessionStatus::Idle),
+                        multiplexer_session: row.get(10)?,
+                        started_at: parse_datetime(row.get::<String>(11)?),
+                        last_accessed_at: row.get::<Option<String>>(12)?.map(|s| parse_datetime(s)),
+                        ended_at: row.get::<Option<String>>(13)?.map(|s| parse_datetime(s)),
+                        metadata: row.get::<Option<String>>(14)?
+                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                    });
+                }
+                Ok(sessions)
+            })
+        })
+        .await
+    }
+
+    /// Update session status
+    pub async fn update_session_status(&self, session_id: &str, status: SessionStatus) -> Result<()> {
+        let session_id = session_id.to_string();
+        let status_str = status.as_str().to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "UPDATE sessions SET status = ?1, updated_at = datetime('now') WHERE session_id = ?2",
+                    libsql::params_from_iter([
+                        libsql::Value::Text(status_str),
+                        libsql::Value::Text(session_id),
+                    ]),
+                )
+                .await
+                .context("Failed to update session status")?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// Update session last accessed time
+    pub async fn update_session_last_accessed(&self, session_id: &str) -> Result<()> {
+        let session_id = session_id.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "UPDATE sessions SET last_accessed_at = datetime('now'), updated_at = datetime('now') WHERE session_id = ?",
+                    libsql::params_from_iter([libsql::Value::Text(session_id)]),
+                )
+                .await
+                .context("Failed to update session last accessed")?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// Delete a session
+    pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        let session_id = session_id.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "DELETE FROM sessions WHERE session_id = ?",
+                    libsql::params_from_iter([libsql::Value::Text(session_id)]),
+                )
+                .await
+                .context("Failed to delete session")?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    // ========================================================================
+    // Project CRUD Operations
+    // ========================================================================
+
+    /// Get or create a project by path
+    pub async fn get_or_create_project(&self, path: &str, name: &str) -> Result<MaestroProject> {
+        // Try to get existing project
+        if let Some(project) = self.get_project_by_path(path).await? {
+            return Ok(project);
+        }
+
+        // Create new project
+        let path = path.to_string();
+        let name = name.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "INSERT INTO maestro_projects (project_path, project_name) VALUES (?1, ?2)",
+                    libsql::params_from_iter([
+                        libsql::Value::Text(path.clone()),
+                        libsql::Value::Text(name.clone()),
+                    ]),
+                )
+                .await
+                .context("Failed to insert project")?;
+
+                let id = conn.last_insert_rowid();
+
+                Ok(MaestroProject {
+                    id,
+                    project_path: path,
+                    project_name: name,
+                    description: None,
+                    project_type: None,
+                    tech_stack: Vec::new(),
+                    is_active: true,
+                    created_at: Utc::now(),
+                    updated_at: None,
+                    last_scanned_at: None,
+                })
+            })
+        })
+        .await
+    }
+
+    /// Get a project by path
+    pub async fn get_project_by_path(&self, path: &str) -> Result<Option<MaestroProject>> {
+        let path = path.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT id, project_path, project_name, description, project_type, tech_stack,
+                         is_active, created_at, updated_at, last_scanned_at
+                         FROM maestro_projects WHERE project_path = ?",
+                    )
+                    .await
+                    .context("Failed to prepare project query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([libsql::Value::Text(path)]))
+                    .await
+                    .context("Failed to query project")?;
+
+                // Get the first row if exists
+                if let Ok(Some(row)) = result.next().await {
+                    Ok(Some(MaestroProject {
+                        id: row.get::<i64>(0)?,
+                        project_path: row.get::<String>(1)?,
+                        project_name: row.get::<String>(2)?,
+                        description: row.get::<Option<String>>(3)?,
+                        project_type: row.get::<Option<String>>(4)?,
+                        tech_stack: row
+                            .get::<Option<String>>(5)?
+                            .and_then(|s: String| serde_json::from_str::<Vec<String>>(&s).ok())
+                            .unwrap_or_default(),
+                        is_active: row.get::<i32>(6)? == 1,
+                        created_at: parse_datetime(row.get::<String>(7)?),
+                        updated_at: row.get::<Option<String>>(8)?.map(|s| parse_datetime(s)),
+                        last_scanned_at: row.get::<Option<String>>(9)?.map(|s| parse_datetime(s)),
+                    }))
+                } else {
+                    Ok(None)
+                }
+            })
+        })
+        .await
+    }
+
+    /// List all active projects
+    pub async fn list_projects(&self) -> Result<Vec<MaestroProject>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT id, project_path, project_name, description, project_type, tech_stack,
+                         is_active, created_at, updated_at, last_scanned_at
+                         FROM maestro_projects WHERE is_active = 1 ORDER BY project_name",
+                    )
+                    .await
+                    .context("Failed to prepare projects list query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query projects")?;
+
+                let mut projects = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    projects.push(MaestroProject {
+                        id: row.get::<i64>(0)?,
+                        project_path: row.get::<String>(1)?,
+                        project_name: row.get::<String>(2)?,
+                        description: row.get::<Option<String>>(3)?,
+                        project_type: row.get::<Option<String>>(4)?,
+                        tech_stack: row
+                            .get::<Option<String>>(5)?
+                            .and_then(|s: String| serde_json::from_str::<Vec<String>>(&s).ok())
+                            .unwrap_or_default(),
+                        is_active: row.get::<i32>(6)? == 1,
+                        created_at: parse_datetime(row.get::<String>(7)?),
+                        updated_at: row.get::<Option<String>>(8)?.map(|s| parse_datetime(s)),
+                        last_scanned_at: row.get::<Option<String>>(9)?.map(|s| parse_datetime(s)),
+                    });
+                }
+                Ok(projects)
+            })
+        })
+        .await
+    }
+
+    // ========================================================================
+    // Memory CRUD Operations
+    // ========================================================================
+
+    /// Insert a new memory
+    pub async fn insert_memory(&self, memory: &Memory) -> Result<i64> {
+        let content = memory.content.clone();
+        let summary = memory.summary.clone().unwrap_or_default();
+        let category = memory_category_to_string(&memory.category);
+        let importance = memory_importance_to_string(&memory.importance);
+        let source = memory.source.clone().unwrap_or_default();
+        let session_id = memory.session_id.clone().unwrap_or_default();
+        let project_id = memory.project_id.unwrap_or(0);
+        let track_id = memory.track_id.unwrap_or(0);
+        let command = memory.command.clone().unwrap_or_default();
+        let command_context = memory.command_context.as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default())
+            .unwrap_or_default();
+        let created_at = memory.created_at.to_rfc3339();
+        let expires_at = memory.expires_at.map(|d| d.to_rfc3339()).unwrap_or_default();
+        let last_accessed = memory.last_accessed.map(|d| d.to_rfc3339()).unwrap_or_default();
+        let metadata = memory.metadata.as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default())
+            .unwrap_or_default();
+        let tags = memory.tags.as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default())
+            .unwrap_or_default();
+
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "INSERT INTO memories (content, summary, category, importance, source, session_id,
+                     project_id, track_id, command, command_context, created_at, expires_at,
+                     last_accessed, metadata, tags)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    libsql::params_from_iter([
+                        libsql::Value::Text(content),
+                        libsql::Value::Text(summary),
+                        libsql::Value::Text(category),
+                        libsql::Value::Text(importance),
+                        libsql::Value::Text(source),
+                        libsql::Value::Text(session_id),
+                        libsql::Value::Integer(project_id),
+                        libsql::Value::Integer(track_id),
+                        libsql::Value::Text(command),
+                        libsql::Value::Text(command_context),
+                        libsql::Value::Text(created_at),
+                        libsql::Value::Text(expires_at),
+                        libsql::Value::Text(last_accessed),
+                        libsql::Value::Text(metadata),
+                        libsql::Value::Text(tags),
+                    ]),
+                )
+                .await
+                .context("Failed to insert memory")?;
+
+                Ok(conn.last_insert_rowid())
+            })
+        })
+        .await
+    }
+
+    /// Get memories by session_id
+    pub async fn get_memories_by_session(&self, session_id: &str) -> Result<Vec<Memory>> {
+        let session_id = session_id.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT id, content, summary, category, importance, source, session_id,
+                         project_id, track_id, command, command_context, created_at, expires_at,
+                         last_accessed, metadata, tags
+                         FROM memories WHERE session_id = ? ORDER BY created_at DESC",
+                    )
+                    .await
+                    .context("Failed to prepare memories query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([libsql::Value::Text(session_id)]))
+                    .await
+                    .context("Failed to query memories")?;
+
+                let mut memories = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    memories.push(Memory {
+                        id: row.get(0)?,
+                        content: row.get(1)?,
+                        summary: row.get(2)?,
+                        category: string_to_memory_category(row.get::<String>(3)?.as_str()),
+                        importance: string_to_memory_importance(row.get::<String>(4)?.as_str()),
+                        source: row.get(5)?,
+                        session_id: row.get(6)?,
+                        project_id: row.get::<i64>(7)?.try_into().ok(),
+                        track_id: row.get::<i64>(8)?.try_into().ok(),
+                        command: row.get(9)?,
+                        command_context: row.get::<Option<String>>(10)?
+                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                        created_at: parse_datetime(row.get::<String>(11)?),
+                        expires_at: row.get::<Option<String>>(12)?.map(|s| parse_datetime(s)),
+                        last_accessed: row.get::<Option<String>>(13)?.map(|s| parse_datetime(s)),
+                        metadata: row.get::<Option<String>>(14)?
+                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                        tags: row.get::<Option<String>>(15)?
+                            .and_then(|s: String| serde_json::from_str::<Vec<String>>(&s).ok()),
+                    });
+                }
+                Ok(memories)
+            })
+        })
+        .await
+    }
+
+    /// Get database statistics
+    pub async fn stats(&self) -> Result<TursoDbStats> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                // Query project count
+                let stmt = conn
+                    .prepare("SELECT COUNT(*) FROM maestro_projects WHERE is_active = 1")
+                    .await
+                    .context("Failed to prepare project count query")?;
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query project count")?;
+                let project_count: i64 = if let Ok(Some(row)) = result.next().await {
+                    row.get(0)?
+                } else {
+                    0
+                };
+
+                // Query memory count
+                let stmt = conn
+                    .prepare("SELECT COUNT(*) FROM memories")
+                    .await
+                    .context("Failed to prepare memory count query")?;
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query memory count")?;
+                let memory_count: i64 = if let Ok(Some(row)) = result.next().await {
+                    row.get(0)?
+                } else {
+                    0
+                };
+
+                // Query session count
+                let stmt = conn
+                    .prepare("SELECT COUNT(*) FROM sessions")
+                    .await
+                    .context("Failed to prepare session count query")?;
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query session count")?;
+                let session_count: i64 = if let Ok(Some(row)) = result.next().await {
+                    row.get(0)?
+                } else {
+                    0
+                };
+
+                Ok(TursoDbStats {
+                    project_count: project_count as usize,
+                    memory_count: memory_count as usize,
+                    session_count: session_count as usize,
+                })
+            })
+        })
+        .await
+    }
+}
+
+/// Database statistics for Turso backend
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TursoDbStats {
+    pub project_count: usize,
+    pub memory_count: usize,
+    pub session_count: usize,
+}
+
+/// Parse datetime string into DateTime<Utc>
+fn parse_datetime(s: String) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(&s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now())
+}
+
+/// Helper function to convert MemoryCategory to string
+fn memory_category_to_string(category: &MemoryCategory) -> String {
+    match category {
+        MemoryCategory::General => "general".to_string(),
+        MemoryCategory::Knowledge => "knowledge".to_string(),
+        MemoryCategory::Preference => "preferences".to_string(),
+        MemoryCategory::Specification => "specifications".to_string(),
+        MemoryCategory::Fact => "fact".to_string(),
+        MemoryCategory::Pattern => "pattern".to_string(),
+        MemoryCategory::Decision => "decision".to_string(),
+        MemoryCategory::Context => "context".to_string(),
+        MemoryCategory::Temporary => "temporary".to_string(),
+        MemoryCategory::Observation => "observation".to_string(),
+    }
+}
+
+/// Helper function to convert string to MemoryCategory
+fn string_to_memory_category(s: &str) -> MemoryCategory {
+    match s.to_lowercase().as_str() {
+        "general" => MemoryCategory::General,
+        "knowledge" => MemoryCategory::Knowledge,
+        "preferences" => MemoryCategory::Preference,
+        "specifications" => MemoryCategory::Specification,
+        "fact" => MemoryCategory::Fact,
+        "pattern" => MemoryCategory::Pattern,
+        "decision" => MemoryCategory::Decision,
+        "context" => MemoryCategory::Context,
+        "temporary" => MemoryCategory::Temporary,
+        "observation" => MemoryCategory::Observation,
+        _ => MemoryCategory::Context,
+    }
+}
+
+/// Helper function to convert MemoryImportance to string
+fn memory_importance_to_string(importance: &MemoryImportance) -> String {
+    match importance {
+        MemoryImportance::Critical => "critical".to_string(),
+        MemoryImportance::High => "high".to_string(),
+        MemoryImportance::Normal => "normal".to_string(),
+        MemoryImportance::Low => "low".to_string(),
+    }
+}
+
+/// Helper function to convert string to MemoryImportance
+fn string_to_memory_importance(s: &str) -> MemoryImportance {
+    match s.to_lowercase().as_str() {
+        "critical" => MemoryImportance::Critical,
+        "high" => MemoryImportance::High,
+        "normal" => MemoryImportance::Normal,
+        "low" => MemoryImportance::Low,
+        _ => MemoryImportance::Normal,
+    }
+}
+
+impl SessionStatus {
+    /// Convert from string to SessionStatus
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "running" => Some(SessionStatus::Running),
+            "waiting" => Some(SessionStatus::Waiting),
+            "idle" => Some(SessionStatus::Idle),
+            "error" => Some(SessionStatus::Error),
+            "starting" => Some(SessionStatus::Starting),
+            "paused" => Some(SessionStatus::Paused),
+            "completed" => Some(SessionStatus::Completed),
+            "terminated" => Some(SessionStatus::Terminated),
+            _ => Some(SessionStatus::Idle),
+        }
+    }
+
+    /// Convert SessionStatus to string
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SessionStatus::Running => "running",
+            SessionStatus::Waiting => "waiting",
+            SessionStatus::Idle => "idle",
+            SessionStatus::Error => "error",
+            SessionStatus::Starting => "starting",
+            SessionStatus::Paused => "paused",
+            SessionStatus::Completed => "completed",
+            SessionStatus::Terminated => "terminated",
+        }
+    }
 }
 
 /// SQL for creating LSP servers table
@@ -319,6 +942,132 @@ CREATE TABLE IF NOT EXISTS lsp_servers (
 
 CREATE INDEX IF NOT EXISTS idx_lsp_session ON lsp_servers(session_id);
 CREATE INDEX IF NOT EXISTS idx_lsp_status ON lsp_servers(status);
+"#;
+
+/// SQL for creating sessions table
+const SESSIONS_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    project_path TEXT NOT NULL,
+    group_path TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    parent_session_id TEXT,
+    command TEXT,
+    tool TEXT,
+    status TEXT NOT NULL DEFAULT 'idle',
+    multiplexer_session TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    last_accessed_at TEXT,
+    ended_at TEXT,
+    metadata TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_path ON sessions(project_path);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_group_sort ON sessions(group_path, sort_order);
+"#;
+
+/// SQL for creating maestro_projects table
+const PROJECTS_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS maestro_projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_path TEXT NOT NULL UNIQUE,
+    project_name TEXT NOT NULL,
+    description TEXT,
+    project_type TEXT,
+    tech_stack TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    last_scanned_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_projects_path ON maestro_projects(project_path);
+CREATE INDEX IF NOT EXISTS idx_projects_active ON maestro_projects(is_active);
+"#;
+
+/// SQL for creating memories table
+const MEMORIES_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    summary TEXT,
+    category TEXT NOT NULL DEFAULT 'context',
+    importance TEXT NOT NULL DEFAULT 'normal',
+    source TEXT,
+    session_id TEXT,
+    project_id INTEGER,
+    track_id INTEGER,
+    command TEXT,
+    command_context TEXT,
+    embedding_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT,
+    last_accessed TEXT,
+    meta_data TEXT,
+    tags TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
+CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
+CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at);
+"#;
+
+/// SQL for creating maestro_tracks table
+const TRACKS_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS maestro_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id TEXT NOT NULL,
+    project_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'new',
+    total_tasks INTEGER DEFAULT 0,
+    completed_tasks INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    UNIQUE(project_id, track_id),
+    FOREIGN KEY (project_id) REFERENCES maestro_projects(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_tracks_project ON maestro_tracks(project_id);
+CREATE INDEX IF NOT EXISTS idx_tracks_status ON maestro_tracks(status);
+"#;
+
+/// SQL for creating session_groups table
+const SESSION_GROUPS_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS session_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    category TEXT,
+    is_expanded INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    parent_id INTEGER REFERENCES session_groups(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_groups_path ON session_groups(path);
+"#;
+
+/// SQL for creating mcp_servers table
+const MCP_SERVERS_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    transport TEXT NOT NULL DEFAULT 'stdio',
+    command TEXT NOT NULL,
+    args TEXT,
+    env TEXT,
+    cwd TEXT,
+    url TEXT,
+    headers TEXT,
+    status TEXT NOT NULL DEFAULT 'stopped',
+    socket_path TEXT,
+    client_count INTEGER DEFAULT 0,
+    last_started_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_status ON mcp_servers(status);
+CREATE INDEX IF NOT EXISTS idx_mcp_transport ON mcp_servers(transport);
 "#;
 
 #[cfg(test)]
@@ -379,7 +1128,7 @@ mod tests {
         assert!(backend.is_shutdown());
 
         // Attempting to use connection after shutdown should fail
-        let result = backend.with_connection(|_conn| Ok(())).await;
+        let result = backend.with_connection(|_conn| Box::pin(async { Ok(()) })).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("shut down"));
     }
