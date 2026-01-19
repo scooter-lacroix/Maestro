@@ -56,6 +56,43 @@ use libsql::{Connection, Database, params_from_iter};
 use std::fmt;
 use std::sync::Arc;
 
+/// Validates that a table name is safe to use in SQL queries.
+///
+/// This is a defensive measure to prevent SQL injection through table names,
+/// even though table names are not typically user-provided in this module.
+///
+/// # Arguments
+///
+/// * `name` - The table name to validate
+///
+/// # Returns
+///
+/// `Ok(())` if the table name is safe, or an error describing the issue.
+fn validate_table_name(name: &str) -> Result<()> {
+    // Empty table names are invalid
+    if name.is_empty() {
+        anyhow::bail!("Table name cannot be empty");
+    }
+
+    // Check for SQL injection patterns
+    if name.contains(';') || name.contains("--") || name.contains("/*") {
+        anyhow::bail!("Table name contains potentially dangerous characters");
+    }
+
+    // Table names should be ASCII alphanumeric with underscores only
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        anyhow::bail!("Table name must contain only alphanumeric characters and underscores");
+    }
+
+    // Must start with a letter or underscore (SQL identifier rules)
+    let first_char = name.chars().next().unwrap();
+    if !first_char.is_alphabetic() && first_char != '_' {
+        anyhow::bail!("Table name must start with a letter or underscore");
+    }
+
+    Ok(())
+}
+
 /// Represents the current state of a migration.
 ///
 /// This enum tracks whether a migration is pending, has been applied,
@@ -262,13 +299,97 @@ pub struct MigrationConfig {
     pub migrations_table: String,
     /// Whether to create the migrations table if it doesn't exist
     pub create_table_if_missing: bool,
+    /// Maximum number of migrations to run concurrently (for future optimization)
+    ///
+    /// Currently, migrations are run sequentially, but this field allows
+    /// for future concurrent execution. Set to 1 for sequential execution.
+    pub max_concurrent_migrations: usize,
+    /// Whether to wrap migrations in transactions for atomicity
+    ///
+    /// When true, each migration runs in its own transaction. When false,
+    /// migrations run without explicit transaction wrapping (useful for
+    /// migrations that require DDL statements that can't be rolled back).
+    pub use_transactions: bool,
+}
+
+impl MigrationConfig {
+    /// Creates a new MigrationConfig with the given table name.
+    ///
+    /// # Arguments
+    ///
+    /// * `migrations_table` - The name of the table for storing migration records
+    ///
+    /// # Returns
+    ///
+    /// A new `MigrationConfig` instance, or an error if the table name is invalid.
+    pub fn new(migrations_table: String) -> Result<Self> {
+        validate_table_name(&migrations_table)?;
+        Ok(Self {
+            migrations_table,
+            create_table_if_missing: true,
+            max_concurrent_migrations: 1, // Sequential by default
+            use_transactions: true,      // Use transactions by default
+        })
+    }
+
+    /// Creates a new MigrationConfig that won't automatically create the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `migrations_table` - The name of the table for storing migration records
+    ///
+    /// # Returns
+    ///
+    /// A new `MigrationConfig` instance, or an error if the table name is invalid.
+    pub fn without_auto_create(migrations_table: String) -> Result<Self> {
+        validate_table_name(&migrations_table)?;
+        Ok(Self {
+            migrations_table,
+            create_table_if_missing: false,
+            max_concurrent_migrations: 1,
+            use_transactions: true,
+        })
+    }
+
+    /// Sets the maximum number of concurrent migrations.
+    ///
+    /// # Arguments
+    ///
+    /// * `max` - Maximum concurrent migrations (1 for sequential)
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining.
+    #[must_use]
+    pub fn with_max_concurrent(mut self, max: usize) -> Self {
+        self.max_concurrent_migrations = max.max(1); // Ensure at least 1
+        self
+    }
+
+    /// Sets whether to use transactions for migrations.
+    ///
+    /// # Arguments
+    ///
+    /// * `use_tx` - Whether to wrap migrations in transactions
+    ///
+    /// # Returns
+    ///
+    /// Self for builder pattern chaining.
+    #[must_use]
+    pub fn with_transactions(mut self, use_tx: bool) -> Self {
+        self.use_transactions = use_tx;
+        self
+    }
 }
 
 impl Default for MigrationConfig {
     fn default() -> Self {
+        // Default table name is guaranteed to be valid
         Self {
             migrations_table: "schema_migrations".to_string(),
             create_table_if_missing: true,
+            max_concurrent_migrations: 1, // Sequential by default
+            use_transactions: true,
         }
     }
 }
@@ -354,8 +475,16 @@ impl MigrationManager {
     /// # Returns
     ///
     /// A new `MigrationManager` instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the table name in the config is invalid. Use [`MigrationConfig::new`]
+    /// to create validated configurations.
     #[must_use]
     pub fn with_config(db: Arc<Database>, config: MigrationConfig) -> Self {
+        // Validate table name on construction - panic here since it's a programming error
+        validate_table_name(&config.migrations_table)
+            .expect("Invalid table name in MigrationConfig");
         Self { db, config }
     }
 
@@ -760,7 +889,10 @@ impl MigrationManager {
             table_name
         );
 
-        let mut rows = conn.query(&sql, libsql::params_from_iter(std::iter::empty::<&str>())).await.context("Failed to execute query")?;
+        let mut rows = conn
+            .query(&sql, libsql::params_from_iter(std::iter::empty::<&str>()))
+            .await
+            .with_context(|| format!("Failed to get latest version from table: {}", table_name))?;
 
         if let Some(row) = rows.next().await? {
             let version: String = row.get(0)?;
@@ -791,7 +923,10 @@ impl MigrationManager {
             table_name
         );
 
-        let mut rows = conn.query(&sql, libsql::params_from_iter(std::iter::empty::<&str>())).await.context("Failed to execute query")?;
+        let mut rows = conn
+            .query(&sql, libsql::params_from_iter(std::iter::empty::<&str>()))
+            .await
+            .with_context(|| format!("Failed to verify migrations in table: {}", table_name))?;
         let mut mismatches = Vec::new();
 
         while let Some(row) = rows.next().await? {
@@ -1116,5 +1251,78 @@ mod tests {
 
         assert_eq!(status.total_count(), 8);
         assert!(!status.is_complete());
+    }
+
+    #[tokio::test]
+    async fn test_validate_table_name_valid() {
+        // Valid table names
+        assert!(validate_table_name("schema_migrations").is_ok());
+        assert!(validate_table_name("my_table").is_ok());
+        assert!(validate_table_name("_private_table").is_ok());
+        assert!(validate_table_name("Table123").is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_table_name_invalid() {
+        // Empty table name
+        assert!(validate_table_name("").is_err());
+
+        // SQL injection patterns
+        assert!(validate_table_name("table; DROP TABLE users; --").is_err());
+        assert!(validate_table_name("table--comment").is_err());
+        assert!(validate_table_name("table/*comment*/").is_err());
+
+        // Invalid characters
+        assert!(validate_table_name("table with spaces").is_err());
+        assert!(validate_table_name("table-with-dashes").is_err());
+        assert!(validate_table_name("table.with.dots").is_err());
+
+        // Must start with letter or underscore
+        assert!(validate_table_name("1table").is_err());
+        assert!(validate_table_name("9table").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_migration_config_validation() {
+        // Valid table names
+        assert!(MigrationConfig::new("valid_table".to_string()).is_ok());
+        assert!(MigrationConfig::new("_private".to_string()).is_ok());
+
+        // Invalid table names
+        assert!(MigrationConfig::new("invalid table".to_string()).is_err());
+        assert!(MigrationConfig::new("table;drop".to_string()).is_err());
+        assert!(MigrationConfig::new("".to_string()).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_migration_config_builder_pattern() {
+        let config = MigrationConfig::new("my_migrations".to_string())
+            .unwrap()
+            .with_max_concurrent(4)
+            .with_transactions(false);
+
+        assert_eq!(config.migrations_table, "my_migrations");
+        assert_eq!(config.max_concurrent_migrations, 4);
+        assert!(!config.use_transactions);
+    }
+
+    #[tokio::test]
+    async fn test_migration_config_max_concurrent_minimum() {
+        let config = MigrationConfig::new("test".to_string())
+            .unwrap()
+            .with_max_concurrent(0);
+
+        // Should enforce minimum of 1
+        assert_eq!(config.max_concurrent_migrations, 1);
+    }
+
+    #[tokio::test]
+    async fn test_migration_config_default_values() {
+        let config = MigrationConfig::default();
+
+        assert_eq!(config.migrations_table, "schema_migrations");
+        assert!(config.create_table_if_missing);
+        assert_eq!(config.max_concurrent_migrations, 1);
+        assert!(config.use_transactions);
     }
 }
