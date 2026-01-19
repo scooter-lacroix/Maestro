@@ -20,6 +20,7 @@ pub mod dfg;
 pub mod five_phase;
 pub mod language;
 pub mod memory;
+pub mod migrations;
 pub mod multi_lang_ast;
 pub mod multi_lang_callgraph;
 pub mod multi_lang_cfg;

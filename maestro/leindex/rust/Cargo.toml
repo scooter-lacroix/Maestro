@@ -85,6 +85,9 @@ uuid = { version = "1.19.0", features = ["v4"] }
 lsp-types = "0.97"  # LSP protocol types
 # tokio already has "full" features which includes process::Command for LSP spawning
 
+# Database migrations
+async-trait = "0.1"  # Async trait support for migration framework
+
 [dev-dependencies]
 tempfile = "3.8"
 
