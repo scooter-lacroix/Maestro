@@ -683,7 +683,7 @@ impl TursoStorageBackend {
                 conn.execute(
                     "INSERT INTO memories (content, summary, category, importance, source, session_id,
                      project_id, track_id, command, command_context, created_at, expires_at,
-                     last_accessed, metadata, tags)
+                     last_accessed, meta_data, tags)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     libsql::params_from_iter([
                         libsql::Value::Text(content),
@@ -721,7 +721,7 @@ impl TursoStorageBackend {
                     .prepare(
                         "SELECT id, content, summary, category, importance, source, session_id,
                          project_id, track_id, command, command_context, created_at, expires_at,
-                         last_accessed, metadata, tags
+                         last_accessed, meta_data, tags
                          FROM memories WHERE session_id = ? ORDER BY created_at DESC",
                     )
                     .await
@@ -820,6 +820,389 @@ impl TursoStorageBackend {
         })
         .await
     }
+
+    // ========================================================================
+    // OLAP Analytical Queries
+    // ========================================================================
+
+    /// Get session statistics grouped by status
+    pub async fn session_stats_by_status(&self) -> Result<Vec<SessionStatusStats>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT status, COUNT(*) as count
+                         FROM sessions
+                         GROUP BY status
+                         ORDER BY count DESC",
+                    )
+                    .await
+                    .context("Failed to prepare session stats query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query session stats")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(SessionStatusStats {
+                        status: row.get::<String>(0)?,
+                        count: row.get::<i64>(1)? as usize,
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get session statistics grouped by project path
+    pub async fn session_stats_by_project(&self, limit: Option<usize>) -> Result<Vec<ProjectSessionStats>> {
+        let limit = limit.unwrap_or(20);
+        self.with_connection(move |conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT project_path, COUNT(*) as session_count,
+                                COUNT(CASE WHEN status = 'running' THEN 1 END) as running_count,
+                                COUNT(CASE WHEN status = 'idle' THEN 1 END) as idle_count
+                         FROM sessions
+                         GROUP BY project_path
+                         ORDER BY session_count DESC
+                         LIMIT ?",
+                    )
+                    .await
+                    .context("Failed to prepare project session stats query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([libsql::Value::Integer(
+                        limit as i64,
+                    )]))
+                    .await
+                    .context("Failed to query project session stats")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(ProjectSessionStats {
+                        project_path: row.get(0)?,
+                        session_count: row.get::<i64>(1)? as usize,
+                        running_count: row.get::<i64>(2)? as usize,
+                        idle_count: row.get::<i64>(3)? as usize,
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get memory statistics grouped by category
+    pub async fn memory_stats_by_category(&self) -> Result<Vec<MemoryCategoryStats>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT category, COUNT(*) as count
+                         FROM memories
+                         GROUP BY category
+                         ORDER BY count DESC",
+                    )
+                    .await
+                    .context("Failed to prepare memory category stats query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query memory category stats")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(MemoryCategoryStats {
+                        category: row.get(0)?,
+                        count: row.get::<i64>(1)? as usize,
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get memory statistics grouped by importance
+    pub async fn memory_stats_by_importance(&self) -> Result<Vec<MemoryImportanceStats>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT importance, COUNT(*) as count
+                         FROM memories
+                         GROUP BY importance
+                         ORDER BY
+                             CASE importance
+                                 WHEN 'critical' THEN 1
+                                 WHEN 'high' THEN 2
+                                 WHEN 'normal' THEN 3
+                                 WHEN 'low' THEN 4
+                                 ELSE 5
+                             END",
+                    )
+                    .await
+                    .context("Failed to prepare memory importance stats query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query memory importance stats")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(MemoryImportanceStats {
+                        importance: row.get(0)?,
+                        count: row.get::<i64>(1)? as usize,
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get track completion statistics
+    pub async fn track_completion_stats(&self) -> Result<Vec<TrackCompletionStats>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT t.status, COUNT(*) as count,
+                                AVG(CAST(t.completed_tasks AS REAL) / NULLIF(t.total_tasks, 0) * 100) as avg_completion_pct
+                         FROM maestro_tracks t
+                         GROUP BY t.status
+                         ORDER BY count DESC",
+                    )
+                    .await
+                    .context("Failed to prepare track completion stats query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query track completion stats")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(TrackCompletionStats {
+                        status: row.get(0)?,
+                        count: row.get::<i64>(1)? as usize,
+                        avg_completion_pct: row.get::<Option<f64>>(2)?,
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get project activity summary (recent sessions and memory creation)
+    pub async fn project_activity_summary(&self, days: Option<u32>) -> Result<Vec<ProjectActivitySummary>> {
+        let days = days.unwrap_or(7);
+        self.with_connection(move |conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT p.project_path, p.project_name,
+                                COUNT(DISTINCT s.id) as session_count,
+                                COUNT(DISTINCT m.id) as memory_count,
+                                MAX(s.started_at) as last_session_at
+                         FROM maestro_projects p
+                         LEFT JOIN sessions s ON p.project_path = s.project_path
+                             AND datetime(s.started_at) >= datetime('now', '-' || ? || ' days')
+                         LEFT JOIN memories m ON m.project_id = p.id
+                             AND datetime(m.created_at) >= datetime('now', '-' || ? || ' days')
+                         WHERE p.is_active = 1
+                         GROUP BY p.id
+                         HAVING session_count > 0 OR memory_count > 0
+                         ORDER BY session_count DESC, memory_count DESC
+                         LIMIT 50",
+                    )
+                    .await
+                    .context("Failed to prepare project activity summary query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([
+                        libsql::Value::Integer(days as i64),
+                        libsql::Value::Integer(days as i64),
+                    ]))
+                    .await
+                    .context("Failed to query project activity summary")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(ProjectActivitySummary {
+                        project_path: row.get(0)?,
+                        project_name: row.get(1)?,
+                        session_count: row.get::<i64>(2)? as usize,
+                        memory_count: row.get::<i64>(3)? as usize,
+                        last_session_at: row.get::<Option<String>>(4)?
+                            .map(|s| parse_datetime(s)),
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get most active projects by session count
+    pub async fn most_active_projects(&self, limit: Option<usize>) -> Result<Vec<ActiveProjectStats>> {
+        let limit = limit.unwrap_or(10);
+        self.with_connection(move |conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT p.project_path, p.project_name,
+                                COUNT(s.id) as total_sessions,
+                                COUNT(CASE WHEN s.status = 'running' THEN 1 END) as active_sessions,
+                                MIN(s.started_at) as first_session_at,
+                                MAX(s.started_at) as last_session_at
+                         FROM maestro_projects p
+                         INNER JOIN sessions s ON p.project_path = s.project_path
+                         WHERE p.is_active = 1
+                         GROUP BY p.id
+                         ORDER BY total_sessions DESC
+                         LIMIT ?",
+                    )
+                    .await
+                    .context("Failed to prepare most active projects query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([libsql::Value::Integer(
+                        limit as i64,
+                    )]))
+                    .await
+                    .context("Failed to query most active projects")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(ActiveProjectStats {
+                        project_path: row.get(0)?,
+                        project_name: row.get(1)?,
+                        total_sessions: row.get::<i64>(2)? as usize,
+                        active_sessions: row.get::<i64>(3)? as usize,
+                        first_session_at: row.get::<Option<String>>(4)?
+                            .map(|s| parse_datetime(s)),
+                        last_session_at: row.get::<Option<String>>(5)?
+                            .map(|s| parse_datetime(s)),
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+
+    /// Get LSP server statistics
+    pub async fn lsp_server_stats(&self) -> Result<Vec<LspServerStats>> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT lsp_name, status, COUNT(*) as count
+                         FROM lsp_servers
+                         GROUP BY lsp_name, status
+                         ORDER BY lsp_name, status",
+                    )
+                    .await
+                    .context("Failed to prepare LSP server stats query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to query LSP server stats")?;
+
+                let mut stats = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    stats.push(LspServerStats {
+                        lsp_name: row.get(0)?,
+                        status: row.get(1)?,
+                        count: row.get::<i64>(2)? as usize,
+                    });
+                }
+                Ok(stats)
+            })
+        })
+        .await
+    }
+}
+
+// ============================================================================
+// OLAP Result Types
+// ============================================================================
+
+/// Session statistics grouped by status
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionStatusStats {
+    pub status: String,
+    pub count: usize,
+}
+
+/// Project session statistics
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectSessionStats {
+    pub project_path: String,
+    pub session_count: usize,
+    pub running_count: usize,
+    pub idle_count: usize,
+}
+
+/// Memory statistics grouped by category
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemoryCategoryStats {
+    pub category: String,
+    pub count: usize,
+}
+
+/// Memory statistics grouped by importance
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemoryImportanceStats {
+    pub importance: String,
+    pub count: usize,
+}
+
+/// Track completion statistics
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TrackCompletionStats {
+    pub status: String,
+    pub count: usize,
+    pub avg_completion_pct: Option<f64>,
+}
+
+/// Project activity summary
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectActivitySummary {
+    pub project_path: String,
+    pub project_name: String,
+    pub session_count: usize,
+    pub memory_count: usize,
+    pub last_session_at: Option<DateTime<Utc>>,
+}
+
+/// Active project statistics
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActiveProjectStats {
+    pub project_path: String,
+    pub project_name: String,
+    pub total_sessions: usize,
+    pub active_sessions: usize,
+    pub first_session_at: Option<DateTime<Utc>>,
+    pub last_session_at: Option<DateTime<Utc>>,
+}
+
+/// LSP server statistics
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LspServerStats {
+    pub lsp_name: String,
+    pub status: String,
+    pub count: usize,
 }
 
 /// Database statistics for Turso backend
@@ -1164,5 +1547,227 @@ mod tests {
         assert_eq!(LspStatus::from_str("error"), Some(LspStatus::Error));
         assert_eq!(LspStatus::from_str("starting"), Some(LspStatus::Starting));
         assert_eq!(LspStatus::from_str("invalid"), None);
+    }
+
+    // ========================================================================
+    // OLAP Query Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_olap_session_stats_by_status() {
+        // Use tempfile for testing instead of :memory: to ensure DDL persists
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert test sessions with different statuses
+        let _ = backend.insert_session(&Session {
+            id: 0,
+            session_id: "test-1".to_string(),
+            title: "Test Session 1".to_string(),
+            project_path: "/test/project".to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).await;
+
+        let _ = backend.insert_session(&Session {
+            id: 0,
+            session_id: "test-2".to_string(),
+            title: "Test Session 2".to_string(),
+            project_path: "/test/project".to_string(),
+            group_path: None,
+            sort_order: 1,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Idle,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).await;
+
+        let stats = backend.session_stats_by_status()
+            .await
+            .expect("Failed to get session stats");
+
+        assert_eq!(stats.len(), 2);
+        assert!(stats.iter().any(|s| s.status == "running" && s.count == 1));
+        assert!(stats.iter().any(|s| s.status == "idle" && s.count == 1));
+    }
+
+    #[tokio::test]
+    async fn test_olap_memory_stats_by_category() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert test memories with different categories
+        let _ = backend.insert_memory(&Memory {
+            id: 0,
+            content: "Test content 1".to_string(),
+            summary: None,
+            category: MemoryCategory::Knowledge,
+            importance: MemoryImportance::Normal,
+            source: None,
+            session_id: None,
+            project_id: None,
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        }).await;
+
+        let _ = backend.insert_memory(&Memory {
+            id: 0,
+            content: "Test content 2".to_string(),
+            summary: None,
+            category: MemoryCategory::Pattern,
+            importance: MemoryImportance::Normal,
+            source: None,
+            session_id: None,
+            project_id: None,
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        }).await;
+
+        let stats = backend.memory_stats_by_category()
+            .await
+            .expect("Failed to get memory stats");
+
+        assert_eq!(stats.len(), 2);
+        assert!(stats.iter().any(|s| s.category == "knowledge" && s.count == 1));
+        assert!(stats.iter().any(|s| s.category == "pattern" && s.count == 1));
+    }
+
+    #[tokio::test]
+    async fn test_olap_project_activity_summary() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Create a test project
+        let _ = backend.get_or_create_project("/test/project", "Test Project").await;
+
+        // Insert a session for the project
+        let _ = backend.insert_session(&Session {
+            id: 0,
+            session_id: "test-1".to_string(),
+            title: "Test Session".to_string(),
+            project_path: "/test/project".to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).await;
+
+        let summary = backend.project_activity_summary(Some(7))
+            .await
+            .expect("Failed to get project activity summary");
+
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].project_path, "/test/project");
+        assert_eq!(summary[0].project_name, "Test Project");
+        assert_eq!(summary[0].session_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_olap_most_active_projects() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Create test projects
+        let _ = backend.get_or_create_project("/test/project1", "Project 1").await;
+        let _ = backend.get_or_create_project("/test/project2", "Project 2").await;
+
+        // Insert sessions for project1
+        for i in 0..3 {
+            let _ = backend.insert_session(&Session {
+                id: 0,
+                session_id: format!("test-{}", i),
+                title: format!("Test Session {}", i),
+                project_path: "/test/project1".to_string(),
+                group_path: None,
+                sort_order: i as i32,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Idle,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            }).await;
+        }
+
+        // Insert one session for project2
+        let _ = backend.insert_session(&Session {
+            id: 0,
+            session_id: "test-p2".to_string(),
+            title: "Test Session P2".to_string(),
+            project_path: "/test/project2".to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Idle,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).await;
+
+        let stats = backend.most_active_projects(Some(10))
+            .await
+            .expect("Failed to get most active projects");
+
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].project_path, "/test/project1");
+        assert_eq!(stats[0].total_sessions, 3);
+        assert_eq!(stats[1].project_path, "/test/project2");
+        assert_eq!(stats[1].total_sessions, 1);
     }
 }
