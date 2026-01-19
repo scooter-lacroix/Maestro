@@ -14,6 +14,7 @@ pub mod session_manager;
 pub mod mcp_pool;
 pub mod mcp_discovery;
 pub mod turso_backend;
+pub mod lsp_manager;
 
 pub use models::*;
 pub use schema::*;
@@ -24,3 +25,4 @@ pub use search::*;
 pub use mcp_discovery::*;
 pub use mcp_pool::*;
 pub use turso_backend::*;
+pub use lsp_manager::*;
