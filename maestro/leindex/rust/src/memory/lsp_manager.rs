@@ -223,7 +223,7 @@ impl LspManager {
     ///
     /// Uses default Turso database location.
     pub async fn with_default_storage() -> Result<Self> {
-        let storage = TursoStorageBackend::new(None).await?;
+        let storage = TursoStorageBackend::new(None, None).await?;
         Ok(Self::new(storage))
     }
 
@@ -476,7 +476,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lsp_manager_creation() {
-        let storage = TursoStorageBackend::in_memory()
+        let storage = TursoStorageBackend::in_memory(None)
             .await
             .expect("Failed to create storage");
         let manager = LspManager::new(storage);
