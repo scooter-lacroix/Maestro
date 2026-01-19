@@ -29,7 +29,8 @@ axum = "0.7"
 tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"] }  # TEMP: Keep for migration support
+libsql = "0.9"  # Turso/libSQL unified database backend
 
 # HTTP client (for Zoekt)
 reqwest = { version = "0.12", features = ["json"], default-features = false }
@@ -79,6 +80,10 @@ regex = "1"
 tantivy = "0.22"
 sha2 = "0.10.9"
 uuid = { version = "1.19.0", features = ["v4"] }
+
+# LSP support for on-demand language server integration
+lsp-types = "0.97"  # LSP protocol types
+# tokio already has "full" features which includes process::Command for LSP spawning
 
 [dev-dependencies]
 tempfile = "3.8"

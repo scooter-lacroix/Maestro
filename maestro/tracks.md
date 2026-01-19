@@ -75,3 +75,32 @@ This file tracks all major tracks for the project. Each track has its own detail
 - [x] Task 6.5: Tzar Review - PASS WITH DISTINCTION
 
 **Execution**: `/maestro:orchestrate v2-refinements_20260112`
+
+---
+
+## [~] Track: On-Demand LSP Integration for Maestro TUI
+*Link: [./maestro/tracks/lsp-integration_20260119/](./maestro/tracks/lsp-integration_20260119/)*
+
+**Description**: On-Demand LSP Integration for Maestro TUI - Add on-demand Language Server Protocol (LSP) support with 3 core Rust-based LSPs (rust-analyzer, ruff-lsp, typescript-language-server), hybrid MCP+stdio exposure, TUI integration with dedicated tab and inline indicators, auto-start lifecycle, and migrate entire database architecture to Turso (libSQL) replacing SQLite/DuckDB/Tantivy with vector search evaluation.
+
+**Type**: Feature
+
+**Status**: NEW - Planning complete, ready for implementation
+
+**Phases**:
+- Phase 1: Foundation and Setup (4 tasks)
+- Phase 2: Turso Storage Backend Implementation (6 tasks)
+- Phase 3: LSP Manager Implementation (6 tasks)
+- Phase 4: LSP MCP Bridge Implementation (4 tasks)
+- Phase 5: Direct stdio LSP Exposure (4 tasks)
+- Phase 6: TUI Integration (5 tasks)
+- Phase 7: Vector Search Performance Evaluation (5 tasks)
+- Phase 8: Testing and Quality Assurance (7 tasks)
+- Phase 9: Documentation and Refinement (5 tasks)
+- Phase 10: Final Review and Release (5 tasks)
+
+**Total Tasks**: 62
+
+**Estimated Time**: 21 days
+
+**Execution**: `/maestro:implement lsp-integration_20260119`
