@@ -13,6 +13,7 @@ pub mod migration;
 pub mod session_manager;
 pub mod mcp_pool;
 pub mod mcp_discovery;
+pub mod turso_backend;
 
 pub use models::*;
 pub use schema::*;
@@ -22,3 +23,4 @@ pub use service::*;
 pub use search::*;
 pub use mcp_discovery::*;
 pub use mcp_pool::*;
+pub use turso_backend::*;
