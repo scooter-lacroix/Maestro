@@ -302,40 +302,40 @@ Integrate LSP status, controls, and logs into the TUI with a dedicated LSPs tab 
 
 ### Tasks
 
-- [ ] **Task 6.1:** Add LSP status indicators to session cards
+- [x] **Task 6.1:** Add LSP status indicators to session cards
   - Modify session card rendering to show LSP status
   - Add color-coded indicators (GREEN, YELLOW, RED, GRAY)
   - Implement status updates in real-time
   - Handle multiple LSPs per session
-  - **Commit:** `feat(tui): add LSP status indicators to session cards`
+  - **Commit:** `feat(tui): add LSP status indicators to session cards` (e0c36f6)
 
-- [ ] **Task 6.2:** Create LSPs tab in TUI
+- [x] **Task 6.2:** Create LSPs tab in TUI
   - Add "LSPs" tab to TUI navigation
   - Design LSP list view with status, controls, logs
   - Implement LSP state refresh
   - Add keyboard navigation for LSP controls
-  - **Commit:** `feat(tui): create LSPs tab in TUI`
+  - **Commit:** `feat(tui): create LSPs tab in TUI` (cdb5cbe)
 
-- [ ] **Task 6.3:** Implement LSP controls in TUI
+- [x] **Task 6.3:** Implement LSP controls in TUI
   - Add Start/Stop/Restart buttons for each LSP
   - Add "View Logs" button for each LSP
   - Implement control actions
   - Show LSP installation status
-  - **Commit:** `feat(tui): implement LSP controls in TUI`
+  - **Commit:** `feat(tui): implement LSP controls in TUI` (0891dd4)
 
-- [ ] **Task 6.4:** Extend MCP log viewer for LSP logs
+- [x] **Task 6.4:** Extend MCP log viewer for LSP logs
   - Modify existing log viewer to support LSP logs
   - Add LSP log source selection
   - Implement real-time log streaming
   - Add log filtering and search
-  - **Commit:** `feat(tui): extend MCP log viewer for LSP logs`
+  - **Commit:** `feat(tui): extend MCP log viewer for LSP logs` (5081077)
 
-- [ ] **Task 6.5:** Add LSP installation guidance
+- [x] **Task 6.5:** Add LSP installation guidance
   - Detect missing LSP binaries on startup
   - Show installation instructions in TUI
   - Provide per-LSP installation commands
   - Track installation status
-  - **Commit:** `feat(tui): add LSP installation guidance`
+  - **Commit:** `feat(tui): add LSP installation guidance` (99e0794)
 
 ---
 
@@ -555,7 +555,7 @@ Final code review, validation, and release of the feature.
 **Total Tasks:** 63
 
 **Progress Update (2026-01-20):**
-- **Phases 1-5: COMPLETE, TZAR REVIEWED, and PRODUCTION-READY ✅**
+- **Phases 1-6: COMPLETE ✅**
   - Phase 1: Foundation - COMPLETE (4/4 tasks)
   - Phase 2: Turso Backend - **COMPLETE, TZAR REVIEWED** (6/6 tasks)
     - Threading safety fixed with OnceLock singleton
@@ -569,9 +569,14 @@ Final code review, validation, and release of the feature.
     - All proxy implementation complete
     - MCP config generation with proxy support implemented
     - 12/12 session_manager tests passing
+  - Phase 6: TUI Integration - **COMPLETE** (5/5 tasks)
+    - LSP status indicators on session cards (e0c36f6)
+    - LSPs tab with list view and navigation (cdb5cbe)
+    - LSP controls (toggle, restart) (0891dd4)
+    - LSP log viewer extension (5081077)
+    - LSP installation guidance (99e0794)
 - **Next Phases:**
-  - Phase 6: TUI Integration (5 tasks) - PENDING
-  - Phase 7: Vector Search Performance Evaluation (5 tasks) - PENDING
+  - Phase 7: Vector Search Performance Evaluation (5 tasks) - NEXT
   - Phase 8: Testing and Quality Assurance (7 tasks) - PENDING
   - Phase 9: Documentation and Refinement (5 tasks) - PENDING
   - Phase 10: Final Review and Release (5 tasks) - PENDING

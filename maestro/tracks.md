@@ -78,14 +78,14 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 6 Ready)
+## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 7 Ready)
 *Link: [./maestro/tracks/lsp-integration_20260119/](./maestro/tracks/lsp-integration_20260119/)*
 
 **Description**: On-Demand LSP Integration for Maestro TUI - Add on-demand Language Server Protocol (LSP) support with 3 core Rust-based LSPs (rust-analyzer, ruff-lsp, typescript-language-server), hybrid MCP+stdio exposure, TUI integration with dedicated tab and inline indicators, auto-start lifecycle, and migrate entire database architecture to Turso (libSQL) replacing SQLite/DuckDB/Tantivy with vector search evaluation.
 
 **Type**: Feature
 
-**Status**: **In Progress** - Phases 1-5: COMPLETE, TZAR REVIEWED, PRODUCTION-READY ✅ | Phase 6: TUI Integration (NEXT)
+**Status**: **In Progress** - Phases 1-6: COMPLETE ✅ | Phase 7: Vector Search Performance Evaluation (NEXT)
 
 **Phases**:
 - [x] Phase 1: Foundation and Setup (4 tasks) - COMPLETE ✅
@@ -98,8 +98,13 @@ This file tracks all major tracks for the project. Each track has its own detail
 - [x] Phase 4: LSP MCP Bridge Implementation (4 tasks) - COMPLETE ✅
 - [x] Phase 5: Direct stdio LSP Exposure (4 tasks) - COMPLETE ✅
   - 12/12 session_manager tests passing
-- [ ] Phase 6: TUI Integration (5 tasks) - NEXT
-- [ ] Phase 7: Vector Search Performance Evaluation (5 tasks)
+- [x] Phase 6: TUI Integration (5 tasks) - COMPLETE ✅
+  - LSP status indicators on session cards (e0c36f6)
+  - LSPs tab with list view and navigation (cdb5cbe)
+  - LSP controls (toggle, restart) (0891dd4)
+  - LSP log viewer extension (5081077)
+  - LSP installation guidance (99e0794)
+- [ ] Phase 7: Vector Search Performance Evaluation (5 tasks) - NEXT
 - [ ] Phase 8: Testing and Quality Assurance (7 tasks)
 - [ ] Phase 9: Documentation and Refinement (5 tasks)
 - [ ] Phase 10: Final Review and Release (5 tasks)
@@ -111,9 +116,10 @@ This file tracks all major tracks for the project. Each track has its own detail
 **Execution**: `/maestro:implement lsp-integration_20260119`
 
 **Progress Summary (2026-01-20):**
-- **25/63 tasks complete (40%)**
-- **Phases 1-5: COMPLETE, TZAR REVIEWED, PRODUCTION-READY** ✅
+- **30/63 tasks complete (48%)**
+- **Phases 1-6: COMPLETE ✅**
   - All core LSP infrastructure implemented and tested
+  - TUI integration complete with status indicators, controls, logs, and installation guidance
   - Tzar of Excellence Review: PASSED for Phase 2
   - All critical issues resolved (schema, errors, NULL handling, transactions, foreign keys, read-only, XSS)
-- Next phase: TUI Integration (Phase 6)
+- Next phase: Vector Search Performance Evaluation (Phase 7)
