@@ -705,11 +705,78 @@ impl MemoryService {
         })
     }
 
+    /// Merge JSON metadata into a session's `meta_data` column.
+    ///
+    /// `patch` must be a JSON object. Keys in `patch` overwrite existing keys.
+    pub fn merge_session_metadata(&self, session_id: &str, patch: serde_json::Value) -> Result<()> {
+        use serde_json::Value;
+
+        let Value::Object(patch_map) = patch else {
+            return Err(anyhow::anyhow!("metadata patch must be a JSON object"));
+        };
+
+        self.db.with_connection(|conn| {
+            let existing: Option<String> = conn
+                .query_row(
+                    "SELECT meta_data FROM sessions WHERE session_id = ?",
+                    [session_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            let mut base = existing
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+
+            let Value::Object(ref mut base_map) = base else {
+                // Corrupted stored value; replace with the patch.
+                let mut map = serde_json::Map::new();
+                for (k, v) in patch_map {
+                    map.insert(k, v);
+                }
+                let merged = serde_json::to_string(&Value::Object(map))?;
+                conn.execute(
+                    "UPDATE sessions SET meta_data = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
+                    params![merged, session_id],
+                )?;
+                return Ok(());
+            };
+
+            for (k, v) in patch_map {
+                base_map.insert(k, v);
+            }
+
+            let merged = serde_json::to_string(&base)?;
+            conn.execute(
+                "UPDATE sessions SET meta_data = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
+                params![merged, session_id],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Delete a session from the database
     pub fn delete_session(&self, session_id: &str) -> Result<()> {
         self.db.with_connection(|conn| {
             conn.execute("DELETE FROM sessions WHERE session_id = ?", [session_id])?;
             Ok(())
+        })
+    }
+
+    /// Get a session's project path by session_id
+    pub fn get_session_project_path(&self, session_id: &str) -> Result<Option<String>> {
+        self.db.with_connection(|conn| {
+            let result: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT project_path FROM sessions WHERE session_id = ?",
+                    [session_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .context("Failed to query session project path")?;
+
+            // Flatten the double Option (optional row + optional column)
+            Ok(result.and_then(|x| x))
         })
     }
 

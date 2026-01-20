@@ -12,7 +12,7 @@ use crate::multiplexer::{TmuxMultiplexer, TmuxSession};
 use tokio::runtime::Handle;
 
 #[cfg(feature = "rusqlite")]
-use super::lsp_manager::LspManager;
+use super::lsp_manager::{LspManager, LspType};
 
 #[cfg(feature = "rusqlite")]
 pub struct SessionManager {
@@ -173,24 +173,181 @@ impl SessionManager {
     }
 
     fn write_tool_search_mcp_config(&self, session_id: &str) -> Result<std::path::PathBuf> {
+        self.write_mcp_config_with_lsps(session_id, &[])
+    }
+
+    /// Write MCP configuration file with LSP entries
+    ///
+    /// Generates a .mcp.json file that includes:
+    /// - Existing MCP servers (like maestro-tool-search)
+    /// - LSP server entries for direct stdio exposure
+    ///
+    /// The LSP section follows the format defined in:
+    /// maestro/leindex/docs/lsp-mcp-json-format.md
+    fn write_mcp_config_with_lsps(&self, session_id: &str, lsp_types: &[LspType]) -> Result<std::path::PathBuf> {
         let mut path = std::env::temp_dir();
         path.push(format!(
             "maestro-mcp-config-{}.json",
             sanitize_filename(session_id)
         ));
 
-        let config = serde_json::json!({
-            "mcpServers": {
-                "maestro-tool-search": {
-                    "command": "maestro",
-                    "args": ["mcp", "tool-search"],
-                    "type": "stdio"
-                }
+        // Get session's project path from database
+        let project_path = self.service
+            .get_session_project_path(session_id)
+            .context("Failed to get session project path")?
+            .unwrap_or_else(|| std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or(".".to_string()));
+
+        // Build mcpServers section (existing MCP servers)
+        let mcp_servers = serde_json::json!({
+            "maestro-tool-search": {
+                "command": "maestro",
+                "args": ["mcp", "tool-search"],
+                "type": "stdio"
             }
         });
 
-        std::fs::write(&path, serde_json::to_string_pretty(&config)?)?;
+        // Build LSP servers section from provided LSP types or detect from project
+        let lsp_servers = if lsp_types.is_empty() {
+            // Auto-detect LSPs from project path
+            self.detect_lsps_for_project(&project_path)?
+        } else {
+            // Use provided LSP types
+            lsp_types.iter()
+                .filter_map(|lsp_type| self.build_lsp_entry(lsp_type, session_id, &project_path).ok())
+                .collect()
+        };
+
+        // Combine into final config
+        let config = if lsp_servers.is_empty() {
+            serde_json::json!({
+                "mcpServers": mcp_servers
+            })
+        } else {
+            serde_json::json!({
+                "mcpServers": mcp_servers,
+                "lsp": {
+                    "servers": lsp_servers
+                }
+            })
+        };
+
+        // Write atomically to avoid partial writes
+        let temp_path = path.with_extension("tmp");
+        std::fs::write(&temp_path, serde_json::to_string_pretty(&config)?)
+            .with_context(|| format!("Failed to write MCP config to {:?}", temp_path))?;
+        std::fs::rename(&temp_path, &path)
+            .with_context(|| format!("Failed to rename MCP config to {:?}", path))?;
+
         Ok(path)
+    }
+
+    /// Build an LSP entry for .mcp.json configuration
+    fn build_lsp_entry(
+        &self,
+        lsp_type: &LspType,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<serde_json::Value> {
+        let sanitized_session = sanitize_filename(session_id);
+
+        // Define capabilities based on LSP type
+        let capabilities: Vec<&str> = match lsp_type {
+            LspType::Rust => vec!["completion", "inlayHint", "definition", "hover"],
+            LspType::Python => vec!["completion", "definition", "hover"],
+            LspType::TypeScript => vec!["completion", "definition", "references"],
+        };
+
+        // Build args array with default additional args
+        let args: Vec<String> = lsp_type.default_additional_args()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        Ok(serde_json::json!({
+            "name": format!("{}-{}", lsp_type.display_name(), sanitized_session),
+            "language": lsp_type.language(),
+            "displayName": lsp_type.display_name(),
+            "command": lsp_type.binary_name(),
+            "args": args,
+            "type": "stdio",
+            "session_id": session_id,
+            "project_path": project_path,
+            "capabilities": capabilities,
+            "transport": "stdio"
+        }))
+    }
+
+    /// Detect which LSPs should be used for a project based on file extensions
+    fn detect_lsps_for_project(&self, project_path: &str) -> Result<Vec<serde_json::Value>> {
+        let mut lsp_entries = Vec::new();
+        let mut detected_languages = std::collections::HashSet::new();
+
+        // Walk the project directory to detect file extensions
+        let path = std::path::Path::new(project_path);
+        if !path.exists() {
+            return Ok(lsp_entries);
+        }
+
+        // Scan for file extensions (limit depth for performance)
+        let max_depth = 3;
+        let mut visited = std::collections::HashSet::new();
+        let mut dirs_to_visit = vec![path.to_path_buf()];
+
+        while let Some(current_dir) = dirs_to_visit.pop() {
+            if visited.contains(&current_dir) || visited.len() > 1000 {
+                continue;
+            }
+            visited.insert(current_dir.clone());
+
+            // Skip hidden directories and common non-source directories
+            if let Some(dir_name) = current_dir.file_name() {
+                let name = dir_name.to_string_lossy();
+                if name.starts_with('.') || name == "node_modules" || name == "target" ||
+                   name == "vendor" || name == "build" || name == "dist" {
+                    continue;
+                }
+            }
+
+            let entries = match std::fs::read_dir(&current_dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            for entry in entries.flatten() {
+                let file_type = match entry.file_type() {
+                    Ok(ft) => ft,
+                    Err(_) => continue,
+                };
+
+                if file_type.is_dir() {
+                    if visited.len() < max_depth * 100 {
+                        dirs_to_visit.push(entry.path());
+                    }
+                } else if file_type.is_file() {
+                    if let Some(ext) = entry.path().extension() {
+                        let ext_str = ext.to_string_lossy();
+                        match ext_str.as_ref() {
+                            "rs" => { detected_languages.insert(LspType::Rust); }
+                            "py" => { detected_languages.insert(LspType::Python); }
+                            "ts" | "tsx" | "js" | "jsx" => { detected_languages.insert(LspType::TypeScript); }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build LSP entries for detected languages
+        let session_id = format!("auto-detected");
+        for lsp_type in detected_languages {
+            if let Ok(entry) = self.build_lsp_entry(&lsp_type, &session_id, project_path) {
+                lsp_entries.push(entry);
+            }
+        }
+
+        Ok(lsp_entries)
     }
 
     /// Attach to an existing session
