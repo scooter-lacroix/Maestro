@@ -138,6 +138,10 @@ struct App {
     lsp_status_cache: HashMap<String, Vec<(String, LspStatus)>>,
     last_lsp_refresh: Instant,
     lsp_state: ratatui::widgets::ListState,
+    // LSP log viewing
+    lsp_log_content: String,
+    lsp_log_scroll: u16,
+    lsp_log_source: Option<(String, String)>, // (session_id, lsp_name)
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -315,6 +319,9 @@ impl App {
 	            lsp_status_cache: HashMap::new(),
 	            last_lsp_refresh: Instant::now(),
 	            lsp_state: ratatui::widgets::ListState::default(),
+	            lsp_log_content: String::new(),
+	            lsp_log_scroll: 0,
+	            lsp_log_source: None,
 	        };
 	        app.mcp_state.select(Some(0));
 	        app.dash_session_state.select(Some(0));
@@ -839,6 +846,50 @@ impl App {
 
         // Refresh status after action
         self.refresh_lsp_status();
+    }
+
+    /// Read LSP logs for the specified session and LSP
+    fn read_lsp_logs(&mut self, session_id: &str, lsp_name: &str) {
+        // Sanitize lsp_name for use in filename (replace spaces with dashes)
+        let safe_lsp_name = lsp_name.replace(' ', "-").to_lowercase();
+
+        // Check common log locations
+        let log_paths = vec![
+            format!("/tmp/{}-{}.log", safe_lsp_name, session_id),
+            format!("/tmp/maestro-lsp-{}-{}.log", session_id, safe_lsp_name),
+            format!("/tmp/maestro-lsp-{}.log", session_id),
+            format!("/tmp/maestro-lsp-{}-stdout.log", session_id),
+            format!("/tmp/maestro-lsp-{}-stderr.log", session_id),
+            format!("/tmp/{}.log", safe_lsp_name),
+        ];
+
+        for path in log_paths {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                self.lsp_log_content = content;
+                self.lsp_log_source = Some((session_id.to_string(), lsp_name.to_string()));
+                self.lsp_log_scroll = 0;
+                return;
+            }
+        }
+
+        // No log file found - provide helpful message
+        self.lsp_log_content = format!(
+            "No logs available for LSP '{}' in session '{}'.\n\n\
+             LSP logs are not currently being captured to files.\n\n\
+             To enable LSP logging, you can:\n\
+             - Start the LSP with output redirection to a log file\n\
+             - Check the LSP configuration for logging options\n\
+             - Use tools like journalctl or dmesg for system-level logs\n\n\
+             Common log locations checked:\n\
+             - /tmp/{}-{}.log\n\
+             - /tmp/maestro-lsp-{}-{}.log\n\
+             - /tmp/maestro-lsp-{}.log\n\
+             - /tmp/maestro-lsp-{{}}-stdout.log\n\
+             - /tmp/maestro-lsp-{{}}-stderr.log",
+            lsp_name, session_id, safe_lsp_name, session_id, session_id, safe_lsp_name, session_id
+        );
+        self.lsp_log_source = Some((session_id.to_string(), lsp_name.to_string()));
+        self.lsp_log_scroll = 0;
     }
 }
 
@@ -1695,6 +1746,9 @@ async fn run_app<B: Backend>(
 	                                        app.mcp_log_lines.clear();
 	                                        app.mcp_log_scroll = 0;
 	                                        app.target_mcp_name = None;
+	                                        app.lsp_log_content.clear();
+	                                        app.lsp_log_scroll = 0;
+	                                        app.lsp_log_source = None;
 	                                    }
 	                                    InputMode::SettingsMenu => {
 	                                        app.settings_menu_kind = None;
@@ -1896,7 +1950,11 @@ async fn run_app<B: Backend>(
 	                                    };
 	                                    app.switcher_state.select(Some(i));
 	                                } else if app.input_mode == InputMode::McpLogs {
-	                                    app.mcp_log_scroll = app.mcp_log_scroll.saturating_add(1);
+	                                    if app.lsp_log_source.is_some() {
+	                                        app.lsp_log_scroll = app.lsp_log_scroll.saturating_add(1);
+	                                    } else {
+	                                        app.mcp_log_scroll = app.mcp_log_scroll.saturating_add(1);
+	                                    }
 	                                } else if app.input_mode == InputMode::SettingsMenu {
 	                                    let len = app.settings_menu_items.len();
 	                                    let i = match app.settings_menu_state.selected() {
@@ -1980,7 +2038,11 @@ async fn run_app<B: Backend>(
 	                                        McpOption::Install => McpOption::Remove,
 	                                    };
 	                                } else if app.input_mode == InputMode::McpLogs {
-	                                    app.mcp_log_scroll = app.mcp_log_scroll.saturating_sub(1);
+	                                    if app.lsp_log_source.is_some() {
+	                                        app.lsp_log_scroll = app.lsp_log_scroll.saturating_sub(1);
+	                                    } else {
+	                                        app.mcp_log_scroll = app.mcp_log_scroll.saturating_sub(1);
+	                                    }
 	                                } else if app.input_mode == InputMode::SettingsMenu {
 	                                    let len = app.settings_menu_items.len();
 	                                    let i = match app.settings_menu_state.selected() {
@@ -2263,6 +2325,17 @@ async fn run_app<B: Backend>(
 	                                            app.rename_buffer = format!("{}-fork", s.title);
 	                                            app.input_mode = InputMode::ForkSession;
 	                                        }
+	                                    }
+	                                }
+	                            }
+	                            (_, KeyCode::Char('l')) => {
+	                                if app.tab_index == 5 { // LSPs tab - view logs
+	                                    if let Some((session_id, lsp_name, _status)) = app.get_selected_lsp() {
+	                                        app.read_lsp_logs(&session_id, &lsp_name);
+	                                        app.input_mode = InputMode::McpLogs; // Reuse the existing log viewer
+	                                        app.status_message = format!("Viewing logs for '{}' (press Esc to close)", lsp_name);
+	                                    } else {
+	                                        app.status_message = "No LSP selected".to_string();
 	                                    }
 	                                }
 	                            }
@@ -3571,10 +3644,46 @@ fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
     let area = centered_rect(80, 70, frame.area());
     frame.render_widget(Clear, area);
 
-    let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
+    // Determine if we're showing MCP or LSP logs
+    let is_lsp_logs = app.lsp_log_source.is_some();
+
+    let (title, content, scroll_offset) = if is_lsp_logs {
+        // LSP logs
+        let (session_id, lsp_name) = app.lsp_log_source.as_ref().unwrap();
+        let title = format!(" LSP Logs: {} - Session {} (Esc to close) ", lsp_name, session_id);
+        let content = if app.lsp_log_content.is_empty() {
+            vec![
+                Line::from(""),
+                Line::from("  No logs found."),
+                Line::from(""),
+                Line::from("  Tip: LSP logs may not be enabled for this server."),
+            ]
+        } else {
+            app.lsp_log_content.lines().map(|l| Line::from(l)).collect()
+        };
+        let scroll_offset = (app.lsp_log_scroll, 0);
+        (title, content, scroll_offset)
+    } else {
+        // MCP logs
+        let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
+        let title = format!(" MCP Logs: {} (Esc to close) ", name);
+        let content = if app.mcp_log_lines.is_empty() {
+            vec![
+                Line::from(""),
+                Line::from("  No logs found."),
+                Line::from(""),
+                Line::from("  Tip: start the server to generate logs."),
+            ]
+        } else {
+            app.mcp_log_lines.iter().map(|l| Line::from(l.as_str())).collect()
+        };
+        let scroll_offset = (app.mcp_log_scroll, 0);
+        (title, content, scroll_offset)
+    };
+
     let theme = theme_from_name(&app.config.theme);
     let block = Block::default()
-        .title(format!(" MCP Logs: {} (Esc to close) ", name))
+        .title(title)
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
@@ -3583,19 +3692,8 @@ fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let content = if app.mcp_log_lines.is_empty() {
-        vec![
-            Line::from(""),
-            Line::from("  No logs found."),
-            Line::from(""),
-            Line::from("  Tip: start the server to generate logs."),
-        ]
-    } else {
-        app.mcp_log_lines.iter().map(|l| Line::from(l.as_str())).collect()
-    };
-
     let para = Paragraph::new(content)
-        .scroll((app.mcp_log_scroll, 0))
+        .scroll(scroll_offset)
         .wrap(Wrap { trim: false });
     frame.render_widget(para, inner);
 }
@@ -4155,7 +4253,9 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
             Span::styled("| ", Style::default().fg(theme.muted)),
             Span::styled("[R] Restart ", Style::default().fg(theme.warning).bold()),
             Span::styled("| ", Style::default().fg(theme.muted)),
-            Span::styled("[r] Refresh", Style::default().fg(theme.warning).bold()),
+            Span::styled("[r] Refresh ", Style::default().fg(theme.warning).bold()),
+            Span::styled("| ", Style::default().fg(theme.muted)),
+            Span::styled("[l] Logs", Style::default().fg(theme.warning).bold()),
         ]),
     ];
     frame.render_widget(Paragraph::new(header_text).block(header_block), chunks[0]);
