@@ -142,6 +142,8 @@ struct App {
     lsp_log_content: String,
     lsp_log_scroll: u16,
     lsp_log_source: Option<(String, String)>, // (session_id, lsp_name)
+    // LSP installation guidance - tracks which LSPs are available on the system
+    lsp_availability: HashMap<String, bool>, // lsp_name -> is_available
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -322,7 +324,10 @@ impl App {
 	            lsp_log_content: String::new(),
 	            lsp_log_scroll: 0,
 	            lsp_log_source: None,
+	            lsp_availability: HashMap::new(),
 	        };
+	        // Check LSP availability on startup
+	        app.check_lsp_availability();
 	        app.mcp_state.select(Some(0));
 	        app.dash_session_state.select(Some(0));
 	        app.memory_state.select(Some(0));
@@ -450,6 +455,62 @@ impl App {
                 self.dash_session_state.select(Some(idx));
                 return;
             }
+        }
+    }
+
+    // LSP installation guidance helpers
+    fn check_lsp_availability(&mut self) {
+        let lsps = vec![
+            "rust-analyzer",
+            "ruff-lsp",
+            "typescript-language-server",
+        ];
+
+        for lsp in lsps {
+            let available = Self::binary_exists(lsp);
+            self.lsp_availability.insert(lsp.to_string(), available);
+        }
+    }
+
+    fn binary_exists(name: &str) -> bool {
+        // Use 'which' command to check if binary exists in PATH
+        if let Ok(output) = std::process::Command::new("which")
+            .arg(name)
+            .output()
+        {
+            output.status.success()
+        } else {
+            false
+        }
+    }
+
+    fn get_lsp_install_command(lsp_name: &str) -> Vec<&'static str> {
+        match lsp_name {
+            "rust-analyzer" => vec![
+                "# Via rustup (recommended):",
+                "rustup component add rust-analyzer",
+                "",
+                "# Or pre-built binary:",
+                "curl -L https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu -o ~/.local/bin/rust-analyzer",
+                "chmod +x ~/.local/bin/rust-analyzer",
+            ],
+            "ruff-lsp" => vec![
+                "# Via pip:",
+                "pip install ruff-lsp",
+                "",
+                "# Or via pipx (recommended for isolation):",
+                "pipx install ruff-lsp",
+            ],
+            "typescript-language-server" => vec![
+                "# Via npm:",
+                "npm install -g typescript-language-server",
+                "",
+                "# Or via yarn:",
+                "yarn global add typescript-language-server",
+            ],
+            _ => vec![
+                "# See LSP documentation for installation instructions",
+            ],
         }
     }
 
@@ -4234,9 +4295,32 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
+
+    // Collect missing LSPs for installation guidance
+    let missing_lsps: Vec<&str> = app.lsp_availability
+        .iter()
+        .filter(|(_, &available)| !available)
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    // Determine if we need to show the missing LSPs section
+    let has_missing_lsps = !missing_lsps.is_empty();
+
+    // Calculate constraints: header + LSP list + (optional) missing LSPs section
+    let list_min = if has_missing_lsps {
+        // Reserve space for missing LSPs section (approximately 15 lines)
+        Constraint::Min(0)
+    } else {
+        Constraint::Min(0)
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(3),  // Header
+            list_min,               // LSP list
+            Constraint::Length(if has_missing_lsps { 15 } else { 0 }),  // Missing LSPs section
+        ])
         .split(area);
 
     // Header block with control hints
@@ -4294,50 +4378,104 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
         ];
         let para = Paragraph::new(text).block(list_block);
         frame.render_widget(para, chunks[1]);
-        return;
+    } else {
+        // Create list items with color-coded status
+        let lsp_items: Vec<ListItem> = lsp_entries
+            .iter()
+            .map(|(_session_id, lsp_name, status, session_title)| {
+                let (status_text, status_color, icon) = match status {
+                    LspStatus::Running => ("Running", Color::Green, "●"),
+                    LspStatus::Stopped => ("Stopped", Color::Red, "■"),
+                    LspStatus::Error => ("Error", Color::Red, "⚠"),
+                    LspStatus::Starting => ("Starting", Color::Yellow, "○"),
+                };
+
+                // Get short session title (truncate if too long)
+                let short_title = session_title.as_ref().map(|t| {
+                    if t.len() > 20 {
+                        format!("{}...", &t[..17])
+                    } else {
+                        t.clone()
+                    }
+                }).unwrap_or_else(|| "Unknown".to_string());
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(icon, Style::default().fg(status_color)),
+                    Span::raw(" "),
+                    Span::styled(format!("{} ", lsp_name), Style::default().bold()),
+                    Span::styled(
+                        format!("[{}] ", status_text),
+                        Style::default().fg(status_color),
+                    ),
+                    Span::styled(
+                        format!("({})", short_title),
+                        Style::default().fg(Color::DarkGray).italic(),
+                    ),
+                ]))
+            })
+            .collect();
+
+        let lsp_list = List::new(lsp_items)
+            .block(list_block)
+            .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
+            .highlight_symbol(">> ");
+        frame.render_stateful_widget(lsp_list, chunks[1], &mut app.lsp_state);
     }
 
-    // Create list items with color-coded status
-    let lsp_items: Vec<ListItem> = lsp_entries
-        .iter()
-        .map(|(_session_id, lsp_name, status, session_title)| {
-            let (status_text, status_color, icon) = match status {
-                LspStatus::Running => ("Running", Color::Green, "●"),
-                LspStatus::Stopped => ("Stopped", Color::Red, "■"),
-                LspStatus::Error => ("Error", Color::Red, "⚠"),
-                LspStatus::Starting => ("Starting", Color::Yellow, "○"),
-            };
+    // Missing LSPs section with installation commands
+    if has_missing_lsps {
+        let missing_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" ⚠ Missing LSPs - Installation Required ")
+            .title_style(Style::default().fg(Color::Yellow).bold());
 
-            // Get short session title (truncate if too long)
-            let short_title = session_title.as_ref().map(|t| {
-                if t.len() > 20 {
-                    format!("{}...", &t[..17])
+        let mut missing_lines = vec![
+            Line::from(vec![
+                Span::styled("The following LSPs are not available on your system:", Style::default().fg(Color::Yellow).bold()),
+            ]),
+            Line::from(""),
+        ];
+
+        for lsp_name in &missing_lsps {
+            let install_commands = App::get_lsp_install_command(lsp_name);
+            missing_lines.push(Line::from(vec![
+                Span::styled(
+                    format!("▸ {} ", lsp_name),
+                    Style::default().fg(Color::Red).bold(),
+                ),
+                Span::styled(
+                    "NOT FOUND",
+                    Style::default().fg(Color::Red).bold(),
+                ),
+            ]));
+
+            for cmd in &install_commands {
+                if cmd.starts_with("#") {
+                    missing_lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(*cmd, Style::default().fg(Color::DarkGray).italic()),
+                    ]));
+                } else if !cmd.is_empty() {
+                    missing_lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("$ {}", cmd),
+                            Style::default().fg(Color::Cyan),
+                        ),
+                    ]));
                 } else {
-                    t.clone()
+                    missing_lines.push(Line::from(""));
                 }
-            }).unwrap_or_else(|| "Unknown".to_string());
+            }
+            missing_lines.push(Line::from(""));
+        }
 
-            ListItem::new(Line::from(vec![
-                Span::styled(icon, Style::default().fg(status_color)),
-                Span::raw(" "),
-                Span::styled(format!("{} ", lsp_name), Style::default().bold()),
-                Span::styled(
-                    format!("[{}] ", status_text),
-                    Style::default().fg(status_color),
-                ),
-                Span::styled(
-                    format!("({})", short_title),
-                    Style::default().fg(Color::DarkGray).italic(),
-                ),
-            ]))
-        })
-        .collect();
-
-    let lsp_list = List::new(lsp_items)
-        .block(list_block)
-        .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
-        .highlight_symbol(">> ");
-    frame.render_stateful_widget(lsp_list, chunks[1], &mut app.lsp_state);
+        let missing_para = Paragraph::new(missing_lines)
+            .block(missing_block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(missing_para, chunks[2]);
+    }
 }
 
 fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
