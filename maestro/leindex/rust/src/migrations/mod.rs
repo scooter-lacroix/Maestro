@@ -1006,6 +1006,420 @@ pub fn sort_migrations_by_version<'a>(migrations: &[&'a dyn Migration]) -> Vec<&
     sorted
 }
 
+// ============================================================================
+// SQLite/Tantivy/DuckDB → Turso Migrations
+// ============================================================================
+
+/// Migration: Create base Turso schema (migrates from SQLite)
+///
+/// This migration creates all the base tables needed for Maestro's OLTP operations,
+/// migrating from the existing SQLite schema.
+#[derive(Debug)]
+pub struct CreateBaseSchema;
+
+#[async_trait::async_trait]
+impl Migration for CreateBaseSchema {
+    fn version(&self) -> &str {
+        "2026_01_19_001_create_base_schema"
+    }
+
+    fn description(&self) -> String {
+        "Create base Turso schema (migrate from SQLite)".to_string()
+    }
+
+    async fn up(&self, conn: &Connection) -> Result<()> {
+        // LSP servers table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS lsp_servers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                language TEXT NOT NULL,
+                lsp_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'stopped',
+                pid INTEGER,
+                port INTEGER,
+                auto_start INTEGER DEFAULT 1,
+                last_started TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Create indexes
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lsp_session ON lsp_servers(session_id)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lsp_status ON lsp_servers(status)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Sessions table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                project_path TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT,
+                last_activity_at TEXT
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Projects table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS maestro_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_path TEXT NOT NULL UNIQUE,
+                project_name TEXT NOT NULL,
+                description TEXT,
+                project_type TEXT,
+                tech_stack TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT,
+                last_scanned_at TEXT
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_projects_path ON maestro_projects(project_path)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_projects_active ON maestro_projects(is_active)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Memories table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                summary TEXT,
+                category TEXT NOT NULL DEFAULT 'context',
+                importance TEXT NOT NULL DEFAULT 'normal',
+                source TEXT,
+                session_id TEXT,
+                project_id INTEGER,
+                track_id INTEGER,
+                command TEXT,
+                command_context TEXT,
+                embedding_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at TEXT,
+                last_accessed TEXT,
+                meta_data TEXT,
+                tags TEXT
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Create memory indexes
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Tracks table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS maestro_tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id TEXT NOT NULL,
+                project_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'new',
+                total_tasks INTEGER DEFAULT 0,
+                completed_tasks INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT,
+                UNIQUE(project_id, track_id),
+                FOREIGN KEY (project_id) REFERENCES maestro_projects(id) ON DELETE CASCADE
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_project ON maestro_tracks(project_id)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_status ON maestro_tracks(status)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Session groups table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS session_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE,
+                category TEXT,
+                is_expanded INTEGER DEFAULT 1,
+                sort_order INTEGER DEFAULT 0,
+                parent_id INTEGER REFERENCES session_groups(id) ON DELETE CASCADE
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_groups_path ON session_groups(path)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // MCP servers table
+        conn.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                transport TEXT NOT NULL DEFAULT 'stdio',
+                command TEXT NOT NULL,
+                args TEXT,
+                env TEXT,
+                cwd TEXT,
+                url TEXT,
+                headers TEXT,
+                status TEXT NOT NULL DEFAULT 'stopped',
+                socket_path TEXT,
+                client_count INTEGER DEFAULT 0,
+                last_started_at TEXT
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mcp_status ON mcp_servers(status)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mcp_transport ON mcp_servers(transport)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, conn: &Connection) -> Result<()> {
+        // Drop tables in reverse order of creation (to handle foreign keys)
+        conn.execute(
+            "DROP TABLE IF EXISTS mcp_servers",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "DROP TABLE IF EXISTS session_groups",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "DROP TABLE IF EXISTS maestro_tracks",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "DROP TABLE IF EXISTS memories",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "DROP TABLE IF EXISTS maestro_projects",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "DROP TABLE IF EXISTS sessions",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "DROP TABLE IF EXISTS lsp_servers",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        Ok(())
+    }
+}
+
+/// Migration: Create FTS5 full-text search (migrates from Tantivy)
+///
+/// This migration creates the FTS5 virtual table for full-text search,
+/// replacing Tantivy indexes.
+#[derive(Debug)]
+pub struct CreateFTS5Indexes;
+
+#[async_trait::async_trait]
+impl Migration for CreateFTS5Indexes {
+    fn version(&self) -> &str {
+        "2026_01_19_002_create_fts5_indexes"
+    }
+
+    fn description(&self) -> String {
+        "Create FTS5 full-text search indexes (migrate from Tantivy)".to_string()
+    }
+
+    async fn up(&self, conn: &Connection) -> Result<()> {
+        // Create FTS5 virtual table for memories
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, category)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        // Populate FTS5 index with existing memories
+        conn.execute(
+            r#"
+            INSERT INTO memories_fts(rowid, content, category)
+            SELECT id, content, category FROM memories
+            WHERE id NOT IN (SELECT rowid FROM memories_fts)
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            "DROP TABLE IF EXISTS memories_fts",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+/// Migration: Create OLAP analytical views (migrates from DuckDB)
+///
+/// This migration creates optimized views and queries for OLAP operations,
+/// replacing DuckDB analytical views.
+#[derive(Debug)]
+pub struct CreateOLAPViews;
+
+#[async_trait::async_trait]
+impl Migration for CreateOLAPViews {
+    fn version(&self) -> &str {
+        "2026_01_19_003_create_olap_views"
+    }
+
+    fn description(&self) -> String {
+        "Create OLAP analytical views (migrate from DuckDB)".to_string()
+    }
+
+    async fn up(&self, conn: &Connection) -> Result<()> {
+        // Note: Turso uses native SQL queries instead of materialized views
+        // The OLAP operations are implemented as methods in TursoStorageBackend
+        // This migration is a placeholder for any view-specific optimizations
+        // that might be added in the future
+
+        // Create a view for active sessions with project info
+        conn.execute(
+            r#"
+            CREATE VIEW IF NOT EXISTS v_active_sessions AS
+            SELECT
+                s.id,
+                s.session_id,
+                s.name,
+                s.project_path,
+                s.status,
+                s.created_at,
+                s.updated_at,
+                s.last_activity_at,
+                p.project_name,
+                p.tech_stack
+            FROM sessions s
+            LEFT JOIN maestro_projects p ON s.project_path = p.project_path
+            WHERE s.status = 'active'
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            "DROP VIEW IF EXISTS v_active_sessions",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+/// Get all migrations for the LSP integration track.
+///
+/// Returns a vector of migrations that should be applied to migrate
+/// from SQLite/DuckDB/Tantivy to Turso.
+pub fn get_lsp_integration_migrations() -> Vec<std::sync::Arc<dyn Migration + Send + Sync>> {
+    vec![
+        std::sync::Arc::new(CreateBaseSchema) as std::sync::Arc<dyn Migration + Send + Sync>,
+        std::sync::Arc::new(CreateFTS5Indexes) as std::sync::Arc<dyn Migration + Send + Sync>,
+        std::sync::Arc::new(CreateOLAPViews) as std::sync::Arc<dyn Migration + Send + Sync>,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1324,5 +1738,152 @@ mod tests {
         assert!(config.create_table_if_missing);
         assert_eq!(config.max_concurrent_migrations, 1);
         assert!(config.use_transactions);
+    }
+
+    #[tokio::test]
+    async fn test_lsp_integration_migrations() -> Result<()> {
+        let db = create_test_db().await?;
+        let manager = MigrationManager::new(db);
+        manager.initialize().await?;
+
+        // Create migration instances
+        let base_schema = CreateBaseSchema;
+        let fts5_indexes = CreateFTS5Indexes;
+        let olap_views = CreateOLAPViews;
+
+        // Run all migrations
+        let migrations: Vec<&dyn Migration> = vec![&base_schema, &fts5_indexes, &olap_views];
+        let applied_count = manager.run_migrations(&migrations, false).await?;
+        assert_eq!(applied_count, 3, "Should apply 3 migrations");
+
+        // Verify all migrations were applied
+        let status = manager.get_status().await?;
+        assert_eq!(status.applied_count, 3);
+        assert!(status.is_complete());
+
+        // Verify migrations can be rolled back
+        let rolled_back = manager.rollback_migrations(&migrations, Some(1)).await?;
+        assert_eq!(rolled_back, 1, "Should rollback 1 migration");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_base_schema_migration() -> Result<()> {
+        let db = create_test_db().await?;
+        let manager = MigrationManager::new(db);
+        manager.initialize().await?;
+
+        // Apply base schema migration
+        let applied = manager.run_migrations(&[&CreateBaseSchema], false).await?;
+        assert_eq!(applied, 1);
+
+        // Verify tables were created
+        let conn = manager.get_connection().await?;
+
+        // Check that lsp_servers table exists
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='lsp_servers'",
+                params_from_iter(std::iter::empty::<&str>()),
+            )
+            .await?;
+        assert!(rows.next().await?.is_some(), "lsp_servers table should exist");
+
+        // Check that memories table exists
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='memories'",
+                params_from_iter(std::iter::empty::<&str>()),
+            )
+            .await?;
+        assert!(rows.next().await?.is_some(), "memories table should exist");
+
+        // Check that maestro_projects table exists
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_projects'",
+                params_from_iter(std::iter::empty::<&str>()),
+            )
+            .await?;
+        assert!(rows.next().await?.is_some(), "maestro_projects table should exist");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fts5_migration() -> Result<()> {
+        let db = create_test_db().await?;
+        let manager = MigrationManager::new(db);
+        manager.initialize().await?;
+
+        // Apply base schema first (needed for memories table)
+        manager.run_migrations(&[&CreateBaseSchema], false).await?;
+
+        // Apply FTS5 migration
+        let applied = manager.run_migrations(&[&CreateFTS5Indexes], false).await?;
+        assert_eq!(applied, 1);
+
+        // Verify FTS5 table was created
+        let conn = manager.get_connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_fts'",
+                params_from_iter(std::iter::empty::<&str>()),
+            )
+            .await?;
+        assert!(rows.next().await?.is_some(), "memories_fts table should exist");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_olap_views_migration() -> Result<()> {
+        let db = create_test_db().await?;
+        let manager = MigrationManager::new(db);
+        manager.initialize().await?;
+
+        // Apply base schema first
+        manager.run_migrations(&[&CreateBaseSchema], false).await?;
+
+        // Apply OLAP views migration
+        let applied = manager.run_migrations(&[&CreateOLAPViews], false).await?;
+        assert_eq!(applied, 1);
+
+        // Verify view was created
+        let conn = manager.get_connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='view' AND name='v_active_sessions'",
+                params_from_iter(std::iter::empty::<&str>()),
+            )
+            .await?;
+        assert!(rows.next().await?.is_some(), "v_active_sessions view should exist");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_migration_idempotency() -> Result<()> {
+        let db = create_test_db().await?;
+        let manager = MigrationManager::new(db);
+        manager.initialize().await?;
+
+        // Create migration instances
+        let base_schema = CreateBaseSchema;
+        let fts5_indexes = CreateFTS5Indexes;
+        let olap_views = CreateOLAPViews;
+
+        let migrations: Vec<&dyn Migration> = vec![&base_schema, &fts5_indexes, &olap_views];
+
+        // Run migrations twice
+        let count1 = manager.run_migrations(&migrations, false).await?;
+        let count2 = manager.run_migrations(&migrations, false).await?;
+
+        // Second run should apply 0 migrations (all already applied)
+        assert_eq!(count1, 3, "First run should apply 3 migrations");
+        assert_eq!(count2, 0, "Second run should apply 0 migrations (idempotent)");
+
+        Ok(())
     }
 }
