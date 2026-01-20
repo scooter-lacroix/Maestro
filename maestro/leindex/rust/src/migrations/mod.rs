@@ -621,6 +621,7 @@ impl MigrationManager {
     ///
     /// # Arguments
     ///
+    /// * `conn` - The database connection to use (for atomicity)
     /// * `migration` - The migration to record
     /// * `checksum` - The migration checksum
     ///
@@ -629,20 +630,20 @@ impl MigrationManager {
     /// `Ok(())` on success, or an error.
     async fn record_migration_applied(
         &self,
+        conn: &Connection,
         migration: &dyn Migration,
         checksum: &str,
     ) -> Result<()> {
         let table_name = &self.config.migrations_table;
-        let conn = self.get_connection().await?;
         let description = migration.description();
 
         let sql = format!(
             r#"
             INSERT INTO {} (version, state, applied_at, checksum, description)
-            VALUES (?, 'APPLIED', datetime('now'), ?, ?)
+            VALUES (?, 'APPLIED', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?)
             ON CONFLICT(version) DO UPDATE SET
                 state = 'APPLIED',
-                applied_at = datetime('now'),
+                applied_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
                 checksum = excluded.checksum
             "#,
             table_name
@@ -659,19 +660,19 @@ impl MigrationManager {
     ///
     /// # Arguments
     ///
+    /// * `conn` - The database connection to use (for atomicity)
     /// * `version` - The migration version to record
     ///
     /// # Returns
     ///
     /// `Ok(())` on success, or an error.
-    async fn record_migration_rolled_back(&self, version: &str) -> Result<()> {
+    async fn record_migration_rolled_back(&self, conn: &Connection, version: &str) -> Result<()> {
         let table_name = &self.config.migrations_table;
-        let conn = self.get_connection().await?;
 
         let sql = format!(
             r#"
             UPDATE {}
-            SET state = 'ROLLED_BACK', rolled_back_at = datetime('now')
+            SET state = 'ROLLED_BACK', rolled_back_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
             WHERE version = ?
             "#,
             table_name
@@ -710,15 +711,39 @@ impl MigrationManager {
 
         let conn = self.get_connection().await?;
 
-        // Apply the migration
-        migration
-            .up(&conn)
-            .await
-            .with_context(|| format!("Failed to apply migration: {}", version))?;
+        // Use transaction if configured
+        if self.config.use_transactions {
+            conn.execute("BEGIN", params_from_iter(std::iter::empty::<libsql::Value>()))
+                .await
+                .context("Failed to begin transaction")?;
+        }
 
-        // Record the migration
-        let checksum = migration.checksum();
-        self.record_migration_applied(migration, &checksum).await?;
+        // Apply the migration
+        let apply_result = migration.up(&conn).await;
+
+        // Only record if apply succeeded
+        if apply_result.is_ok() {
+            let checksum = migration.checksum();
+            let record_result = self.record_migration_applied(&conn, migration, &checksum).await;
+
+            // Commit or rollback based on results
+            if self.config.use_transactions {
+                if record_result.is_ok() {
+                    conn.execute("COMMIT", params_from_iter(std::iter::empty::<libsql::Value>()))
+                        .await
+                        .context("Failed to commit transaction")?;
+                } else {
+                    conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                        .await
+                        .context("Failed to rollback transaction")?;
+                    return Ok(false);
+                }
+            } else {
+                record_result?;
+            }
+        }
+
+        apply_result?;
 
         tracing::info!("Applied migration: {}", version);
 
@@ -746,14 +771,38 @@ impl MigrationManager {
 
         let conn = self.get_connection().await?;
 
-        // Rollback the migration
-        migration
-            .down(&conn)
-            .await
-            .with_context(|| format!("Failed to rollback migration: {}", version))?;
+        // Use transaction if configured
+        if self.config.use_transactions {
+            conn.execute("BEGIN", params_from_iter(std::iter::empty::<libsql::Value>()))
+                .await
+                .context("Failed to begin transaction")?;
+        }
 
-        // Record the rollback
-        self.record_migration_rolled_back(version).await?;
+        // Rollback the migration
+        let rollback_result = migration.down(&conn).await;
+
+        // Only record if rollback succeeded
+        if rollback_result.is_ok() {
+            let record_result = self.record_migration_rolled_back(&conn, version).await;
+
+            // Commit or rollback based on results
+            if self.config.use_transactions {
+                if record_result.is_ok() {
+                    conn.execute("COMMIT", params_from_iter(std::iter::empty::<libsql::Value>()))
+                        .await
+                        .context("Failed to commit transaction")?;
+                } else {
+                    conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                        .await
+                        .context("Failed to rollback transaction")?;
+                    return Ok(false);
+                }
+            } else {
+                record_result?;
+            }
+        }
+
+        rollback_result?;
 
         tracing::info!("Rolled back migration: {}", version);
 
@@ -1042,7 +1091,7 @@ impl Migration for CreateBaseSchema {
                 auto_start INTEGER DEFAULT 1,
                 last_started TEXT,
                 last_error TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 updated_at TEXT,
                 UNIQUE(session_id, lsp_name)
             )
@@ -1072,7 +1121,7 @@ impl Migration for CreateBaseSchema {
                 name TEXT NOT NULL,
                 project_path TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 updated_at TEXT,
                 last_activity_at TEXT
             )
@@ -1092,7 +1141,7 @@ impl Migration for CreateBaseSchema {
                 project_type TEXT,
                 tech_stack TEXT,
                 is_active INTEGER DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 updated_at TEXT,
                 last_scanned_at TEXT
             )
@@ -1128,7 +1177,7 @@ impl Migration for CreateBaseSchema {
                 command TEXT,
                 command_context TEXT,
                 embedding_id INTEGER,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 expires_at TEXT,
                 last_accessed TEXT,
                 meta_data TEXT,
@@ -1178,7 +1227,7 @@ impl Migration for CreateBaseSchema {
                 status TEXT NOT NULL DEFAULT 'new',
                 total_tasks INTEGER DEFAULT 0,
                 completed_tasks INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 updated_at TEXT,
                 UNIQUE(project_id, track_id),
                 FOREIGN KEY (project_id) REFERENCES maestro_projects(id) ON DELETE CASCADE

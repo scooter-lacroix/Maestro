@@ -106,7 +106,7 @@ fn collect_source_files(root: &Path, max_files: usize) -> Result<Vec<PathBuf>> {
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| !should_skip_dir(e.path()))
-        .filter_map(|e| e.ok())
+        .filter_map(|e| e.ok()) // Intentionally skip dirs with permission errors
     {
         let path = entry.path();
         if is_supported_source_file(path) {

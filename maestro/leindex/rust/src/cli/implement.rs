@@ -91,7 +91,7 @@ pub async fn run(
 
             let service = MemoryService::new(None).context("Failed to create memory service")?;
             let _ = service.initialize();
-            let manager = SessionManager::new(service);
+            let manager = SessionManager::new(service)?;
             let session = manager.create_session(&title, &project_path_str, &tool, None, None)?;
 
             // Give the tool a moment to start before sending commands.

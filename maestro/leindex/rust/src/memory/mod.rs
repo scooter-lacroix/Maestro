@@ -5,24 +5,40 @@
 
 pub mod models;
 pub mod schema;
-pub mod db;
 pub mod scanner;
-pub mod service;
 pub mod search;
-pub mod migration;
-pub mod session_manager;
-pub mod mcp_pool;
 pub mod mcp_discovery;
 pub mod turso_backend;
 pub mod lsp_manager;
 
+// Legacy rusqlite-based modules (only available with "rusqlite" feature)
+#[cfg(feature = "rusqlite")]
+pub mod db;
+#[cfg(feature = "rusqlite")]
+pub mod service;
+#[cfg(feature = "rusqlite")]
+pub mod migration;
+#[cfg(feature = "rusqlite")]
+pub mod session_manager;
+#[cfg(feature = "rusqlite")]
+pub mod mcp_pool;
+
 pub use models::*;
 pub use schema::*;
-pub use db::*;
 pub use scanner::*;
-pub use service::*;
 pub use search::*;
 pub use mcp_discovery::*;
-pub use mcp_pool::*;
 pub use turso_backend::*;
 pub use lsp_manager::*;
+
+// Legacy rusqlite-based re-exports (only available with "rusqlite" feature)
+#[cfg(feature = "rusqlite")]
+pub use db::*;
+#[cfg(feature = "rusqlite")]
+pub use service::*;
+#[cfg(feature = "rusqlite")]
+pub use migration::*;
+#[cfg(feature = "rusqlite")]
+pub use session_manager::*;
+#[cfg(feature = "rusqlite")]
+pub use mcp_pool::*;

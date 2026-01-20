@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use tracing::{info, warn};
 
 use super::models::{Session, SessionGroup, SessionStatus};
+#[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
 
 #[derive(Debug, Deserialize)]
@@ -42,8 +43,10 @@ struct GroupData {
     order: i32,
 }
 
+#[cfg(feature = "rusqlite")]
 pub struct LegacyMigrator;
 
+#[cfg(feature = "rusqlite")]
 impl LegacyMigrator {
     /// Attempt to migrate Go TUI sessions to SQLite
     pub fn migrate(service: &MemoryService) -> Result<usize> {

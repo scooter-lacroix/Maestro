@@ -97,7 +97,7 @@ impl Scanner {
             .max_depth(max_depth)
             .into_iter()
             .filter_entry(|e| self.should_traverse(e))
-            .filter_map(|e| e.ok())
+            .filter_map(|e| e.ok()) // Intentionally skip dirs with permission errors
         {
             let path = entry.path();
             if entry.file_type().is_dir() && self.is_maestro_project(path) {
@@ -265,7 +265,7 @@ impl Scanner {
 
         if tracks_dir.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&tracks_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
+                for entry in entries.filter_map(|e| e.ok()) { // Intentionally skip entries with permission errors
                     let track_path = entry.path();
                     if track_path.extension().map(|e| e == "md").unwrap_or(false) {
                         let track_id = track_path.file_stem()

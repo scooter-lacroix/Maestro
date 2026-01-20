@@ -2,16 +2,27 @@
 //!
 //! Manages SQLite connections with connection pooling via DashMap.
 //! Optimized for concurrent access with thread-safe operations.
+//!
+//! **NOTE:** This module is only available when the "rusqlite" feature is enabled.
+//! The new TursoStorageBackend should be preferred for new code.
 
+#[cfg(feature = "rusqlite")]
 use anyhow::{Context, Result};
+#[cfg(feature = "rusqlite")]
 use dashmap::DashMap;
+#[cfg(feature = "rusqlite")]
 use rusqlite::Connection;
+#[cfg(feature = "rusqlite")]
 use std::path::{Path, PathBuf};
+#[cfg(feature = "rusqlite")]
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "rusqlite")]
 use tracing::info;
 
+#[cfg(feature = "rusqlite")]
 use super::schema::CREATE_TABLES_SQL;
 
+#[cfg(feature = "rusqlite")]
 #[derive(Clone)]
 pub struct DatabaseManager {
     db_path: PathBuf,
@@ -21,6 +32,7 @@ pub struct DatabaseManager {
     cache: DashMap<String, serde_json::Value>,
 }
 
+#[cfg(feature = "rusqlite")]
 impl DatabaseManager {
     /// Create new database manager
     pub fn new(db_path: Option<PathBuf>) -> Result<Self> {
@@ -265,6 +277,7 @@ impl DatabaseManager {
 }
 
 /// Database statistics
+#[cfg(feature = "rusqlite")]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DbStats {
     pub project_count: usize,
@@ -274,7 +287,7 @@ pub struct DbStats {
     pub db_size_bytes: u64,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rusqlite"))]
 mod tests {
     use super::*;
     use tempfile::tempdir;

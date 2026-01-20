@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS maestro_projects (
     project_type TEXT,
     tech_stack TEXT,  -- JSON array
     is_active INTEGER DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     last_scanned_at TEXT
 );
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS maestro_tracks (
     status TEXT NOT NULL DEFAULT 'new',
     total_tasks INTEGER DEFAULT 0,
     completed_tasks INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     UNIQUE(project_id, track_id)
 );
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS memories (
     command TEXT,
     command_context TEXT,  -- JSON
     embedding_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     expires_at TEXT,
     last_accessed TEXT,
     meta_data TEXT,  -- JSON
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS file_claims (
     status TEXT NOT NULL DEFAULT 'active',
     is_exclusive INTEGER DEFAULT 1,
     reason TEXT,
-    claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    claimed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     expires_at TEXT NOT NULL,
     released_at TEXT,
     version INTEGER DEFAULT 1
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     tool TEXT,
     status TEXT NOT NULL DEFAULT 'idle',
     multiplexer_session TEXT,
-    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     last_accessed_at TEXT,
     ended_at TEXT,
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS agent_namespaces (
     allowed_readers TEXT,  -- JSON array
     allowed_writers TEXT,  -- JSON array
     config TEXT,  -- JSON
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_namespaces_name ON agent_namespaces(name);

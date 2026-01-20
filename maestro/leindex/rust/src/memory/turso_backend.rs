@@ -78,17 +78,24 @@ pub struct LspServerState {
 #[derive(Debug, Clone)]
 pub struct TursoConfig {
     /// Maximum number of connections in the pool
+    /// **DEPRECATED**: Not applicable to libsql embedded mode (manages connections internally)
+    #[deprecated(note = "Not applicable to libsql embedded mode")]
     pub max_connections: usize,
     /// Connection timeout in seconds
+    /// **DEPRECATED**: Not applicable to libsql embedded mode (uses internal timeout)
+    #[deprecated(note = "Not applicable to libsql embedded mode")]
     pub connection_timeout_secs: u64,
     /// Whether to enable read-only mode
+    /// **NOTE**: Not currently enforced. Write operations will succeed even if true.
     pub read_only: bool,
 }
 
 impl Default for TursoConfig {
     fn default() -> Self {
         Self {
+            #[allow(deprecated)]
             max_connections: 10,
+            #[allow(deprecated)]
             connection_timeout_secs: 30,
             read_only: false,
         }
@@ -159,9 +166,8 @@ impl TursoStorageBackend {
         }
 
         info!(
-            "Opening Turso database (local embedded): {} with max_connections={}",
-            path.display(),
-            config.max_connections
+            "Opening Turso database (local embedded): {}",
+            path.display()
         );
 
         // Use libsql's local embedded mode with connection pool configuration
@@ -191,7 +197,7 @@ impl TursoStorageBackend {
     /// Returns `Result<TursoStorageBackend>` with an in-memory database
     pub async fn in_memory(config: Option<TursoConfig>) -> Result<Self> {
         let config = config.unwrap_or_default();
-        info!("Opening in-memory Turso database with max_connections={}", config.max_connections);
+        info!("Opening in-memory Turso database");
 
         let db = Builder::new_local(":memory:")
             .build()
@@ -212,7 +218,16 @@ impl TursoStorageBackend {
     ///
     /// Creates all tables for OLTP operations: LSP servers, sessions, projects, memories, tracks.
     /// Also creates FTS5 full-text search tables.
+    ///
+    /// ## Returns
+    ///
+    /// Returns error if backend is shut down, or on schema creation failure.
     pub async fn initialize(&self) -> Result<()> {
+        // Check shutdown guard first
+        if self.is_shutdown() {
+            return Err(anyhow::anyhow!("Cannot initialize: Turso backend is shut down"));
+        }
+
         info!("Initializing Turso database schema");
 
         let conn = self
@@ -458,7 +473,7 @@ impl TursoStorageBackend {
                     .context("Failed to query sessions")?;
 
                 let mut sessions = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     sessions.push(Session {
                         id: row.get(0)?,
                         session_id: row.get(1)?,
@@ -492,7 +507,7 @@ impl TursoStorageBackend {
         self.with_connection(move |conn: libsql::Connection| {
             Box::pin(async move {
                 conn.execute(
-                    "UPDATE sessions SET status = ?1, updated_at = datetime('now') WHERE session_id = ?2",
+                    "UPDATE sessions SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE session_id = ?2",
                     libsql::params_from_iter([
                         libsql::Value::Text(status_str),
                         libsql::Value::Text(session_id),
@@ -512,7 +527,7 @@ impl TursoStorageBackend {
         self.with_connection(move |conn: libsql::Connection| {
             Box::pin(async move {
                 conn.execute(
-                    "UPDATE sessions SET last_accessed_at = datetime('now'), updated_at = datetime('now') WHERE session_id = ?",
+                    "UPDATE sessions SET last_accessed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE session_id = ?",
                     libsql::params_from_iter([libsql::Value::Text(session_id)]),
                 )
                 .await
@@ -648,7 +663,7 @@ impl TursoStorageBackend {
                     .context("Failed to query projects")?;
 
                 let mut projects = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     projects.push(MaestroProject {
                         id: row.get::<i64>(0)?,
                         project_path: row.get::<String>(1)?,
@@ -770,7 +785,7 @@ impl TursoStorageBackend {
                     .context("Failed to query memories")?;
 
                 let mut memories = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     memories.push(Memory {
                         id: row.get(0)?,
                         content: row.get(1)?,
@@ -882,7 +897,7 @@ impl TursoStorageBackend {
                     .context("Failed to query session stats")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(SessionStatusStats {
                         status: row.get::<String>(0)?,
                         count: row.get::<i64>(1)? as usize,
@@ -920,7 +935,7 @@ impl TursoStorageBackend {
                     .context("Failed to query project session stats")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(ProjectSessionStats {
                         project_path: row.get(0)?,
                         session_count: row.get::<i64>(1)? as usize,
@@ -954,7 +969,7 @@ impl TursoStorageBackend {
                     .context("Failed to query memory category stats")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(MemoryCategoryStats {
                         category: row.get(0)?,
                         count: row.get::<i64>(1)? as usize,
@@ -993,7 +1008,7 @@ impl TursoStorageBackend {
                     .context("Failed to query memory importance stats")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(MemoryImportanceStats {
                         importance: row.get(0)?,
                         count: row.get::<i64>(1)? as usize,
@@ -1026,7 +1041,7 @@ impl TursoStorageBackend {
                     .context("Failed to query track completion stats")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(TrackCompletionStats {
                         status: row.get(0)?,
                         count: row.get::<i64>(1)? as usize,
@@ -1073,7 +1088,7 @@ impl TursoStorageBackend {
                     .context("Failed to query project activity summary")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(ProjectActivitySummary {
                         project_path: row.get(0)?,
                         project_name: row.get(1)?,
@@ -1119,7 +1134,7 @@ impl TursoStorageBackend {
                     .context("Failed to query most active projects")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(ActiveProjectStats {
                         project_path: row.get(0)?,
                         project_name: row.get(1)?,
@@ -1157,7 +1172,7 @@ impl TursoStorageBackend {
                     .context("Failed to query LSP server stats")?;
 
                 let mut stats = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     stats.push(LspServerStats {
                         lsp_name: row.get(0)?,
                         status: row.get(1)?,
@@ -1206,7 +1221,7 @@ impl TursoStorageBackend {
                     .context("Failed to execute FTS5 search")?;
 
                 let mut results = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
+                while let Some(row) = result.next().await? {
                     let project_id: Option<i64> = row.get(7)?;
                     results.push(MemorySearchResult {
                         id: row.get::<i64>(0)?,
@@ -1541,6 +1556,58 @@ impl TursoStorageBackend {
         })
         .await
     }
+
+    /// Get all LSP servers with auto_start enabled
+    ///
+    /// ## Arguments
+    ///
+    /// - `auto_start`: Whether to filter by auto_start flag (true/false)
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of LSP server states with the specified auto_start value
+    pub async fn get_lsp_states_by_auto_start(&self, auto_start: bool) -> Result<Vec<LspServerState>> {
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let sql = r#"
+                SELECT id, session_id, language, lsp_name, status, pid, port,
+                       auto_start, last_started, last_error, created_at, updated_at
+                FROM lsp_servers
+                WHERE auto_start = ?
+                ORDER BY session_id, lsp_name
+                "#;
+
+                let mut rows = conn
+                    .prepare(sql)
+                    .await
+                    .context("Failed to prepare LSP states by auto_start query")?
+                    .query(libsql::params_from_iter([libsql::Value::Integer(if auto_start { 1 } else { 0 })]))
+                    .await
+                    .context("Failed to query LSP states by auto_start")?;
+
+                let mut states = Vec::new();
+                while let Some(row) = rows.next().await? {
+                    states.push(LspServerState {
+                        id: row.get::<i64>(0)?,
+                        session_id: row.get(1)?,
+                        language: row.get(2)?,
+                        lsp_name: row.get(3)?,
+                        status: row.get(4)?,
+                        pid: row.get::<Option<i64>>(5)?,
+                        port: row.get::<Option<i64>>(6)?,
+                        auto_start: row.get::<i32>(7)? == 1,
+                        last_started: row.get::<Option<String>>(8)?,
+                        last_error: row.get::<Option<String>>(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get::<Option<String>>(11)?,
+                    });
+                }
+
+                Ok(states)
+            })
+        })
+        .await
+    }
 }
 
 // ============================================================================
@@ -1746,7 +1813,7 @@ CREATE TABLE IF NOT EXISTS lsp_servers (
     auto_start INTEGER DEFAULT 1,
     last_started TEXT,
     last_error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     UNIQUE(session_id, lsp_name)
 );
@@ -1769,7 +1836,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     tool TEXT,
     status TEXT NOT NULL DEFAULT 'idle',
     multiplexer_session TEXT,
-    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     last_accessed_at TEXT,
     ended_at TEXT,
@@ -1790,7 +1857,7 @@ CREATE TABLE IF NOT EXISTS maestro_projects (
     project_type TEXT,
     tech_stack TEXT,
     is_active INTEGER DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     last_scanned_at TEXT
 );
@@ -1813,7 +1880,7 @@ CREATE TABLE IF NOT EXISTS memories (
     command TEXT,
     command_context TEXT,
     embedding_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     expires_at TEXT,
     last_accessed TEXT,
     meta_data TEXT,
@@ -1837,7 +1904,7 @@ CREATE TABLE IF NOT EXISTS maestro_tracks (
     status TEXT NOT NULL DEFAULT 'new',
     total_tasks INTEGER DEFAULT 0,
     completed_tasks INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at TEXT,
     UNIQUE(project_id, track_id),
     FOREIGN KEY (project_id) REFERENCES maestro_projects(id) ON DELETE CASCADE
@@ -1898,6 +1965,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_turso_backend_with_config() {
+        #[allow(deprecated)]
         let config = TursoConfig {
             max_connections: 20,
             connection_timeout_secs: 60,
@@ -1906,7 +1974,9 @@ mod tests {
         let backend = TursoStorageBackend::in_memory(Some(config))
             .await
             .expect("Failed to create in-memory backend");
+        #[allow(deprecated)]
         assert_eq!(backend.config().max_connections, 20);
+        #[allow(deprecated)]
         assert_eq!(backend.config().connection_timeout_secs, 60);
         assert!(backend.is_read_only());
     }
@@ -1916,7 +1986,9 @@ mod tests {
         let backend = TursoStorageBackend::in_memory(None)
             .await
             .expect("Failed to create in-memory backend");
+        #[allow(deprecated)]
         assert_eq!(backend.config().max_connections, 10);
+        #[allow(deprecated)]
         assert_eq!(backend.config().connection_timeout_secs, 30);
         assert!(!backend.is_read_only());
     }
@@ -1952,13 +2024,16 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
         assert!(!backend.is_shutdown());
         assert!(!backend.is_read_only());
+        #[allow(deprecated)]
         assert_eq!(backend.config().max_connections, 10);
     }
 
     #[tokio::test]
     async fn test_turso_config_default() {
         let config = TursoConfig::default();
+        #[allow(deprecated)]
         assert_eq!(config.max_connections, 10);
+        #[allow(deprecated)]
         assert_eq!(config.connection_timeout_secs, 30);
         assert!(!config.read_only);
     }

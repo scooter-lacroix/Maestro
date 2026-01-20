@@ -94,7 +94,7 @@ pub async fn scan(paths: Vec<PathBuf>, depth: usize) -> Result<()> {
         for entry in walkdir::WalkDir::new(&base_dir)
             .max_depth(depth)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|e| e.ok()) // Intentionally skip dirs with permission errors
         {
             let path = entry.path();
             

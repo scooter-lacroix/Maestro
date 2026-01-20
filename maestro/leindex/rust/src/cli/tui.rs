@@ -708,7 +708,14 @@ async fn run_app<B: Backend>(
                                         // let _ = terminal.draw(|frame| ui(frame, \u0026mut app));
 
                                         if let Some(svc) = service.as_ref() {
-                                            let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
+                                            let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                Ok(m) => m,
+                                                Err(e) => {
+                                                    app.status_message = format!("Failed to create session manager: {}", e);
+                                                    app.is_spawning = false;
+                                                    continue;
+                                                }
+                                            };
                                             match manager.create_session(
                                                 &app.new_session_title,
                                                 &app.new_session_path,
@@ -917,7 +924,14 @@ async fn run_app<B: Backend>(
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
                                                 if let Some(orig) = app.sessions.iter().find(|s| s.session_id == id) {
-                                                    let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
+                                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                        Ok(m) => m,
+                                                        Err(e) => {
+                                                            app.status_message = format!("Failed to create session manager: {}", e);
+                                                            app.input_mode = InputMode::Normal;
+                                                            continue;
+                                                        }
+                                                    };
                                                     let _ = manager.fork_session(&id, &app.rename_buffer, orig);
                                                     app.status_message = format!("Session forked as {}", app.rename_buffer);
                                                     if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
@@ -931,7 +945,13 @@ async fn run_app<B: Backend>(
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
-                                                let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
+                                                let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                    Ok(m) => m,
+                                                    Err(e) => {
+                                                        app.status_message = format!("Failed to create session manager: {}", e);
+                                                        continue;
+                                                    }
+                                                };
                                                 match manager.kill_session(&id) {
                                                     Ok(()) => {
                                                         if app.input_mode == InputMode::DeleteConfirm {
@@ -1381,7 +1401,14 @@ async fn run_app<B: Backend>(
                                             HubFocus::Rename => {
                                                 if let Some(svc) = service.as_ref() {
                                                     if let Some(id) = app.target_session_id.clone() {
-                                                        let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
+                                                        let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                            Ok(m) => m,
+                                                            Err(e) => {
+                                                                app.status_message = format!("Failed to create session manager: {}", e);
+                                                                app.input_mode = InputMode::Normal;
+                                                                continue;
+                                                            }
+                                                        };
                                                         let _ = manager.rename_session(&id, &app.rename_buffer);
                                                         if let Ok(sessions) = svc.list_sessions() { app.sessions = sessions; }
                                                         app.refresh_session_entries();
@@ -1539,7 +1566,13 @@ async fn run_app<B: Backend>(
                                         if c == 'y' || c == 'Y' {
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
-                                                    let manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone());
+                                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                        Ok(m) => m,
+                                                        Err(e) => {
+                                                            app.status_message = format!("Failed to create session manager: {}", e);
+                                                            continue;
+                                                        }
+                                                    };
                                                     match manager.kill_session(&id) {
                                                         Ok(()) => {
                                                             if app.input_mode == InputMode::DeleteConfirm {

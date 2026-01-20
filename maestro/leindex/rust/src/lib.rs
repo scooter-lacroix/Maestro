@@ -19,6 +19,7 @@ pub mod config;
 pub mod dfg;
 pub mod five_phase;
 pub mod language;
+pub mod lsp;
 pub mod memory;
 pub mod migrations;
 pub mod multi_lang_ast;

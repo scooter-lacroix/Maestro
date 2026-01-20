@@ -23,13 +23,16 @@ use tokio::sync::{mpsc, Mutex, RwLock, watch};
 use tracing::{error, info, warn};
 
 use super::models::{McpServer, McpStatus, McpTransport};
+#[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
 
+#[cfg(feature = "rusqlite")]
 pub struct McpPool {
     proxies: Arc<RwLock<HashMap<String, Arc<SocketProxy>>>>,
     service: MemoryService,
 }
 
+#[cfg(feature = "rusqlite")]
 impl McpPool {
     pub fn new(service: MemoryService) -> Self {
         Self {

@@ -5,6 +5,12 @@ edition = "2021"
 description = "High-performance code analyzers for LeIndex - Pure Rust"
 authors = ["Maestro Project"]
 
+[features]
+default = ["rusqlite"]
+# Enable rusqlite for legacy memory service and migration support
+# Disable with --no-default-features for pure libsql/turso backend
+rusqlite = ["dep:rusqlite"]
+
 [lib]
 name = "leindex_analyzers"
 crate-type = ["rlib"]
@@ -16,6 +22,10 @@ path = "src/main.rs"
 [[bin]]
 name = "maestro-setup"
 path = "src/setup_main.rs"
+
+[[bin]]
+name = "maestro-lsp-mcp-bridge"
+path = "src/lsp/bin/mcp_bridge.rs"
 
 [dependencies]
 # CLI
@@ -29,7 +39,7 @@ axum = "0.7"
 tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled"] }  # TEMP: Keep for migration support
+rusqlite = { version = "0.32", optional = true }  # TEMP: Keep for migration support (feature: rusqlite) - no bundled to avoid conflicts with libsql
 libsql = "0.9"  # Turso/libSQL unified database backend
 
 # HTTP client (for Zoekt)
@@ -73,6 +83,7 @@ tree-sitter-cpp = "0.23"
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+libc = "0.2"
 walkdir = "2"
 regex = "1"
 

@@ -2,19 +2,33 @@
 //!
 //! Primary interface for all memory operations.
 //! Provides CRUD operations for projects, tracks, and memories.
+//!
+//! **NOTE:** This module is only available when the "rusqlite" feature is enabled.
+//! The new TursoStorageBackend should be preferred for new code.
 
+#[cfg(feature = "rusqlite")]
 use anyhow::{Context, Result};
+#[cfg(feature = "rusqlite")]
 use chrono::{DateTime, Utc};
+#[cfg(feature = "rusqlite")]
 use rusqlite::{params, Connection, OpenFlags};
+#[cfg(feature = "rusqlite")]
 use std::path::PathBuf;
+#[cfg(feature = "rusqlite")]
 use std::sync::Arc;
+#[cfg(feature = "rusqlite")]
 use tracing::{info, warn};
 
+#[cfg(feature = "rusqlite")]
 use super::db::DatabaseManager;
+#[cfg(feature = "rusqlite")]
 use super::models::*;
+#[cfg(feature = "rusqlite")]
 use super::scanner::Scanner;
+#[cfg(feature = "rusqlite")]
 use super::mcp_discovery;
 
+#[cfg(feature = "rusqlite")]
 #[derive(Clone)]
 pub struct MemoryService {
     db: DatabaseManager,
@@ -22,6 +36,7 @@ pub struct MemoryService {
     search_index: Option<Arc<super::search::MemorySearchIndex>>,
 }
 
+#[cfg(feature = "rusqlite")]
 impl MemoryService {
     /// Create new memory service
     pub fn new(db_path: Option<PathBuf>) -> Result<Self> {
@@ -275,8 +290,8 @@ impl MemoryService {
                         updated_at: row.get::<_, Option<String>>(9)?.map(parse_datetime),
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect tracks")?;
 
             Ok(tracks)
         })
@@ -411,10 +426,10 @@ impl MemoryService {
                  LIMIT ?",
             )?;
 
-            let memories: Vec<Memory> = stmt
+            let memories = stmt
                 .query_map([limit], |row| self.map_memory(row))?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect memories")?;
 
             Ok(memories)
         })
@@ -801,8 +816,8 @@ impl MemoryService {
                             .and_then(|s| serde_json::from_str(&s).ok()),
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect sessions")?;
 
             Ok(sessions)
         })
@@ -828,8 +843,8 @@ impl MemoryService {
                         parent_id: row.get(6)?,
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect session groups")?;
 
             Ok(groups)
         })
@@ -1045,8 +1060,8 @@ impl MemoryService {
                         last_started_at: row.get::<_, Option<String>>(12)?.map(parse_datetime),
                     })
                 })?
-                .filter_map(|r| r.ok())
-                .collect();
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect MCP servers")?;
 
             Ok(servers)
         })
@@ -1157,10 +1172,12 @@ fn parse_track_status(s: String) -> TrackStatus {
     }
 }
 
+#[cfg(feature = "rusqlite")]
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>>;
 }
 
+#[cfg(feature = "rusqlite")]
 impl<T> OptionalExt<T> for std::result::Result<T, rusqlite::Error> {
     fn optional(self) -> Result<Option<T>> {
         match self {
@@ -1171,7 +1188,7 @@ impl<T> OptionalExt<T> for std::result::Result<T, rusqlite::Error> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rusqlite"))]
 mod tests {
     use super::*;
     use tempfile::tempdir;
