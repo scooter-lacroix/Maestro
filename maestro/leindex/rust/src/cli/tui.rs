@@ -19,6 +19,7 @@ use leindex_analyzers::memory::MemoryService;
 use leindex_analyzers::memory::models::McpStatus;
 use leindex_analyzers::memory::McpPool;
 use leindex_analyzers::memory::LspStatus;
+use leindex_analyzers::memory::lsp_manager::LspType;
 use leindex_analyzers::multiplexer::TmuxMultiplexer;
 use leindex_analyzers::config::Config;
 
@@ -698,6 +699,146 @@ impl App {
                 self.lsp_status_cache.insert(session_id, lsp_entries);
             }
         }
+    }
+
+    /// Get selected LSP from cache
+    fn get_selected_lsp(&self) -> Option<(String, String, LspStatus)> {
+        let selected_index = self.lsp_state.selected()?;
+
+        // Collect all LSPs into a flat list with tracking
+        let mut all_lsps: Vec<(String, String, LspStatus)> = Vec::new();
+        for (session_id, lsp_entries) in &self.lsp_status_cache {
+            for (lsp_name, status) in lsp_entries {
+                all_lsps.push((session_id.clone(), lsp_name.clone(), *status));
+            }
+        }
+
+        all_lsps.get(selected_index).cloned()
+    }
+
+    /// Map LSP name to LspType
+    fn lsp_name_to_type(lsp_name: &str) -> Option<LspType> {
+        match lsp_name {
+            "rust-analyzer" => Some(LspType::Rust),
+            "ruff-lsp" => Some(LspType::Python),
+            "typescript-language-server" => Some(LspType::TypeScript),
+            _ => None,
+        }
+    }
+
+    /// Toggle LSP start/stop
+    fn toggle_lsp(&mut self, session_id: &str, lsp_name: &str, status: LspStatus) {
+        let Some(lsp_type) = Self::lsp_name_to_type(lsp_name) else {
+            self.status_message = format!("Unknown LSP: {}", lsp_name);
+            return;
+        };
+
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            self.status_message = "Runtime not available".to_string();
+            return;
+        };
+
+        let session_id = session_id.to_string();
+        let lsp_name = lsp_name.to_string();
+
+        // Create storage and LspManager for the operation
+        let storage = match handle.block_on(
+            leindex_analyzers::memory::TursoStorageBackend::new(None, None)
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                self.status_message = format!("Failed to create storage: {}", e);
+                return;
+            }
+        };
+
+        let lsp_manager = leindex_analyzers::memory::lsp_manager::LspManager::new(storage);
+        let lsp_manager_clone = lsp_manager.clone();
+        let session_id_clone = session_id.clone();
+
+        match status {
+            LspStatus::Stopped | LspStatus::Error => {
+                // Start the LSP
+                let result = handle.block_on(async move {
+                    lsp_manager_clone.start_lsp(&session_id_clone, lsp_type, None).await
+                });
+
+                match result {
+                    Ok(()) => {
+                        self.status_message = format!("Started '{}' for session", lsp_name);
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to start '{}': {}", lsp_name, e);
+                    }
+                }
+            }
+            LspStatus::Running | LspStatus::Starting => {
+                // Stop the LSP
+                let session_id_clone = session_id.clone();
+                let result = handle.block_on(async move {
+                    lsp_manager_clone.stop_lsp(&session_id_clone, lsp_type).await
+                });
+
+                match result {
+                    Ok(()) => {
+                        self.status_message = format!("Stopped '{}' for session", lsp_name);
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Failed to stop '{}': {}", lsp_name, e);
+                    }
+                }
+            }
+        }
+
+        // Refresh status after action
+        self.refresh_lsp_status();
+    }
+
+    /// Restart LSP
+    fn restart_lsp(&mut self, session_id: &str, lsp_name: &str) {
+        let Some(lsp_type) = Self::lsp_name_to_type(lsp_name) else {
+            self.status_message = format!("Unknown LSP: {}", lsp_name);
+            return;
+        };
+
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            self.status_message = "Runtime not available".to_string();
+            return;
+        };
+
+        let session_id = session_id.to_string();
+        let lsp_name = lsp_name.to_string();
+
+        // Create storage and LspManager for the operation
+        let storage = match handle.block_on(
+            leindex_analyzers::memory::TursoStorageBackend::new(None, None)
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                self.status_message = format!("Failed to create storage: {}", e);
+                return;
+            }
+        };
+
+        let lsp_manager = leindex_analyzers::memory::lsp_manager::LspManager::new(storage);
+        let lsp_manager_clone = lsp_manager.clone();
+        let session_id_clone = session_id.clone();
+
+        let result = handle.block_on(async move {
+            lsp_manager_clone.restart_lsp(&session_id_clone, lsp_type).await
+        });
+
+        match result {
+            Ok(()) => {
+                self.status_message = format!("Restarted '{}' for session", lsp_name);
+            }
+            Err(e) => {
+                self.status_message = format!("Failed to restart '{}': {}", lsp_name, e);
+            }
+        }
+
+        // Refresh status after action
+        self.refresh_lsp_status();
     }
 }
 
@@ -2696,8 +2837,12 @@ async fn run_app<B: Backend>(
                                         }
                                     }
                                 } else if app.tab_index == 5 { // LSPs tab
-                                    // Basic toggle implementation - Task 6.3 will expand this
-                                    app.status_message = "LSP start/stop toggle coming in Task 6.3".to_string();
+                                    // Toggle LSP start/stop
+                                    if let Some((session_id, lsp_name, status)) = app.get_selected_lsp() {
+                                        app.toggle_lsp(&session_id, &lsp_name, status);
+                                    } else {
+                                        app.status_message = "No LSP selected".to_string();
+                                    }
                                 } else {
                                     app.input_mode = InputMode::SessionSwitcher;
                                     app.switcher_state.select(Some(0));
@@ -2783,6 +2928,13 @@ async fn run_app<B: Backend>(
 	                                        Err(e) => {
 	                                            app.status_message = format!("Restart failed: {}", e);
 	                                        }
+	                                    }
+	                                } else if app.tab_index == 5 { // LSPs tab
+	                                    // Restart LSP
+	                                    if let Some((session_id, lsp_name, _status)) = app.get_selected_lsp() {
+	                                        app.restart_lsp(&session_id, &lsp_name);
+	                                    } else {
+	                                        app.status_message = "No LSP selected".to_string();
 	                                    }
 	                                } else {
 	                                    // Other tabs: manual full refresh
@@ -3989,7 +4141,7 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-    // Header block with refresh hint
+    // Header block with control hints
     let header_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -3998,8 +4150,12 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let header_text = vec![
         Line::from(vec![
-            Span::styled("Tip: ", Style::default().fg(theme.muted)),
-            Span::styled("Press 'r' to refresh status, 's' to toggle LSP", Style::default().fg(theme.warning).bold()),
+            Span::styled("Controls: ", Style::default().fg(theme.muted)),
+            Span::styled("[s] Toggle ", Style::default().fg(theme.warning).bold()),
+            Span::styled("| ", Style::default().fg(theme.muted)),
+            Span::styled("[R] Restart ", Style::default().fg(theme.warning).bold()),
+            Span::styled("| ", Style::default().fg(theme.muted)),
+            Span::styled("[r] Refresh", Style::default().fg(theme.warning).bold()),
         ]),
     ];
     frame.render_widget(Paragraph::new(header_text).block(header_block), chunks[0]);
