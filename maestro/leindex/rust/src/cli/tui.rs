@@ -13,7 +13,8 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph, Tabs, List, ListItem, BorderType, Clear, Wrap},
 };
-use std::{collections::{HashMap, HashSet}, io, sync::Arc, time::Instant};
+use std::{collections::{HashMap, HashSet}, io, sync::Arc, time::Instant, collections::hash_map::DefaultHasher};
+use std::hash::{Hash, Hasher};
 
 use leindex_analyzers::memory::MemoryService;
 use leindex_analyzers::memory::models::McpStatus;
@@ -22,6 +23,7 @@ use leindex_analyzers::memory::LspStatus;
 use leindex_analyzers::memory::lsp_manager::LspType;
 use leindex_analyzers::multiplexer::TmuxMultiplexer;
 use leindex_analyzers::config::Config;
+use leindex_analyzers::memory::TursoStorageBackend;
 
 use super::theme::{theme_from_name, Theme, THEMES};
 
@@ -51,8 +53,17 @@ pub async fn run() -> Result<()> {
         None
     };
 
+    // Create TursoStorageBackend for LSP operations (before entering async loop)
+    let storage_backend = match TursoStorageBackend::new(None, None).await {
+        Ok(backend) => Some(Arc::new(backend)),
+        Err(e) => {
+            eprintln!("Warning: Failed to create storage backend for LSP operations: {}", e);
+            None
+        }
+    };
+
     // Run app
-    let result = run_app(&mut terminal, service, mcp_pool).await;
+    let result = run_app(&mut terminal, service, mcp_pool, storage_backend).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -144,6 +155,10 @@ struct App {
     lsp_log_source: Option<(String, String)>, // (session_id, lsp_name)
     // LSP installation guidance - tracks which LSPs are available on the system
     lsp_availability: HashMap<String, bool>, // lsp_name -> is_available
+    // Storage backend for LSP operations (sync access)
+    storage_backend: Option<Arc<TursoStorageBackend>>,
+    // Flag to trigger async LSP refresh
+    pending_lsp_refresh: bool,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -254,7 +269,7 @@ struct Stats {
 }
 
 impl App {
-	    fn new(_service: Option<&MemoryService>, mcp_pool: Option<Arc<McpPool>>) -> Self {
+	    fn new(_service: Option<&MemoryService>, mcp_pool: Option<Arc<McpPool>>, storage_backend: Option<Arc<TursoStorageBackend>>) -> Self {
         let config = Config::load();
         std::env::set_var("EDITOR", &config.editor);
         let mut app = Self {
@@ -325,6 +340,8 @@ impl App {
 	            lsp_log_scroll: 0,
 	            lsp_log_source: None,
 	            lsp_availability: HashMap::new(),
+	            storage_backend,
+	            pending_lsp_refresh: false,
 	        };
 	        // Check LSP availability on startup
 	        app.check_lsp_availability();
@@ -473,13 +490,70 @@ impl App {
     }
 
     fn binary_exists(name: &str) -> bool {
-        // Use 'which' command to check if binary exists in PATH
-        if let Ok(output) = std::process::Command::new("which")
-            .arg(name)
-            .output()
+        // Platform-specific binary detection
+        #[cfg(target_os = "windows")]
         {
-            output.status.success()
-        } else {
+            // On Windows, use 'where' command
+            if let Ok(output) = std::process::Command::new("where")
+                .arg(name)
+                .output()
+            {
+                if output.status.success() {
+                    return true;
+                }
+            }
+
+            // Special case for rust-analyzer: check rustup components
+            if name == "rust-analyzer" {
+                if let Ok(output) = std::process::Command::new("rustup")
+                    .args(["component", "list", "--installed"])
+                    .output()
+                {
+                    if let Ok(stdout) = String::from_utf8(output.stdout) {
+                        return stdout.contains("rust-analyzer");
+                    }
+                }
+            }
+
+            false
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            // On Unix-like systems, use 'which' command
+            if let Ok(output) = std::process::Command::new("which")
+                .arg(name)
+                .output()
+            {
+                if output.status.success() {
+                    return true;
+                }
+            }
+
+            // Special case for rust-analyzer: check rustup components
+            if name == "rust-analyzer" {
+                if let Ok(output) = std::process::Command::new("rustup")
+                    .args(["component", "list", "--installed"])
+                    .output()
+                {
+                    if let Ok(stdout) = String::from_utf8(output.stdout) {
+                        if stdout.contains("rust-analyzer") {
+                            return true;
+                        }
+                    }
+                }
+
+                // Also check if rust-analyzer binary exists directly
+                if let Ok(output) = std::process::Command::new("which")
+                    .arg("rust-analyzer")
+                    .output()
+                {
+                    if output.status.success() {
+                        return true;
+                    }
+                }
+            }
+
             false
         }
     }
@@ -726,58 +800,88 @@ impl App {
     }
 
     /// Refresh LSP status cache from Turso database
+    ///
+    /// Sets a flag to trigger async refresh in the main event loop.
+    /// This avoids the Tokio panic when calling async from sync context.
     fn refresh_lsp_status(&mut self) {
-        // Only refresh every 2 seconds to avoid excessive async calls
-        if self.last_lsp_refresh.elapsed() < std::time::Duration::from_secs(2) {
+        self.refresh_lsp_status_impl(false);
+    }
+
+    /// Refresh LSP status cache from Turso database (internal implementation)
+    ///
+    /// Sets a flag to trigger async refresh in the main event loop.
+    /// This avoids the Tokio panic when calling async from sync context.
+    fn refresh_lsp_status_impl(&mut self, force: bool) {
+        // Only refresh every 2 seconds to avoid excessive async calls (unless forced)
+        if !force && self.last_lsp_refresh.elapsed() < std::time::Duration::from_secs(2) {
             return;
         }
         self.last_lsp_refresh = Instant::now();
+        self.pending_lsp_refresh = true;
+    }
 
-        // Use tokio runtime handle for async call
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+    /// Perform the actual LSP status refresh (async)
+    ///
+    /// This must be called from an async context.
+    async fn do_refresh_lsp_status(&mut self) {
+        let Some(storage) = self.storage_backend.clone() else {
+            self.status_message = "Storage backend not available for LSP refresh".to_string();
+            self.pending_lsp_refresh = false;
             return;
         };
 
-        // Create Turso storage backend (uses default path)
-        let storage = match handle.block_on(
-            leindex_analyzers::memory::TursoStorageBackend::new(None, None)
-        ) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-
-        // Clear cache to ensure we get fresh data
-        self.lsp_status_cache.clear();
-
         // Query LSP states for all sessions
+        let mut new_cache: HashMap<String, Vec<(String, LspStatus)>> = HashMap::new();
+
         for session in &self.sessions {
             let session_id = session.session_id.clone();
-            let session_id_clone = session_id.clone();
-            let storage_clone = storage.clone();
 
-            let lsp_states = handle.block_on(async move {
-                storage_clone.get_session_lsp_states(&session_id_clone).await
-            });
-
-            if let Ok(states) = lsp_states {
-                let lsp_entries: Vec<(String, LspStatus)> = states
-                    .into_iter()
-                    .map(|state| (state.lsp_name, state.status))
-                    .collect();
-                self.lsp_status_cache.insert(session_id, lsp_entries);
+            match storage.get_session_lsp_states(&session_id).await {
+                Ok(states) => {
+                    for state in states {
+                        new_cache
+                            .entry(session_id.clone())
+                            .or_insert_with(Vec::new)
+                            .push((state.lsp_name, state.status));
+                    }
+                }
+                Err(e) => {
+                    // Log error but continue with other sessions
+                    eprintln!("Failed to get LSP states for session {}: {}", session_id, e);
+                }
             }
         }
+
+        // Update cache
+        self.lsp_status_cache = new_cache;
+
+        // Clamp selection to valid range
+        let total_count: usize = self.lsp_status_cache.values().map(|v| v.len()).sum();
+        if let Some(selected) = self.lsp_state.selected() {
+            if selected >= total_count && total_count > 0 {
+                self.lsp_state.select(Some(total_count.saturating_sub(1)));
+            } else if total_count == 0 {
+                self.lsp_state.select(None);
+            }
+        }
+
+        self.pending_lsp_refresh = false;
     }
 
     /// Get selected LSP from cache
+    ///
+    /// Builds the LSP list in the same order as render_lsps (session order)
+    /// to ensure the correct LSP is selected for toggle/restart/logs operations.
     fn get_selected_lsp(&self) -> Option<(String, String, LspStatus)> {
         let selected_index = self.lsp_state.selected()?;
 
-        // Collect all LSPs into a flat list with tracking
+        // Build LSP entries list in session order (same as render_lsps)
         let mut all_lsps: Vec<(String, String, LspStatus)> = Vec::new();
-        for (session_id, lsp_entries) in &self.lsp_status_cache {
-            for (lsp_name, status) in lsp_entries {
-                all_lsps.push((session_id.clone(), lsp_name.clone(), *status));
+        for session in &self.sessions {
+            if let Some(lsp_states) = self.lsp_status_cache.get(&session.session_id) {
+                for (lsp_name, status) in lsp_states {
+                    all_lsps.push((session.session_id.clone(), lsp_name.clone(), *status));
+                }
             }
         }
 
@@ -795,118 +899,79 @@ impl App {
     }
 
     /// Toggle LSP start/stop
+    ///
+    /// This sets a pending flag and the actual operation is performed in the async event loop.
     fn toggle_lsp(&mut self, session_id: &str, lsp_name: &str, status: LspStatus) {
         let Some(lsp_type) = Self::lsp_name_to_type(lsp_name) else {
             self.status_message = format!("Unknown LSP: {}", lsp_name);
             return;
         };
 
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            self.status_message = "Runtime not available".to_string();
+        let Some(storage) = self.storage_backend.clone() else {
+            self.status_message = "Storage backend not available".to_string();
             return;
         };
 
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
 
-        // Create storage and LspManager for the operation
-        let storage = match handle.block_on(
-            leindex_analyzers::memory::TursoStorageBackend::new(None, None)
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                self.status_message = format!("Failed to create storage: {}", e);
-                return;
-            }
+        // Spawn the operation in the background
+        tokio::spawn(async move {
+            let lsp_manager = leindex_analyzers::memory::lsp_manager::LspManager::new((*storage).clone());
+
+            let result = match status {
+                LspStatus::Stopped | LspStatus::Error => {
+                    // Start the LSP
+                    lsp_manager.start_lsp(&session_id, lsp_type, None).await
+                }
+                LspStatus::Running | LspStatus::Starting => {
+                    // Stop the LSP
+                    lsp_manager.stop_lsp(&session_id, lsp_type).await
+                }
+            };
+
+            result
+        });
+
+        // Update status message optimistically - actual status will be reflected on next refresh
+        let action_msg = match status {
+            LspStatus::Stopped | LspStatus::Error => "Starting",
+            LspStatus::Running | LspStatus::Starting => "Stopping",
         };
+        self.status_message = format!("{} '{}'... (press 'r' to refresh)", action_msg, lsp_name);
 
-        let lsp_manager = leindex_analyzers::memory::lsp_manager::LspManager::new(storage);
-        let lsp_manager_clone = lsp_manager.clone();
-        let session_id_clone = session_id.clone();
-
-        match status {
-            LspStatus::Stopped | LspStatus::Error => {
-                // Start the LSP
-                let result = handle.block_on(async move {
-                    lsp_manager_clone.start_lsp(&session_id_clone, lsp_type, None).await
-                });
-
-                match result {
-                    Ok(()) => {
-                        self.status_message = format!("Started '{}' for session", lsp_name);
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Failed to start '{}': {}", lsp_name, e);
-                    }
-                }
-            }
-            LspStatus::Running | LspStatus::Starting => {
-                // Stop the LSP
-                let session_id_clone = session_id.clone();
-                let result = handle.block_on(async move {
-                    lsp_manager_clone.stop_lsp(&session_id_clone, lsp_type).await
-                });
-
-                match result {
-                    Ok(()) => {
-                        self.status_message = format!("Stopped '{}' for session", lsp_name);
-                    }
-                    Err(e) => {
-                        self.status_message = format!("Failed to stop '{}': {}", lsp_name, e);
-                    }
-                }
-            }
-        }
-
-        // Refresh status after action
-        self.refresh_lsp_status();
+        // Trigger a delayed refresh
+        self.refresh_lsp_status_impl(true);
     }
 
     /// Restart LSP
+    ///
+    /// This spawns the operation in the background and triggers a refresh.
     fn restart_lsp(&mut self, session_id: &str, lsp_name: &str) {
         let Some(lsp_type) = Self::lsp_name_to_type(lsp_name) else {
             self.status_message = format!("Unknown LSP: {}", lsp_name);
             return;
         };
 
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            self.status_message = "Runtime not available".to_string();
+        let Some(storage) = self.storage_backend.clone() else {
+            self.status_message = "Storage backend not available".to_string();
             return;
         };
 
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
 
-        // Create storage and LspManager for the operation
-        let storage = match handle.block_on(
-            leindex_analyzers::memory::TursoStorageBackend::new(None, None)
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                self.status_message = format!("Failed to create storage: {}", e);
-                return;
-            }
-        };
-
-        let lsp_manager = leindex_analyzers::memory::lsp_manager::LspManager::new(storage);
-        let lsp_manager_clone = lsp_manager.clone();
-        let session_id_clone = session_id.clone();
-
-        let result = handle.block_on(async move {
-            lsp_manager_clone.restart_lsp(&session_id_clone, lsp_type).await
+        // Spawn the operation in the background
+        tokio::spawn(async move {
+            let lsp_manager = leindex_analyzers::memory::lsp_manager::LspManager::new((*storage).clone());
+            lsp_manager.restart_lsp(&session_id, lsp_type).await
         });
 
-        match result {
-            Ok(()) => {
-                self.status_message = format!("Restarted '{}' for session", lsp_name);
-            }
-            Err(e) => {
-                self.status_message = format!("Failed to restart '{}': {}", lsp_name, e);
-            }
-        }
+        // Update status message optimistically - actual status will be reflected on next refresh
+        self.status_message = format!("Restarting '{}'... (press 'r' to refresh)", lsp_name);
 
-        // Refresh status after action
-        self.refresh_lsp_status();
+        // Trigger a delayed refresh
+        self.refresh_lsp_status_impl(true);
     }
 
     /// Read LSP logs for the specified session and LSP
@@ -914,13 +979,30 @@ impl App {
         // Sanitize lsp_name for use in filename (replace spaces with dashes)
         let safe_lsp_name = lsp_name.replace(' ', "-").to_lowercase();
 
+        // Sanitize session_id to prevent path traversal attacks
+        // Only allow alphanumeric characters, hyphens, and underscores
+        let safe_session_id: String = session_id
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+
+        // If sanitization removed characters, use a hash for safety
+        let safe_session_id = if safe_session_id.is_empty() || safe_session_id.len() != session_id.len() {
+            // Use a hash for safety - std::hash::DefaultHasher
+            let mut hasher = DefaultHasher::new();
+            session_id.hash(&mut hasher);
+            format!("session_{:x}", hasher.finish())
+        } else {
+            safe_session_id
+        };
+
         // Check common log locations
         let log_paths = vec![
-            format!("/tmp/{}-{}.log", safe_lsp_name, session_id),
-            format!("/tmp/maestro-lsp-{}-{}.log", session_id, safe_lsp_name),
-            format!("/tmp/maestro-lsp-{}.log", session_id),
-            format!("/tmp/maestro-lsp-{}-stdout.log", session_id),
-            format!("/tmp/maestro-lsp-{}-stderr.log", session_id),
+            format!("/tmp/{}-{}.log", safe_lsp_name, safe_session_id),
+            format!("/tmp/maestro-lsp-{}-{}.log", safe_session_id, safe_lsp_name),
+            format!("/tmp/maestro-lsp-{}.log", safe_session_id),
+            format!("/tmp/maestro-lsp-{}-stdout.log", safe_session_id),
+            format!("/tmp/maestro-lsp-{}-stderr.log", safe_session_id),
             format!("/tmp/{}.log", safe_lsp_name),
         ];
 
@@ -947,7 +1029,7 @@ impl App {
              - /tmp/maestro-lsp-{}.log\n\
              - /tmp/maestro-lsp-{{}}-stdout.log\n\
              - /tmp/maestro-lsp-{{}}-stderr.log",
-            lsp_name, session_id, safe_lsp_name, session_id, session_id, safe_lsp_name, session_id
+            lsp_name, session_id, safe_lsp_name, safe_session_id, safe_session_id, safe_lsp_name, safe_session_id
         );
         self.lsp_log_source = Some((session_id.to_string(), lsp_name.to_string()));
         self.lsp_log_scroll = 0;
@@ -980,18 +1062,24 @@ async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     service: Option<MemoryService>,
     mcp_pool: Option<Arc<McpPool>>,
+    storage_backend: Option<Arc<TursoStorageBackend>>,
 ) -> Result<()> {
-    let mut app = App::new(service.as_ref(), mcp_pool);
+    let mut app = App::new(service.as_ref(), mcp_pool, storage_backend);
     let mut last_refresh = std::time::Instant::now();
 
     loop {
         terminal.draw(|frame| ui(frame, &mut app))?;
 
+        // Handle pending LSP refresh (async operation)
+        if app.pending_lsp_refresh {
+            app.do_refresh_lsp_status().await;
+        }
+
         // Periodic refresh (every 500ms)
         if last_refresh.elapsed() >= std::time::Duration::from_millis(500) {
             app.refresh_from_service(&service);
-            // Refresh LSP status (has its own internal throttling)
-            app.refresh_lsp_status();
+            // Note: LSP status is no longer auto-refreshed periodically
+            // It's only refreshed on explicit user action (press 'r')
             last_refresh = std::time::Instant::now();
         }
 
@@ -3150,7 +3238,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Span::raw(" Switch  "),
             Span::styled(" ↑↓ Arrows ", Style::default().bg(Color::Cyan).fg(Color::Black)),
             Span::raw(" Scroll  "),
-            Span::styled(" 1-5 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
+            Span::styled(" 1-7 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
             Span::raw(" Jump  "),
             Span::styled(" n ", Style::default().bg(Color::Green).fg(Color::Black)),
             Span::raw(" New  "),
@@ -4391,9 +4479,11 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
                 };
 
                 // Get short session title (truncate if too long)
+                // Use character-based slicing to avoid UTF-8 truncation panic
                 let short_title = session_title.as_ref().map(|t| {
-                    if t.len() > 20 {
-                        format!("{}...", &t[..17])
+                    if t.chars().count() > 20 {
+                        let truncated: String = t.chars().take(17).collect();
+                        format!("{}...", truncated)
                     } else {
                         t.clone()
                     }
