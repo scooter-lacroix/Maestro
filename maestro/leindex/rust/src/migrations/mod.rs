@@ -721,29 +721,35 @@ impl MigrationManager {
         // Apply the migration
         let apply_result = migration.up(&conn).await;
 
-        // Only record if apply succeeded
-        if apply_result.is_ok() {
-            let checksum = migration.checksum();
-            let record_result = self.record_migration_applied(&conn, migration, &checksum).await;
+        match apply_result {
+            Ok(_) => {
+                let checksum = migration.checksum();
+                let record_result = self.record_migration_applied(&conn, migration, &checksum).await;
 
-            // Commit or rollback based on results
-            if self.config.use_transactions {
-                if record_result.is_ok() {
+                // Commit or rollback based on results
+                if self.config.use_transactions {
+                    if let Err(e) = record_result {
+                        conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                            .await
+                            .context("Failed to rollback transaction")?;
+                        return Err(e.context("Failed to record migration as applied"));
+                    }
                     conn.execute("COMMIT", params_from_iter(std::iter::empty::<libsql::Value>()))
                         .await
                         .context("Failed to commit transaction")?;
                 } else {
-                    conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
-                        .await
-                        .context("Failed to rollback transaction")?;
-                    return Ok(false);
+                    record_result?;
                 }
-            } else {
-                record_result?;
+            }
+            Err(e) => {
+                // If application failed, we must rollback the transaction
+                if self.config.use_transactions {
+                     let _ = conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                        .await;
+                }
+                return Err(e);
             }
         }
-
-        apply_result?;
 
         tracing::info!("Applied migration: {}", version);
 
@@ -781,28 +787,34 @@ impl MigrationManager {
         // Rollback the migration
         let rollback_result = migration.down(&conn).await;
 
-        // Only record if rollback succeeded
-        if rollback_result.is_ok() {
-            let record_result = self.record_migration_rolled_back(&conn, version).await;
+        match rollback_result {
+            Ok(_) => {
+                let record_result = self.record_migration_rolled_back(&conn, version).await;
 
-            // Commit or rollback based on results
-            if self.config.use_transactions {
-                if record_result.is_ok() {
+                // Commit or rollback based on results
+                if self.config.use_transactions {
+                    if let Err(e) = record_result {
+                        conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                            .await
+                            .context("Failed to rollback transaction")?;
+                        return Err(e.context("Failed to record migration as rolled back"));
+                    }
                     conn.execute("COMMIT", params_from_iter(std::iter::empty::<libsql::Value>()))
                         .await
                         .context("Failed to commit transaction")?;
                 } else {
-                    conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
-                        .await
-                        .context("Failed to rollback transaction")?;
-                    return Ok(false);
+                    record_result?;
                 }
-            } else {
-                record_result?;
+            }
+            Err(e) => {
+                // If rollback failed, we must rollback the transaction
+                if self.config.use_transactions {
+                    let _ = conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                        .await;
+                }
+                return Err(e);
             }
         }
-
-        rollback_result?;
 
         tracing::info!("Rolled back migration: {}", version);
 
@@ -1118,14 +1130,38 @@ impl Migration for CreateBaseSchema {
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                project_path TEXT,
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                title TEXT NOT NULL,
+                project_path TEXT NOT NULL,
+                group_path TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                parent_session_id TEXT,
+                command TEXT,
+                tool TEXT,
+                status TEXT NOT NULL DEFAULT 'idle',
+                multiplexer_session TEXT,
+                started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 updated_at TEXT,
-                last_activity_at TEXT
+                last_accessed_at TEXT,
+                ended_at TEXT,
+                metadata TEXT
             )
             "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_path ON sessions(project_path)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_group_sort ON sessions(group_path, sort_order)",
             params_from_iter(std::iter::empty::<&str>()),
         )
         .await?;
@@ -1429,17 +1465,17 @@ impl Migration for CreateOLAPViews {
             SELECT
                 s.id,
                 s.session_id,
-                s.name,
+                s.title,
                 s.project_path,
                 s.status,
-                s.created_at,
+                s.started_at,
                 s.updated_at,
-                s.last_activity_at,
+                s.last_accessed_at,
                 p.project_name,
                 p.tech_stack
             FROM sessions s
             LEFT JOIN maestro_projects p ON s.project_path = p.project_path
-            WHERE s.status = 'active'
+            WHERE s.status = 'running' AND s.ended_at IS NULL
             "#,
             params_from_iter(std::iter::empty::<&str>()),
         )

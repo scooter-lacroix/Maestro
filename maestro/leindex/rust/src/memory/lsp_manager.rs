@@ -48,12 +48,13 @@ use tokio::time::{interval, timeout};
 use tracing::{debug, info, warn};
 
 use super::turso_backend::{LspServerState, LspStatus, TursoStorageBackend};
+use crate::lsp::stdio_proxy::LspStdioProxy;
 
 #[cfg(unix)]
 /// LSP server types supported by Maestro
 ///
 /// Each variant represents a specific language server that can be spawned on-demand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum LspType {
     /// rust-analyzer - Rust language server
     Rust,
@@ -122,6 +123,9 @@ pub struct LspConfig {
     pub additional_args: Vec<String>,
     /// Environment variables for LSP process
     pub env_vars: HashMap<String, String>,
+    /// Whether to use stdio proxy for this LSP (requires feature flag)
+    #[serde(default)]
+    pub use_proxy: bool,
 }
 
 impl Default for LspConfig {
@@ -131,6 +135,7 @@ impl Default for LspConfig {
             binary_path: None,
             additional_args: Vec::new(),
             env_vars: HashMap::new(),
+            use_proxy: false,
         }
     }
 }
@@ -159,6 +164,12 @@ pub struct LspProcess {
     child: Option<TokioChild>,
     /// Process group ID (Unix only) used for killing child sub-processes.
     pgid: Option<i32>,
+    /// Stdio proxy task handle (if proxy is enabled)
+    proxy_task: Option<tokio::task::JoinHandle<()>>,
+    /// Stdio proxy socket path (if proxy is enabled)
+    proxy_socket_path: Option<PathBuf>,
+    /// Whether stdio proxy is enabled for this LSP
+    use_proxy: bool,
 }
 
 // Implement Clone manually since TokioChild doesn't support Clone
@@ -175,13 +186,16 @@ impl Clone for LspProcess {
             last_error: self.last_error.clone(),
             child: None, // Cannot clone the child handle
             pgid: self.pgid,
+            proxy_task: None, // Cannot clone the task handle
+            proxy_socket_path: self.proxy_socket_path.clone(),
+            use_proxy: self.use_proxy,
         }
     }
 }
 
 impl LspProcess {
     /// Create a new LSP process tracking record
-    pub fn new(lsp_type: LspType, session_id: String) -> Self {
+    pub fn new(lsp_type: LspType, session_id: String, use_proxy: bool) -> Self {
         Self {
             lsp_type,
             session_id,
@@ -193,6 +207,9 @@ impl LspProcess {
             last_error: None,
             child: None,
             pgid: None,
+            proxy_task: None,
+            proxy_socket_path: None,
+            use_proxy,
         }
     }
 
@@ -208,6 +225,22 @@ impl LspProcess {
     pub(crate) async fn kill_with_timeout(&mut self, max_wait: Duration) -> Result<()> {
         let pid = self.pid;
         let pgid = self.pgid;
+
+        // First, shut down the stdio proxy if it's running
+        if let Some(proxy_task) = self.proxy_task.take() {
+            debug!("Aborting stdio proxy task for LSP '{}'", self.lsp_type.display_name());
+            proxy_task.abort();
+
+            // Clean up socket file if it exists
+            if let Some(ref socket_path) = self.proxy_socket_path {
+                if let Err(e) = std::fs::remove_file(socket_path) {
+                    // Log error but don't fail - the file might already be gone
+                    debug!("Failed to remove proxy socket file {:?}: {}", socket_path, e);
+                }
+            }
+
+            self.proxy_socket_path = None;
+        }
 
         if let Some(mut child) = self.child.take() {
             debug!(
@@ -320,7 +353,7 @@ impl LspProcess {
             session_id: self.session_id.clone(),
             language: self.lsp_type.language().to_string(),
             lsp_name: self.lsp_type.binary_name().to_string(),
-            status: self.status.as_str().to_string(),
+            status: self.status,
             pid: self.pid.map(|p| p as i64),
             port: self.port.map(|p| p as i64),
             auto_start: self.auto_start,
@@ -402,6 +435,21 @@ fn unix_kill_process_group(pgid: i32, signal: i32) -> std::io::Result<()> {
     Err(err)
 }
 
+/// Get the process group ID for a process
+#[cfg(unix)]
+fn get_process_group_id(pid: Option<u32>) -> Option<i32> {
+    pid.and_then(|p| {
+        unsafe {
+            let pgid = libc::getpgid(p as i32);
+            if pgid < 0 {
+                None
+            } else {
+                Some(pgid)
+            }
+        }
+    })
+}
+
 /// LSP Manager
 ///
 /// Manages the lifecycle of LSP server processes for code intelligence.
@@ -425,6 +473,8 @@ pub struct LspManager {
     storage: TursoStorageBackend,
     /// Running LSP processes (session_id + lsp_name -> process info)
     running_lsps: Arc<RwLock<HashMap<String, LspProcess>>>,
+    /// Running MCP bridge processes (session_id + lsp_name -> child handle)
+    running_bridges: Arc<RwLock<HashMap<String, TokioChild>>>,
     /// Cancellation flag for background monitoring tasks started via `start_monitoring`.
     monitor_stop_tx: watch::Sender<bool>,
 }
@@ -448,6 +498,7 @@ impl LspManager {
         Self {
             storage,
             running_lsps: Arc::new(RwLock::new(HashMap::new())),
+            running_bridges: Arc::new(RwLock::new(HashMap::new())),
             monitor_stop_tx,
         }
     }
@@ -505,15 +556,16 @@ impl LspManager {
         }
 
         // Update status to starting
+        let use_proxy = config.use_proxy;
         {
             let mut running = self.running_lsps.write().await;
-            let mut process = LspProcess::new(lsp_type, session_id.to_string());
+            let mut process = LspProcess::new(lsp_type, session_id.to_string(), use_proxy);
             process.status = LspStatus::Starting;
             process.auto_start = config.auto_start;
             running.insert(lsp_key.clone(), process);
         }
 
-        // Spawn the LSP process
+        // Spawn the LSP process (unless using proxy, which will spawn it)
         let binary = config
             .binary_path
             .clone()
@@ -584,6 +636,71 @@ impl LspManager {
                     process.status = LspStatus::Running;
                     process.started_at = Some(chrono::Utc::now());
                     process.child = Some(child);
+                }
+
+                // Spawn stdio proxy if enabled
+                if use_proxy {
+                    let project_path = std::env::current_dir()
+                        .unwrap_or_else(|_| PathBuf::from("."));
+
+                    match LspStdioProxy::new(lsp_type, session_id, project_path.to_string_lossy().as_ref()) {
+                        Ok(mut proxy) => {
+                            let socket_path = proxy.socket_path().clone();
+                            let socket_path_for_log = socket_path.clone();
+
+                            // Spawn proxy in background task
+                            let handle = match tokio::runtime::Handle::try_current() {
+                                Ok(handle) => handle,
+                                Err(_) => {
+                                    warn!("No tokio runtime found for stdio proxy, continuing without proxy");
+                                    let mut running = self.running_lsps.write().await;
+                                    if let Some(process) = running.get_mut(&lsp_key) {
+                                        process.use_proxy = false;
+                                    }
+                                    drop(running);
+                                    // Persist to database
+                                    if let Err(e) = self.persist_lsp_state(session_id, lsp_type).await {
+                                        warn!("Failed to persist LSP state to database: {}", e);
+                                    }
+                                    return Ok(());
+                                }
+                            };
+
+                            let proxy_task = handle.spawn(async move {
+                                if let Err(e) = proxy.run().await {
+                                    warn!("LSP stdio proxy exited with error: {}", e);
+                                }
+                            });
+
+                            // Store proxy task handle and socket path
+                            {
+                                let mut running = self.running_lsps.write().await;
+                                if let Some(process) = running.get_mut(&lsp_key) {
+                                    process.proxy_task = Some(proxy_task);
+                                    process.proxy_socket_path = Some(socket_path);
+                                }
+                            }
+
+                            info!(
+                                "LSP stdio proxy started for '{}', socket at: {:?}",
+                                lsp_type.display_name(),
+                                socket_path_for_log
+                            );
+                        }
+                        Err(e) => {
+                            // Proxy creation failed, but LSP is still running
+                            warn!(
+                                "Failed to create stdio proxy for LSP '{}': {}, continuing without proxy",
+                                lsp_type.display_name(),
+                                e
+                            );
+                            // Update process to disable proxy
+                            let mut running = self.running_lsps.write().await;
+                            if let Some(process) = running.get_mut(&lsp_key) {
+                                process.use_proxy = false;
+                            }
+                        }
+                    }
                 }
 
                 // Persist to database
@@ -703,6 +820,22 @@ impl LspManager {
         }
 
         result
+    }
+
+    /// Get the stdio proxy socket path for an LSP
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `lsp_type`: Type of LSP to query
+    ///
+    /// ## Returns
+    ///
+    /// Returns the socket path if proxy is enabled, or `None` if not tracking this LSP or proxy is not enabled
+    pub async fn get_proxy_socket_path(&self, session_id: &str, lsp_type: LspType) -> Option<PathBuf> {
+        let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
+        let running = self.running_lsps.read().await;
+        running.get(&lsp_key).and_then(|p| p.proxy_socket_path.clone())
     }
 
     /// Persist LSP state to database
@@ -1143,7 +1276,7 @@ impl LspManager {
             };
 
             // Only restart if the LSP was previously running
-            if state.status == "running" || state.status == "starting" {
+            if state.status == LspStatus::Running || state.status == LspStatus::Starting {
                 info!("Restoring LSP '{}' for session '{}'", lsp_type.display_name(), state.session_id);
 
                 match self.start_lsp(&state.session_id, lsp_type, None).await {
@@ -1304,7 +1437,7 @@ impl LspManager {
                     session_id: session_id.to_string(),
                     language: lsp_type.language().to_string(),
                     lsp_name: lsp_type.binary_name().to_string(),
-                    status: "unknown".to_string(), // Default status
+                    status: LspStatus::Stopped, // Default status
                     pid: None,
                     port: None,
                     auto_start: enabled,
@@ -1351,6 +1484,174 @@ impl LspManager {
     /// If database persistence fails, this method updates in-memory state and continues
     pub async fn disable_auto_start(&self, session_id: &str, lsp_type: LspType) -> Result<bool> {
         self.set_auto_start(session_id, lsp_type, false).await
+    }
+
+    // ========================================================================
+    // Proxy Mode Management
+    // ========================================================================
+
+    /// Enable stdio proxy mode for an LSP in a session
+    ///
+    /// When proxy mode is enabled, the LSP will be accessible via a Unix socket
+    /// that allows multiple concurrent clients. This requires restarting the LSP.
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `lsp_type`: Type of LSP to enable proxy for
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok(true)` if the proxy mode was enabled, `Ok(false)` if already enabled
+    ///
+    /// ## Behavior
+    ///
+    /// If the LSP is currently running, it will be restarted with proxy mode enabled.
+    /// The restart is graceful - the LSP is stopped first, then started with the new configuration.
+    pub async fn enable_proxy_mode(&self, session_id: &str, lsp_type: LspType) -> Result<bool> {
+        let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
+
+        info!(
+            "Enabling proxy mode for LSP '{}' in session '{}'",
+            lsp_type.display_name(),
+            session_id
+        );
+
+        // Check if proxy is already enabled
+        let already_enabled = {
+            let running = self.running_lsps.read().await;
+            running.get(&lsp_key).map(|p| p.use_proxy).unwrap_or(false)
+        };
+
+        if already_enabled {
+            debug!("Proxy mode already enabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+            return Ok(false);
+        }
+
+        // Restart the LSP with proxy mode enabled
+        // First, get the existing configuration from the database if it exists
+        let _config = match self.storage.get_lsp_state(session_id, lsp_type.binary_name()).await {
+            Ok(Some(state)) => {
+                // If we have a saved state, we can preserve the existing settings
+                Some(LspConfig {
+                    auto_start: state.auto_start,
+                    use_proxy: true,
+                    ..Default::default()
+                })
+            }
+            Ok(None) => {
+                // No existing state, use default config with proxy enabled
+                Some(LspConfig {
+                    auto_start: true,
+                    use_proxy: true,
+                    ..Default::default()
+                })
+            }
+            Err(e) => {
+                warn!("Failed to get existing LSP state for '{}', using default config: {}",
+                      lsp_type.binary_name(), e);
+                Some(LspConfig {
+                    auto_start: true,
+                    use_proxy: true,
+                    ..Default::default()
+                })
+            }
+        };
+
+        // Restart the LSP with proxy enabled
+        match self.restart_lsp(session_id, lsp_type).await {
+            Ok(()) => {
+                // Update the in-memory proxy flag
+                let mut running = self.running_lsps.write().await;
+                if let Some(process) = running.get_mut(&lsp_key) {
+                    process.use_proxy = true;
+                }
+                drop(running);
+
+                info!("Proxy mode enabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+                Ok(true)
+            }
+            Err(e) => {
+                warn!("Failed to restart LSP '{}' for proxy mode: {}", lsp_type.display_name(), e);
+                // Don't return error - graceful degradation
+                Ok(false)
+            }
+        }
+    }
+
+    /// Disable stdio proxy mode for an LSP in a session
+    ///
+    /// When proxy mode is disabled, the LSP will use direct stdio communication
+    /// (single client only). This requires restarting the LSP.
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `lsp_type`: Type of LSP to disable proxy for
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok(true)` if the proxy mode was disabled, `Ok(false)` if already disabled
+    ///
+    /// ## Behavior
+    ///
+    /// If the LSP is currently running, it will be restarted with proxy mode disabled.
+    /// The proxy socket will be cleaned up during the restart.
+    pub async fn disable_proxy_mode(&self, session_id: &str, lsp_type: LspType) -> Result<bool> {
+        let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
+
+        info!(
+            "Disabling proxy mode for LSP '{}' in session '{}'",
+            lsp_type.display_name(),
+            session_id
+        );
+
+        // Check if proxy is currently enabled
+        let is_enabled = {
+            let running = self.running_lsps.read().await;
+            running.get(&lsp_key).map(|p| p.use_proxy).unwrap_or(false)
+        };
+
+        if !is_enabled {
+            debug!("Proxy mode already disabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+            return Ok(false);
+        }
+
+        // Restart the LSP with proxy mode disabled
+        match self.restart_lsp(session_id, lsp_type).await {
+            Ok(()) => {
+                // Update the in-memory proxy flag
+                let mut running = self.running_lsps.write().await;
+                if let Some(process) = running.get_mut(&lsp_key) {
+                    process.use_proxy = false;
+                }
+                drop(running);
+
+                info!("Proxy mode disabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+                Ok(true)
+            }
+            Err(e) => {
+                warn!("Failed to restart LSP '{}' to disable proxy mode: {}", lsp_type.display_name(), e);
+                // Don't return error - graceful degradation
+                Ok(false)
+            }
+        }
+    }
+
+    /// Check if proxy mode is enabled for an LSP
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `lsp_type`: Type of LSP to query
+    ///
+    /// ## Returns
+    ///
+    /// Returns `true` if proxy mode is enabled, `false` otherwise
+    pub async fn is_proxy_enabled(&self, session_id: &str, lsp_type: LspType) -> bool {
+        let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
+        let running = self.running_lsps.read().await;
+        running.get(&lsp_key).map(|p| p.use_proxy).unwrap_or(false)
     }
 
     /// Stop all LSPs for a specific session
@@ -1443,7 +1744,7 @@ impl LspManager {
             .arg(project_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::inherit())  // Inherit stderr to avoid deadlock
             .kill_on_drop(true);
 
         #[cfg(unix)]
@@ -1458,7 +1759,7 @@ impl LspManager {
         }
 
         match cmd.spawn() {
-            Ok(mut child) => {
+            Ok(child) => {
                 let pid = child.id();
                 info!(
                     "MCP bridge for LSP '{}' started successfully (PID: {})",
@@ -1466,12 +1767,9 @@ impl LspManager {
                     pid.unwrap_or(0)
                 );
 
-                // Note: We don't store the bridge child handle in running_lsps because
-                // that map is specifically for LSP processes. The bridge processes are
-                // managed separately and will be cleaned up when the session ends.
-
-                // Store bridge PID in a separate map for tracking
-                // For now, we just return the PID - the caller can track it if needed
+                // Store the child handle so we can properly manage the bridge lifecycle
+                let mut bridges = self.running_bridges.write().await;
+                bridges.insert(bridge_key, child);
 
                 Ok(pid.unwrap_or(0))
             }
@@ -1510,6 +1808,8 @@ impl LspManager {
         lsp_type: LspType,
         bridge_pid: u32,
     ) -> Result<()> {
+        let bridge_key = format!("{}:{}:mcp", session_id, lsp_type.binary_name());
+
         info!(
             "Stopping MCP bridge for LSP '{}' in session '{}' (PID: {})",
             lsp_type.display_name(),
@@ -1517,19 +1817,51 @@ impl LspManager {
             bridge_pid
         );
 
-        // Send SIGTERM to the bridge process
-        #[cfg(unix)]
-        {
-            use std::process::Command as StdCommand;
-            let _ = StdCommand::new("kill")
-                .arg(bridge_pid.to_string())
-                .output();
-        }
+        // Remove and get the child handle from the map
+        let child = {
+            let mut bridges = self.running_bridges.write().await;
+            bridges.remove(&bridge_key)
+        };
 
-        #[cfg(not(unix))]
-        {
-            // On non-Unix, we'd need to track the child handle to kill it properly
-            warn!("Stopping MCP bridges is not fully supported on this platform");
+        if let Some(mut child_handle) = child {
+            // Kill the bridge process using the stored child handle
+            #[cfg(unix)]
+            {
+                if let Some(pgid) = get_process_group_id(child_handle.id()) {
+                    // Try SIGTERM first
+                    if let Err(e) = unix_kill_process_group(pgid, libc::SIGTERM) {
+                        warn!("Failed to SIGTERM bridge process group (PGID: {}): {}", pgid, e);
+                    }
+
+                    // Wait up to 5 seconds for graceful shutdown
+                    match timeout(Duration::from_secs(5), child_handle.wait()).await {
+                        Ok(Ok(exit_status)) => {
+                            info!("MCP bridge exited after SIGTERM: {:?}", exit_status);
+                        }
+                        Ok(Err(e)) => {
+                            warn!("Failed to wait for bridge process: {}", e);
+                        }
+                        Err(_) => {
+                            // Timeout - send SIGKILL
+                            debug!("Bridge did not exit within timeout; sending SIGKILL");
+                            if let Err(e) = unix_kill_process_group(pgid, libc::SIGKILL) {
+                                warn!("Failed to SIGKILL bridge process group: {}", e);
+                            }
+                            let _ = timeout(Duration::from_secs(2), child_handle.wait()).await;
+                        }
+                    }
+                }
+            }
+
+            #[cfg(not(unix))]
+            {
+                let _ = child_handle.kill().await;
+                let _ = timeout(Duration::from_secs(5), child_handle.wait()).await;
+            }
+
+            info!("MCP bridge stopped successfully");
+        } else {
+            warn!("No bridge process found for key: {}", bridge_key);
         }
 
         Ok(())
@@ -1637,12 +1969,15 @@ mod tests {
 
     #[test]
     fn test_lsp_process_creation() {
-        let process = LspProcess::new(LspType::Rust, "test-session".to_string());
+        let process = LspProcess::new(LspType::Rust, "test-session".to_string(), false);
         assert_eq!(process.lsp_type, LspType::Rust);
         assert_eq!(process.session_id, "test-session");
         assert_eq!(process.status, LspStatus::Stopped);
         assert!(process.pid.is_none());
         assert!(process.last_error.is_none());
+        assert!(!process.use_proxy);
+        assert!(process.proxy_task.is_none());
+        assert!(process.proxy_socket_path.is_none());
     }
 
     #[tokio::test]

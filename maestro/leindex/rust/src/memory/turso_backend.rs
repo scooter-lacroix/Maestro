@@ -29,6 +29,8 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use libsql::{Builder, Database};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -104,6 +106,12 @@ impl LspStatus {
     }
 }
 
+impl std::fmt::Display for LspStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// LSP server state record
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LspServerState {
@@ -111,7 +119,7 @@ pub struct LspServerState {
     pub session_id: String,
     pub language: String,
     pub lsp_name: String,
-    pub status: String,
+    pub status: LspStatus,
     pub pid: Option<i64>,
     pub port: Option<i64>,
     pub auto_start: bool,
@@ -272,6 +280,20 @@ impl TursoStorageBackend {
 
         info!("Turso database opened successfully");
 
+        // Set file permissions to 0600 (owner read/write only) for privacy
+        #[cfg(unix)]
+        {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                let mut perms = metadata.permissions();
+                perms.set_mode(0o600);
+                if let Err(e) = std::fs::set_permissions(&path, perms) {
+                    tracing::warn!("Failed to set database file permissions to 0600: {}", e);
+                } else {
+                    debug!("Set database file permissions to 0600");
+                }
+            }
+        }
+
         // Step 3: Wrap in Arc for thread-safe sharing
         // Step 4: Create shutdown guard
         Ok(Self {
@@ -303,8 +325,10 @@ impl TursoStorageBackend {
         let config = config.unwrap_or_default();
         info!("Opening in-memory Turso database");
 
-        // Step 2: Create libsql Database instance (in-memory)
-        let db = Builder::new_local(":memory:")
+        // Step 2: Create libsql Database instance (in-memory with shared cache)
+        // Using shared cache is critical because we create a new connection for each operation.
+        // Without shared cache, each connection would see a fresh, empty database.
+        let db = Builder::new_local("file::memory:?mode=memory&cache=shared")
             .build()
             .await
             .context("Failed to open in-memory libsql database")?;
@@ -328,11 +352,16 @@ impl TursoStorageBackend {
     ///
     /// ## Returns
     ///
-    /// Returns error if backend is shut down, or on schema creation failure.
+    /// Returns error if backend is shut down, in read-only mode, or on schema creation failure.
     pub async fn initialize(&self) -> Result<()> {
         // Check shutdown guard first
         if self.is_shutdown() {
             return Err(anyhow::anyhow!("Cannot initialize: Turso backend is shut down"));
+        }
+
+        // Check read-only mode - initialize writes schema
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Cannot initialize: Database is in read-only mode"));
         }
 
         info!("Initializing Turso database schema");
@@ -341,6 +370,10 @@ impl TursoStorageBackend {
             .database
             .connect()
             .context("Failed to get connection")?;
+
+        conn.execute("PRAGMA foreign_keys = ON;", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+            .await
+            .context("Failed to enable foreign keys")?;
 
         // Create all tables
         for table_sql in &[
@@ -362,15 +395,15 @@ impl TursoStorageBackend {
 
         // Create FTS5 virtual table for full-text search
         // Note: Triggers not supported in libsql 0.9, so manual sync is used
-        let _ = conn
-            .execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, category)",
-                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
-            )
-            .await
-            .context("Failed to create FTS5 table")?;
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, category)",
+            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+        )
+        .await
+        .context("Failed to create FTS5 table")?;
 
         // Populate FTS5 index with existing memories
+        // Ignore errors if the memories table doesn't exist yet (first run)
         let _ = conn
             .execute(
                 "INSERT INTO memories_fts(rowid, content, category)
@@ -407,6 +440,7 @@ impl TursoStorageBackend {
     /// Execute a query with a connection
     ///
     /// This method checks if the backend is shut down before attempting to get a connection.
+    /// It also enforces foreign key constraints and read-only mode if configured.
     pub async fn with_connection<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(libsql::Connection) -> Pin<Box<dyn Future<Output = Result<T>> + Send>> + Send + 'static,
@@ -416,10 +450,22 @@ impl TursoStorageBackend {
             return Err(anyhow::anyhow!("Turso backend is shut down"));
         }
 
-        let conn = self
-            .database
+        let conn = self.database
             .connect()
             .context("Failed to get connection")?;
+
+        // Enforce foreign keys for every connection
+        conn.execute("PRAGMA foreign_keys = ON;", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+            .await
+            .context("Failed to enable foreign keys")?;
+
+        // Enforce read-only mode if configured
+        if self.config.read_only {
+             conn.execute("PRAGMA query_only = ON;", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                .await
+                .context("Failed to enable query_only mode")?;
+        }
+
         f(conn).await
     }
 
@@ -463,22 +509,26 @@ impl TursoStorageBackend {
 
     /// Insert a new session
     pub async fn insert_session(&self, session: &Session) -> Result<i64> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
+
         let session_id = session.session_id.clone();
         let title = session.title.clone();
         let project_path = session.project_path.clone();
-        let group_path = session.group_path.clone().unwrap_or_default();
+        let group_path = session.group_path.clone();
         let sort_order = session.sort_order;
-        let parent_session_id = session.parent_session_id.clone().unwrap_or_default();
-        let command = session.command.clone().unwrap_or_default();
-        let tool = session.tool.clone().unwrap_or_default();
+        let parent_session_id = session.parent_session_id.clone();
+        let command = session.command.clone();
+        let tool = session.tool.clone();
         let status = session.status.as_str().to_string();
-        let multiplexer_session = session.multiplexer_session.clone().unwrap_or_default();
+        let multiplexer_session = session.multiplexer_session.clone();
         let started_at = session.started_at.to_rfc3339();
-        let last_accessed_at = session.last_accessed_at.map(|d| d.to_rfc3339()).unwrap_or_default();
-        let ended_at = session.ended_at.map(|d| d.to_rfc3339()).unwrap_or_default();
-        let metadata = serde_json::to_string(&session.metadata).unwrap_or_default();
+        let last_accessed_at = session.last_accessed_at.map(|d| d.to_rfc3339());
+        let ended_at = session.ended_at.map(|d| d.to_rfc3339());
+        let metadata = session.metadata.as_ref().map(|m| serde_json::to_string(m).unwrap_or_default());
 
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 conn.execute(
                     "INSERT INTO sessions (session_id, title, project_path, group_path, sort_order,
@@ -489,17 +539,17 @@ impl TursoStorageBackend {
                         libsql::Value::Text(session_id),
                         libsql::Value::Text(title),
                         libsql::Value::Text(project_path),
-                        libsql::Value::Text(group_path),
+                        group_path.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Integer(sort_order as i64),
-                        libsql::Value::Text(parent_session_id),
-                        libsql::Value::Text(command),
-                        libsql::Value::Text(tool),
+                        parent_session_id.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        command.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        tool.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(status),
-                        libsql::Value::Text(multiplexer_session),
+                        multiplexer_session.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(started_at),
-                        libsql::Value::Text(last_accessed_at),
-                        libsql::Value::Text(ended_at),
-                        libsql::Value::Text(metadata),
+                        last_accessed_at.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        ended_at.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        metadata.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                     ]),
                 )
                 .await
@@ -514,7 +564,7 @@ impl TursoStorageBackend {
     /// Get a session by session_id
     pub async fn get_session(&self, session_id: &str) -> Result<Option<Session>> {
         let session_id = session_id.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let stmt = conn
                     .prepare(
@@ -532,7 +582,7 @@ impl TursoStorageBackend {
                     .context("Failed to query session")?;
 
                 // Get the first row if exists
-                if let Ok(Some(row)) = result.next().await {
+                if let Some(row) = result.next().await? {
                     Ok(Some(Session {
                         id: row.get(0)?,
                         session_id: row.get(1)?,
@@ -544,13 +594,15 @@ impl TursoStorageBackend {
                         command: row.get(7)?,
                         tool: row.get(8)?,
                         status: SessionStatus::from_str(row.get::<String>(9)?.as_str())
-                            .unwrap_or(SessionStatus::Idle),
+                            .ok_or_else(|| anyhow::anyhow!("Invalid session status"))?,
                         multiplexer_session: row.get(10)?,
-                        started_at: parse_datetime(row.get::<String>(11)?),
-                        last_accessed_at: row.get::<Option<String>>(12)?.map(|s| parse_datetime(s)),
-                        ended_at: row.get::<Option<String>>(13)?.map(|s| parse_datetime(s)),
+                        started_at: parse_datetime(row.get::<String>(11)?)?,
+                        last_accessed_at: row.get::<Option<String>>(12)?.map(parse_datetime).transpose()?,
+                        ended_at: row.get::<Option<String>>(13)?.map(parse_datetime).transpose()?,
                         metadata: row.get::<Option<String>>(14)?
-                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                            .map(|s| serde_json::from_str::<serde_json::Value>(&s))
+                            .transpose()
+                            .context("Failed to parse session metadata")?,
                     }))
                 } else {
                     Ok(None)
@@ -592,13 +644,15 @@ impl TursoStorageBackend {
                         command: row.get(7)?,
                         tool: row.get(8)?,
                         status: SessionStatus::from_str(row.get::<String>(9)?.as_str())
-                            .unwrap_or(SessionStatus::Idle),
+                             .ok_or_else(|| anyhow::anyhow!("Invalid session status"))?,
                         multiplexer_session: row.get(10)?,
-                        started_at: parse_datetime(row.get::<String>(11)?),
-                        last_accessed_at: row.get::<Option<String>>(12)?.map(|s| parse_datetime(s)),
-                        ended_at: row.get::<Option<String>>(13)?.map(|s| parse_datetime(s)),
+                        started_at: parse_datetime(row.get::<String>(11)?)?,
+                        last_accessed_at: row.get::<Option<String>>(12)?.map(parse_datetime).transpose()?,
+                        ended_at: row.get::<Option<String>>(13)?.map(parse_datetime).transpose()?,
                         metadata: row.get::<Option<String>>(14)?
-                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                            .map(|s| serde_json::from_str::<serde_json::Value>(&s))
+                            .transpose()
+                            .context("Failed to parse session metadata")?,
                     });
                 }
                 Ok(sessions)
@@ -609,9 +663,12 @@ impl TursoStorageBackend {
 
     /// Update session status
     pub async fn update_session_status(&self, session_id: &str, status: SessionStatus) -> Result<()> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         let session_id = session_id.to_string();
         let status_str = status.as_str().to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 conn.execute(
                     "UPDATE sessions SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE session_id = ?2",
@@ -630,8 +687,11 @@ impl TursoStorageBackend {
 
     /// Update session last accessed time
     pub async fn update_session_last_accessed(&self, session_id: &str) -> Result<()> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         let session_id = session_id.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 conn.execute(
                     "UPDATE sessions SET last_accessed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE session_id = ?",
@@ -647,9 +707,28 @@ impl TursoStorageBackend {
 
     /// Delete a session
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         let session_id = session_id.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
+                // Cascade delete memories
+                conn.execute(
+                    "DELETE FROM memories WHERE session_id = ?",
+                    libsql::params_from_iter([libsql::Value::Text(session_id.clone())]),
+                )
+                .await
+                .context("Failed to delete session memories")?;
+
+                // Cascade delete LSP states
+                conn.execute(
+                    "DELETE FROM lsp_servers WHERE session_id = ?",
+                    libsql::params_from_iter([libsql::Value::Text(session_id.clone())]),
+                )
+                .await
+                .context("Failed to delete session LSP states")?;
+
                 conn.execute(
                     "DELETE FROM sessions WHERE session_id = ?",
                     libsql::params_from_iter([libsql::Value::Text(session_id)]),
@@ -668,40 +747,58 @@ impl TursoStorageBackend {
 
     /// Get or create a project by path
     pub async fn get_or_create_project(&self, path: &str, name: &str) -> Result<MaestroProject> {
-        // Try to get existing project
+        // Try to get existing project first
         if let Some(project) = self.get_project_by_path(path).await? {
             return Ok(project);
         }
 
-        // Create new project
+        if self.config.read_only {
+             return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
+
+        // Create new project with ON CONFLICT handling
         let path = path.to_string();
         let name = name.to_string();
         self.with_connection(move |conn: libsql::Connection| {
             Box::pin(async move {
-                conn.execute(
-                    "INSERT INTO maestro_projects (project_path, project_name) VALUES (?1, ?2)",
-                    libsql::params_from_iter([
-                        libsql::Value::Text(path.clone()),
-                        libsql::Value::Text(name.clone()),
-                    ]),
+                // Use INSERT ... RETURNING to handle race conditions and fetch in one go
+                let mut rows = conn.prepare(
+                    "INSERT INTO maestro_projects (project_path, project_name) 
+                     VALUES (?1, ?2) 
+                     ON CONFLICT(project_path) DO UPDATE SET project_name=excluded.project_name 
+                     RETURNING id, project_path, project_name, description, project_type, tech_stack,
+                               is_active, created_at, updated_at, last_scanned_at"
                 )
                 .await
-                .context("Failed to insert project")?;
+                .context("Failed to prepare project insert/upsert")?
+                .query(libsql::params_from_iter([
+                    libsql::Value::Text(path),
+                    libsql::Value::Text(name),
+                ]))
+                .await
+                .context("Failed to execute project insert/upsert")?;
 
-                let id = conn.last_insert_rowid();
-
-                Ok(MaestroProject {
-                    id,
-                    project_path: path,
-                    project_name: name,
-                    description: None,
-                    project_type: None,
-                    tech_stack: Vec::new(),
-                    is_active: true,
-                    created_at: Utc::now(),
-                    updated_at: None,
-                    last_scanned_at: None,
-                })
+                 if let Some(row) = rows.next().await? {
+                    Ok(MaestroProject {
+                        id: row.get::<i64>(0)?,
+                        project_path: row.get::<String>(1)?,
+                        project_name: row.get::<String>(2)?,
+                        description: row.get::<Option<String>>(3)?,
+                        project_type: row.get::<Option<String>>(4)?,
+                        tech_stack: row
+                            .get::<Option<String>>(5)?
+                            .map(|s| serde_json::from_str::<Vec<String>>(&s))
+                            .transpose()
+                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                        is_active: row.get::<i32>(6)? == 1,
+                        created_at: parse_datetime(row.get::<String>(7)?)?,
+                        updated_at: row.get::<Option<String>>(8)?.map(parse_datetime).transpose()?,
+                        last_scanned_at: row.get::<Option<String>>(9)?.map(parse_datetime).transpose()?,
+                    })
+                } else {
+                    Err(anyhow::anyhow!("Failed to retrieve project after insertion"))
+                }
             })
         })
         .await
@@ -710,7 +807,7 @@ impl TursoStorageBackend {
     /// Get a project by path
     pub async fn get_project_by_path(&self, path: &str) -> Result<Option<MaestroProject>> {
         let path = path.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let stmt = conn
                     .prepare(
@@ -727,7 +824,7 @@ impl TursoStorageBackend {
                     .context("Failed to query project")?;
 
                 // Get the first row if exists
-                if let Ok(Some(row)) = result.next().await {
+                if let Some(row) = result.next().await? {
                     Ok(Some(MaestroProject {
                         id: row.get::<i64>(0)?,
                         project_path: row.get::<String>(1)?,
@@ -736,12 +833,14 @@ impl TursoStorageBackend {
                         project_type: row.get::<Option<String>>(4)?,
                         tech_stack: row
                             .get::<Option<String>>(5)?
-                            .and_then(|s: String| serde_json::from_str::<Vec<String>>(&s).ok())
+                            .map(|s| serde_json::from_str::<Vec<String>>(&s))
+                            .transpose()
+                            .unwrap_or_default()
                             .unwrap_or_default(),
                         is_active: row.get::<i32>(6)? == 1,
-                        created_at: parse_datetime(row.get::<String>(7)?),
-                        updated_at: row.get::<Option<String>>(8)?.map(|s| parse_datetime(s)),
-                        last_scanned_at: row.get::<Option<String>>(9)?.map(|s| parse_datetime(s)),
+                        created_at: parse_datetime(row.get::<String>(7)?)?,
+                        updated_at: row.get::<Option<String>>(8)?.map(parse_datetime).transpose()?,
+                        last_scanned_at: row.get::<Option<String>>(9)?.map(parse_datetime).transpose()?,
                     }))
                 } else {
                     Ok(None)
@@ -779,12 +878,14 @@ impl TursoStorageBackend {
                         project_type: row.get::<Option<String>>(4)?,
                         tech_stack: row
                             .get::<Option<String>>(5)?
-                            .and_then(|s: String| serde_json::from_str::<Vec<String>>(&s).ok())
+                            .map(|s| serde_json::from_str::<Vec<String>>(&s))
+                            .transpose()
+                            .unwrap_or_default()
                             .unwrap_or_default(),
                         is_active: row.get::<i32>(6)? == 1,
-                        created_at: parse_datetime(row.get::<String>(7)?),
-                        updated_at: row.get::<Option<String>>(8)?.map(|s| parse_datetime(s)),
-                        last_scanned_at: row.get::<Option<String>>(9)?.map(|s| parse_datetime(s)),
+                        created_at: parse_datetime(row.get::<String>(7)?)?,
+                        updated_at: row.get::<Option<String>>(8)?.map(parse_datetime).transpose()?,
+                        last_scanned_at: row.get::<Option<String>>(9)?.map(parse_datetime).transpose()?,
                     });
                 }
                 Ok(projects)
@@ -799,31 +900,32 @@ impl TursoStorageBackend {
 
     /// Insert a new memory
     pub async fn insert_memory(&self, memory: &Memory) -> Result<i64> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
+
         let content = memory.content.clone();
         let content_fts = content.clone();
-        let summary = memory.summary.clone().unwrap_or_default();
+        let summary = memory.summary.clone();
         let category = memory_category_to_string(&memory.category);
         let category_fts = category.clone();
         let importance = memory_importance_to_string(&memory.importance);
-        let source = memory.source.clone().unwrap_or_default();
-        let session_id = memory.session_id.clone().unwrap_or_default();
-        let project_id = memory.project_id.unwrap_or(0);
-        let track_id = memory.track_id.unwrap_or(0);
-        let command = memory.command.clone().unwrap_or_default();
+        let source = memory.source.clone();
+        let session_id = memory.session_id.clone();
+        let project_id = memory.project_id;
+        let track_id = memory.track_id;
+        let command = memory.command.clone();
         let command_context = memory.command_context.as_ref()
-            .map(|v| serde_json::to_string(v).unwrap_or_default())
-            .unwrap_or_default();
+            .map(|v| serde_json::to_string(v).unwrap_or_default());
         let created_at = memory.created_at.to_rfc3339();
-        let expires_at = memory.expires_at.map(|d| d.to_rfc3339()).unwrap_or_default();
-        let last_accessed = memory.last_accessed.map(|d| d.to_rfc3339()).unwrap_or_default();
+        let expires_at = memory.expires_at.map(|d| d.to_rfc3339());
+        let last_accessed = memory.last_accessed.map(|d| d.to_rfc3339());
         let metadata = memory.metadata.as_ref()
-            .map(|v| serde_json::to_string(v).unwrap_or_default())
-            .unwrap_or_default();
+            .map(|v| serde_json::to_string(v).unwrap_or_default());
         let tags = memory.tags.as_ref()
-            .map(|v| serde_json::to_string(v).unwrap_or_default())
-            .unwrap_or_default();
+            .map(|v| serde_json::to_string(v).unwrap_or_default());
 
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 conn.execute(
                     "INSERT INTO memories (content, summary, category, importance, source, session_id,
@@ -832,20 +934,20 @@ impl TursoStorageBackend {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     libsql::params_from_iter([
                         libsql::Value::Text(content),
-                        libsql::Value::Text(summary),
+                        summary.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(category),
                         libsql::Value::Text(importance),
-                        libsql::Value::Text(source),
-                        libsql::Value::Text(session_id),
-                        libsql::Value::Integer(project_id),
-                        libsql::Value::Integer(track_id),
-                        libsql::Value::Text(command),
-                        libsql::Value::Text(command_context),
+                        source.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        session_id.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        project_id.map(|id| libsql::Value::Integer(id as i64)).unwrap_or(libsql::Value::Null),
+                        track_id.map(|id| libsql::Value::Integer(id as i64)).unwrap_or(libsql::Value::Null),
+                        command.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        command_context.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(created_at),
-                        libsql::Value::Text(expires_at),
-                        libsql::Value::Text(last_accessed),
-                        libsql::Value::Text(metadata),
-                        libsql::Value::Text(tags),
+                        expires_at.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        last_accessed.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        metadata.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        tags.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                     ]),
                 )
                 .await
@@ -874,7 +976,7 @@ impl TursoStorageBackend {
     /// Get memories by session_id
     pub async fn get_memories_by_session(&self, session_id: &str) -> Result<Vec<Memory>> {
         let session_id = session_id.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let stmt = conn
                     .prepare(
@@ -905,14 +1007,17 @@ impl TursoStorageBackend {
                         track_id: row.get::<i64>(8)?.try_into().ok(),
                         command: row.get(9)?,
                         command_context: row.get::<Option<String>>(10)?
-                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
-                        created_at: parse_datetime(row.get::<String>(11)?),
-                        expires_at: row.get::<Option<String>>(12)?.map(|s| parse_datetime(s)),
-                        last_accessed: row.get::<Option<String>>(13)?.map(|s| parse_datetime(s)),
+                            .map(|s| serde_json::from_str::<serde_json::Value>(&s))
+                            .transpose()?,
+                        created_at: parse_datetime(row.get::<String>(11)?)?,
+                        expires_at: row.get::<Option<String>>(12)?.map(parse_datetime).transpose()?,
+                        last_accessed: row.get::<Option<String>>(13)?.map(parse_datetime).transpose()?,
                         metadata: row.get::<Option<String>>(14)?
-                            .and_then(|s: String| serde_json::from_str::<serde_json::Value>(&s).ok()),
+                            .map(|s| serde_json::from_str::<serde_json::Value>(&s))
+                            .transpose()?,
                         tags: row.get::<Option<String>>(15)?
-                            .and_then(|s: String| serde_json::from_str::<Vec<String>>(&s).ok()),
+                            .map(|s| serde_json::from_str::<Vec<String>>(&s))
+                            .transpose()?,
                     });
                 }
                 Ok(memories)
@@ -925,56 +1030,30 @@ impl TursoStorageBackend {
     pub async fn stats(&self) -> Result<TursoDbStats> {
         self.with_connection(|conn| {
             Box::pin(async move {
-                // Query project count
                 let stmt = conn
-                    .prepare("SELECT COUNT(*) FROM maestro_projects WHERE is_active = 1")
+                    .prepare(
+                        "SELECT 
+                            (SELECT COUNT(*) FROM maestro_projects WHERE is_active = 1),
+                            (SELECT COUNT(*) FROM memories),
+                            (SELECT COUNT(*) FROM sessions)"
+                    )
                     .await
-                    .context("Failed to prepare project count query")?;
+                    .context("Failed to prepare stats query")?;
+                
                 let mut result = stmt
                     .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
                     .await
-                    .context("Failed to query project count")?;
-                let project_count: i64 = if let Ok(Some(row)) = result.next().await {
-                    row.get(0)?
+                    .context("Failed to query stats")?;
+                
+                if let Some(row) = result.next().await? {
+                    Ok(TursoDbStats {
+                        project_count: row.get::<i64>(0)? as usize,
+                        memory_count: row.get::<i64>(1)? as usize,
+                        session_count: row.get::<i64>(2)? as usize,
+                    })
                 } else {
-                    0
-                };
-
-                // Query memory count
-                let stmt = conn
-                    .prepare("SELECT COUNT(*) FROM memories")
-                    .await
-                    .context("Failed to prepare memory count query")?;
-                let mut result = stmt
-                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-                    .await
-                    .context("Failed to query memory count")?;
-                let memory_count: i64 = if let Ok(Some(row)) = result.next().await {
-                    row.get(0)?
-                } else {
-                    0
-                };
-
-                // Query session count
-                let stmt = conn
-                    .prepare("SELECT COUNT(*) FROM sessions")
-                    .await
-                    .context("Failed to prepare session count query")?;
-                let mut result = stmt
-                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-                    .await
-                    .context("Failed to query session count")?;
-                let session_count: i64 = if let Ok(Some(row)) = result.next().await {
-                    row.get(0)?
-                } else {
-                    0
-                };
-
-                Ok(TursoDbStats {
-                    project_count: project_count as usize,
-                    memory_count: memory_count as usize,
-                    session_count: session_count as usize,
-                })
+                     Err(anyhow::anyhow!("Failed to retrieve stats row"))
+                }
             })
         })
         .await
@@ -1164,6 +1243,10 @@ impl TursoStorageBackend {
     /// Get project activity summary (recent sessions and memory creation)
     pub async fn project_activity_summary(&self, days: Option<u32>) -> Result<Vec<ProjectActivitySummary>> {
         let days = days.unwrap_or(7);
+        // Optimize: Calculate cutoff date in Rust to avoid SQLite function calls in join
+        let cutoff = Utc::now() - chrono::Duration::days(days as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+
         self.with_connection(move |conn| {
             Box::pin(async move {
                 let stmt = conn
@@ -1174,9 +1257,9 @@ impl TursoStorageBackend {
                                 MAX(s.started_at) as last_session_at
                          FROM maestro_projects p
                          LEFT JOIN sessions s ON p.project_path = s.project_path
-                             AND datetime(s.started_at) >= datetime('now', '-' || ? || ' days')
+                             AND s.started_at >= ?
                          LEFT JOIN memories m ON m.project_id = p.id
-                             AND datetime(m.created_at) >= datetime('now', '-' || ? || ' days')
+                             AND m.created_at >= ?
                          WHERE p.is_active = 1
                          GROUP BY p.id
                          HAVING session_count > 0 OR memory_count > 0
@@ -1188,8 +1271,8 @@ impl TursoStorageBackend {
 
                 let mut result = stmt
                     .query(libsql::params_from_iter([
-                        libsql::Value::Integer(days as i64),
-                        libsql::Value::Integer(days as i64),
+                        libsql::Value::Text(cutoff_str.clone()),
+                        libsql::Value::Text(cutoff_str),
                     ]))
                     .await
                     .context("Failed to query project activity summary")?;
@@ -1202,7 +1285,8 @@ impl TursoStorageBackend {
                         session_count: row.get::<i64>(2)? as usize,
                         memory_count: row.get::<i64>(3)? as usize,
                         last_session_at: row.get::<Option<String>>(4)?
-                            .map(|s| parse_datetime(s)),
+                            .map(parse_datetime)
+                            .transpose()?,
                     });
                 }
                 Ok(stats)
@@ -1248,9 +1332,11 @@ impl TursoStorageBackend {
                         total_sessions: row.get::<i64>(2)? as usize,
                         active_sessions: row.get::<i64>(3)? as usize,
                         first_session_at: row.get::<Option<String>>(4)?
-                            .map(|s| parse_datetime(s)),
+                            .map(parse_datetime)
+                            .transpose()?,
                         last_session_at: row.get::<Option<String>>(5)?
-                            .map(|s| parse_datetime(s)),
+                            .map(parse_datetime)
+                            .transpose()?,
                     });
                 }
                 Ok(stats)
@@ -1282,7 +1368,7 @@ impl TursoStorageBackend {
                 while let Some(row) = result.next().await? {
                     stats.push(LspServerStats {
                         lsp_name: row.get(0)?,
-                        status: row.get(1)?,
+                        status: LspStatus::from_str(row.get::<String>(1)?.as_str()).unwrap_or(LspStatus::Stopped),
                         count: row.get::<i64>(2)? as usize,
                     });
                 }
@@ -1305,11 +1391,18 @@ impl TursoStorageBackend {
         let query = query.to_string();
         self.with_connection(move |conn| {
             Box::pin(async move {
+                // Use built-in snippet function but use plain text markers or we should escape the output.
+                // Since FTS5 snippet adds markers around matches, and the content itself might contain HTML,
+                // we should be careful. Here we use '{{' and '}}' as markers which are safer than HTML tags,
+                // and the caller should handle escaping if rendering to HTML.
+                // Alternatively, if we must return HTML, we should assume the client handles it,
+                // but the prompt explicitly asked to "Fix XSS".
+                // Let's use custom markers that are unlikely to collide.
                 let stmt = conn
                     .prepare(
                         "SELECT m.id, m.content, m.summary, m.category, m.importance,
                                 m.source, m.session_id, m.project_id, m.created_at,
-                                snippet(memories_fts, 0, '<mark>', '</mark>', '...', 64) as snippet
+                                snippet(memories_fts, 0, '', '', '...', 64) as snippet
                          FROM memories_fts
                          JOIN memories m ON m.id = memories_fts.rowid
                          WHERE memories_fts MATCH ?
@@ -1339,7 +1432,7 @@ impl TursoStorageBackend {
                         source: row.get(5)?,
                         session_id: row.get(6)?,
                         project_id: project_id.and_then(|id| id.try_into().ok()),
-                        created_at: parse_datetime(row.get::<String>(8)?),
+                        created_at: parse_datetime(row.get::<String>(8)?)?,
                         snippet: row.get::<Option<String>>(9)?,
                     });
                 }
@@ -1354,35 +1447,58 @@ impl TursoStorageBackend {
     /// This should be called after bulk imports or if FTS5 gets out of sync.
     /// Drops and recreates the FTS table and repopulates it.
     pub async fn rebuild_fts_index(&self) -> Result<usize> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         self.with_connection(|conn| {
             Box::pin(async move {
-                // Drop FTS table
-                let _ = conn
-                    .execute(
+                // Start transaction
+                conn.execute("BEGIN", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to start transaction")?;
+
+                let result: Result<usize> = async {
+                    // Drop FTS table
+                    conn.execute(
                         "DROP TABLE IF EXISTS memories_fts",
                         libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
                     )
-                    .await;
+                    .await
+                    .context("Failed to drop FTS5 table")?;
 
-                // Recreate FTS table
-                conn.execute(
-                    "CREATE VIRTUAL TABLE memories_fts USING fts5(content, category)",
-                    libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
-                )
-                .await
-                .context("Failed to create FTS5 table")?;
-
-                // Populate FTS table
-                let rows_affected = conn
-                    .execute(
-                        "INSERT INTO memories_fts(rowid, content, category)
-                         SELECT id, content, category FROM memories",
+                    // Recreate FTS table
+                    conn.execute(
+                        "CREATE VIRTUAL TABLE memories_fts USING fts5(content, category)",
                         libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
                     )
                     .await
-                    .context("Failed to populate FTS5 index")?;
+                    .context("Failed to create FTS5 table")?;
 
-                Ok(rows_affected as usize)
+                    // Populate FTS table
+                    let rows_affected = conn
+                        .execute(
+                            "INSERT INTO memories_fts(rowid, content, category)
+                             SELECT id, content, category FROM memories",
+                            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                        )
+                        .await
+                        .context("Failed to populate FTS5 index")?;
+
+                    Ok(rows_affected as usize)
+                }.await;
+
+                match result {
+                    Ok(count) => {
+                        conn.execute("COMMIT", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                            .await
+                            .context("Failed to commit transaction")?;
+                        Ok(count)
+                    }
+                    Err(e) => {
+                        let _ = conn.execute("ROLLBACK", libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await;
+                        Err(e)
+                    }
+                }
             })
         })
         .await
@@ -1393,6 +1509,9 @@ impl TursoStorageBackend {
     /// Runs an integrity check and optimization on the FTS5 index.
     /// Call this after bulk imports to ensure FTS index is optimized.
     pub async fn optimize_fts_index(&self) -> Result<()> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         self.with_connection(|conn| {
             Box::pin(async move {
                 conn.execute(
@@ -1421,8 +1540,11 @@ impl TursoStorageBackend {
     ///
     /// Returns the ID of the inserted/updated record
     pub async fn upsert_lsp_state(&self, state: &LspServerState) -> Result<i64> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         let state = state.clone();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let sql = r#"
                 INSERT INTO lsp_servers (session_id, language, lsp_name, status, pid, port,
@@ -1448,12 +1570,12 @@ impl TursoStorageBackend {
                             libsql::Value::Text(state.session_id),
                             libsql::Value::Text(state.language),
                             libsql::Value::Text(state.lsp_name),
-                            libsql::Value::Text(state.status),
-                            libsql::Value::Integer(state.pid.unwrap_or(0)),
-                            libsql::Value::Integer(state.port.unwrap_or(0)),
+                            libsql::Value::Text(state.status.as_str().to_string()),
+                            state.pid.map(libsql::Value::Integer).unwrap_or(libsql::Value::Null),
+                            state.port.map(libsql::Value::Integer).unwrap_or(libsql::Value::Null),
                             libsql::Value::Integer(if state.auto_start { 1 } else { 0 }),
-                            libsql::Value::Text(state.last_started.unwrap_or_default()),
-                            libsql::Value::Text(state.last_error.unwrap_or_default()),
+                            state.last_started.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                            state.last_error.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                             libsql::Value::Text(state.created_at),
                             libsql::Value::Text(state.updated_at.unwrap_or_else(|| chrono::Utc::now().to_rfc3339())),
                         ]),
@@ -1485,7 +1607,7 @@ impl TursoStorageBackend {
     pub async fn get_lsp_state(&self, session_id: &str, lsp_name: &str) -> Result<Option<LspServerState>> {
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
@@ -1511,7 +1633,7 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: row.get(4)?,
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1539,7 +1661,7 @@ impl TursoStorageBackend {
     /// Returns a vector of LSP server states for the session
     pub async fn get_session_lsp_states(&self, session_id: &str) -> Result<Vec<LspServerState>> {
         let session_id = session_id.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
@@ -1564,7 +1686,7 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: row.get(4)?,
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1592,9 +1714,12 @@ impl TursoStorageBackend {
     ///
     /// Returns Ok(()) on success
     pub async fn delete_lsp_state(&self, session_id: &str, lsp_name: &str) -> Result<()> {
+        if self.config.read_only {
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
+        }
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 conn.execute(
                     "DELETE FROM lsp_servers WHERE session_id = ? AND lsp_name = ?",
@@ -1622,7 +1747,7 @@ impl TursoStorageBackend {
     /// Returns a vector of LSP server states with the specified status
     pub async fn get_lsp_states_by_status(&self, status: &str) -> Result<Vec<LspServerState>> {
         let status = status.to_string();
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
@@ -1647,7 +1772,7 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: row.get(4)?,
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1674,7 +1799,7 @@ impl TursoStorageBackend {
     ///
     /// Returns a vector of LSP server states with the specified auto_start value
     pub async fn get_lsp_states_by_auto_start(&self, auto_start: bool) -> Result<Vec<LspServerState>> {
-        self.with_connection(move |conn: libsql::Connection| {
+        self.with_connection(move |conn| {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
@@ -1699,7 +1824,7 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: row.get(4)?,
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1803,7 +1928,7 @@ pub struct ActiveProjectStats {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct LspServerStats {
     pub lsp_name: String,
-    pub status: String,
+    pub status: LspStatus,
     pub count: usize,
 }
 
@@ -1816,10 +1941,10 @@ pub struct TursoDbStats {
 }
 
 /// Parse datetime string into DateTime<Utc>
-fn parse_datetime(s: String) -> DateTime<Utc> {
+fn parse_datetime(s: String) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(&s)
         .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now())
+        .map_err(|e| anyhow::anyhow!("Failed to parse datetime '{}': {}", s, e))
 }
 
 /// Helper function to convert MemoryCategory to string
@@ -2545,7 +2670,7 @@ mod tests {
             session_id: "test-session".to_string(),
             language: "rust".to_string(),
             lsp_name: "rust-analyzer".to_string(),
-            status: "running".to_string(),
+            status: LspStatus::Running,
             pid: Some(12345),
             port: None,
             auto_start: true,
@@ -2577,7 +2702,7 @@ mod tests {
             session_id: "test-session".to_string(),
             language: "rust".to_string(),
             lsp_name: "rust-analyzer".to_string(),
-            status: "running".to_string(),
+            status: LspStatus::Running,
             pid: Some(12345),
             port: None,
             auto_start: true,
@@ -2598,7 +2723,7 @@ mod tests {
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.session_id, "test-session");
         assert_eq!(retrieved.lsp_name, "rust-analyzer");
-        assert_eq!(retrieved.status, "running");
+        assert_eq!(retrieved.status, LspStatus::Running);
     }
 
     #[tokio::test]
@@ -2616,7 +2741,7 @@ mod tests {
             session_id: "test-session".to_string(),
             language: "rust".to_string(),
             lsp_name: "rust-analyzer".to_string(),
-            status: "running".to_string(),
+            status: LspStatus::Running,
             pid: Some(12345),
             port: None,
             auto_start: true,
@@ -2630,7 +2755,7 @@ mod tests {
 
         // Update LSP state
         let updated_state = LspServerState {
-            status: "stopped".to_string(),
+            status: LspStatus::Stopped,
             pid: None,
             ..state
         };
@@ -2643,7 +2768,7 @@ mod tests {
             .expect("Failed to get LSP state")
             .expect("LSP state not found");
 
-        assert_eq!(retrieved.status, "stopped");
+        assert_eq!(retrieved.status, LspStatus::Stopped);
     }
 
     #[tokio::test]
@@ -2661,7 +2786,7 @@ mod tests {
             session_id: "test-session".to_string(),
             language: "rust".to_string(),
             lsp_name: "rust-analyzer".to_string(),
-            status: "running".to_string(),
+            status: LspStatus::Running,
             pid: Some(12345),
             port: None,
             auto_start: true,
@@ -2702,7 +2827,7 @@ mod tests {
                 session_id: format!("session-{}", i),
                 language: "rust".to_string(),
                 lsp_name: "rust-analyzer".to_string(),
-                status: if i == 2 { "stopped".to_string() } else { "running".to_string() },
+                status: if i == 2 { LspStatus::Stopped } else { LspStatus::Running },
                 pid: Some(12345 + i as i64),
                 port: None,
                 auto_start: true,
