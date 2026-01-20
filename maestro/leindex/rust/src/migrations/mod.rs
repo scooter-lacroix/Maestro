@@ -1043,7 +1043,8 @@ impl Migration for CreateBaseSchema {
                 last_started TEXT,
                 last_error TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT
+                updated_at TEXT,
+                UNIQUE(session_id, lsp_name)
             )
             "#,
             params_from_iter(std::iter::empty::<&str>()),

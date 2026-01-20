@@ -1284,6 +1284,263 @@ impl TursoStorageBackend {
         })
         .await
     }
+
+    // ========================================================================
+    // LSP State Tracking
+    // ========================================================================
+
+    /// Insert or update an LSP server state
+    ///
+    /// ## Arguments
+    ///
+    /// - `state`: LSP server state to insert or update
+    ///
+    /// ## Returns
+    ///
+    /// Returns the ID of the inserted/updated record
+    pub async fn upsert_lsp_state(&self, state: &LspServerState) -> Result<i64> {
+        let state = state.clone();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let sql = r#"
+                INSERT INTO lsp_servers (session_id, language, lsp_name, status, pid, port,
+                                       auto_start, last_started, last_error, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                ON CONFLICT(session_id, lsp_name) DO UPDATE SET
+                    status = excluded.status,
+                    pid = excluded.pid,
+                    port = excluded.port,
+                    auto_start = excluded.auto_start,
+                    last_started = excluded.last_started,
+                    last_error = excluded.last_error,
+                    updated_at = excluded.updated_at
+                RETURNING id
+                "#;
+
+                let mut rows = conn
+                    .prepare(sql)
+                    .await
+                    .context("Failed to prepare LSP state upsert")?
+                    .query(
+                        libsql::params_from_iter([
+                            libsql::Value::Text(state.session_id),
+                            libsql::Value::Text(state.language),
+                            libsql::Value::Text(state.lsp_name),
+                            libsql::Value::Text(state.status),
+                            libsql::Value::Integer(state.pid.unwrap_or(0)),
+                            libsql::Value::Integer(state.port.unwrap_or(0)),
+                            libsql::Value::Integer(if state.auto_start { 1 } else { 0 }),
+                            libsql::Value::Text(state.last_started.unwrap_or_default()),
+                            libsql::Value::Text(state.last_error.unwrap_or_default()),
+                            libsql::Value::Text(state.created_at),
+                            libsql::Value::Text(state.updated_at.unwrap_or_else(|| chrono::Utc::now().to_rfc3339())),
+                        ]),
+                    )
+                    .await
+                    .context("Failed to upsert LSP state")?;
+
+                if let Some(row) = rows.next().await? {
+                    Ok(row.get::<i64>(0)?)
+                } else {
+                    // Fallback to last_insert_rowid if RETURNING doesn't work
+                    Ok(conn.last_insert_rowid())
+                }
+            })
+        })
+        .await
+    }
+
+    /// Get LSP server state by session ID and LSP name
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `lsp_name`: LSP server name
+    ///
+    /// ## Returns
+    ///
+    /// Returns the LSP server state, or None if not found
+    pub async fn get_lsp_state(&self, session_id: &str, lsp_name: &str) -> Result<Option<LspServerState>> {
+        let session_id = session_id.to_string();
+        let lsp_name = lsp_name.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let sql = r#"
+                SELECT id, session_id, language, lsp_name, status, pid, port,
+                       auto_start, last_started, last_error, created_at, updated_at
+                FROM lsp_servers
+                WHERE session_id = ? AND lsp_name = ?
+                "#;
+
+                let mut rows = conn
+                    .prepare(sql)
+                    .await
+                    .context("Failed to prepare LSP state query")?
+                    .query(libsql::params_from_iter([
+                        libsql::Value::Text(session_id),
+                        libsql::Value::Text(lsp_name),
+                    ]))
+                    .await
+                    .context("Failed to query LSP state")?;
+
+                if let Some(row) = rows.next().await? {
+                    Ok(Some(LspServerState {
+                        id: row.get::<i64>(0)?,
+                        session_id: row.get(1)?,
+                        language: row.get(2)?,
+                        lsp_name: row.get(3)?,
+                        status: row.get(4)?,
+                        pid: row.get::<Option<i64>>(5)?,
+                        port: row.get::<Option<i64>>(6)?,
+                        auto_start: row.get::<i32>(7)? == 1,
+                        last_started: row.get::<Option<String>>(8)?,
+                        last_error: row.get::<Option<String>>(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get::<Option<String>>(11)?,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            })
+        })
+        .await
+    }
+
+    /// Get all LSP server states for a session
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of LSP server states for the session
+    pub async fn get_session_lsp_states(&self, session_id: &str) -> Result<Vec<LspServerState>> {
+        let session_id = session_id.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let sql = r#"
+                SELECT id, session_id, language, lsp_name, status, pid, port,
+                       auto_start, last_started, last_error, created_at, updated_at
+                FROM lsp_servers
+                WHERE session_id = ?
+                ORDER BY lsp_name
+                "#;
+
+                let mut rows = conn
+                    .prepare(sql)
+                    .await
+                    .context("Failed to prepare session LSP states query")?
+                    .query(libsql::params_from_iter([libsql::Value::Text(session_id)]))
+                    .await
+                    .context("Failed to query session LSP states")?;
+
+                let mut states = Vec::new();
+                while let Some(row) = rows.next().await? {
+                    states.push(LspServerState {
+                        id: row.get::<i64>(0)?,
+                        session_id: row.get(1)?,
+                        language: row.get(2)?,
+                        lsp_name: row.get(3)?,
+                        status: row.get(4)?,
+                        pid: row.get::<Option<i64>>(5)?,
+                        port: row.get::<Option<i64>>(6)?,
+                        auto_start: row.get::<i32>(7)? == 1,
+                        last_started: row.get::<Option<String>>(8)?,
+                        last_error: row.get::<Option<String>>(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get::<Option<String>>(11)?,
+                    });
+                }
+
+                Ok(states)
+            })
+        })
+        .await
+    }
+
+    /// Delete an LSP server state
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `lsp_name`: LSP server name
+    ///
+    /// ## Returns
+    ///
+    /// Returns Ok(()) on success
+    pub async fn delete_lsp_state(&self, session_id: &str, lsp_name: &str) -> Result<()> {
+        let session_id = session_id.to_string();
+        let lsp_name = lsp_name.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                conn.execute(
+                    "DELETE FROM lsp_servers WHERE session_id = ? AND lsp_name = ?",
+                    libsql::params_from_iter([
+                        libsql::Value::Text(session_id),
+                        libsql::Value::Text(lsp_name),
+                    ]),
+                )
+                .await
+                .context("Failed to delete LSP state")?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    /// Get all LSP servers with a specific status
+    ///
+    /// ## Arguments
+    ///
+    /// - `status`: LSP status to filter by
+    ///
+    /// ## Returns
+    ///
+    /// Returns a vector of LSP server states with the specified status
+    pub async fn get_lsp_states_by_status(&self, status: &str) -> Result<Vec<LspServerState>> {
+        let status = status.to_string();
+        self.with_connection(move |conn: libsql::Connection| {
+            Box::pin(async move {
+                let sql = r#"
+                SELECT id, session_id, language, lsp_name, status, pid, port,
+                       auto_start, last_started, last_error, created_at, updated_at
+                FROM lsp_servers
+                WHERE status = ?
+                ORDER BY session_id, lsp_name
+                "#;
+
+                let mut rows = conn
+                    .prepare(sql)
+                    .await
+                    .context("Failed to prepare LSP states by status query")?
+                    .query(libsql::params_from_iter([libsql::Value::Text(status)]))
+                    .await
+                    .context("Failed to query LSP states by status")?;
+
+                let mut states = Vec::new();
+                while let Some(row) = rows.next().await? {
+                    states.push(LspServerState {
+                        id: row.get::<i64>(0)?,
+                        session_id: row.get(1)?,
+                        language: row.get(2)?,
+                        lsp_name: row.get(3)?,
+                        status: row.get(4)?,
+                        pid: row.get::<Option<i64>>(5)?,
+                        port: row.get::<Option<i64>>(6)?,
+                        auto_start: row.get::<i32>(7)? == 1,
+                        last_started: row.get::<Option<String>>(8)?,
+                        last_error: row.get::<Option<String>>(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get::<Option<String>>(11)?,
+                    });
+                }
+
+                Ok(states)
+            })
+        })
+        .await
+    }
 }
 
 // ============================================================================
@@ -2089,5 +2346,198 @@ mod tests {
             .expect("Failed to search memories");
 
         assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_lsp_state_upsert() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert LSP state
+        let state = LspServerState {
+            id: 0,
+            session_id: "test-session".to_string(),
+            language: "rust".to_string(),
+            lsp_name: "rust-analyzer".to_string(),
+            status: "running".to_string(),
+            pid: Some(12345),
+            port: None,
+            auto_start: true,
+            last_started: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        let id = backend.upsert_lsp_state(&state)
+            .await
+            .expect("Failed to upsert LSP state");
+
+        assert!(id > 0);
+    }
+
+    #[tokio::test]
+    async fn test_lsp_state_get() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert LSP state
+        let state = LspServerState {
+            id: 0,
+            session_id: "test-session".to_string(),
+            language: "rust".to_string(),
+            lsp_name: "rust-analyzer".to_string(),
+            status: "running".to_string(),
+            pid: Some(12345),
+            port: None,
+            auto_start: true,
+            last_started: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+
+        // Get LSP state
+        let retrieved = backend.get_lsp_state("test-session", "rust-analyzer")
+            .await
+            .expect("Failed to get LSP state");
+
+        assert!(retrieved.is_some());
+        let retrieved = retrieved.unwrap();
+        assert_eq!(retrieved.session_id, "test-session");
+        assert_eq!(retrieved.lsp_name, "rust-analyzer");
+        assert_eq!(retrieved.status, "running");
+    }
+
+    #[tokio::test]
+    async fn test_lsp_state_update() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert LSP state
+        let state = LspServerState {
+            id: 0,
+            session_id: "test-session".to_string(),
+            language: "rust".to_string(),
+            lsp_name: "rust-analyzer".to_string(),
+            status: "running".to_string(),
+            pid: Some(12345),
+            port: None,
+            auto_start: true,
+            last_started: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+
+        // Update LSP state
+        let updated_state = LspServerState {
+            status: "stopped".to_string(),
+            pid: None,
+            ..state
+        };
+
+        backend.upsert_lsp_state(&updated_state).await.expect("Failed to update LSP state");
+
+        // Verify update
+        let retrieved = backend.get_lsp_state("test-session", "rust-analyzer")
+            .await
+            .expect("Failed to get LSP state")
+            .expect("LSP state not found");
+
+        assert_eq!(retrieved.status, "stopped");
+    }
+
+    #[tokio::test]
+    async fn test_lsp_state_delete() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert LSP state
+        let state = LspServerState {
+            id: 0,
+            session_id: "test-session".to_string(),
+            language: "rust".to_string(),
+            lsp_name: "rust-analyzer".to_string(),
+            status: "running".to_string(),
+            pid: Some(12345),
+            port: None,
+            auto_start: true,
+            last_started: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+
+        backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+
+        // Delete LSP state
+        backend.delete_lsp_state("test-session", "rust-analyzer")
+            .await
+            .expect("Failed to delete LSP state");
+
+        // Verify deletion
+        let retrieved = backend.get_lsp_state("test-session", "rust-analyzer")
+            .await
+            .expect("Failed to get LSP state");
+
+        assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_lsp_state_get_by_status() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert multiple LSP states
+        for i in 0..3 {
+            let state = LspServerState {
+                id: 0,
+                session_id: format!("session-{}", i),
+                language: "rust".to_string(),
+                lsp_name: "rust-analyzer".to_string(),
+                status: if i == 2 { "stopped".to_string() } else { "running".to_string() },
+                pid: Some(12345 + i as i64),
+                port: None,
+                auto_start: true,
+                last_started: Some(chrono::Utc::now().to_rfc3339()),
+                last_error: None,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                updated_at: Some(chrono::Utc::now().to_rfc3339()),
+            };
+
+            backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+        }
+
+        // Get running LSPs
+        let running_lsps = backend.get_lsp_states_by_status("running")
+            .await
+            .expect("Failed to get LSP states by status");
+
+        assert_eq!(running_lsps.len(), 2);
     }
 }
