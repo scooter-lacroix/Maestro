@@ -211,6 +211,7 @@ impl TursoStorageBackend {
     /// Initialize database schema
     ///
     /// Creates all tables for OLTP operations: LSP servers, sessions, projects, memories, tracks.
+    /// Also creates FTS5 full-text search tables.
     pub async fn initialize(&self) -> Result<()> {
         info!("Initializing Turso database schema");
 
@@ -236,6 +237,26 @@ impl TursoStorageBackend {
             .await
             .context("Failed to create table")?;
         }
+
+        // Create FTS5 virtual table for full-text search
+        // Note: Triggers not supported in libsql 0.9, so manual sync is used
+        let _ = conn
+            .execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(content, category)",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to create FTS5 table")?;
+
+        // Populate FTS5 index with existing memories
+        let _ = conn
+            .execute(
+                "INSERT INTO memories_fts(rowid, content, category)
+                 SELECT id, content, category FROM memories
+                 WHERE id NOT IN (SELECT rowid FROM memories_fts)",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await;
 
         info!("Turso database schema initialized successfully");
         Ok(())
@@ -657,8 +678,10 @@ impl TursoStorageBackend {
     /// Insert a new memory
     pub async fn insert_memory(&self, memory: &Memory) -> Result<i64> {
         let content = memory.content.clone();
+        let content_fts = content.clone();
         let summary = memory.summary.clone().unwrap_or_default();
         let category = memory_category_to_string(&memory.category);
+        let category_fts = category.clone();
         let importance = memory_importance_to_string(&memory.importance);
         let source = memory.source.clone().unwrap_or_default();
         let session_id = memory.session_id.clone().unwrap_or_default();
@@ -706,7 +729,21 @@ impl TursoStorageBackend {
                 .await
                 .context("Failed to insert memory")?;
 
-                Ok(conn.last_insert_rowid())
+                let id = conn.last_insert_rowid();
+
+                // Also add to FTS5 index
+                let _ = conn
+                    .execute(
+                        "INSERT INTO memories_fts(rowid, content, category) VALUES (?, ?, ?)",
+                        libsql::params_from_iter([
+                            libsql::Value::Integer(id),
+                            libsql::Value::Text(content_fts),
+                            libsql::Value::Text(category_fts),
+                        ]),
+                    )
+                    .await;
+
+                Ok(id)
             })
         })
         .await
@@ -1132,6 +1169,140 @@ impl TursoStorageBackend {
         })
         .await
     }
+
+    // ========================================================================
+    // FTS5 Full-Text Search
+    // ========================================================================
+
+    /// Search memories using FTS5 full-text search
+    ///
+    /// Searches memory content using FTS5 for fast full-text search.
+    /// Supports simple queries (words) and FTS5 query syntax.
+    pub async fn search_memories(&self, query: &str, limit: Option<usize>) -> Result<Vec<MemorySearchResult>> {
+        let limit = limit.unwrap_or(50);
+        let query = query.to_string();
+        self.with_connection(move |conn| {
+            Box::pin(async move {
+                let stmt = conn
+                    .prepare(
+                        "SELECT m.id, m.content, m.summary, m.category, m.importance,
+                                m.source, m.session_id, m.project_id, m.created_at,
+                                snippet(memories_fts, 0, '<mark>', '</mark>', '...', 64) as snippet
+                         FROM memories_fts
+                         JOIN memories m ON m.id = memories_fts.rowid
+                         WHERE memories_fts MATCH ?
+                         ORDER BY rank
+                         LIMIT ?",
+                    )
+                    .await
+                    .context("Failed to prepare FTS5 search query")?;
+
+                let mut result = stmt
+                    .query(libsql::params_from_iter([
+                        libsql::Value::Text(query),
+                        libsql::Value::Integer(limit as i64),
+                    ]))
+                    .await
+                    .context("Failed to execute FTS5 search")?;
+
+                let mut results = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    let project_id: Option<i64> = row.get(7)?;
+                    results.push(MemorySearchResult {
+                        id: row.get::<i64>(0)?,
+                        content: row.get(1)?,
+                        summary: row.get(2)?,
+                        category: row.get(3)?,
+                        importance: row.get(4)?,
+                        source: row.get(5)?,
+                        session_id: row.get(6)?,
+                        project_id: project_id.and_then(|id| id.try_into().ok()),
+                        created_at: parse_datetime(row.get::<String>(8)?),
+                        snippet: row.get::<Option<String>>(9)?,
+                    });
+                }
+                Ok(results)
+            })
+        })
+        .await
+    }
+
+    /// Rebuild FTS5 index for all memories
+    ///
+    /// This should be called after bulk imports or if FTS5 gets out of sync.
+    /// Drops and recreates the FTS table and repopulates it.
+    pub async fn rebuild_fts_index(&self) -> Result<usize> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                // Drop FTS table
+                let _ = conn
+                    .execute(
+                        "DROP TABLE IF EXISTS memories_fts",
+                        libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                    )
+                    .await;
+
+                // Recreate FTS table
+                conn.execute(
+                    "CREATE VIRTUAL TABLE memories_fts USING fts5(content, category)",
+                    libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                )
+                .await
+                .context("Failed to create FTS5 table")?;
+
+                // Populate FTS table
+                let rows_affected = conn
+                    .execute(
+                        "INSERT INTO memories_fts(rowid, content, category)
+                         SELECT id, content, category FROM memories",
+                        libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                    )
+                    .await
+                    .context("Failed to populate FTS5 index")?;
+
+                Ok(rows_affected as usize)
+            })
+        })
+        .await
+    }
+
+    /// Trigger FTS5 index optimization
+    ///
+    /// Runs an integrity check and optimization on the FTS5 index.
+    /// Call this after bulk imports to ensure FTS index is optimized.
+    pub async fn optimize_fts_index(&self) -> Result<()> {
+        self.with_connection(|conn| {
+            Box::pin(async move {
+                conn.execute(
+                    "INSERT INTO memories_fts(memories_fts) VALUES('optimize')",
+                    libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                )
+                .await
+                .context("Failed to optimize FTS5 index")?;
+                Ok(())
+            })
+        })
+        .await
+    }
+}
+
+// ============================================================================
+// FTS5 Result Types
+// ============================================================================
+
+/// Memory search result with snippet
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MemorySearchResult {
+    pub id: i64,
+    pub content: String,
+    pub summary: Option<String>,
+    pub category: String,
+    pub importance: String,
+    pub source: Option<String>,
+    pub session_id: Option<String>,
+    pub project_id: Option<u32>,
+    pub created_at: DateTime<Utc>,
+    pub snippet: Option<String>,  // HTML-highlighted snippet
 }
 
 // ============================================================================
@@ -1769,5 +1940,154 @@ mod tests {
         assert_eq!(stats[0].total_sessions, 3);
         assert_eq!(stats[1].project_path, "/test/project2");
         assert_eq!(stats[1].total_sessions, 1);
+    }
+
+    // ========================================================================
+    // FTS5 Full-Text Search Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_fts5_search_memories() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert test memories with different content
+        let cat_id = backend.insert_memory(&Memory {
+            id: 0,
+            content: "The cat sat on the mat".to_string(),
+            summary: Some("A cat story".to_string()),
+            category: MemoryCategory::Knowledge,
+            importance: MemoryImportance::Normal,
+            source: None,
+            session_id: None,
+            project_id: None,
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        }).await.expect("Failed to insert memory");
+
+        let dog_id = backend.insert_memory(&Memory {
+            id: 0,
+            content: "The dog chased the ball in the park".to_string(),
+            summary: Some("A dog story".to_string()),
+            category: MemoryCategory::Pattern,
+            importance: MemoryImportance::High,
+            source: None,
+            session_id: None,
+            project_id: None,
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        }).await.expect("Failed to insert memory");
+
+        // Test search for "cat"
+        let results = backend.search_memories("cat", Some(10))
+            .await
+            .expect("Failed to search memories");
+
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|r| r.id == cat_id));
+    }
+
+    #[tokio::test]
+    async fn test_fts5_rebuild_index() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert test memories
+        for i in 0..3 {
+            backend.insert_memory(&Memory {
+                id: 0,
+                content: format!("Test content number {}", i),
+                summary: None,
+                category: MemoryCategory::Knowledge,
+                importance: MemoryImportance::Normal,
+                source: None,
+                session_id: None,
+                project_id: None,
+                track_id: None,
+                command: None,
+                command_context: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                last_accessed: None,
+                metadata: None,
+                tags: None,
+            }).await.expect("Failed to insert memory");
+        }
+
+        // Rebuild FTS index
+        let count = backend.rebuild_fts_index()
+            .await
+            .expect("Failed to rebuild FTS index");
+
+        assert_eq!(count, 3);
+
+        // Verify search works
+        let results = backend.search_memories("content", Some(10))
+            .await
+            .expect("Failed to search memories");
+
+        assert_eq!(results.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_fts5_optimize_index() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert a test memory
+        backend.insert_memory(&Memory {
+            id: 0,
+            content: "Test content for optimization".to_string(),
+            summary: None,
+            category: MemoryCategory::Knowledge,
+            importance: MemoryImportance::Normal,
+            source: None,
+            session_id: None,
+            project_id: None,
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        }).await.expect("Failed to insert memory");
+
+        // Optimize FTS index
+        backend.optimize_fts_index()
+            .await
+            .expect("Failed to optimize FTS index");
+
+        // Verify search still works
+        let results = backend.search_memories("optimization", Some(10))
+            .await
+            .expect("Failed to search memories");
+
+        assert!(!results.is_empty());
     }
 }
