@@ -136,6 +136,7 @@ struct App {
     // Cache of (session_id -> Vec<(lsp_name, status)>)
     lsp_status_cache: HashMap<String, Vec<(String, LspStatus)>>,
     last_lsp_refresh: Instant,
+    lsp_state: ratatui::widgets::ListState,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -312,10 +313,12 @@ impl App {
 	            dash_focus: DashFocus::Sessions,
 	            lsp_status_cache: HashMap::new(),
 	            last_lsp_refresh: Instant::now(),
+	            lsp_state: ratatui::widgets::ListState::default(),
 	        };
 	        app.mcp_state.select(Some(0));
 	        app.dash_session_state.select(Some(0));
 	        app.memory_state.select(Some(0));
+	        app.lsp_state.select(Some(0));
 	        app
 	    }
 
@@ -1815,7 +1818,7 @@ async fn run_app<B: Backend>(
 	                                        None => 0,
 	                                    };
 	                                    app.memory_state.select(Some(i));
-	                                } else if app.tab_index == 5 { // Settings
+	                                } else if app.tab_index == 6 { // Settings
 	                                    app.settings_option = match app.settings_option {
 	                                        SettingsOption::Editor => SettingsOption::Theme,
 	                                        SettingsOption::Theme => SettingsOption::InstallPath,
@@ -1890,7 +1893,7 @@ async fn run_app<B: Backend>(
 	                                        None => 0,
 	                                    };
 	                                    app.memory_state.select(Some(i));
-	                                } else if app.tab_index == 5 { // Settings
+	                                } else if app.tab_index == 6 { // Settings
 	                                    app.settings_option = match app.settings_option {
 	                                        SettingsOption::Editor => SettingsOption::Save,
 	                                        SettingsOption::Theme => SettingsOption::Editor,
@@ -2088,6 +2091,9 @@ async fn run_app<B: Backend>(
 	                                        }
 	                                        app.refresh_from_service(&service);
 	                                    }
+	                                } else if app.tab_index == 5 { // LSPs tab
+	                                    app.refresh_lsp_status();
+	                                    app.status_message = "LSP status refreshed".to_string();
 	                                }
 	                            }
                              (_, KeyCode::Char('k')) => {
@@ -2232,7 +2238,7 @@ async fn run_app<B: Backend>(
                                         }
                                     };
                                 } else {
-                                    app.tab_index = (app.tab_index + 1) % 6;
+                                    app.tab_index = (app.tab_index + 1) % 7;
                                     app.preview_focused = false;
                                 }
                             }
@@ -2240,23 +2246,23 @@ async fn run_app<B: Backend>(
                                 if app.tab_index == 0 {
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
-                                            app.tab_index = 5;
+                                            app.tab_index = 6;
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
                                         DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
                                     };
                                 } else {
-                                    app.tab_index = if app.tab_index == 0 { 5 } else { app.tab_index - 1 };
+                                    app.tab_index = if app.tab_index == 0 { 6 } else { app.tab_index - 1 };
                                     app.preview_focused = false;
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('o')) => {
-                                app.tab_index = if app.tab_index == 0 { 5 } else { app.tab_index - 1 };
+                                app.tab_index = if app.tab_index == 0 { 6 } else { app.tab_index - 1 };
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 6;
+                                app.tab_index = (app.tab_index + 1) % 7;
                                 app.preview_focused = false;
                             }
                              (_, KeyCode::Down) => {
@@ -2315,7 +2321,19 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 5 { // Settings
+                                } else if app.tab_index == 5 { // LSPs
+                                    let i = match app.lsp_state.selected() {
+                                        Some(i) => {
+                                            if i >= app.lsp_status_cache.values().map(|v| v.len()).sum::<usize>().saturating_sub(1) {
+                                                0
+                                            } else {
+                                                i + 1
+                                            }
+                                        }
+                                        None => 0,
+                                    };
+                                    app.lsp_state.select(Some(i));
+                                } else if app.tab_index == 6 { // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
                                         SettingsOption::Theme => SettingsOption::InstallPath,
@@ -2369,7 +2387,7 @@ async fn run_app<B: Backend>(
 	                                        None => 0,
 	                                    };
 	                                    app.session_state.select(Some(i));
-	                                } else if app.tab_index == 4 { // Memory
+	                            } else if app.tab_index == 4 { // Memory
 	                                    let i = match app.memory_state.selected() {
 	                                        Some(i) => {
 	                                            if i == 0 {
@@ -2381,7 +2399,20 @@ async fn run_app<B: Backend>(
 	                                        None => 0,
 	                                    };
 	                                    app.memory_state.select(Some(i));
-	                                } else if app.tab_index == 5 { // Settings
+	                            } else if app.tab_index == 5 { // LSPs
+	                                    let i = match app.lsp_state.selected() {
+	                                        Some(i) => {
+	                                            let total_lsps = app.lsp_status_cache.values().map(|v| v.len()).sum::<usize>();
+	                                            if i == 0 {
+	                                                total_lsps.saturating_sub(1)
+	                                            } else {
+	                                                i - 1
+	                                            }
+	                                        }
+	                                        None => 0,
+	                                    };
+	                                    app.lsp_state.select(Some(i));
+	                                } else if app.tab_index == 6 { // Settings
 	                                    app.settings_option = match app.settings_option {
 	                                        SettingsOption::Editor => SettingsOption::Save,
 	                                        SettingsOption::Theme => SettingsOption::Editor,
@@ -2396,6 +2427,8 @@ async fn run_app<B: Backend>(
                             (_, KeyCode::Char('3')) => app.tab_index = 2,
                             (_, KeyCode::Char('4')) => app.tab_index = 3,
                             (_, KeyCode::Char('5')) => app.tab_index = 4,
+                            (_, KeyCode::Char('6')) => app.tab_index = 5,
+                            (_, KeyCode::Char('7')) => app.tab_index = 6,
                             (_, KeyCode::Char('G')) => {
                                 if app.tab_index == 1 {
                                     app.input_mode = InputMode::NewGroupTitle;
@@ -2520,7 +2553,7 @@ async fn run_app<B: Backend>(
                                          }
                                          DashFocus::Tabs => {}
                                      }
-	                                 } else if app.tab_index == 5 { // Settings
+	                                 } else if app.tab_index == 6 { // Settings
 	                                    match app.settings_option {
 	                                        SettingsOption::Editor => {
 	                                            app.open_settings_menu(SettingsMenuKind::Editor);
@@ -2662,6 +2695,9 @@ async fn run_app<B: Backend>(
                                             app.mcp_menu_option = McpOption::StartStop;
                                         }
                                     }
+                                } else if app.tab_index == 5 { // LSPs tab
+                                    // Basic toggle implementation - Task 6.3 will expand this
+                                    app.status_message = "LSP start/stop toggle coming in Task 6.3".to_string();
                                 } else {
                                     app.input_mode = InputMode::SessionSwitcher;
                                     app.switcher_state.select(Some(0));
@@ -2800,7 +2836,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     // Header with tabs
     let is_focused = app.tab_index == 0 && app.dash_focus == DashFocus::Tabs;
-    let tabs = Tabs::new(vec!["Dashboard", "Sessions", "Projects", "Analysis", "Memory", "Settings"])
+    let tabs = Tabs::new(vec!["Dashboard", "Sessions", "Projects", "Analysis", "Memory", "LSPs", "Settings"])
         .block(Block::default()
             .borders(Borders::ALL)
             .border_type(if is_focused { BorderType::Double } else { BorderType::Rounded })
@@ -2808,7 +2844,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
             .title(" Maestro Cockpit v2.0 "))
         .select(app.tab_index)
         .highlight_style(Style::default().fg(theme.accent).bold());
-    
+
     frame.render_widget(tabs, chunks[0]);
 
     match app.tab_index {
@@ -2817,7 +2853,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
         2 => render_projects(frame, chunks[1], app),
         3 => render_analysis(frame, chunks[1], app),
         4 => render_memory(frame, chunks[1], app),
-        5 => render_settings(frame, app),
+        5 => render_lsps(frame, chunks[1], app),
+        6 => render_settings(frame, app),
         _ => {}
     }
     // Footer
@@ -3472,12 +3509,12 @@ fn render_settings(frame: &mut Frame, app: &App) {
         ])
         .split(inner_area);
 
-    let editor_style = if app.tab_index == 5 && app.settings_option == SettingsOption::Editor { Style::default().fg(theme.warning).bold() } else { Style::default() };
+    let editor_style = if app.tab_index == 6 && app.settings_option == SettingsOption::Editor { Style::default().fg(theme.warning).bold() } else { Style::default() };
     let editor = Paragraph::new(app.config.editor.as_str())
         .block(Block::default().borders(Borders::ALL).title(" 📝 PREFERRED EDITOR ").border_style(editor_style));
     frame.render_widget(editor, chunks[0]);
 
-    let theme_style = if app.tab_index == 5 && app.settings_option == SettingsOption::Theme { Style::default().fg(theme.warning).bold() } else { Style::default() };
+    let theme_style = if app.tab_index == 6 && app.settings_option == SettingsOption::Theme { Style::default().fg(theme.warning).bold() } else { Style::default() };
     let theme_name = THEMES
         .iter()
         .find(|(id, _)| id.eq_ignore_ascii_case(app.config.theme.as_str()))
@@ -3487,12 +3524,12 @@ fn render_settings(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title(" 🎨 THEME ").border_style(theme_style));
     frame.render_widget(theme_field, chunks[1]);
 
-    let path_style = if app.tab_index == 5 && app.settings_option == SettingsOption::InstallPath { Style::default().fg(theme.warning).bold() } else { Style::default() };
+    let path_style = if app.tab_index == 6 && app.settings_option == SettingsOption::InstallPath { Style::default().fg(theme.warning).bold() } else { Style::default() };
     let path = Paragraph::new(app.config.install_path.as_str())
         .block(Block::default().borders(Borders::ALL).title(" 📁 MAESTRO INSTALL PATH ").border_style(path_style));
     frame.render_widget(path, chunks[2]);
 
-    let save_style = if app.tab_index == 5 && app.settings_option == SettingsOption::Save { Style::default().bg(theme.success).fg(Color::Black).bold() } else { Style::default().fg(theme.success) };
+    let save_style = if app.tab_index == 6 && app.settings_option == SettingsOption::Save { Style::default().bg(theme.success).fg(Color::Black).bold() } else { Style::default().fg(theme.success) };
     let save = Paragraph::new(" [ SAVE CONFIGURATION ] ")
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL).border_style(save_style));
@@ -3943,6 +3980,108 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
         .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
         .highlight_symbol(">> ");
     frame.render_stateful_widget(list, chunks[1], &mut app.memory_state);
+}
+
+fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    // Header block with refresh hint
+    let header_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" 🔌 Language Server Protocol (LSP) Status ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let header_text = vec![
+        Line::from(vec![
+            Span::styled("Tip: ", Style::default().fg(theme.muted)),
+            Span::styled("Press 'r' to refresh status, 's' to toggle LSP", Style::default().fg(theme.warning).bold()),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(header_text).block(header_block), chunks[0]);
+
+    // Collect all LSPs across all sessions into a flat list
+    let mut lsp_entries: Vec<(String, String, LspStatus, Option<String>)> = Vec::new();
+    // (session_id, lsp_name, status, session_title)
+
+    for session in &app.sessions {
+        let session_title = session.title.clone();
+        if let Some(lsp_states) = app.lsp_status_cache.get(&session.session_id) {
+            for (lsp_name, status) in lsp_states {
+                lsp_entries.push((
+                    session.session_id.clone(),
+                    lsp_name.clone(),
+                    *status,
+                    Some(session_title.clone()),
+                ));
+            }
+        }
+    }
+
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" 📋 LSP Servers (by session) ")
+        .title_style(Style::default().fg(theme.accent_alt));
+
+    if lsp_entries.is_empty() {
+        let text = vec![
+            Line::from(""),
+            Line::from("  No LSP servers found."),
+            Line::from(""),
+            Line::from("  Tip: LSPs are auto-detected from tmux sessions."),
+            Line::from("  Press 'r' to refresh status."),
+        ];
+        let para = Paragraph::new(text).block(list_block);
+        frame.render_widget(para, chunks[1]);
+        return;
+    }
+
+    // Create list items with color-coded status
+    let lsp_items: Vec<ListItem> = lsp_entries
+        .iter()
+        .map(|(_session_id, lsp_name, status, session_title)| {
+            let (status_text, status_color, icon) = match status {
+                LspStatus::Running => ("Running", Color::Green, "●"),
+                LspStatus::Stopped => ("Stopped", Color::Red, "■"),
+                LspStatus::Error => ("Error", Color::Red, "⚠"),
+                LspStatus::Starting => ("Starting", Color::Yellow, "○"),
+            };
+
+            // Get short session title (truncate if too long)
+            let short_title = session_title.as_ref().map(|t| {
+                if t.len() > 20 {
+                    format!("{}...", &t[..17])
+                } else {
+                    t.clone()
+                }
+            }).unwrap_or_else(|| "Unknown".to_string());
+
+            ListItem::new(Line::from(vec![
+                Span::styled(icon, Style::default().fg(status_color)),
+                Span::raw(" "),
+                Span::styled(format!("{} ", lsp_name), Style::default().bold()),
+                Span::styled(
+                    format!("[{}] ", status_text),
+                    Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    format!("({})", short_title),
+                    Style::default().fg(Color::DarkGray).italic(),
+                ),
+            ]))
+        })
+        .collect();
+
+    let lsp_list = List::new(lsp_items)
+        .block(list_block)
+        .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg).bold())
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(lsp_list, chunks[1], &mut app.lsp_state);
 }
 
 fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
