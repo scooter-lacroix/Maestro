@@ -13,11 +13,12 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph, Tabs, List, ListItem, BorderType, Clear, Wrap},
 };
-use std::{collections::HashSet, io, sync::Arc};
+use std::{collections::{HashMap, HashSet}, io, sync::Arc, time::Instant};
 
 use leindex_analyzers::memory::MemoryService;
 use leindex_analyzers::memory::models::McpStatus;
 use leindex_analyzers::memory::McpPool;
+use leindex_analyzers::memory::LspStatus;
 use leindex_analyzers::multiplexer::TmuxMultiplexer;
 use leindex_analyzers::config::Config;
 
@@ -94,6 +95,10 @@ struct App {
     analysis_input: String,
     analysis_history: Vec<String>,
     frame_count: u64,
+    // Help modal state
+    help_scroll: u16,
+    // Throttle expensive preview capture
+    last_preview_refresh: Instant,
     // Phase 11 additions
     mcp_state: ratatui::widgets::ListState,
     preview_focused: bool,
@@ -127,6 +132,10 @@ struct App {
     dash_session_state: ratatui::widgets::ListState,
     dash_session_entries: Vec<DashSessionEntry>,
     dash_focus: DashFocus,
+    // Phase 6: LSP Integration
+    // Cache of (session_id -> Vec<(lsp_name, status)>)
+    lsp_status_cache: HashMap<String, Vec<(String, LspStatus)>>,
+    last_lsp_refresh: Instant,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -270,6 +279,8 @@ impl App {
             analysis_input: String::new(),
             analysis_history: Vec::new(),
             frame_count: 0,
+            help_scroll: 0,
+            last_preview_refresh: Instant::now(),
             mcp_state: ratatui::widgets::ListState::default(),
             preview_focused: false,
             preview_scroll: 0,
@@ -299,6 +310,8 @@ impl App {
 	            dash_session_state: ratatui::widgets::ListState::default(),
 	            dash_session_entries: Vec::new(),
 	            dash_focus: DashFocus::Sessions,
+	            lsp_status_cache: HashMap::new(),
+	            last_lsp_refresh: Instant::now(),
 	        };
 	        app.mcp_state.select(Some(0));
 	        app.dash_session_state.select(Some(0));
@@ -483,12 +496,17 @@ impl App {
             let multiplexer = TmuxMultiplexer::default();
             multiplexer.refresh_session_cache().ok();
             for session in &mut self.sessions {
-                if session.status != leindex_analyzers::memory::models::SessionStatus::Terminated {
-                    if !multiplexer.session_exists(&session.session_id) {
-                        session.status = leindex_analyzers::memory::models::SessionStatus::Terminated;
-                    } else {
-                        session.status = leindex_analyzers::memory::models::SessionStatus::Running;
-                    }
+                let exists = multiplexer.session_exists(&session.session_id);
+                let new_status = if exists {
+                    leindex_analyzers::memory::models::SessionStatus::Running
+                } else {
+                    leindex_analyzers::memory::models::SessionStatus::Terminated
+                };
+
+                if session.status != new_status {
+                    session.status = new_status;
+                    // Best-effort: persist status transitions so restart/resume logic is consistent.
+                    let _ = svc.update_session_status(&session.session_id, new_status);
                 }
             }
 
@@ -635,6 +653,49 @@ impl App {
         }
     }
 
+    /// Refresh LSP status cache from Turso database
+    fn refresh_lsp_status(&mut self) {
+        // Only refresh every 2 seconds to avoid excessive async calls
+        if self.last_lsp_refresh.elapsed() < std::time::Duration::from_secs(2) {
+            return;
+        }
+        self.last_lsp_refresh = Instant::now();
+
+        // Use tokio runtime handle for async call
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+
+        // Create Turso storage backend (uses default path)
+        let storage = match handle.block_on(
+            leindex_analyzers::memory::TursoStorageBackend::new(None, None)
+        ) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        // Clear cache to ensure we get fresh data
+        self.lsp_status_cache.clear();
+
+        // Query LSP states for all sessions
+        for session in &self.sessions {
+            let session_id = session.session_id.clone();
+            let session_id_clone = session_id.clone();
+            let storage_clone = storage.clone();
+
+            let lsp_states = handle.block_on(async move {
+                storage_clone.get_session_lsp_states(&session_id_clone).await
+            });
+
+            if let Ok(states) = lsp_states {
+                let lsp_entries: Vec<(String, LspStatus)> = states
+                    .into_iter()
+                    .map(|state| (state.lsp_name, state.status))
+                    .collect();
+                self.lsp_status_cache.insert(session_id, lsp_entries);
+            }
+        }
+    }
 }
 
 fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
@@ -673,19 +734,29 @@ async fn run_app<B: Backend>(
         // Periodic refresh (every 500ms)
         if last_refresh.elapsed() >= std::time::Duration::from_millis(500) {
             app.refresh_from_service(&service);
+            // Refresh LSP status (has its own internal throttling)
+            app.refresh_lsp_status();
             last_refresh = std::time::Instant::now();
         }
 
         // Fetch preview for selected session
-        if app.tab_index == 1 {
+        if app.tab_index == 1 && app.last_preview_refresh.elapsed() >= std::time::Duration::from_millis(200) {
+            app.last_preview_refresh = Instant::now();
+
             if let Some(i) = app.session_state.selected() {
                 if let Some(SessionEntry::Session(s)) = app.session_entries.get(i).cloned() {
-                    if let Ok(content) = TmuxMultiplexer::get_pane_content(&s.session_id, 15) {
-                        app.session_preview_content = content;
+                    match TmuxMultiplexer::get_pane_content(&s.session_id, 25) {
+                        Ok(content) => app.session_preview_content = content,
+                        Err(_) => {
+                            app.session_preview_content =
+                                session_log_tail(&s.session_id, 200).unwrap_or_default();
+                        }
                     }
                 } else {
                     app.session_preview_content.clear();
                 }
+            } else {
+                app.session_preview_content.clear();
             }
         }
 
@@ -1833,9 +1904,23 @@ async fn run_app<B: Backend>(
                         }
 
                     } else if app.show_help {
-                        if matches!(key.code, KeyCode::Char('/') | KeyCode::Esc) {
-                            app.show_help = false;
+                        let max_scroll = build_help_text(&app)
+                            .len()
+                            .saturating_sub(1) as u16;
+
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('/') | KeyCode::Char('?') => {
+                                app.show_help = false;
+                            }
+                            KeyCode::Up => app.help_scroll = app.help_scroll.saturating_sub(1),
+                            KeyCode::Down => app.help_scroll = app.help_scroll.saturating_add(1),
+                            KeyCode::PageUp => app.help_scroll = app.help_scroll.saturating_sub(10),
+                            KeyCode::PageDown => app.help_scroll = app.help_scroll.saturating_add(10),
+                            KeyCode::Home => app.help_scroll = 0,
+                            KeyCode::End => app.help_scroll = max_scroll,
+                            _ => {}
                         }
+                        app.help_scroll = app.help_scroll.min(max_scroll);
                     } else {
 	                        match (key.modifiers, key.code) {
 	                            (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
@@ -2023,22 +2108,83 @@ async fn run_app<B: Backend>(
                                      }
                                  }
                              }
-                            (_, KeyCode::Char('f')) => {
-                                if app.tab_index == 1 {
-                                    if let Some(i) = app.session_state.selected() {
-                                        if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
-                                            app.target_session_id = Some(s.session_id.clone());
-                                            app.rename_buffer = format!("{}-fork", s.title);
-                                            app.input_mode = InputMode::ForkSession;
-                                        }
-                                    }
-                                }
-                            }
-                             (KeyModifiers::ALT, KeyCode::Char('d')) | (KeyModifiers::ALT, KeyCode::Char('D')) | (KeyModifiers::NONE, KeyCode::Char('d')) => {
-                                 if app.tab_index == 1 {
-                                     if let Some(i) = app.session_state.selected() {
-                                         if let Some(entry) = app.session_entries.get(i) {
-                                             match entry {
+	                            (_, KeyCode::Char('f')) => {
+	                                if app.tab_index == 1 {
+	                                    if let Some(i) = app.session_state.selected() {
+	                                        if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
+	                                            app.target_session_id = Some(s.session_id.clone());
+	                                            app.rename_buffer = format!("{}-fork", s.title);
+	                                            app.input_mode = InputMode::ForkSession;
+	                                        }
+	                                    }
+	                                }
+	                            }
+	                            (_, KeyCode::Char('u') | KeyCode::Char('U')) => {
+	                                if app.tab_index == 1 {
+	                                    let Some(i) = app.session_state.selected() else { continue; };
+	                                    let Some(SessionEntry::Session(s)) =
+	                                        app.session_entries.get(i).cloned()
+	                                    else {
+	                                        continue;
+	                                    };
+
+	                                    let Some(svc) = service.as_ref() else {
+	                                        app.status_message =
+	                                            "Error: Memory service not available".to_string();
+	                                        continue;
+	                                    };
+
+	                                    app.is_spawning = true;
+	                                    app.status_message =
+	                                        format!("Resuming '{}' (agent + shell)...", s.title);
+	                                    let _ = terminal.draw(|frame| ui(frame, &mut app));
+
+	                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(
+	                                        svc.clone(),
+	                                    ) {
+	                                        Ok(m) => m,
+	                                        Err(e) => {
+	                                            app.status_message =
+	                                                format!("Failed to create session manager: {}", e);
+	                                            app.is_spawning = false;
+	                                            continue;
+	                                        }
+	                                    };
+
+	                                    let res = manager.restore_session(
+	                                        &s,
+	                                        leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+	                                    );
+	                                    app.is_spawning = false;
+	                                    app.refresh_from_service(&service);
+
+	                                    match res {
+	                                        Ok(()) => {
+	                                            app.status_message = format!(
+	                                                "Attaching to '{}'... (Ctrl+B d to detach)",
+	                                                s.title
+	                                            );
+	                                            let _ = terminal.draw(|frame| ui(frame, &mut app));
+	                                            let _ = suspend_fullscreen_app(terminal);
+	                                            let attach_res = TmuxMultiplexer::attach(&s.session_id);
+	                                            let _ = resume_fullscreen_app(terminal);
+	                                            let _ = terminal.clear();
+	                                            app.status_message = match attach_res {
+	                                                Ok(()) => format!("Returned from '{}'", s.title),
+	                                                Err(e) => format!("Attach failed: {}", e),
+	                                            };
+	                                        }
+	                                        Err(e) => {
+	                                            app.status_message = format!("Resume failed: {}", e);
+	                                        }
+	                                    }
+	                                }
+	                            }
+	                             (KeyModifiers::ALT, KeyCode::Char('d')) | (KeyModifiers::ALT, KeyCode::Char('D')) | (KeyModifiers::NONE, KeyCode::Char('d')) => {
+	                                 if app.tab_index == 1 {
+	                                     if let Some(i) = app.session_state.selected() {
+	                                         if let Some(entry) = app.session_entries.get(i) {
+	                                             match entry {
                                                  SessionEntry::Session(s) => {
                                                      app.target_session_id = Some(s.session_id.clone());
                                                      app.status_message = format!(
@@ -2336,9 +2482,10 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('/') | KeyCode::Char('?')) => {
-                                app.show_help = true;
-                            }
+	                            (_, KeyCode::Char('/') | KeyCode::Char('?')) => {
+	                                app.show_help = true;
+	                                app.help_scroll = 0;
+	                            }
                             (_, KeyCode::Char('e')) if app.tab_index == 2 => {
                                 app.preview_focused = !app.preview_focused;
                             }
@@ -2424,22 +2571,85 @@ async fn run_app<B: Backend>(
                                                         app.refresh_session_entries();
                                                     }
                                                 }
-                                                SessionEntry::Session(s) => {
-                                                    app.status_message = format!("Attaching to '{}'... (Ctrl+B d to detach)", s.title);
-                                                    let _ = terminal.draw(|frame| ui(frame, &mut app));
-                                                    let _ = suspend_fullscreen_app(terminal);
-                                                    let res = TmuxMultiplexer::attach(&s.session_id);
-                                                    let _ = resume_fullscreen_app(terminal);
-                                                    let _ = terminal.clear(); // Restore terminal state
-                                                    app.status_message = match res {
-                                                        Ok(()) => format!("Returned from '{}'", s.title),
-                                                        Err(e) => format!("Attach failed: {}", e),
-                                                    };
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+	                                                SessionEntry::Session(s) => {
+	                                                    app.status_message = format!("Attaching to '{}'... (Ctrl+B d to detach)", s.title);
+	                                                    let _ = terminal.draw(|frame| ui(frame, &mut app));
+	                                                    let _ = suspend_fullscreen_app(terminal);
+	                                                    let res = TmuxMultiplexer::attach(&s.session_id);
+	                                                    let _ = resume_fullscreen_app(terminal);
+	                                                    let _ = terminal.clear(); // Restore terminal state
+	                                                    match res {
+	                                                        Ok(()) => {
+	                                                            app.status_message =
+	                                                                format!("Returned from '{}'", s.title);
+	                                                        }
+	                                                        Err(e) => {
+	                                                            // If the session is dead, do the useful thing:
+	                                                            // recreate the shell and attempt to resume the agent (best-effort).
+	                                                            if s.status
+	                                                                == leindex_analyzers::memory::models::SessionStatus::Terminated
+	                                                            {
+	                                                                if let Some(svc) = service.as_ref()
+	                                                                {
+	                                                                    app.is_spawning = true;
+	                                                                    app.status_message = format!(
+	                                                                        "Session terminated; resuming '{}'...",
+	                                                                        s.title
+	                                                                    );
+	                                                                    let _ = terminal.draw(|frame| {
+	                                                                        ui(frame, &mut app)
+	                                                                    });
+
+	                                                                    if let Ok(manager) = leindex_analyzers::memory::session_manager::SessionManager::new(
+	                                                                        svc.clone(),
+	                                                                    ) {
+	                                                                        let _ = manager.restore_session(
+	                                                                            &s,
+	                                                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+	                                                                        );
+	                                                                    }
+	                                                                    app.is_spawning = false;
+	                                                                    app.refresh_from_service(&service);
+
+	                                                                    app.status_message = format!(
+	                                                                        "Attaching to '{}'... (Ctrl+B d to detach)",
+	                                                                        s.title
+	                                                                    );
+	                                                                    let _ = terminal.draw(|frame| {
+	                                                                        ui(frame, &mut app)
+	                                                                    });
+	                                                                    let _ = suspend_fullscreen_app(terminal);
+	                                                                    let attach_res =
+	                                                                        TmuxMultiplexer::attach(&s.session_id);
+	                                                                    let _ =
+	                                                                        resume_fullscreen_app(terminal);
+	                                                                    let _ = terminal.clear();
+	                                                                    app.status_message =
+	                                                                        match attach_res {
+	                                                                            Ok(()) => format!(
+	                                                                                "Returned from '{}'",
+	                                                                                s.title
+	                                                                            ),
+	                                                                            Err(e) => format!(
+	                                                                                "Attach failed: {}",
+	                                                                                e
+	                                                                            ),
+	                                                                        };
+	                                                                } else {
+	                                                                    app.status_message =
+	                                                                        format!("Attach failed: {}", e);
+	                                                                }
+	                                                            } else {
+	                                                                app.status_message =
+	                                                                    format!("Attach failed: {}", e);
+	                                                            }
+	                                                        }
+	                                                    }
+	                                                }
+	                                            }
+	                                        }
+	                                    }
+	                                }
                             }
 
 
@@ -2479,18 +2689,82 @@ async fn run_app<B: Backend>(
                                 }
                             }
 	                            (_, KeyCode::Char('R')) => {
-	                                // Manual full refresh
-	                                if let Some(svc) = service.as_ref() {
-	                                    let _ = svc.sync_mcp_servers_from_system();
-	                                    let _ = svc.sync_memories_from_system();
-	                                    if let Ok(projects) = svc.list_projects() {
-	                                        app.projects = projects.iter().map(|p| ProjectInfo {
-	                                            name: p.project_name.clone(),
-	                                            path: p.project_path.clone(),
-	                                            _track_count: 0,
-	                                        }).collect();
-	                                    }
+	                                // Sessions tab: restart the selected session (shell/tool fresh).
+	                                if app.tab_index == 1 {
+	                                    let Some(i) = app.session_state.selected() else { continue; };
+	                                    let Some(SessionEntry::Session(s)) =
+	                                        app.session_entries.get(i).cloned()
+	                                    else {
+	                                        continue;
+	                                    };
+
+	                                    let Some(svc) = service.as_ref() else {
+	                                        app.status_message =
+	                                            "Error: Memory service not available".to_string();
+	                                        continue;
+	                                    };
+
+	                                    app.is_spawning = true;
+	                                    app.status_message =
+	                                        format!("Restarting '{}' (shell + fresh tool)...", s.title);
+	                                    let _ = terminal.draw(|frame| ui(frame, &mut app));
+
+	                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(
+	                                        svc.clone(),
+	                                    ) {
+	                                        Ok(m) => m,
+	                                        Err(e) => {
+	                                            app.status_message =
+	                                                format!("Failed to create session manager: {}", e);
+	                                            app.is_spawning = false;
+	                                            continue;
+	                                        }
+	                                    };
+
+	                                    let res = manager.restore_session(
+	                                        &s,
+	                                        leindex_analyzers::memory::session_manager::SessionRestoreMode::Restart,
+	                                    );
+	                                    app.is_spawning = false;
 	                                    app.refresh_from_service(&service);
+
+	                                    match res {
+	                                        Ok(()) => {
+	                                            app.status_message = format!(
+	                                                "Attaching to '{}'... (Ctrl+B d to detach)",
+	                                                s.title
+	                                            );
+	                                            let _ = terminal.draw(|frame| ui(frame, &mut app));
+	                                            let _ = suspend_fullscreen_app(terminal);
+	                                            let attach_res = TmuxMultiplexer::attach(&s.session_id);
+	                                            let _ = resume_fullscreen_app(terminal);
+	                                            let _ = terminal.clear();
+	                                            app.status_message = match attach_res {
+	                                                Ok(()) => format!("Returned from '{}'", s.title),
+	                                                Err(e) => format!("Attach failed: {}", e),
+	                                            };
+	                                        }
+	                                        Err(e) => {
+	                                            app.status_message = format!("Restart failed: {}", e);
+	                                        }
+	                                    }
+	                                } else {
+	                                    // Other tabs: manual full refresh
+	                                    if let Some(svc) = service.as_ref() {
+	                                        let _ = svc.sync_mcp_servers_from_system();
+	                                        let _ = svc.sync_memories_from_system();
+	                                        if let Ok(projects) = svc.list_projects() {
+	                                            app.projects = projects
+	                                                .iter()
+	                                                .map(|p| ProjectInfo {
+	                                                    name: p.project_name.clone(),
+	                                                    path: p.project_path.clone(),
+	                                                    _track_count: 0,
+	                                                })
+	                                                .collect();
+	                                        }
+	                                        app.refresh_from_service(&service);
+	                                    }
 	                                }
 	                            }
                             _ => {}
@@ -2802,11 +3076,49 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .border_type(if app.tab_index == 0 && app.dash_focus == DashFocus::Sessions { BorderType::Double } else { BorderType::Rounded })
         .title(" 🕒 Recent Sessions ")
         .title_style(if app.tab_index == 0 && app.dash_focus == DashFocus::Sessions { Style::default().fg(Color::Blue).bold() } else { Style::default().fg(Color::Blue) });
-    
+
     let mut session_items = Vec::new();
     if app.dash_session_entries.is_empty() {
         session_items.push(ListItem::new("  No active sessions"));
     } else {
+        // Pre-collect LSP indicators for all sessions (single borrow, then release)
+        // Clone the cache first to avoid borrow checker issues
+        let lsp_cache = app.lsp_status_cache.clone();
+        let lsp_indicators_map = {
+            let mut map = std::collections::HashMap::new();
+            for (session_id, lsps) in &lsp_cache {
+                if !lsps.is_empty() {
+                    let indicators: Vec<Span> = lsps
+                        .iter()
+                        .map(|(lsp_name, status)| {
+                            let (icon, color) = match status {
+                                LspStatus::Running => (" ● ", Color::Green),
+                                LspStatus::Starting => (" ◐ ", Color::Yellow),
+                                LspStatus::Error => (" x ", Color::Red),
+                                LspStatus::Stopped => (" ○ ", Color::Gray),
+                            };
+                            let short_name = if lsp_name.contains("rust") {
+                                "R"
+                            } else if lsp_name.contains("ruff") || lsp_name.contains("python") {
+                                "P"
+                            } else if lsp_name.contains("typescript") || lsp_name.contains("ts") {
+                                "T"
+                            } else {
+                                "?"
+                            };
+                            Span::styled(
+                                format!("{}{}", short_name, icon),
+                                Style::default().fg(color),
+                            )
+                        })
+                        .collect();
+                    map.insert(session_id.clone(), indicators);
+                }
+            }
+            map
+        };
+        // `app` borrow is now released
+
         for entry in &app.dash_session_entries {
             match entry {
                 DashSessionEntry::GroupHeader { group_path } => {
@@ -2838,11 +3150,25 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
                         _ => Span::styled(" o ", Style::default().fg(Color::Gray)),
                     };
 
-                    session_items.push(ListItem::new(Line::from(vec![
+                    // Build line with session status, title, and LSP indicators
+                    let mut line_spans = vec![
                         Span::raw("   "),
                         status_icon,
                         Span::styled(sess.title.clone(), Style::default().bold()),
-                    ])));
+                    ];
+
+                    // Add LSP indicators if any exist (use pre-collected map)
+                    if let Some(indicators) = lsp_indicators_map.get(&sess.session_id) {
+                        if !indicators.is_empty() {
+                            line_spans.push(Span::raw(" "));
+                            line_spans.push(Span::styled("LSP:", Style::default().fg(Color::DarkGray)));
+                            for indicator in indicators {
+                                line_spans.push(indicator.clone());
+                            }
+                        }
+                    }
+
+                    session_items.push(ListItem::new(Line::from(line_spans)));
                 }
             }
         }
@@ -2908,19 +3234,34 @@ fn render_help_modal(frame: &mut Frame, app: &App) {
         .border_type(BorderType::Double)
         .style(Style::default().bg(theme.panel_bg));
 
-    let text = vec![
+    let text = build_help_text(app);
+
+    let para = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Left)
+        .scroll((app.help_scroll, 0))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(Clear, area);
+    frame.render_widget(para, area);
+}
+
+fn build_help_text(app: &App) -> Vec<Line<'static>> {
+    vec![
         Line::from(""),
         Line::from(vec![Span::styled(" GLOBAL CONTROLS:", Style::default().fg(Color::Yellow).bold())]),
         Line::from(vec![Span::styled("   Tab / S-Tab   ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Cycle Tabs / Focus Preview (e.g. 1->2->3)")]),
         Line::from(vec![Span::styled("   ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Navigate / Scroll Preview")]),
-        Line::from(vec![Span::styled("   Ctrl + /      ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Toggle This Modal")]),
+        Line::from(vec![Span::styled("   / or ?        ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Open/close this modal")]),
+        Line::from(vec![Span::styled("   PgUp/PgDn     ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Scroll modal content")]),
         Line::from(vec![Span::styled("   q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),  Span::raw(" Quit Maestro Cockpit")]),
         Line::from(""),
         Line::from(vec![Span::styled("   Dash: k / d   ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Kill / Delete Highlighted Dashboard Session")]),
         Line::from(""),
         Line::from(vec![Span::styled(" SESSIONS (Tab 2):", Style::default().fg(Color::Yellow).bold())]),
         Line::from(vec![Span::styled("   n             ", Style::default().fg(Color::Green).bold()), Span::raw(" New Session Wizard (Title, Path, Tool)")]),
-        Line::from(vec![Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Attach to tmux Session")]),
+        Line::from(vec![Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()), Span::raw(" Attach (auto-resume if terminated)")]),
+        Line::from(vec![Span::styled("   u             ", Style::default().fg(Color::Green).bold()), Span::raw(" Resume (restore shell + resume agent, best-effort)")]),
+        Line::from(vec![Span::styled("   R             ", Style::default().fg(Color::Green).bold()), Span::raw(" Restart (restore shell + start tool fresh)")]),
         Line::from(vec![Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Session Hub (Rename, Move, Search history)")]),
         Line::from(vec![Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Focus Preview Pane (for scrolling history)")]),
         Line::from(vec![Span::styled("   Alt + ↑/↓     ", Style::default().fg(Color::Cyan).bold()), Span::raw(" Reorder group/session (persists to DB)")]),
@@ -2943,11 +3284,7 @@ fn render_help_modal(frame: &mut Frame, app: &App) {
         Line::from(""),
         Line::from("  ---------------------------------- "),
         Line::from(format!("  Maestro TUI Cockpit v2.0-beta-8  {}", if (app.frame_count / 30) % 2 == 0 { "⚡" } else { "  " })),
-    ];
-
-    let para = Paragraph::new(text).block(block).alignment(Alignment::Left);
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
+    ]
 }
 
 fn render_session_hub_modal(frame: &mut Frame, app: &App) {
@@ -3408,6 +3745,32 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let path = format!("{}/.maestro/logs/{}.log", home, session_name);
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+
+    // Avoid loading the entire file: read only the tail window.
+    let window: u64 = 128 * 1024;
+    let start = len.saturating_sub(window);
+    let _ = file.seek(SeekFrom::Start(start)).ok()?;
+
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+
+    let mut out: Vec<String> = Vec::new();
+    for line in buf.lines().rev().take(lines) {
+        out.push(line.to_string());
+    }
+    out.reverse();
+    Some(out.join("\n"))
+}
+
 fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -3703,6 +4066,44 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         let mut items = Vec::new();
 
+        // Pre-collect LSP indicators for all sessions (single borrow, then release)
+        // Clone the cache first to avoid borrow checker issues
+        let lsp_cache = app.lsp_status_cache.clone();
+        let lsp_indicators_map = {
+            let mut map = std::collections::HashMap::new();
+            for (session_id, lsps) in &lsp_cache {
+                if !lsps.is_empty() {
+                    let indicators: Vec<Span> = lsps
+                        .iter()
+                        .map(|(lsp_name, status)| {
+                            let (icon, color) = match status {
+                                LspStatus::Running => (" ● ", Color::Green),
+                                LspStatus::Starting => (" ◐ ", Color::Yellow),
+                                LspStatus::Error => (" x ", Color::Red),
+                                LspStatus::Stopped => (" ○ ", Color::Gray),
+                            };
+                            let short_name = if lsp_name.contains("rust") {
+                                "R"
+                            } else if lsp_name.contains("ruff") || lsp_name.contains("python") {
+                                "P"
+                            } else if lsp_name.contains("typescript") || lsp_name.contains("ts") {
+                                "T"
+                            } else {
+                                "?"
+                            };
+                            Span::styled(
+                                format!("{}{}", short_name, icon),
+                                Style::default().fg(color),
+                            )
+                        })
+                        .collect();
+                    map.insert(session_id.clone(), indicators);
+                }
+            }
+            map
+        };
+        // `app` borrow is now released
+
         for (i, entry) in app.session_entries.iter().enumerate() {
             match entry {
                 SessionEntry::Group(g) => {
@@ -3723,7 +4124,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     let is_running = s.status == leindex_analyzers::memory::models::SessionStatus::Running;
                     let is_terminated = s.status == leindex_analyzers::memory::models::SessionStatus::Terminated;
                     let is_waiting = s.status == leindex_analyzers::memory::models::SessionStatus::Waiting;
-                    
+
                     let (status_icon, status_color) = if is_running {
                         (" * ", Color::Green)
                     } else if is_terminated {
@@ -3734,14 +4135,14 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                         (" o ", Color::Gray)
                     };
 
-                    let title_style = if is_running { 
-                        Style::default().fg(Color::Cyan) 
+                    let title_style = if is_running {
+                        Style::default().fg(Color::Cyan)
                     } else if is_terminated {
                         Style::default().fg(Color::DarkGray)
                     } else {
                         Style::default().fg(Color::White)
                     };
-                    
+
                     // Determine if this is the last item in a group (for L-line)
                     let mut branch = " ├─";
                     let is_last_in_group = if let Some(next) = app.session_entries.get(i + 1) {
@@ -3750,7 +4151,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                         // End of list is also end of group
                         true
                     };
-                    
+
                     if is_last_in_group {
                         branch = " └─";
                     }
@@ -3766,6 +4167,16 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     }
 
                     line_spans.push(Span::styled(format!(" [{}]", s.tool.as_deref().unwrap_or("?")), Style::default().fg(Color::DarkGray)));
+
+                    // Add LSP indicators if any exist (use pre-collected map)
+                    if let Some(indicators) = lsp_indicators_map.get(&s.session_id) {
+                        if !indicators.is_empty() {
+                            line_spans.push(Span::raw(" "));
+                            for indicator in indicators {
+                                line_spans.push(indicator.clone());
+                            }
+                        }
+                    }
 
                     items.push(ListItem::new(vec![Line::from(line_spans)]));
                 }
@@ -3820,31 +4231,84 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     Span::styled(&s.project_path, Style::default().fg(Color::DarkGray)),
                 ]));
 
-                // Row 4: Claude info if applicable
-                if s.tool.as_deref() == Some("claude") {
-                    if let Some(ref metadata) = s.metadata {
-                        if let Some(cid) = metadata.get("claude_session_id").and_then(|v| v.as_str()) {
+	                // Row 4: Tool session IDs (best-effort capture)
+	                if let Some(ref metadata) = s.metadata {
+	                    if s.tool.as_deref() == Some("claude") {
+	                        if let Some(cid) = metadata.get("claude_session_id").and_then(|v| v.as_str()) {
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Claude: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled("● Connected", Style::default().fg(Color::Green)),
+	                            ]));
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Session ID: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled(cid, Style::default().fg(Color::White)),
+	                            ]));
+	                        }
+	                    }
+	                    if s.tool.as_deref() == Some("gemini") {
+	                        if let Some(gid) = metadata.get("gemini_session_id").and_then(|v| v.as_str()) {
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Gemini: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled("● Connected", Style::default().fg(Color::Green)),
+	                            ]));
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Session ID: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled(gid, Style::default().fg(Color::White)),
+	                            ]));
+	                        }
+	                    }
+	                    if s.tool.as_deref() == Some("codex") {
+	                        if let Some(cid) = metadata.get("codex_session_id").and_then(|v| v.as_str()) {
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Codex: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled("● Captured", Style::default().fg(Color::Green)),
+	                            ]));
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Session ID: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled(cid, Style::default().fg(Color::White)),
+	                            ]));
+	                        }
+	                    }
+	                    if s.tool.as_deref() == Some("opencode") {
+	                        if let Some(oid) = metadata.get("opencode_session_id").and_then(|v| v.as_str()) {
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" OpenCode: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled("● Captured", Style::default().fg(Color::Green)),
+	                            ]));
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Session ID: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled(oid, Style::default().fg(Color::White)),
+	                            ]));
+	                        }
+	                    }
+	                    if s.tool.as_deref() == Some("amp") {
+	                        if let Some(tid) = metadata.get("amp_thread_id").and_then(|v| v.as_str()) {
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Amp: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled("● Captured", Style::default().fg(Color::Green)),
+	                            ]));
+	                            preview_lines.push(Line::from(vec![
+	                                Span::styled(" Thread ID: ", Style::default().fg(Color::DarkGray)),
+	                                Span::styled(tid, Style::default().fg(Color::White)),
+	                            ]));
+	                        }
+	                    }
+
+	                    if let Some(mcps) = metadata.get("loaded_mcp_names").and_then(|v| v.as_array()) {
+	                        let mcp_names: Vec<String> = mcps
+	                            .iter()
+	                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect();
+                        if !mcp_names.is_empty() {
                             preview_lines.push(Line::from(vec![
-                                Span::styled(" Status: ", Style::default().fg(Color::DarkGray)),
-                                Span::styled("● Connected", Style::default().fg(Color::Green)),
+                                Span::styled(" 🔌 MCPs: ", Style::default().fg(Color::Cyan)),
+                                Span::styled(mcp_names.join(", "), Style::default().fg(Color::White)),
                             ]));
-                            preview_lines.push(Line::from(vec![
-                                Span::styled(" Session ID: ", Style::default().fg(Color::DarkGray)),
-                                Span::styled(cid, Style::default().fg(Color::White)),
-                            ]));
-                        }
-                        if let Some(mcps) = metadata.get("loaded_mcp_names").and_then(|v| v.as_array()) {
-                            let mcp_names: Vec<String> = mcps.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect();
-                            if !mcp_names.is_empty() {
-                                preview_lines.push(Line::from(vec![
-                                    Span::styled(" 🔌 MCPs: ", Style::default().fg(Color::Cyan)),
-                                    Span::styled(mcp_names.join(", "), Style::default().fg(Color::White)),
-                                ]));
-                            }
                         }
                     }
+                }
+
+                if s.tool.as_deref() == Some("claude") {
                     preview_lines.push(Line::from(vec![
                         Span::styled(" Fork: ", Style::default().fg(Color::DarkGray).italic()),
                         Span::styled("f ", Style::default().fg(Color::Cyan).bold()),
