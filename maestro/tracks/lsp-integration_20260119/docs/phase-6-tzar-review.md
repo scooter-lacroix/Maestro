@@ -95,6 +95,51 @@
 
 ---
 
-## Final Verdict: FAIL
+## Final Verdict: FAIL (Initial Review)
 
 This phase cannot pass "zero tolerance" because it contains (a) a guaranteed runtime panic path via `Handle::block_on` in an async context, (b) a correctness bug that can operate on the wrong LSP due to nondeterministic ordering, (c) a UTF-8 slicing panic, and (d) a serious local file disclosure/DoS surface in log viewing from `/tmp`. These are not polish issues; they are foundational correctness and security failures that must be fixed before proceeding.
+
+---
+
+## Fix Commits
+
+### Round 1 Fixes (commit 88b9be3)
+Fixed 5 out of 6 critical issues:
+1. Tokio panic - FIXED (flag-driven refresh pattern)
+2. Wrong LSP selection - FIXED (session order consistency)
+3. Refresh throttling - PARTIAL (force parameter added but manual 'r' still used non-forced)
+4. UTF-8 truncation - FIXED (chars().take(17))
+5. Path traversal - FIXED (session_id sanitized)
+6. Storage/config mismatch - FIXED (backend created once)
+
+### Round 2 Fixes (commit 3bc514d)
+Fixed the final critical issue and additional improvements:
+- **Manual refresh now uses force=true** - bypasses throttle and only shows "refreshed" when actually triggered
+- **refresh_lsp_status_impl returns bool** - indicates whether refresh was triggered or throttled
+- **Removed eprintln! calls** that corrupted TUI display in raw mode
+- **Added session_name sanitization** in session_log_tail()
+
+---
+
+## Re-Review Results (After All Fixes)
+
+### Critical Issues Status
+
+| Issue | Status | Details |
+|-------|--------|---------|
+| 1. Tokio panic | **PASS** | TUI LSP refresh is flag-driven (`pending_lsp_refresh`) and executed via `await` in the main async loop, no `block_on` in `tui.rs` |
+| 2. Wrong LSP selection | **PASS** | Selection builds the flat LSP list in session order (same as rendering) |
+| 3. Refresh throttling | **PASS** | Manual 'r' refresh now uses `force=true` and only shows "refreshed" when actually triggered |
+| 4. UTF-8 truncation | **PASS** | Uses `t.chars().take(17).collect()` |
+| 5. Path traversal | **PASS** | `session_id` is filtered and hashed if modified before building `/tmp/...` paths |
+| 6. Storage/config mismatch | **PASS** | `TursoStorageBackend` is created once and stored in `App` |
+
+### Additional Fixes Applied
+- Removed `eprintln!` calls that corrupt TUI display in raw mode
+- Added `session_name` sanitization in `session_log_tail()` to prevent path traversal
+
+---
+
+## Final Verdict: PASS
+
+All 6 critical issues have been fixed. Phase 6 (TUI Integration) is now **PRODUCTION-READY**.
