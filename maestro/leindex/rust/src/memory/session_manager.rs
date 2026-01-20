@@ -22,6 +22,16 @@ pub struct SessionManager {
     lsp_manager_init: std::sync::Once,
 }
 
+/// Mode for restoring a session
+#[cfg(feature = "rusqlite")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionRestoreMode {
+    /// Resume the session if it exists, otherwise recreate it
+    Resume,
+    /// Force restart the session (kill existing if running, then recreate)
+    Restart,
+}
+
 #[cfg(feature = "rusqlite")]
 impl SessionManager {
     pub fn new(service: MemoryService) -> Result<Self> {
@@ -280,7 +290,7 @@ impl SessionManager {
     }
 
     /// Detect which LSPs should be used for a project based on file extensions
-    fn detect_lsps_for_project(&self, project_path: &str) -> Result<Vec<serde_json::Value>> {
+    pub(crate) fn detect_lsps_for_project(&self, project_path: &str) -> Result<Vec<serde_json::Value>> {
         let mut lsp_entries = Vec::new();
         let mut detected_languages = std::collections::HashSet::new();
 
@@ -294,6 +304,7 @@ impl SessionManager {
         let max_depth = 3;
         let mut visited = std::collections::HashSet::new();
         let mut dirs_to_visit = vec![path.to_path_buf()];
+        let root_path = path.to_path_buf();
 
         while let Some(current_dir) = dirs_to_visit.pop() {
             if visited.contains(&current_dir) || visited.len() > 1000 {
@@ -302,11 +313,14 @@ impl SessionManager {
             visited.insert(current_dir.clone());
 
             // Skip hidden directories and common non-source directories
-            if let Some(dir_name) = current_dir.file_name() {
-                let name = dir_name.to_string_lossy();
-                if name.starts_with('.') || name == "node_modules" || name == "target" ||
-                   name == "vendor" || name == "build" || name == "dist" {
-                    continue;
+            // IMPORTANT: Don't skip the root project path, even if it starts with '.'
+            if current_dir != root_path {
+                if let Some(dir_name) = current_dir.file_name() {
+                    let name = dir_name.to_string_lossy();
+                    if name.starts_with('.') || name == "node_modules" || name == "target" ||
+                       name == "vendor" || name == "build" || name == "dist" {
+                        continue;
+                    }
                 }
             }
 
@@ -357,6 +371,68 @@ impl SessionManager {
 
         // Use tmux session name directly
         TmuxMultiplexer::attach(session_id)?;
+        Ok(())
+    }
+
+    /// Restore a session (resume existing or recreate it)
+    ///
+    /// ## Arguments
+    ///
+    /// - `session`: The session to restore
+    /// - `mode`: Restore mode (Resume or Restart)
+    ///
+    /// ## Behavior
+    ///
+    /// - `Resume`: If tmux session exists, does nothing. If not, recreates it.
+    /// - `Restart`: Kills existing tmux session if running, then recreates it.
+    pub fn restore_session(&self, session: &Session, mode: SessionRestoreMode) -> Result<()> {
+        let session_id = &session.session_id;
+        let title = &session.title;
+        let project_path = &session.project_path;
+
+        match mode {
+            SessionRestoreMode::Resume => {
+                // If session already exists in tmux, nothing to do
+                if self.tmux.session_exists(session_id) {
+                    tracing::debug!("Session '{}' already running, resuming", session_id);
+                    // Update status to Running in case it was stale
+                    self.service
+                        .update_session_status(session_id, SessionStatus::Running)?;
+                    return Ok(());
+                }
+                // Fall through to recreate
+            }
+            SessionRestoreMode::Restart => {
+                // Kill existing session if it's running
+                if self.tmux.session_exists(session_id) {
+                    tracing::debug!("Restarting session '{}': killing existing", session_id);
+                    let _ = self.tmux.kill_session(session_id);
+                }
+            }
+        }
+
+        // Recreate the tmux session
+        let mut tmux_session = TmuxSession::new(title, project_path);
+
+        // Use the stored command if available, otherwise build from tool
+        let run_cmd = session.command.clone().or_else(|| {
+            session.tool.as_ref().map(|tool| {
+                self.build_tool_command(tool, project_path, &tmux_session.name)
+                    .unwrap_or_else(|_| format!("cd {}", project_path))
+            })
+        });
+
+        // Start the tmux session
+        self.tmux
+            .start_session(&mut tmux_session, run_cmd.as_deref())
+            .context("Failed to start tmux session during restore")?;
+
+        // Update status to Running
+        self.service
+            .update_session_status(session_id, SessionStatus::Running)?;
+
+        tracing::info!("Session '{}' restored successfully", session_id);
+
         Ok(())
     }
 
@@ -445,4 +521,317 @@ fn shell_escape(s: &str) -> String {
         return "''".to_string();
     }
     format!("'{}'", s.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("test-session-123"), "test-session-123");
+        assert_eq!(sanitize_filename("session@test/123"), "session_test_123");
+        assert_eq!(sanitize_filename("session.with.dots"), "session_with_dots");
+    }
+
+    #[test]
+    fn test_shell_escape() {
+        assert_eq!(shell_escape("simple"), "'simple'");
+        // The function wraps in single quotes, replacing single quotes with '"'"'
+        // For "with 'quotes'", the single quote gets replaced with '"'"', resulting in:
+        // 'with '"' quotes' (the single quote in the middle is replaced)
+        let result = shell_escape("with 'quotes'");
+        assert!(result.starts_with("'") && result.ends_with("'"));
+        assert!(result.contains("with"));
+        assert!(result.contains("quotes"));
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn test_mcp_config_with_no_lsps() {
+        // Test that MCP config without LSPs works correctly
+        let service = MemoryService::new(None).unwrap();
+        service.initialize().unwrap();
+
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create a test session
+        let session_id = "test-session-no-lsp";
+        let project_path = "/tmp/test";
+
+        session_manager.service.import_session(Session {
+            id: 0,
+            session_id: session_id.to_string(),
+            title: "Test Session".to_string(),
+            project_path: project_path.to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).unwrap();
+
+        // Generate MCP config
+        let config_path = session_manager.write_mcp_config_with_lsps(session_id, &[]).unwrap();
+
+        // Verify file exists and is valid JSON
+        assert!(config_path.exists());
+        let content = std::fs::read_to_string(&config_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Verify mcpServers exists
+        assert!(json.get("mcpServers").is_some());
+
+        // Verify lsp section does NOT exist when no LSPs
+        assert!(json.get("lsp").is_none());
+
+        // Clean up
+        std::fs::remove_file(&config_path).ok();
+    }
+
+    #[test]
+    fn test_mcp_config_with_lsps() {
+        // Test that MCP config with LSPs includes lsp section
+        let service = MemoryService::new(None).unwrap();
+        service.initialize().unwrap();
+
+        let session_manager = SessionManager::new(service).unwrap();
+
+        let session_id = "test-session-with-lsp";
+        let project_path = "/tmp/test";
+
+        session_manager.service.import_session(Session {
+            id: 0,
+            session_id: session_id.to_string(),
+            title: "Test Session".to_string(),
+            project_path: project_path.to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).unwrap();
+
+        // Generate MCP config with Rust LSP
+        let lsp_types = vec![LspType::Rust];
+        let config_path = session_manager.write_mcp_config_with_lsps(session_id, &lsp_types).unwrap();
+
+        // Verify file exists and is valid JSON
+        assert!(config_path.exists());
+        let content = std::fs::read_to_string(&config_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        // Verify mcpServers exists
+        assert!(json.get("mcpServers").is_some());
+
+        // Verify lsp section exists when LSPs are provided
+        let lsp = json.get("lsp").unwrap();
+        let servers = lsp.get("servers").unwrap().as_array().unwrap();
+
+        // Verify Rust LSP entry
+        assert!(!servers.is_empty());
+        let rust_lsp = &servers[0];
+        assert_eq!(rust_lsp["language"], "rust");
+        assert_eq!(rust_lsp["displayName"], "rust-analyzer");
+        assert_eq!(rust_lsp["command"], "rust-analyzer");
+
+        // Verify capabilities
+        let capabilities = rust_lsp["capabilities"].as_array().unwrap();
+        assert!(capabilities.iter().any(|c| c == "completion"));
+        assert!(capabilities.iter().any(|c| c == "inlayHint"));
+
+        // Clean up
+        std::fs::remove_file(&config_path).ok();
+    }
+
+    #[test]
+    fn test_detect_lsps_for_rust_project() {
+        let service = MemoryService::new(None).unwrap();
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create a temporary directory with Rust files
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create some Rust files
+        std::fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(temp_dir.path().join("lib.rs"), "pub fn test() {}").unwrap();
+
+        // Detect LSPs
+        let lsp_entries = session_manager.detect_lsps_for_project(&project_path).unwrap();
+
+        // Should detect Rust LSP
+        assert!(!lsp_entries.is_empty(), "No LSP entries detected for Rust project");
+        assert!(lsp_entries.iter().any(|lsp| lsp["language"] == "rust"), "Rust LSP not found in entries");
+    }
+
+    #[test]
+    fn test_detect_lsps_for_python_project() {
+        let service = MemoryService::new(None).unwrap();
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create a temporary directory with Python files
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create some Python files
+        std::fs::write(temp_dir.path().join("main.py"), "print('hello')").unwrap();
+        std::fs::write(temp_dir.path().join("lib.py"), "def test(): pass").unwrap();
+
+        // Detect LSPs
+        let lsp_entries = session_manager.detect_lsps_for_project(&project_path).unwrap();
+
+        // Should detect Python LSP
+        assert!(!lsp_entries.is_empty());
+        assert!(lsp_entries.iter().any(|lsp| lsp["language"] == "python"));
+    }
+
+    #[test]
+    fn test_detect_lsps_for_typescript_project() {
+        let service = MemoryService::new(None).unwrap();
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create a temporary directory with TypeScript files
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create some TypeScript files
+        std::fs::write(temp_dir.path().join("main.ts"), "console.log('hello')").unwrap();
+        std::fs::write(temp_dir.path().join("app.tsx"), "export default function App() {}").unwrap();
+
+        // Detect LSPs
+        let lsp_entries = session_manager.detect_lsps_for_project(&project_path).unwrap();
+
+        // Should detect TypeScript LSP
+        assert!(!lsp_entries.is_empty());
+        assert!(lsp_entries.iter().any(|lsp| lsp["language"] == "typescript"));
+    }
+
+    #[test]
+    fn test_detect_lsps_for_mixed_project() {
+        let service = MemoryService::new(None).unwrap();
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create a temporary directory with mixed language files
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create files from different languages
+        std::fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(temp_dir.path().join("script.py"), "print('hello')").unwrap();
+        std::fs::write(temp_dir.path().join("app.tsx"), "export default function App() {}").unwrap();
+
+        // Detect LSPs
+        let lsp_entries = session_manager.detect_lsps_for_project(&project_path).unwrap();
+
+        // Should detect all three LSPs
+        assert!(!lsp_entries.is_empty());
+        assert!(lsp_entries.iter().any(|lsp| lsp["language"] == "rust"));
+        assert!(lsp_entries.iter().any(|lsp| lsp["language"] == "python"));
+        assert!(lsp_entries.iter().any(|lsp| lsp["language"] == "typescript"));
+    }
+
+    #[test]
+    fn test_detect_lsps_for_empty_project() {
+        let service = MemoryService::new(None).unwrap();
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create an empty temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Detect LSPs
+        let lsp_entries = session_manager.detect_lsps_for_project(&project_path).unwrap();
+
+        // Should return empty list
+        assert!(lsp_entries.is_empty());
+    }
+
+    #[test]
+    fn test_detect_lsps_skips_non_source_dirs() {
+        let service = MemoryService::new(None).unwrap();
+        let session_manager = SessionManager::new(service).unwrap();
+
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let project_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create non-source directories
+        let node_modules = temp_dir.path().join("node_modules");
+        std::fs::create_dir(&node_modules).unwrap();
+        std::fs::write(node_modules.join("package.json"), "{}").unwrap();
+
+        let target = temp_dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("lib.rs"), "fn main() {}").unwrap();
+
+        // Create actual source file
+        std::fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+        // Detect LSPs
+        let lsp_entries = session_manager.detect_lsps_for_project(&project_path).unwrap();
+
+        // Should detect Rust LSP from main.rs but not from target directory
+        assert!(!lsp_entries.is_empty());
+        assert_eq!(lsp_entries.len(), 1);
+    }
+
+    #[test]
+    fn test_get_session_project_path() {
+        let service = MemoryService::new(None).unwrap();
+        service.initialize().unwrap();
+
+        // Import a test session
+        let session_id = "test-session-path";
+        let project_path = "/tmp/test-project";
+
+        service.import_session(Session {
+            id: 0,
+            session_id: session_id.to_string(),
+            title: "Test".to_string(),
+            project_path: project_path.to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        }).unwrap();
+
+        // Query project path
+        let result = service.get_session_project_path(session_id).unwrap();
+
+        // Should return the correct project path
+        assert_eq!(result, Some(project_path.to_string()));
+    }
+
+    #[test]
+    fn test_get_session_project_path_not_found() {
+        let service = MemoryService::new(None).unwrap();
+        service.initialize().unwrap();
+
+        // Query non-existent session
+        let result = service.get_session_project_path("non-existent-session").unwrap();
+
+        // Should return None
+        assert!(result.is_none());
+    }
 }
