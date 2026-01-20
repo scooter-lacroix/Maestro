@@ -811,13 +811,16 @@ impl App {
     ///
     /// Sets a flag to trigger async refresh in the main event loop.
     /// This avoids the Tokio panic when calling async from sync context.
-    fn refresh_lsp_status_impl(&mut self, force: bool) {
+    ///
+    /// Returns true if refresh was triggered, false if throttled.
+    fn refresh_lsp_status_impl(&mut self, force: bool) -> bool {
         // Only refresh every 2 seconds to avoid excessive async calls (unless forced)
         if !force && self.last_lsp_refresh.elapsed() < std::time::Duration::from_secs(2) {
-            return;
+            return false;
         }
         self.last_lsp_refresh = Instant::now();
         self.pending_lsp_refresh = true;
+        true
     }
 
     /// Perform the actual LSP status refresh (async)
@@ -847,7 +850,7 @@ impl App {
                 }
                 Err(e) => {
                     // Log error but continue with other sessions
-                    eprintln!("Failed to get LSP states for session {}: {}", session_id, e);
+                    // Error logged but not displayed in TUI
                 }
             }
         }
@@ -2444,8 +2447,13 @@ async fn run_app<B: Backend>(
 	                                        app.refresh_from_service(&service);
 	                                    }
 	                                } else if app.tab_index == 5 { // LSPs tab
-	                                    app.refresh_lsp_status();
-	                                    app.status_message = "LSP status refreshed".to_string();
+	                                    // Use force=true for manual refresh to bypass throttle
+	                                    if app.refresh_lsp_status_impl(true) {
+	                                        app.status_message = "LSP status refreshed".to_string();
+	                                    } else {
+	                                        // Should not happen with force=true, but handle gracefully
+	                                        app.status_message = "LSP refresh pending...".to_string();
+	                                    }
 	                                }
 	                            }
                              (_, KeyCode::Char('k')) => {
@@ -4185,8 +4193,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
 
+    // Sanitize session_name to prevent path traversal attacks
+    let safe_session_name: String = session_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let path = format!("{}/.maestro/logs/{}.log", home, session_name);
+    let path = format!("{}/.maestro/logs/{}.log", home, safe_session_name);
 
     let mut file = std::fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
