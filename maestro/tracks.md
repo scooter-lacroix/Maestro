@@ -78,29 +78,35 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: On-Demand LSP Integration for Maestro TUI
+## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 6 Ready)
 *Link: [./maestro/tracks/lsp-integration_20260119/](./maestro/tracks/lsp-integration_20260119/)*
 
 **Description**: On-Demand LSP Integration for Maestro TUI - Add on-demand Language Server Protocol (LSP) support with 3 core Rust-based LSPs (rust-analyzer, ruff-lsp, typescript-language-server), hybrid MCP+stdio exposure, TUI integration with dedicated tab and inline indicators, auto-start lifecycle, and migrate entire database architecture to Turso (libSQL) replacing SQLite/DuckDB/Tantivy with vector search evaluation.
 
 **Type**: Feature
 
-**Status**: NEW - Planning complete, ready for implementation
+**Status**: In Progress - Phases 1-5 complete, ready for Phase 6 (TUI Integration)
 
 **Phases**:
-- Phase 1: Foundation and Setup (4 tasks)
-- Phase 2: Turso Storage Backend Implementation (6 tasks)
-- Phase 3: LSP Manager Implementation (6 tasks)
-- Phase 4: LSP MCP Bridge Implementation (4 tasks)
-- Phase 5: Direct stdio LSP Exposure (4 tasks)
-- Phase 6: TUI Integration (5 tasks)
-- Phase 7: Vector Search Performance Evaluation (5 tasks)
-- Phase 8: Testing and Quality Assurance (7 tasks)
-- Phase 9: Documentation and Refinement (5 tasks)
-- Phase 10: Final Review and Release (5 tasks)
+- [x] Phase 1: Foundation and Setup (4 tasks) - COMPLETE
+- [x] Phase 2: Turso Storage Backend Implementation (6 tasks) - COMPLETE (2026-01-20)
+- [x] Phase 3: LSP Manager Implementation (7 tasks) - COMPLETE
+- [x] Phase 4: LSP MCP Bridge Implementation (4 tasks) - COMPLETE
+- [x] Phase 5: Direct stdio LSP Exposure (4 tasks) - COMPLETE
+- [ ] Phase 6: TUI Integration (5 tasks) - NEXT
+- [ ] Phase 7: Vector Search Performance Evaluation (5 tasks)
+- [ ] Phase 8: Testing and Quality Assurance (7 tasks)
+- [ ] Phase 9: Documentation and Refinement (5 tasks)
+- [ ] Phase 10: Final Review and Release (5 tasks)
 
-**Total Tasks**: 62
+**Total Tasks**: 63
 
-**Estimated Time**: 21 days
+**Estimated Time**: 22 days
 
 **Execution**: `/maestro:implement lsp-integration_20260119`
+
+**Progress Summary (2026-01-20):**
+- 25/63 tasks complete (40%)
+- Phases 1-5 complete (all core LSP infrastructure done)
+- Threading safety resolved (OnceLock singleton pattern)
+- Next phase: TUI Integration (Phase 6)
