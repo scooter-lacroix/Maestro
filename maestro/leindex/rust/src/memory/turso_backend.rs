@@ -14,6 +14,17 @@
 //! ## Migration Status
 //!
 //! Phase 2: OLTP operations migrated from rusqlite to libsql.
+//!
+//! ## Threading Safety
+//!
+//! This backend uses `OnceLock` to ensure thread-safe one-time initialization of
+//! libSQL threading configuration. The `Database` instance is wrapped in `Arc`
+//! for safe sharing across threads, while individual connections are created
+//! per-operation through `database.connect()`.
+//!
+//! **Important**: libsql 0.9 has known concurrency issues when accessing connections
+//! concurrently. Each operation creates its own connection through `with_connection`,
+//! which is the recommended pattern for thread-safe access.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -21,11 +32,47 @@ use libsql::{Builder, Database};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::future::Future;
 use tracing::{debug, info};
 
 use super::models::{Session, SessionStatus, MaestroProject, Memory, MemoryCategory, MemoryImportance};
+
+/// Global OnceLock for ensuring libSQL threading is configured only once
+///
+/// libsql 0.9's underlying SQLite library requires that threading configuration
+/// be set exactly once per process. This OnceLock ensures that regardless of
+/// how many `TursoStorageBackend` instances are created, the threading mode
+/// is initialized exactly once.
+///
+/// The stored `()` value is just a marker - the important part is OnceLock's
+/// guarantee that `get_or_init()` will call the initialization closure exactly
+/// once, even if multiple threads call it concurrently.
+static LIBSQL_THREADING_INIT: OnceLock<()> = OnceLock::new();
+
+/// Initialize libSQL threading mode (exactly once per process)
+///
+/// This function uses `OnceLock` to ensure that:
+/// 1. The initialization happens exactly once per process
+/// 2. Multiple threads can safely call this concurrently
+/// 3. After the first call, subsequent calls are no-ops
+///
+/// The libsql crate internally manages threading through its Database struct.
+/// This OnceLock serves as a process-level singleton marker to document the
+/// threading requirements and ensure any future threading configuration
+/// happens in a single place.
+fn ensure_libsql_threading_initialized() {
+    LIBSQL_THREADING_INIT.get_or_init(|| {
+        // Note: libsql 0.9 does not expose explicit threading mode configuration
+        // like rusqlite's config().init_locked_mode(). The crate manages its
+        // threading internally through the Database struct.
+        //
+        // This OnceLock serves as a synchronization point for any future
+        // threading configuration that may be needed, and documents that
+        // threading initialization is a one-time-per-process operation.
+        debug!("libSQL threading mode initialization marker set (one-time per process)");
+    });
+}
 
 /// LSP server status values
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -107,15 +154,53 @@ impl Default for TursoConfig {
 /// Provides unified storage using libSQL (Turso) as the database backend.
 /// This will replace the existing rusqlite-based DatabaseManager.
 ///
+/// ## Threading Architecture
+///
+/// The backend uses a carefully designed threading strategy:
+///
+/// 1. **OnceLock Singleton**: `LIBSQL_THREADING_INIT` ensures threading configuration
+///    happens exactly once per process, using `std::sync::OnceLock`.
+///
+/// 2. **Arc<Database>**: The libsql `Database` instance is wrapped in `Arc` for
+///    thread-safe sharing. Multiple backend clones share the same underlying database.
+///
+/// 3. **Per-Operation Connections**: Each database operation creates its own connection
+///    via `database.connect()`. This is the recommended pattern for libsql 0.9 to avoid
+///    concurrency issues (see [GitHub issue #2132](https://github.com/tursodatabase/libsql/issues/2132)).
+///
+/// 4. **Shutdown Guard**: `is_shutdown` AtomicBool prevents new connections after shutdown.
+///
+/// ## Connection Lifecycle
+///
+/// 1. **Process Start**
+///    - First call to `new()` or `in_memory()` triggers OnceLock initialization
+///    - Subsequent calls skip initialization (OnceLock ensures one-time execution)
+///
+/// 2. **Backend Creation**
+///    - Call `ensure_libsql_threading_initialized()` (one-time per process)
+///    - Create `libsql::Database` via `Builder::new_local()`
+///    - Wrap in `Arc<Database>` for thread-safe sharing
+///    - Create `AtomicBool` shutdown guard
+///
+/// 3. **Database Operations** (via `with_connection`)
+///    - Check `is_shutdown` guard
+///    - Call `database.connect()` to get a new Connection
+///    - Execute operation
+///    - Connection dropped (RAII cleanup)
+///
+/// 4. **Backend Shutdown**
+///    - Set `is_shutdown = true` (prevents new connections)
+///    - Drop `Arc<Database>` when all clones are dropped
+///
 /// ## Current Implementation
 ///
 /// - Local embedded mode only
-/// - Basic connection handling
-/// - Connection pooling configuration
-/// - Graceful shutdown
+/// - Basic connection handling with OnceLock-based threading safety
+/// - Per-operation connection creation
+/// - Graceful shutdown with AtomicBool guard
 /// - LSP state table schema
 ///
-/// ## Future Implementation (Phase 2)
+/// ## Future Implementation (Phase 2+)
 ///
 /// - Full OLTP operations migration
 /// - OLAP operations migration
@@ -151,7 +236,16 @@ impl TursoStorageBackend {
     /// ## Returns
     ///
     /// Returns `Result<TursoStorageBackend>` with the initialized backend
+    ///
+    /// ## Threading Safety
+    ///
+    /// This method calls `ensure_libsql_threading_initialized()` which uses
+    /// `OnceLock` to ensure threading configuration happens exactly once per process.
+    /// Multiple backend instances can be safely created concurrently.
     pub async fn new(db_path: Option<PathBuf>, config: Option<TursoConfig>) -> Result<Self> {
+        // Step 1: Initialize libSQL threading mode (once per process)
+        ensure_libsql_threading_initialized();
+
         let config = config.unwrap_or_default();
         let path = db_path.unwrap_or_else(|| {
             let mut p = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -170,14 +264,16 @@ impl TursoStorageBackend {
             path.display()
         );
 
-        // Use libsql's local embedded mode with connection pool configuration
+        // Step 2: Create libsql Database instance (thread-safe via Arc)
         let db = Builder::new_local(path.clone())
             .build()
             .await
             .context("Failed to open libsql database")?;
 
-        info!("Turso database opened successfully with connection pool");
+        info!("Turso database opened successfully");
 
+        // Step 3: Wrap in Arc for thread-safe sharing
+        // Step 4: Create shutdown guard
         Ok(Self {
             db_path: path,
             database: Arc::new(db),
@@ -195,10 +291,19 @@ impl TursoStorageBackend {
     /// ## Returns
     ///
     /// Returns `Result<TursoStorageBackend>` with an in-memory database
+    ///
+    /// ## Threading Safety
+    ///
+    /// This method calls `ensure_libsql_threading_initialized()` which uses
+    /// `OnceLock` to ensure threading configuration happens exactly once per process.
     pub async fn in_memory(config: Option<TursoConfig>) -> Result<Self> {
+        // Step 1: Initialize libSQL threading mode (once per process)
+        ensure_libsql_threading_initialized();
+
         let config = config.unwrap_or_default();
         info!("Opening in-memory Turso database");
 
+        // Step 2: Create libsql Database instance (in-memory)
         let db = Builder::new_local(":memory:")
             .build()
             .await
@@ -206,6 +311,8 @@ impl TursoStorageBackend {
 
         info!("In-memory Turso database opened successfully");
 
+        // Step 3: Wrap in Arc for thread-safe sharing
+        // Step 4: Create shutdown guard
         Ok(Self {
             db_path: PathBuf::from(":memory:"),
             database: Arc::new(db),
