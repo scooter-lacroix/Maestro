@@ -39,15 +39,19 @@
 //!
 //! ```no_run
 //! use leindex_analyzers::lsp::McpBridge;
+//! use leindex_analyzers::memory::lsp_manager::LspType;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let bridge = McpBridge::new("rust-analyzer", "/path/to/project").await?;
+//!     // Create a bridge for rust-analyzer
+//!     let bridge = McpBridge::new(LspType::Rust, "/path/to/project");
 //!     // Bridge communicates via stdio
 //!     Ok(())
 //! }
 //! ```
 
 pub mod mcp_bridge;
+pub mod stdio_proxy;
 
 pub use mcp_bridge::*;
+pub use stdio_proxy::*;
