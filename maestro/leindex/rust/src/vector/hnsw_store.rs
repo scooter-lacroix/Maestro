@@ -97,7 +97,8 @@ impl HnswVectorStore {
         }
 
         let content = fs::read_to_string(&vectors_path)?;
-        let stored_entries: Vec<(String, Vec<f32>, VectorMetadata)> =
+        // FIX: Include content field in deserialization (Task 7.6.11)
+        let stored_entries: Vec<(String, Vec<f32>, VectorMetadata, Option<String>)> =
             serde_json::from_str(&content).context("Failed to parse vectors.json")?;
 
         let mut id_map = self
@@ -117,18 +118,18 @@ impl HnswVectorStore {
         let config = self._config.clone();
         let mut new_hnsw = HNSW::new(config, CosineSimilarity::new());
 
-        for (id, embedding, metadata) in stored_entries {
+        for (id, embedding, metadata, content) in stored_entries {
             // Insert into new HNSW - it returns the internal ID
             let internal_id = new_hnsw.insert(embedding.clone());
 
-            // Store metadata WITH embedding for persistence
+            // Store metadata WITH embedding AND content for persistence
             id_map.insert(
                 internal_id,
                 VectorDataWithEmbedding {
                     id,
                     embedding,
                     metadata,
-                    content: None,
+                    content, // FIX: Restore content field (Task 7.6.11)
                 },
             );
         }
@@ -453,7 +454,7 @@ impl HnswVectorStore {
             .read()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
-        // Serialize vectors with their embeddings, excluding tombstones
+        // Serialize vectors with their embeddings AND content, excluding tombstones
         let serializable: Vec<_> = id_map
             .iter()
             .filter(|(id, _)| !tombstones.contains(id))
@@ -462,6 +463,7 @@ impl HnswVectorStore {
                     data.id.clone(),
                     data.embedding.clone(),
                     data.metadata.clone(),
+                    data.content.clone(), // FIX: Include content field (Task 7.6.11)
                 )
             })
             .collect();

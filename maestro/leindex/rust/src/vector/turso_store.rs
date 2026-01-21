@@ -239,8 +239,15 @@ impl TursoVectorStore {
                         libsql::Value::Text(vector_id.clone()),
                         libsql::Value::Text(metadata.file_path.clone()),
                         libsql::Value::Integer(metadata.chunk_index as i64),
-                        libsql::Value::Integer(metadata.start_line.unwrap_or(0) as i64),
-                        libsql::Value::Integer(metadata.end_line.unwrap_or(0) as i64),
+                        // FIX: Use NULL for optional fields instead of sentinel 0 (Task 7.6.16)
+                        metadata
+                            .start_line
+                            .map(|v| libsql::Value::Integer(v as i64))
+                            .unwrap_or(libsql::Value::Null),
+                        metadata
+                            .end_line
+                            .map(|v| libsql::Value::Integer(v as i64))
+                            .unwrap_or(libsql::Value::Null),
                         libsql::Value::Integer(chunk_type_int as i64),
                         libsql::Value::Text(metadata.parent_context.clone().unwrap_or_default()),
                         libsql::Value::Text(content.to_string()),
@@ -348,8 +355,8 @@ impl TursoVectorStore {
                         String,
                         String,
                         i64,
-                        i64,
-                        i64,
+                        Option<i64>, // FIX: Use Option<i64> for start_line (Task 7.6.16)
+                        Option<i64>, // FIX: Use Option<i64> for end_line (Task 7.6.16)
                         i64,
                         Option<String>,
                         Option<String>,
@@ -362,8 +369,9 @@ impl TursoVectorStore {
                     let vector_id: String = row.get(0)?;
                     let file_path: String = row.get(1)?;
                     let chunk_index: i64 = row.get(2)?;
-                    let start_line: i64 = row.get(3)?;
-                    let end_line: i64 = row.get(4)?;
+                    // FIX: Read as Option<i64> to handle NULL properly (Task 7.6.16)
+                    let start_line: Option<i64> = row.get(3)?;
+                    let end_line: Option<i64> = row.get(4)?;
                     let chunk_type_int: i64 = row.get(5)?; // **SECURITY:** Read as INTEGER
                     let parent_context: Option<String> = row.get(6)?;
                     let content: Option<String> = row.get(7)?;
@@ -449,16 +457,9 @@ impl TursoVectorStore {
                                 metadata: VectorMetadata {
                                     file_path,
                                     chunk_index: chunk_index as i32,
-                                    start_line: if start_line > 0 {
-                                        Some(start_line as i32)
-                                    } else {
-                                        None
-                                    },
-                                    end_line: if end_line > 0 {
-                                        Some(end_line as i32)
-                                    } else {
-                                        None
-                                    },
+                                    // FIX: Handle Option<i64> directly from NULL (Task 7.6.16)
+                                    start_line: start_line.map(|v| v as i32),
+                                    end_line: end_line.map(|v| v as i32),
                                     // **SECURITY:** Use from_i32() for INTEGER storage
                                     chunk_type: ChunkType::from_i32(chunk_type_int as i32),
                                     parent_context,
@@ -585,8 +586,9 @@ impl TursoVectorStore {
                 let embedding_json: String = row.get(1)?;
                 let file_path: String = row.get(2)?;
                 let chunk_index: i64 = row.get(3)?;
-                let start_line: i64 = row.get(4)?;
-                let end_line: i64 = row.get(5)?;
+                // FIX: Read as Option<i64> to handle NULL properly (Task 7.6.16)
+                let start_line: Option<i64> = row.get(4)?;
+                let end_line: Option<i64> = row.get(5)?;
                 let chunk_type_int: i64 = row.get(6)?;
                 let parent_context: Option<String> = row.get(7)?;
                 let embedding_model: String = row.get(8)?;
@@ -600,8 +602,9 @@ impl TursoVectorStore {
                 let metadata = VectorMetadata {
                     file_path,
                     chunk_index: chunk_index as i32,
-                    start_line: if start_line > 0 { Some(start_line as i32) } else { None },
-                    end_line: if end_line > 0 { Some(end_line as i32) } else { None },
+                    // FIX: Handle Option<i64> directly from NULL (Task 7.6.16)
+                    start_line: start_line.map(|v| v as i32),
+                    end_line: end_line.map(|v| v as i32),
                     chunk_type: ChunkType::from_i32(chunk_type_int as i32),
                     parent_context,
                     embedding_model,

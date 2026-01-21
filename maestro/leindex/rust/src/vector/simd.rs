@@ -15,6 +15,16 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         return 0.0;
     }
 
+    // FIX: Validate embeddings for NaN/Inf (Task 7.6.14)
+    // Check for invalid floating point values that could corrupt search results
+    for &val in a.iter().chain(b.iter()) {
+        if val.is_nan() || val.is_infinite() {
+            // Return neutral score (0 similarity) for invalid embeddings
+            // This prevents NaN/Inf from propagating through the computation
+            return 0.0;
+        }
+    }
+
     let len = a.len();
     let chunks = len / 8;
     let _remainder = len % 8;
