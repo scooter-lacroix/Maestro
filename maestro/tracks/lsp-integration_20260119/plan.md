@@ -1003,7 +1003,7 @@ Comprehensive testing of all components, including unit tests, integration tests
 
 ### Tasks
 
-- [ ] **Task 8.1:** Write unit tests for Turso backend
+- [x] **Task 8.1:** Write unit tests for Turso backend
   - **[PREREQUISITE]** Phase 2 Task 2.1 must be complete (threading configuration)
   - **[CRITICAL]** Verify threading safety with concurrent connection creation
     - Run tests with `--test-threads=1` for serial execution baseline
@@ -1018,7 +1018,8 @@ Comprehensive testing of all components, including unit tests, integration tests
   - Test LSP state operations
   - Target: >98% code coverage
   - **Acceptance Criteria:** All Turso backend tests pass without `OnceInstance poisoned` errors
-  - **Commit:** `test(storage): write unit tests for Turso backend`
+  - **Commit:** `test(turso): add comprehensive threading safety tests for Turso backend` (294e08a)
+  - **Status:** COMPLETE ✅ - All 25 tests pass in both serial and parallel modes
 
 - [ ] **Task 8.2:** Write unit tests for LspManager
   - Test LSP process spawning
