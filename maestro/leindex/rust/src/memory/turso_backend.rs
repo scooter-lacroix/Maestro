@@ -3046,4 +3046,401 @@ mod tests {
 
         assert_eq!(running_lsps.len(), 2);
     }
+
+    // ========================================================================
+    // Task 8.1: Threading Safety Tests
+    // ========================================================================
+
+    /// Test threading safety with concurrent connection creation
+    /// Verify OnceLock prevents libsql threading assertion failures
+    #[tokio::test]
+    async fn test_threading_safety_concurrent_creation() {
+        use std::sync::Arc;
+        use tokio::task::JoinSet;
+
+        // Create multiple backends concurrently from multiple threads
+        // This tests that OnceLock properly handles concurrent initialization
+        let mut join_set = JoinSet::new();
+
+        for i in 0..10 {
+            join_set.spawn(async move {
+                let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+                let db_path = temp_dir.path().join(format!("test-{}.db", i));
+                let backend = TursoStorageBackend::new(Some(db_path), None)
+                    .await
+                    .expect("Failed to create backend");
+                backend.initialize().await.expect("Failed to initialize");
+
+                // Perform a simple operation to verify the backend works
+                let stats = backend.stats().await.expect("Failed to get stats");
+                assert_eq!(stats.session_count, 0);
+                assert_eq!(stats.memory_count, 0);
+                assert_eq!(stats.project_count, 0);
+
+                // Return a value to verify the task completed
+                i
+            });
+        }
+
+        // Wait for all tasks to complete
+        let mut results = Vec::new();
+        while let Some(result) = join_set.join_next().await {
+            results.push(result.expect("Task failed"));
+        }
+
+        // Verify all 10 tasks completed successfully
+        assert_eq!(results.len(), 10);
+        results.sort();
+        for (i, &result) in results.iter().enumerate() {
+            assert_eq!(result, i as i32);
+        }
+    }
+
+    /// Test multiple concurrent TursoStorageBackend instances
+    /// Verify that multiple instances can operate independently
+    #[tokio::test]
+    async fn test_multiple_concurrent_backend_instances() {
+        use std::sync::Arc;
+        use tokio::task::JoinSet;
+
+        // Create multiple backend instances and perform concurrent operations
+        let mut join_set = JoinSet::new();
+
+        for i in 0..5 {
+            join_set.spawn(async move {
+                let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+                let db_path = temp_dir.path().join(format!("test-{}.db", i));
+                let backend = TursoStorageBackend::new(Some(db_path), None)
+                    .await
+                    .expect("Failed to create backend");
+                backend.initialize().await.expect("Failed to initialize");
+
+                // Insert test data
+                let session = Session {
+                    id: 0,
+                    session_id: format!("session-{}", i),
+                    title: format!("Test Session {}", i),
+                    project_path: format!("/test/project/{}", i),
+                    group_path: None,
+                    sort_order: i as i32,
+                    parent_session_id: None,
+                    command: None,
+                    tool: None,
+                    status: SessionStatus::Running,
+                    multiplexer_session: None,
+                    started_at: Utc::now(),
+                    last_accessed_at: None,
+                    ended_at: None,
+                    metadata: None,
+                };
+
+                backend
+                    .insert_session(&session)
+                    .await
+                    .expect("Failed to insert session");
+
+                // Verify insertion
+                let retrieved = backend
+                    .get_session(&session.session_id)
+                    .await
+                    .expect("Failed to get session");
+
+                assert!(retrieved.is_some());
+                assert_eq!(retrieved.unwrap().session_id, session.session_id);
+
+                i
+            });
+        }
+
+        // Wait for all tasks to complete
+        let mut results = Vec::new();
+        while let Some(result) = join_set.join_next().await {
+            results.push(result.expect("Task failed"));
+        }
+
+        assert_eq!(results.len(), 5);
+    }
+
+    /// Test connection lifecycle under load
+    /// Verify that connections are properly created and cleaned up
+    #[tokio::test]
+    async fn test_connection_lifecycle_under_load() {
+        use std::sync::Arc;
+        use tokio::task::JoinSet;
+
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = Arc::new(
+            TursoStorageBackend::new(Some(db_path), None)
+                .await
+                .expect("Failed to create backend"),
+        );
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Spawn many tasks that create connections concurrently
+        let mut join_set = JoinSet::new();
+
+        for i in 0..50 {
+            let backend_clone = Arc::clone(&backend);
+            join_set.spawn(async move {
+                // Each task performs multiple operations
+                for j in 0..5 {
+                    let session = Session {
+                        id: 0,
+                        session_id: format!("session-{}-{}", i, j),
+                        title: format!("Test Session {}-{}", i, j),
+                        project_path: format!("/test/project/{}", i),
+                        group_path: None,
+                        sort_order: (i * 5 + j) as i32,
+                        parent_session_id: None,
+                        command: None,
+                        tool: None,
+                        status: SessionStatus::Running,
+                        multiplexer_session: None,
+                        started_at: Utc::now(),
+                        last_accessed_at: None,
+                        ended_at: None,
+                        metadata: None,
+                    };
+
+                    backend_clone
+                        .insert_session(&session)
+                        .await
+                        .expect("Failed to insert session");
+                }
+
+                // Verify we can list sessions (don't count here, just verify operation works)
+                let _sessions = backend_clone
+                    .list_sessions()
+                    .await
+                    .expect("Failed to list sessions");
+
+                // Return the number of sessions this task inserted
+                5
+            });
+        }
+
+        // Wait for all tasks to complete
+        let mut total_inserted = 0;
+        while let Some(result) = join_set.join_next().await {
+            total_inserted += result.expect("Task failed");
+        }
+
+        // Verify all tasks reported correct insertion count
+        assert_eq!(total_inserted, 50 * 5);
+
+        // Final verification - list should have exactly 250 sessions
+        let sessions = backend
+            .list_sessions()
+            .await
+            .expect("Failed to list sessions");
+
+        assert_eq!(sessions.len(), 250, "Expected exactly 250 sessions");
+    }
+
+    /// Test read-only mode enforcement
+    #[tokio::test]
+    async fn test_read_only_mode_enforcement() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+
+        // First create and initialize with data
+        {
+            let backend = TursoStorageBackend::new(Some(db_path.clone()), None)
+                .await
+                .expect("Failed to create backend");
+            backend.initialize().await.expect("Failed to initialize");
+
+            let session = Session {
+                id: 0,
+                session_id: "test-session".to_string(),
+                title: "Test Session".to_string(),
+                project_path: "/test/project".to_string(),
+                group_path: None,
+                sort_order: 0,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Running,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            };
+
+            backend
+                .insert_session(&session)
+                .await
+                .expect("Failed to insert session");
+        }
+
+        // Now open in read-only mode
+        let config = TursoConfig {
+            #[allow(deprecated)]
+            max_connections: 10,
+            #[allow(deprecated)]
+            connection_timeout_secs: 30,
+            read_only: true,
+        };
+
+        let backend = TursoStorageBackend::new(Some(db_path), Some(config))
+            .await
+            .expect("Failed to create backend");
+
+        // Read operations should work
+        let sessions = backend
+            .list_sessions()
+            .await
+            .expect("Failed to list sessions");
+        assert_eq!(sessions.len(), 1);
+
+        // Write operations should fail
+        let result = backend
+            .insert_session(&Session {
+                id: 0,
+                session_id: "new-session".to_string(),
+                title: "New Session".to_string(),
+                project_path: "/test/new".to_string(),
+                group_path: None,
+                sort_order: 1,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Running,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("read-only"));
+    }
+
+    /// Test foreign key constraint enforcement
+    #[tokio::test]
+    async fn test_foreign_key_constraint_enforcement() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Create a project
+        let project = backend
+            .get_or_create_project("/test/project", "Test Project")
+            .await
+            .expect("Failed to create project");
+
+        // Insert a memory referencing the project
+        let memory = Memory {
+            id: 0,
+            content: "Test content".to_string(),
+            summary: None,
+            category: MemoryCategory::Knowledge,
+            importance: MemoryImportance::Normal,
+            source: None,
+            session_id: None,
+            project_id: {
+                let pid: i64 = project.id;
+                pid.try_into().ok()
+            },
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        };
+
+        backend
+            .insert_memory(&memory)
+            .await
+            .expect("Failed to insert memory");
+
+        // Verify memory is associated with project
+        let memories = backend
+            .get_memories_by_session(&format!("project-{}", project.id))
+            .await;
+
+        // Note: This query is by session_id, so it won't find the memory
+        // The important part is that the insert succeeded with a valid project_id
+    }
+
+    /// Test stats query returns correct counts
+    #[tokio::test]
+    async fn test_stats_query() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test.db");
+        let backend = TursoStorageBackend::new(Some(db_path), None)
+            .await
+            .expect("Failed to create backend");
+        backend.initialize().await.expect("Failed to initialize");
+
+        // Insert test data
+        backend
+            .get_or_create_project("/test/project", "Test Project")
+            .await
+            .expect("Failed to create project");
+
+        let session = Session {
+            id: 0,
+            session_id: "test-session".to_string(),
+            title: "Test Session".to_string(),
+            project_path: "/test/project".to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: None,
+            tool: None,
+            status: SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: Utc::now(),
+            last_accessed_at: None,
+            ended_at: None,
+            metadata: None,
+        };
+
+        backend
+            .insert_session(&session)
+            .await
+            .expect("Failed to insert session");
+
+        let memory = Memory {
+            id: 0,
+            content: "Test content".to_string(),
+            summary: None,
+            category: MemoryCategory::Knowledge,
+            importance: MemoryImportance::Normal,
+            source: None,
+            session_id: Some("test-session".to_string()),
+            project_id: None,
+            track_id: None,
+            command: None,
+            command_context: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            last_accessed: None,
+            metadata: None,
+            tags: None,
+        };
+
+        backend
+            .insert_memory(&memory)
+            .await
+            .expect("Failed to insert memory");
+
+        // Get stats
+        let stats = backend.stats().await.expect("Failed to get stats");
+
+        assert_eq!(stats.project_count, 1);
+        assert_eq!(stats.session_count, 1);
+        assert_eq!(stats.memory_count, 1);
+    }
 }

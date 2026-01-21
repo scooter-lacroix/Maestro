@@ -78,7 +78,7 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 8 Ready)
+## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 8 In Progress)
 *Link: [./maestro/tracks/lsp-integration_20260119/](./maestro/tracks/lsp-integration_20260119/)*
 
 **Description**: On-Demand LSP Integration for Maestro TUI - Add on-demand Language Server Protocol (LSP) support with 3 core Rust-based LSPs (rust-analyzer, ruff-lsp, typescript-language-server), hybrid MCP+stdio exposure, TUI integration with dedicated tab and inline indicators, auto-start lifecycle, and migrate entire database architecture to Turso (libSQL) replacing SQLite/DuckDB/Tantivy with vector search evaluation.
