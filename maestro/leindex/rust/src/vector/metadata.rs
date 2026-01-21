@@ -81,6 +81,26 @@ pub enum ChunkType {
     Other,
 }
 
+impl ChunkType {
+    /// Convert to integer for database storage (prevents SQL injection)
+    pub fn to_i32(self) -> i32 {
+        self as i32
+    }
+
+    /// Convert from integer (database storage) to ChunkType
+    pub fn from_i32(value: i32) -> Self {
+        match value {
+            0 => Self::Function,
+            1 => Self::Class,
+            2 => Self::Module,
+            3 => Self::Import,
+            4 => Self::Comment,
+            5 => Self::Text,
+            _ => Self::Other, // 6 or unknown -> Other
+        }
+    }
+}
+
 impl Default for ChunkType {
     fn default() -> Self {
         Self::Text

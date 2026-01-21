@@ -12,6 +12,7 @@ use tracing::{debug, info, warn};
 
 use super::cache::{TtlCache, VectorDeduplicator};
 use super::metadata::*;
+use super::simd::cosine_similarity;
 
 /// Vector store with HNSW-based similarity search
 pub struct VectorStore {
@@ -74,7 +75,7 @@ impl VectorStore {
         let stored_entries: Vec<StoredVector> = serde_json::from_str(&content)
             .context("Failed to parse vectors.json")?;
 
-        let mut vectors = self.vectors.write().unwrap();
+        let mut vectors = self.vectors.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
         for v in stored_entries {
             if let Some(content) = &v.content {
                 let hash = VectorDeduplicator::hash_content(content);
@@ -102,7 +103,7 @@ impl VectorStore {
     /// Save index metadata
     fn save_metadata(&self) -> Result<()> {
         let meta_path = self.index_path.join("metadata.json");
-        let content = serde_json::to_string_pretty(&*self.metadata.read().unwrap())?;
+        let content = serde_json::to_string_pretty(&*self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?)?;
         fs::write(meta_path, content)?;
         Ok(())
     }
@@ -134,12 +135,12 @@ impl VectorStore {
         };
 
         // Store vector
-        self.vectors.write().unwrap().insert(vector_id.clone(), stored);
+        self.vectors.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?.insert(vector_id.clone(), stored);
         self.deduplicator.register(content_hash, vector_id.clone());
 
         // Update metadata
         {
-            let mut meta = self.metadata.write().unwrap();
+            let mut meta = self.metadata.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             meta.vector_count += 1;
             meta.updated_at = chrono::Utc::now();
         }
@@ -168,33 +169,38 @@ impl VectorStore {
             return Ok(cached);
         }
 
-        let vectors = self.vectors.read().unwrap();
-        
-        // Calculate similarities
-        let mut scores: Vec<(String, f32, VectorMetadata, Option<String>)> = vectors
+        let vectors = self.vectors.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
+        // Two-phase approach to avoid cache thrashing with large tuples (~150 bytes)
+        // Phase 1: Compute scores only (indices + floats)
+        let mut indexed_scores: Vec<(String, f32)> = vectors
             .iter()
             .map(|(id, v)| {
                 let score = cosine_similarity(query_embedding, &v.embedding);
-                (id.clone(), score, v.metadata.clone(), v.content.clone())
+                (id.clone(), score)
             })
             .collect();
 
-        // Sort by score descending - use partial sort for efficiency if top_k is small
-        if scores.len() > top_k {
-            scores.select_nth_unstable_by(top_k - 1, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            scores.truncate(top_k);
+        // Partially sort to get top-k scores efficiently
+        if indexed_scores.len() > top_k {
+            indexed_scores.select_nth_unstable_by(top_k - 1, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            indexed_scores.truncate(top_k);
         }
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Take top_k
-        let results: Vec<SearchResult> = scores
+        // Sort the top-k scores in descending order
+        indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Phase 2: Lookup metadata for top-k results
+        let results: Vec<SearchResult> = indexed_scores
             .into_iter()
-            .take(top_k)
-            .map(|(id, score, metadata, content)| SearchResult {
-                vector_id: id,
-                score,
-                metadata,
-                content,
+            .map(|(id, score)| {
+                let v = &vectors[&id];  // Safe lookup since we just got the id from the same map
+                SearchResult {
+                    vector_id: v.id.clone(),
+                    score,
+                    metadata: v.metadata.clone(),
+                    content: v.content.clone(),
+                }
             })
             .collect();
 
@@ -206,7 +212,7 @@ impl VectorStore {
 
     /// Delete vectors by file path
     pub fn delete_by_file(&self, file_path: &str) -> Result<usize> {
-        let mut vectors = self.vectors.write().unwrap();
+        let mut vectors = self.vectors.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
         let initial_count = vectors.len();
 
         for v in vectors.values() {
@@ -214,13 +220,13 @@ impl VectorStore {
                 self.deduplicator.unregister(&v.id);
             }
         }
-        
+
         vectors.retain(|_, v| v.metadata.file_path != file_path);
 
         let deleted = initial_count - vectors.len();
 
         if deleted > 0 {
-            let mut meta = self.metadata.write().unwrap();
+            let mut meta = self.metadata.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             meta.vector_count = meta.vector_count.saturating_sub(deleted);
             meta.updated_at = chrono::Utc::now();
             self.cache.clear();
@@ -231,12 +237,12 @@ impl VectorStore {
 
     /// Get vector count
     pub fn vector_count(&self) -> usize {
-        self.metadata.read().unwrap().vector_count
+        self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap().vector_count
     }
 
     /// Get index info
     pub fn info(&self) -> IndexMetadata {
-        self.metadata.read().unwrap().clone()
+        self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap().clone()
     }
 
     /// Get cache statistics
@@ -251,13 +257,14 @@ impl VectorStore {
 
         // Save vectors
         let vectors_path = self.index_path.join("vectors.json");
-        let vectors = self.vectors.read().unwrap();
-        
+        let vectors = self.vectors.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
         let serializable: Vec<_> = vectors.values().map(|v| {
             serde_json::json!({
                 "id": v.id,
                 "embedding": v.embedding,
                 "metadata": v.metadata,
+                "content": v.content,
             })
         }).collect();
 
@@ -266,23 +273,6 @@ impl VectorStore {
 
         info!("Persisted {} vectors to disk", vectors.len());
         Ok(())
-    }
-}
-
-/// Cosine similarity between two vectors
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() {
-        return 0.0;
-    }
-
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot / (norm_a * norm_b)
     }
 }
 
