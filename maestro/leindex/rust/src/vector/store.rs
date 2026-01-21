@@ -123,6 +123,13 @@ impl VectorStore {
         embedding: Vec<f32>,
         metadata: VectorMetadata,
     ) -> Result<String> {
+        // Task 7.6.31: Validate embedding dimension
+        validate_embedding_dim(&embedding)?;
+        // Task 7.6.33: Validate chunk_index
+        validate_chunk_index(metadata.chunk_index)?;
+        // Task 7.7.1: Validate file_path
+        validate_file_path(&metadata.file_path)?;
+
         // Check for duplicate via content hash
         let content_hash = VectorDeduplicator::hash_content(content);
 
@@ -174,13 +181,14 @@ impl VectorStore {
         embedding: Vec<f32>,
         metadata: VectorMetadata,
     ) -> Result<String> {
-        // Validate vector_id format (must start with "vec_")
-        if !vector_id.starts_with("vec_") {
-            return Err(anyhow::anyhow!(
-                "Invalid vector_id format: must start with 'vec_', got: {}",
-                vector_id
-            ));
-        }
+        // Task 7.6.31: Validate embedding dimension
+        validate_embedding_dim(&embedding)?;
+        // Task 7.6.33: Validate chunk_index
+        validate_chunk_index(metadata.chunk_index)?;
+        // Task 7.7.1: Validate file_path
+        validate_file_path(&metadata.file_path)?;
+        // Task 7.6.32: Validate vector_id format
+        validate_vector_id(vector_id)?;
 
         // Check for duplicate via content hash
         let content_hash = VectorDeduplicator::hash_content(content);
@@ -235,6 +243,9 @@ impl VectorStore {
     /// Search for similar vectors
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);
+
+        // Task 7.6.31: Validate query embedding dimension
+        validate_embedding_dim(query_embedding)?;
 
         // CRITICAL: Early return for top_k == 0 to prevent panic (select_nth_unstable_by would underflow)
         if top_k == 0 {

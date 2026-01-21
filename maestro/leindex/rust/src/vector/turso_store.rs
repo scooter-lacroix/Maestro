@@ -236,6 +236,13 @@ impl TursoVectorStore {
             return Err(anyhow::anyhow!("Cannot add vector: store is shut down"));
         }
 
+        // Task 7.6.31: Validate embedding dimension
+        validate_embedding_dim(&embedding)?;
+        // Task 7.6.33: Validate chunk_index
+        validate_chunk_index(metadata.chunk_index)?;
+        // Task 7.7.1: Validate file_path
+        validate_file_path(&metadata.file_path)?;
+
         let vector_id = format!(
             "vec_{}",
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
@@ -315,13 +322,14 @@ impl TursoVectorStore {
             ));
         }
 
-        // Validate vector_id format (must start with "vec_")
-        if !vector_id.starts_with("vec_") {
-            return Err(anyhow::anyhow!(
-                "Invalid vector_id format: must start with 'vec_', got: {}",
-                vector_id
-            ));
-        }
+        // Task 7.6.31: Validate embedding dimension
+        validate_embedding_dim(&embedding)?;
+        // Task 7.6.33: Validate chunk_index
+        validate_chunk_index(metadata.chunk_index)?;
+        // Task 7.7.1: Validate file_path
+        validate_file_path(&metadata.file_path)?;
+        // Task 7.6.32: Validate vector_id format
+        validate_vector_id(vector_id)?;
 
         // Serialize embedding as JSON array for storage
         let embedding_json =
@@ -391,6 +399,9 @@ impl TursoVectorStore {
         if self.is_shutdown.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("Cannot search: store is shut down"));
         }
+
+        // Task 7.6.31: Validate query embedding dimension
+        validate_embedding_dim(query_embedding)?;
 
         let top_k = top_k.min(MAX_TOP_K);
 

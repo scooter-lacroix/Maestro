@@ -2,6 +2,7 @@
 //!
 //! Metadata structures for vectors and index.
 
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -220,4 +221,69 @@ mod rand {
 
         (h as f64) / (u64::MAX as f64)
     }
+}
+
+// Validation constants (Task 7.6.31-33, 7.7.1)
+pub const MIN_EMBEDDING_DIM: usize = 1;
+pub const MAX_EMBEDDING_DIM: usize = 4096;
+pub const MAX_CHUNK_INDEX: i32 = 10_000_000;
+pub const MAX_FILE_PATH_LENGTH: usize = 4096;
+
+/// Validate embedding dimensions (Task 7.6.31)
+pub fn validate_embedding_dim(embedding: &[f32]) -> Result<()> {
+    let dim = embedding.len();
+    if dim < MIN_EMBEDDING_DIM || dim > MAX_EMBEDDING_DIM {
+        return Err(anyhow::anyhow!(
+            "Invalid embedding dimension: {} (must be between {} and {})",
+            dim,
+            MIN_EMBEDDING_DIM,
+            MAX_EMBEDDING_DIM
+        ));
+    }
+    Ok(())
+}
+
+/// Validate vector_id format (Task 7.6.32)
+pub fn validate_vector_id(vector_id: &str) -> Result<()> {
+    if !vector_id.starts_with("vec_") {
+        return Err(anyhow::anyhow!(
+            "Invalid vector_id format: must start with 'vec_', got: {}",
+            vector_id
+        ));
+    }
+    if vector_id.len() < 5 {
+        // "vec_" + at least 1 char
+        return Err(anyhow::anyhow!(
+            "Invalid vector_id: too short, got: {}",
+            vector_id
+        ));
+    }
+    Ok(())
+}
+
+/// Validate chunk_index bounds (Task 7.6.33)
+pub fn validate_chunk_index(chunk_index: i32) -> Result<()> {
+    if chunk_index < 0 || chunk_index > MAX_CHUNK_INDEX {
+        return Err(anyhow::anyhow!(
+            "Invalid chunk_index: {} (must be between 0 and {})",
+            chunk_index,
+            MAX_CHUNK_INDEX
+        ));
+    }
+    Ok(())
+}
+
+/// Validate file_path is not empty (Task 7.7.1)
+pub fn validate_file_path(file_path: &str) -> Result<()> {
+    if file_path.trim().is_empty() {
+        return Err(anyhow::anyhow!("Invalid file_path: cannot be empty"));
+    }
+    if file_path.len() > MAX_FILE_PATH_LENGTH {
+        return Err(anyhow::anyhow!(
+            "Invalid file_path: too long ({} chars, max {})",
+            file_path.len(),
+            MAX_FILE_PATH_LENGTH
+        ));
+    }
+    Ok(())
 }

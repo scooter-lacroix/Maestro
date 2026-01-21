@@ -168,6 +168,13 @@ impl HnswVectorStore {
         embedding: Vec<f32>,
         metadata: VectorMetadata,
     ) -> Result<String> {
+        // Task 7.6.31: Validate embedding dimension
+        validate_embedding_dim(&embedding)?;
+        // Task 7.6.33: Validate chunk_index
+        validate_chunk_index(metadata.chunk_index)?;
+        // Task 7.7.1: Validate file_path
+        validate_file_path(&metadata.file_path)?;
+
         // Insert into HNSW index - returns internal ID
         let internal_id = {
             let mut hnsw = self
@@ -221,13 +228,14 @@ impl HnswVectorStore {
         embedding: Vec<f32>,
         metadata: VectorMetadata,
     ) -> Result<String> {
-        // Validate external_id format (must start with "vec_")
-        if !external_id.starts_with("vec_") {
-            return Err(anyhow::anyhow!(
-                "Invalid external_id format: must start with 'vec_', got: {}",
-                external_id
-            ));
-        }
+        // Task 7.6.31: Validate embedding dimension
+        validate_embedding_dim(&embedding)?;
+        // Task 7.6.33: Validate chunk_index
+        validate_chunk_index(metadata.chunk_index)?;
+        // Task 7.7.1: Validate file_path
+        validate_file_path(&metadata.file_path)?;
+        // Task 7.6.32: Validate vector_id format
+        validate_vector_id(external_id)?;
 
         // Insert into HNSW index - returns internal ID
         let internal_id = {
@@ -278,6 +286,9 @@ impl HnswVectorStore {
     /// Search for similar vectors using HNSW
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);
+
+        // Task 7.6.31: Validate query embedding dimension
+        validate_embedding_dim(query_embedding)?;
 
         // Check cache
         use sha2::{Digest, Sha256};
