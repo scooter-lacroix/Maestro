@@ -14,10 +14,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use super::store::VectorStore;
 use super::hnsw_store::HnswVectorStore;
-use super::turso_store::TursoVectorStore;
 use super::metadata::*;
+use super::store::VectorStore;
+use super::turso_store::TursoVectorStore;
 
 /// Threshold for switching from Linear to HNSW search
 const HNSW_THRESHOLD: usize = 90_000;
@@ -76,7 +76,10 @@ impl AdaptiveVectorStore {
                 Some(store)
             }
             Err(e) => {
-                warn!("Failed to initialize Turso store: {}, continuing without persistence", e);
+                warn!(
+                    "Failed to initialize Turso store: {}, continuing without persistence",
+                    e
+                );
                 None
             }
         };
@@ -119,8 +122,11 @@ impl AdaptiveVectorStore {
             index_path: path,
         };
 
-        info!("Adaptive vector store initialized in {:?} mode ({} vectors)",
-              store.mode(), initial_count);
+        info!(
+            "Adaptive vector store initialized in {:?} mode ({} vectors)",
+            store.mode(),
+            initial_count
+        );
 
         Ok(store)
     }
@@ -141,13 +147,13 @@ impl AdaptiveVectorStore {
             StoreMode::Linear => {
                 let linear_guard = self.linear.read().await;
                 if let Some(ref linear) = *linear_guard {
-                    return Ok(linear.vector_count());
+                    return Ok(linear.vector_count()?);
                 }
             }
             StoreMode::Hnsw => {
                 let hnsw_guard = self.hnsw.read().await;
                 if let Some(ref hnsw) = *hnsw_guard {
-                    return Ok(hnsw.vector_count());
+                    return Ok(hnsw.vector_count()?);
                 }
             }
             StoreMode::Turso => {
@@ -173,7 +179,11 @@ impl AdaptiveVectorStore {
 
         // Always add to Turso for persistence
         let turso_id = if let Some(ref turso) = self.turso {
-            Some(turso.add_vector(content, embedding.clone(), metadata.clone()).await?)
+            Some(
+                turso
+                    .add_vector(content, embedding.clone(), metadata.clone())
+                    .await?,
+            )
         } else {
             None
         };
@@ -196,15 +206,16 @@ impl AdaptiveVectorStore {
                     turso_id.ok_or_else(|| anyhow::anyhow!("No active store"))?
                 }
             }
-            StoreMode::Turso => {
-                turso_id.ok_or_else(|| anyhow::anyhow!("No active store"))?
-            }
+            StoreMode::Turso => turso_id.ok_or_else(|| anyhow::anyhow!("No active store"))?,
         };
 
         // Check if we need to switch modes
         let count = self.vector_count().await?;
         if self.mode() == StoreMode::Linear && count >= HNSW_SWITCH_UP_THRESHOLD {
-            info!("Vector count reached {}K, switching to HNSW mode", count / 1000);
+            info!(
+                "Vector count reached {}K, switching to HNSW mode",
+                count / 1000
+            );
             self.switch_to_hnsw().await?;
         }
 
@@ -221,14 +232,20 @@ impl AdaptiveVectorStore {
             StoreMode::Linear => {
                 let linear_guard = self.linear.read().await;
                 if let Some(ref linear) = *linear_guard {
-                    debug!("Searching using Linear store ({} vectors)", linear.vector_count());
+                    debug!(
+                        "Searching using Linear store ({} vectors)",
+                        linear.vector_count().unwrap_or(0)
+                    );
                     return linear.search(query_embedding, top_k);
                 }
             }
             StoreMode::Hnsw => {
                 let hnsw_guard = self.hnsw.read().await;
                 if let Some(ref hnsw) = *hnsw_guard {
-                    debug!("Searching using HNSW store ({} vectors)", hnsw.vector_count());
+                    debug!(
+                        "Searching using HNSW store ({} vectors)",
+                        hnsw.vector_count().unwrap_or(0)
+                    );
                     return hnsw.search(query_embedding, top_k);
                 }
             }
@@ -282,7 +299,10 @@ impl AdaptiveVectorStore {
         // Check if we should switch back to Linear mode
         let count = self.vector_count().await?;
         if self.mode() == StoreMode::Hnsw && count < HNSW_SWITCH_DOWN_THRESHOLD {
-            info!("Vector count dropped to {}K, switching to Linear mode", count / 1000);
+            info!(
+                "Vector count dropped to {}K, switching to Linear mode",
+                count / 1000
+            );
             self.switch_to_linear().await?;
         }
 
@@ -316,7 +336,9 @@ impl AdaptiveVectorStore {
             // and rely on persistence to handle the data migration properly.
 
             // Persist the old store to disk first to ensure all data is saved
-            old_store.persist().context("Failed to persist old linear store before migration")?;
+            old_store
+                .persist()
+                .context("Failed to persist old linear store before migration")?;
 
             // Create a new HNSW store and load the data from disk
             new_hnsw_store = HnswVectorStore::new(Some(self.index_path.clone()), None)
@@ -360,7 +382,9 @@ impl AdaptiveVectorStore {
             info!("Migrating data from HNSW store to Linear store...");
 
             // Persist the old store to disk first to ensure all data is saved
-            old_store.persist().context("Failed to persist old HNSW store before migration")?;
+            old_store
+                .persist()
+                .context("Failed to persist old HNSW store before migration")?;
 
             // Create a new linear store and load the data from disk
             new_linear_store = VectorStore::new(Some(self.index_path.clone()), None)
@@ -376,7 +400,8 @@ impl AdaptiveVectorStore {
         }
 
         // Update mode atomically
-        self.mode.store(StoreMode::Linear as usize, Ordering::SeqCst);
+        self.mode
+            .store(StoreMode::Linear as usize, Ordering::SeqCst);
 
         info!("Successfully switched to Linear mode");
         Ok(())
@@ -405,21 +430,17 @@ impl AdaptiveVectorStore {
     /// Get cache statistics
     pub async fn cache_stats(&self) -> super::cache::CacheStats {
         match self.mode() {
-            StoreMode::Linear => {
-                match self.linear.read().await.as_ref() {
-                    Some(linear) => linear.cache_stats(),
-                    None => super::cache::CacheStats::default(),
-                }
-            }
-            StoreMode::Hnsw => {
-                match self.hnsw.read().await.as_ref() {
-                    Some(hnsw) => hnsw.cache_stats(),
-                    None => super::cache::CacheStats::default(),
-                }
-            }
+            StoreMode::Linear => match self.linear.read().await.as_ref() {
+                Some(linear) => linear.cache_stats().unwrap_or_default(),
+                None => super::cache::CacheStats::default(),
+            },
+            StoreMode::Hnsw => match self.hnsw.read().await.as_ref() {
+                Some(hnsw) => hnsw.cache_stats().unwrap_or_default(),
+                None => super::cache::CacheStats::default(),
+            },
             StoreMode::Turso => {
                 if let Some(ref turso) = self.turso {
-                    return turso.cache_stats();
+                    return turso.cache_stats().unwrap_or_default();
                 }
                 super::cache::CacheStats::default()
             }
@@ -433,7 +454,10 @@ impl AdaptiveVectorStore {
             return Ok(());
         }
 
-        info!("Shutting down adaptive vector store at {:?}", self.index_path);
+        info!(
+            "Shutting down adaptive vector store at {:?}",
+            self.index_path
+        );
 
         // Persist in-memory state
         self.persist().await?;
@@ -458,7 +482,9 @@ mod tests {
     #[tokio::test]
     async fn test_adaptive_store_creation() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
-        let store = AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf())).await.unwrap();
+        let store = AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf()))
+            .await
+            .unwrap();
         assert_eq!(store.mode(), StoreMode::Linear);
 
         let count = store.vector_count().await.unwrap();
@@ -468,13 +494,18 @@ mod tests {
     #[tokio::test]
     async fn test_adaptive_add_and_search() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
-        let store = AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf())).await.unwrap();
+        let store = AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf()))
+            .await
+            .unwrap();
 
         let embedding = vec![0.1; 768];
         let metadata = VectorMetadata::new("test.rs", 0);
         let content = "test content";
 
-        store.add_vector(content, embedding, metadata).await.unwrap();
+        store
+            .add_vector(content, embedding, metadata)
+            .await
+            .unwrap();
 
         let count = store.vector_count().await.unwrap();
         assert_eq!(count, 1);
@@ -483,7 +514,9 @@ mod tests {
     #[tokio::test]
     async fn test_adaptive_shutdown() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
-        let store = AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf())).await.unwrap();
+        let store = AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf()))
+            .await
+            .unwrap();
 
         store.shutdown().await.unwrap();
         assert!(store.is_shutdown.load(Ordering::SeqCst));

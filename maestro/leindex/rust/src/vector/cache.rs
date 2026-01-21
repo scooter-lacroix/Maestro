@@ -3,6 +3,7 @@
 //! Thread-safe LRU cache with time-to-live support.
 //! Used for caching search results and embeddings.
 
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -54,33 +55,48 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> TtlCache<K, V> {
     }
 
     /// Get a value from the cache
-    pub fn get(&self, key: &K) -> Option<V> {
-        let mut entries = self.entries.lock().unwrap();
+    pub fn get(&self, key: &K) -> Result<Option<V>> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
         let now = Instant::now();
 
         if let Some(entry) = entries.get_mut(key) {
             if entry.expires_at > now {
                 // Update last accessed
                 entry.last_accessed = now;
-                self.stats.lock().unwrap().hits += 1;
-                return Some(entry.value.clone());
+                self.stats
+                    .lock()
+                    .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+                    .hits += 1;
+                return Ok(Some(entry.value.clone()));
             } else {
                 // Expired
                 entries.remove(key);
-                let mut stats = self.stats.lock().unwrap();
+                let mut stats = self
+                    .stats
+                    .lock()
+                    .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
                 stats.misses += 1;
                 stats.expirations += 1;
             }
         } else {
-            self.stats.lock().unwrap().misses += 1;
+            self.stats
+                .lock()
+                .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+                .misses += 1;
         }
 
-        None
+        Ok(None)
     }
 
     /// Put a value in the cache
-    pub fn put(&self, key: K, value: V) {
-        let mut entries = self.entries.lock().unwrap();
+    pub fn put(&self, key: K, value: V) -> Result<()> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
         let now = Instant::now();
 
         // Evict if at capacity
@@ -93,7 +109,10 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> TtlCache<K, V> {
 
             if let Some(k) = lru_key {
                 entries.remove(&k);
-                self.stats.lock().unwrap().evictions += 1;
+                self.stats
+                    .lock()
+                    .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+                    .evictions += 1;
             }
         }
 
@@ -105,36 +124,62 @@ impl<K: std::hash::Hash + Eq + Clone, V: Clone> TtlCache<K, V> {
                 last_accessed: now,
             },
         );
+        Ok(())
     }
 
     /// Remove a specific key
-    pub fn remove(&self, key: &K) -> bool {
-        self.entries.lock().unwrap().remove(key).is_some()
+    pub fn remove(&self, key: &K) -> Result<bool> {
+        Ok(self
+            .entries
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .remove(key)
+            .is_some())
     }
 
     /// Clear all entries
-    pub fn clear(&self) {
-        self.entries.lock().unwrap().clear();
+    pub fn clear(&self) -> Result<()> {
+        self.entries
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .clear();
+        Ok(())
     }
 
     /// Get cache statistics
-    pub fn stats(&self) -> CacheStats {
-        self.stats.lock().unwrap().clone()
+    pub fn stats(&self) -> Result<CacheStats> {
+        Ok(self
+            .stats
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .clone())
     }
 
     /// Reset statistics
-    pub fn reset_stats(&self) {
-        *self.stats.lock().unwrap() = CacheStats::default();
+    pub fn reset_stats(&self) -> Result<()> {
+        *self
+            .stats
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))? = CacheStats::default();
+        Ok(())
     }
 
     /// Get current size
-    pub fn len(&self) -> usize {
-        self.entries.lock().unwrap().len()
+    pub fn len(&self) -> Result<usize> {
+        Ok(self
+            .entries
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .len())
     }
 
     /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.entries.lock().unwrap().is_empty()
+    pub fn is_empty(&self) -> Result<bool> {
+        Ok(self
+            .entries
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .is_empty())
     }
 }
 
@@ -154,51 +199,76 @@ impl VectorDeduplicator {
 
     /// Hash content using SHA-256
     pub fn hash_content(content: &str) -> String {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         format!("{:x}", hasher.finalize())
     }
 
     /// Unregister a vector (for deletions)
-    pub fn unregister(&self, vector_id: &str) {
-        let mut counts = self.reference_counts.lock().unwrap();
+    pub fn unregister(&self, vector_id: &str) -> Result<()> {
+        let mut counts = self
+            .reference_counts
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
         counts.remove(vector_id);
-        
+
         // Note: Full reverse lookup (hash_to_id) cleanup is O(N) here.
         // In a real system we'd store bidirectionally or just let it expire.
         // For now we just remove the ref count to prevent "phantom" dedup.
-        let mut hash_to_id = self.hash_to_id.lock().unwrap();
+        let mut hash_to_id = self
+            .hash_to_id
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
         hash_to_id.retain(|_, id| id != vector_id);
+        Ok(())
     }
 
     /// Get existing vector ID for content hash
-    pub fn get_vector_id(&self, content_hash: &str) -> Option<String> {
-        self.hash_to_id.lock().unwrap().get(content_hash).cloned()
+    pub fn get_vector_id(&self, content_hash: &str) -> Result<Option<String>> {
+        Ok(self
+            .hash_to_id
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .get(content_hash)
+            .cloned())
     }
 
     /// Register a new vector
-    pub fn register(&self, content_hash: String, vector_id: String) {
-        self.hash_to_id.lock().unwrap().insert(content_hash, vector_id.clone());
-        self.reference_counts.lock().unwrap().insert(vector_id, 1);
+    pub fn register(&self, content_hash: String, vector_id: String) -> Result<()> {
+        self.hash_to_id
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .insert(content_hash, vector_id.clone());
+        self.reference_counts
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?
+            .insert(vector_id, 1);
+        Ok(())
     }
 
     /// Add a reference to an existing vector
-    pub fn add_reference(&self, vector_id: &str) -> u32 {
-        let mut counts = self.reference_counts.lock().unwrap();
+    pub fn add_reference(&self, vector_id: &str) -> Result<u32> {
+        let mut counts = self
+            .reference_counts
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
         let count = counts.entry(vector_id.to_string()).or_insert(0);
         *count += 1;
-        *count
+        Ok(*count)
     }
 
     /// Remove a reference
-    pub fn remove_reference(&self, vector_id: &str) -> u32 {
-        let mut counts = self.reference_counts.lock().unwrap();
+    pub fn remove_reference(&self, vector_id: &str) -> Result<u32> {
+        let mut counts = self
+            .reference_counts
+            .lock()
+            .map_err(|e| anyhow!("Lock poisoned: {}", e))?;
         if let Some(count) = counts.get_mut(vector_id) {
             *count = count.saturating_sub(1);
-            *count
+            Ok(*count)
         } else {
-            0
+            Ok(0)
         }
     }
 }
@@ -216,20 +286,23 @@ mod tests {
     #[test]
     fn test_ttl_cache_basic() {
         let cache: TtlCache<String, i32> = TtlCache::new(10, 60);
-        
-        cache.put("key1".to_string(), 42);
-        assert_eq!(cache.get(&"key1".to_string()), Some(42));
-        assert_eq!(cache.get(&"key2".to_string()), None);
+
+        cache.put("key1".to_string(), 42).unwrap();
+        assert_eq!(cache.get(&"key1".to_string()).unwrap(), Some(42));
+        assert_eq!(cache.get(&"key2".to_string()).unwrap(), None);
     }
 
     #[test]
     fn test_deduplicator() {
         let dedup = VectorDeduplicator::new();
-        
+
         let hash = VectorDeduplicator::hash_content("test content");
-        assert!(dedup.get_vector_id(&hash).is_none());
-        
-        dedup.register(hash.clone(), "vec_1".to_string());
-        assert_eq!(dedup.get_vector_id(&hash), Some("vec_1".to_string()));
+        assert!(dedup.get_vector_id(&hash).unwrap().is_none());
+
+        dedup.register(hash.clone(), "vec_1".to_string()).unwrap();
+        assert_eq!(
+            dedup.get_vector_id(&hash).unwrap(),
+            Some("vec_1".to_string())
+        );
     }
 }

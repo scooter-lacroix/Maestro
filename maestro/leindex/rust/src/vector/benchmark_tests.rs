@@ -1,8 +1,6 @@
 //! Unit tests for vector benchmark infrastructure
 
-use crate::vector::{
-    VectorStore, VectorMetadata, ChunkType, SearchResult,
-};
+use crate::vector::{ChunkType, SearchResult, VectorMetadata, VectorStore};
 
 /// Test that generated embeddings are valid (normalized)
 #[test]
@@ -14,7 +12,11 @@ fn test_embedding_validation() {
 
     // Check values are in valid range
     for &val in &embedding {
-        assert!(val >= -1.0 && val <= 1.0, "Embedding value out of range: {}", val);
+        assert!(
+            val >= -1.0 && val <= 1.0,
+            "Embedding value out of range: {}",
+            val
+        );
     }
 }
 
@@ -25,12 +27,18 @@ fn test_cosine_similarity_calculation() {
     let a = vec![1.0, 0.0, 0.0];
     let b = vec![1.0, 0.0, 0.0];
     let sim = cosine_similarity(&a, &b);
-    assert!((sim - 1.0).abs() < 0.001, "Identical vectors should have similarity 1.0");
+    assert!(
+        (sim - 1.0).abs() < 0.001,
+        "Identical vectors should have similarity 1.0"
+    );
 
     // Test orthogonal vectors
     let c = vec![0.0, 1.0, 0.0];
     let sim2 = cosine_similarity(&a, &c);
-    assert!(sim2.abs() < 0.001, "Orthogonal vectors should have similarity ~0");
+    assert!(
+        sim2.abs() < 0.001,
+        "Orthogonal vectors should have similarity ~0"
+    );
 }
 
 /// Cosine similarity helper (duplicate from store.rs for testing)
@@ -134,11 +142,11 @@ fn test_cache_effectiveness() {
 
     // First search (cache miss)
     let _ = store.search(&query, 5).unwrap();
-    let stats_before = store.cache_stats();
+    let stats_before = store.cache_stats().unwrap();
 
     // Second search (cache hit)
     let _ = store.search(&query, 5).unwrap();
-    let stats_after = store.cache_stats();
+    let stats_after = store.cache_stats().unwrap();
 
     // Cache should have more hits after second search
     assert!(
@@ -179,7 +187,9 @@ fn test_metadata_preservation() {
 
     let embedding = vec![0.1; 768];
     let content = "test content";
-    let _ = store.add_vector(content, embedding, original_metadata.clone()).unwrap();
+    let _ = store
+        .add_vector(content, embedding, original_metadata.clone())
+        .unwrap();
 
     let query = vec![0.1; 768];
     let results = store.search(&query, 1).unwrap();
@@ -192,7 +202,10 @@ fn test_metadata_preservation() {
     assert_eq!(retrieved.metadata.start_line, Some(10));
     assert_eq!(retrieved.metadata.end_line, Some(20));
     assert_eq!(retrieved.metadata.chunk_type, ChunkType::Function);
-    assert_eq!(retrieved.metadata.parent_context, Some("parent_function".to_string()));
+    assert_eq!(
+        retrieved.metadata.parent_context,
+        Some("parent_function".to_string())
+    );
     assert_eq!(retrieved.content, Some("test content".to_string()));
 }
 
@@ -206,19 +219,19 @@ fn test_delete_by_file() {
     for file_idx in 0..3 {
         for i in 0..5 {
             let mut embedding = vec![0.0; 768];
-            embedding[file_idx * 5 + i] = 1.0;  // Unique pattern per vector
+            embedding[file_idx * 5 + i] = 1.0; // Unique pattern per vector
             let metadata = VectorMetadata::new(&format!("file{}.rs", file_idx), i as i32);
-            let content = format!("content {}_{}", file_idx, i);  // Unique content
+            let content = format!("content {}_{}", file_idx, i); // Unique content
             store.add_vector(&content, embedding, metadata).unwrap();
         }
     }
 
-    assert_eq!(store.vector_count(), 15);
+    assert_eq!(store.vector_count().unwrap(), 15);
 
     // Delete all vectors from file0.rs
     let deleted = store.delete_by_file("file0.rs").unwrap();
     assert_eq!(deleted, 5);
-    assert_eq!(store.vector_count(), 10);
+    assert_eq!(store.vector_count().unwrap(), 10);
 
     // Verify file0.rs vectors are gone
     let query = vec![0.1; 768];
@@ -234,7 +247,7 @@ fn test_vector_count_accuracy() {
     let temp_dir = tempfile::tempdir().unwrap();
     let store = VectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
 
-    assert_eq!(store.vector_count(), 0);
+    assert_eq!(store.vector_count().unwrap(), 0);
 
     for i in 0..10 {
         let embedding = vec![0.1; 768];
@@ -243,7 +256,7 @@ fn test_vector_count_accuracy() {
         store.add_vector(&content, embedding, metadata).unwrap();
     }
 
-    assert_eq!(store.vector_count(), 10);
+    assert_eq!(store.vector_count().unwrap(), 10);
 }
 
 /// Test that deduplication works correctly
@@ -257,12 +270,14 @@ fn test_deduplication() {
     let content = "duplicate content";
 
     // Add same content twice
-    let id1 = store.add_vector(content, embedding.clone(), metadata.clone()).unwrap();
+    let id1 = store
+        .add_vector(content, embedding.clone(), metadata.clone())
+        .unwrap();
     let id2 = store.add_vector(content, embedding, metadata).unwrap();
 
     // Should return same ID (deduplicated)
     assert_eq!(id1, id2);
-    assert_eq!(store.vector_count(), 1);
+    assert_eq!(store.vector_count().unwrap(), 1);
 }
 
 /// Test MAX_TOP_K is enforced

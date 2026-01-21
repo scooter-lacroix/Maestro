@@ -6,14 +6,11 @@
 //! 3. test_lock_poisoning_recovery - Simulate lock poisoning and verify error handling works
 
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::task;
-use std::time::Duration;
 
-use crate::vector::{
-    VectorStore, VectorMetadata, ChunkType, AdaptiveVectorStore,
-    SearchResult,
-};
+use crate::vector::{AdaptiveVectorStore, ChunkType, SearchResult, VectorMetadata, VectorStore};
 
 /// Test concurrent add and delete operations
 #[tokio::test]
@@ -41,14 +38,20 @@ async fn test_concurrent_add_delete() {
                     embedding[j] = (thread_id * 100 + i * 10 + j) as f32 / 10000.0;
                 }
 
-                let metadata = VectorMetadata::new(&format!("file{}_{}.rs", thread_id, i), i as i32);
+                let metadata =
+                    VectorMetadata::new(&format!("file{}_{}.rs", thread_id, i), i as i32);
 
                 // Add vector
-                let _ = store_clone.add_vector(&content, embedding, metadata).unwrap();
+                let _ = store_clone
+                    .add_vector(&content, embedding, metadata)
+                    .unwrap();
 
                 // Occasionally delete vectors by file
-                if i % 10 == 9 {  // Delete on every 10th iteration
-                    let _ = store_clone.delete_by_file(&format!("file{}_{}.rs", thread_id, i-9)).unwrap();
+                if i % 10 == 9 {
+                    // Delete on every 10th iteration
+                    let _ = store_clone
+                        .delete_by_file(&format!("file{}_{}.rs", thread_id, i - 9))
+                        .unwrap();
                 }
             }
         });
@@ -63,7 +66,10 @@ async fn test_concurrent_add_delete() {
     // Verify the store is still functional
     let query = vec![0.5; 768];
     let results = store.search(&query, 10).unwrap();
-    println!("Final search returned {} results after concurrent operations", results.len());
+    println!(
+        "Final search returned {} results after concurrent operations",
+        results.len()
+    );
 
     // The store should still be functional even if some operations were deleted
     assert!(results.len() >= 0); // Should not panic
@@ -75,7 +81,11 @@ async fn test_concurrent_mode_switch() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let adaptive_store = Arc::new(AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf())).await.unwrap());
+    let adaptive_store = Arc::new(
+        AdaptiveVectorStore::new(Some(temp_dir.path().to_path_buf()))
+            .await
+            .unwrap(),
+    );
 
     let num_threads = 6;
     let mut handles = vec![];
@@ -92,10 +102,14 @@ async fn test_concurrent_mode_switch() {
                 for j in 0..768 {
                     embedding[j] = (thread_id * 100 + i + j) as f32 / 1000.0;
                 }
-                let metadata = VectorMetadata::new(&format!("thread{}_file{}.rs", thread_id, i), i as i32);
+                let metadata =
+                    VectorMetadata::new(&format!("thread{}_file{}.rs", thread_id, i), i as i32);
 
                 // Add vector
-                let _ = store_clone.add_vector(&content, embedding, metadata).await.unwrap();
+                let _ = store_clone
+                    .add_vector(&content, embedding, metadata)
+                    .await
+                    .unwrap();
 
                 // Perform search
                 let mut query = vec![0.0; 768];
@@ -106,7 +120,10 @@ async fn test_concurrent_mode_switch() {
 
                 // Occasionally delete vectors to trigger potential mode switches
                 if i % 15 == 0 && i > 0 {
-                    let _ = store_clone.delete_by_file(&format!("thread{}_file{}.rs", thread_id, i-15)).await.unwrap();
+                    let _ = store_clone
+                        .delete_by_file(&format!("thread{}_file{}.rs", thread_id, i - 15))
+                        .await
+                        .unwrap();
                 }
 
                 // Brief pause to allow other threads to operate and potentially trigger mode switches
@@ -143,15 +160,18 @@ async fn test_concurrent_mode_switch() {
     assert!(results.len() >= 0); // Should not panic
 
     println!("Final mode: {:?}", adaptive_store.mode());
-    println!("Final vector count: {}", adaptive_store.vector_count().await.unwrap());
+    println!(
+        "Final vector count: {}",
+        adaptive_store.vector_count().await.unwrap()
+    );
 }
 
 /// Test lock poisoning recovery in vector stores
 #[tokio::test]
 async fn test_lock_poisoning_recovery() {
+    use std::panic;
     use std::sync::{Arc, Mutex};
     use std::thread;
-    use std::panic;
 
     // Test actual lock poisoning scenario with a custom structure that mimics our stores
     let mutex = Arc::new(Mutex::new(Vec::new()));
@@ -208,10 +228,13 @@ async fn test_lock_poisoning_recovery() {
                 for j in 0..768 {
                     embedding[j] = (thread_id * 100 + i * 10 + j) as f32 / 10000.0;
                 }
-                let metadata = VectorMetadata::new(&format!("file_{}_{}.rs", thread_id, i), i as i32);
+                let metadata =
+                    VectorMetadata::new(&format!("file_{}_{}.rs", thread_id, i), i as i32);
 
                 // Add vector - this internally uses locks
-                let result = store_clone.add_vector(&content, embedding, metadata).unwrap();
+                let result = store_clone
+                    .add_vector(&content, embedding, metadata)
+                    .unwrap();
 
                 // Search - this also uses locks
                 let mut query = vec![0.0; 768];
@@ -229,7 +252,9 @@ async fn test_lock_poisoning_recovery() {
 
     // Wait for all operations to complete
     for handle in handles {
-        handle.await.expect("Thread panicked during vector operations");
+        handle
+            .await
+            .expect("Thread panicked during vector operations");
     }
 
     // Verify store is still functional after concurrent operations
@@ -238,7 +263,13 @@ async fn test_lock_poisoning_recovery() {
         query[i] = (i % 10) as f32 / 100.0;
     }
     let results = store.search(&query, 10).unwrap();
-    assert!(results.len() >= 0, "Store should remain functional after concurrent operations");
+    assert!(
+        results.len() >= 0,
+        "Store should remain functional after concurrent operations"
+    );
 
-    println!("Lock poisoning recovery test completed successfully - store has {} vectors", store.vector_count());
+    println!(
+        "Lock poisoning recovery test completed successfully - store has {} vectors",
+        store.vector_count().unwrap()
+    );
 }

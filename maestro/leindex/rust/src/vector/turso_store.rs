@@ -9,8 +9,8 @@
 use anyhow::{Context, Result};
 use libsql::{Builder, Database};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
@@ -68,8 +68,7 @@ impl TursoVectorStore {
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create database directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create database directory")?;
         }
 
         info!("Opening Turso vector database: {}", path.display());
@@ -145,7 +144,10 @@ impl TursoVectorStore {
                     let delay = self.retry_config.calculate_delay(attempt - 1);
                     warn!(
                         "Attempt {} failed for {}: {:?}. Retrying in {}ms...",
-                        attempt, operation_name, last_error.as_ref().unwrap(), delay
+                        attempt,
+                        operation_name,
+                        last_error.as_ref().unwrap(),
+                        delay
                     );
 
                     sleep(Duration::from_millis(delay)).await;
@@ -159,13 +161,15 @@ impl TursoVectorStore {
     /// Initialize database schema
     async fn initialize(&self) -> Result<()> {
         self.execute_with_retry("initialize", || async {
-            let conn = self.database.connect()
+            let conn = self
+                .database
+                .connect()
                 .context("Failed to get connection")?;
 
             // Enable foreign keys
             conn.execute(
                 "PRAGMA foreign_keys = ON;",
-                libsql::params_from_iter(std::iter::empty::<libsql::Value>())
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
             )
             .await
             .context("Failed to enable foreign keys")?;
@@ -173,7 +177,7 @@ impl TursoVectorStore {
             // Create vectors table
             conn.execute(
                 VECTORS_TABLE_SQL,
-                libsql::params_from_iter(std::iter::empty::<libsql::Value>())
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
             )
             .await
             .context("Failed to create vectors table")?;
@@ -181,14 +185,15 @@ impl TursoVectorStore {
             // Create secondary indexes
             conn.execute(
                 SEARCH_INDEXES_SQL,
-                libsql::params_from_iter(std::iter::empty::<libsql::Value>())
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
             )
             .await
             .context("Failed to create search indexes")?;
 
             debug!("Turso vector store schema initialized");
             Ok(())
-        }).await
+        })
+        .await
     }
 
     /// Add a vector to the store
@@ -202,18 +207,23 @@ impl TursoVectorStore {
             return Err(anyhow::anyhow!("Cannot add vector: store is shut down"));
         }
 
-        let vector_id = format!("vec_{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        let vector_id = format!(
+            "vec_{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        );
 
         // Serialize embedding as JSON array for storage
-        let embedding_json = serde_json::to_string(&embedding)
-            .context("Failed to serialize embedding")?;
+        let embedding_json =
+            serde_json::to_string(&embedding).context("Failed to serialize embedding")?;
 
         // **SECURITY:** Use INTEGER for chunk_type (prevents SQL injection)
         let chunk_type_int = metadata.chunk_type.to_i32();
 
         // Execute the database operation with retry
         self.execute_with_retry("add_vector", || async {
-            let conn = self.database.connect()
+            let conn = self
+                .database
+                .connect()
                 .context("Failed to get connection")?;
 
             conn.execute(
@@ -224,28 +234,32 @@ impl TursoVectorStore {
                     embedding_model, created_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                 "#,
-                libsql::params_from_iter([
-                    libsql::Value::Text(vector_id.clone()),
-                    libsql::Value::Text(metadata.file_path.clone()),
-                    libsql::Value::Integer(metadata.chunk_index as i64),
-                    libsql::Value::Integer(metadata.start_line.unwrap_or(0) as i64),
-                    libsql::Value::Integer(metadata.end_line.unwrap_or(0) as i64),
-                    libsql::Value::Integer(chunk_type_int as i64),
-                    libsql::Value::Text(metadata.parent_context.clone().unwrap_or_default()),
-                    libsql::Value::Text(content.to_string()),
-                    libsql::Value::Text(embedding_json.clone()),
-                    libsql::Value::Text(metadata.embedding_model.clone()),
-                    libsql::Value::Text(metadata.created_at.to_rfc3339()),
-                ].into_iter())
+                libsql::params_from_iter(
+                    [
+                        libsql::Value::Text(vector_id.clone()),
+                        libsql::Value::Text(metadata.file_path.clone()),
+                        libsql::Value::Integer(metadata.chunk_index as i64),
+                        libsql::Value::Integer(metadata.start_line.unwrap_or(0) as i64),
+                        libsql::Value::Integer(metadata.end_line.unwrap_or(0) as i64),
+                        libsql::Value::Integer(chunk_type_int as i64),
+                        libsql::Value::Text(metadata.parent_context.clone().unwrap_or_default()),
+                        libsql::Value::Text(content.to_string()),
+                        libsql::Value::Text(embedding_json.clone()),
+                        libsql::Value::Text(metadata.embedding_model.clone()),
+                        libsql::Value::Text(metadata.created_at.to_rfc3339()),
+                    ]
+                    .into_iter(),
+                ),
             )
             .await
             .context("Failed to insert vector")?;
 
             Ok(())
-        }).await?;
+        })
+        .await?;
 
         // Invalidate cache
-        self.cache.clear();
+        let _ = self.cache.clear();
 
         debug!("Added vector {} to Turso vector store", vector_id);
         Ok(vector_id)
@@ -260,7 +274,7 @@ impl TursoVectorStore {
         let top_k = top_k.min(MAX_TOP_K);
 
         // Check cache
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         for &val in query_embedding {
             hasher.update(&val.to_le_bytes());
@@ -268,135 +282,203 @@ impl TursoVectorStore {
         hasher.update(&(top_k as u64).to_le_bytes());
         let cache_key = format!("{:x}", hasher.finalize());
 
-        if let Some(cached) = self.cache.get(&cache_key) {
+        if let Some(cached) = self.cache.get(&cache_key)? {
             debug!("Cache hit for Turso vector search");
             return Ok(cached);
         }
 
         // Use retry logic for the search operation
-        let search_results = self.execute_with_retry("search", || async {
-            let conn = self.database.connect()
-                .context("Failed to get connection")?;
+        let search_results = self
+            .execute_with_retry("search", || async {
+                let conn = self
+                    .database
+                    .connect()
+                    .context("Failed to get connection")?;
 
-            // Get all vectors and compute cosine distance
-            let stmt = conn
-                .prepare(
-                    "SELECT vector_id, file_path, chunk_index, start_line, end_line,
+                // Get all vectors and compute cosine distance
+                let stmt = conn
+                    .prepare(
+                        "SELECT vector_id, file_path, chunk_index, start_line, end_line,
                             chunk_type, parent_context, content, embedding,
                             embedding_model, created_at
-                     FROM vectors"
-                )
-                .await
-                .context("Failed to prepare search query")?;
+                     FROM vectors",
+                    )
+                    .await
+                    .context("Failed to prepare search query")?;
 
-            let mut results = stmt
-                .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-                .await
-                .context("Failed to execute search query")?;
+                let mut results = stmt
+                    .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                    .await
+                    .context("Failed to execute search query")?;
 
-            // Use a min-heap to keep track of top-k results efficiently
-            use std::collections::BinaryHeap;
-            use std::cmp::Reverse;
+                // Use a min-heap to keep track of top-k results efficiently
+                use std::cmp::Reverse;
+                use std::collections::BinaryHeap;
 
-            // Wrapper for f32 that implements Ord by comparing as if they were ordered by similarity (higher is better)
-            #[derive(Debug)]
-            struct OrderedF32(f32);
+                // Wrapper for f32 that implements Ord by comparing as if they were ordered by similarity (higher is better)
+                #[derive(Debug)]
+                struct OrderedF32(f32);
 
-            impl PartialEq for OrderedF32 {
-                fn eq(&self, other: &Self) -> bool {
-                    self.0 == other.0
-                }
-            }
-
-            impl Eq for OrderedF32 {}
-
-            impl PartialOrd for OrderedF32 {
-                fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                    self.0.partial_cmp(&other.0)
-                }
-            }
-
-            impl Ord for OrderedF32 {
-                fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                    self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
-                }
-            }
-
-            // Min-heap to keep the top-k most similar vectors (using negative similarity for min-heap behavior)
-            let mut top_k_heap: BinaryHeap<Reverse<(OrderedF32, String, String, i64, i64, i64, i64, Option<String>, Option<String>, String, String)>> = BinaryHeap::new();
-
-            while let Some(row) = results.next().await? {
-                let vector_id: String = row.get(0)?;
-                let file_path: String = row.get(1)?;
-                let chunk_index: i64 = row.get(2)?;
-                let start_line: i64 = row.get(3)?;
-                let end_line: i64 = row.get(4)?;
-                let chunk_type_int: i64 = row.get(5)?; // **SECURITY:** Read as INTEGER
-                let parent_context: Option<String> = row.get(6)?;
-                let content: Option<String> = row.get(7)?;
-                let embedding_json: String = row.get(8)?;
-                let embedding_model: String = row.get(9)?;
-                let created_at: String = row.get(10)?;
-
-                // Parse embedding JSON
-                let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
-                    .context("Failed to parse embedding JSON")?;
-
-                // Compute cosine similarity
-                let similarity = cosine_similarity(query_embedding, &embedding);
-
-                if top_k_heap.len() < top_k {
-                    // Heap not full, just add
-                    top_k_heap.push(Reverse((OrderedF32(similarity), vector_id, file_path, chunk_index,
-                                           start_line, end_line, chunk_type_int, parent_context,
-                                           content, embedding_model, created_at)));
-                } else if let Some(Reverse((lowest_sim, _, _, _, _, _, _, _, _, _, _))) = top_k_heap.peek() {
-                    // If current similarity is higher than lowest in heap, replace it
-                    if similarity > lowest_sim.0 {
-                        top_k_heap.pop(); // Remove lowest
-                        top_k_heap.push(Reverse((OrderedF32(similarity), vector_id, file_path, chunk_index,
-                                               start_line, end_line, chunk_type_int, parent_context,
-                                               content, embedding_model, created_at)));
+                impl PartialEq for OrderedF32 {
+                    fn eq(&self, other: &Self) -> bool {
+                        self.0 == other.0
                     }
                 }
-            }
 
-            // Extract results from heap and sort in descending order
-            let mut scored_results: Vec<_> = top_k_heap.into_vec();
-            scored_results.sort_by(|a, b| b.0.0.0.partial_cmp(&a.0.0.0).unwrap_or(std::cmp::Ordering::Equal));
+                impl Eq for OrderedF32 {}
 
-            // Take top_k results and convert to SearchResult
-            let search_results: Vec<SearchResult> = scored_results
-                .into_iter()
-                .take(top_k)
-                .map(|Reverse((similarity, vector_id, file_path, chunk_index, start_line, end_line,
-                       chunk_type_int, parent_context, content, embedding_model, created_at))| {
-                    SearchResult {
-                        vector_id,
-                        score: similarity.0,  // Extract the actual f32 value
-                        metadata: VectorMetadata {
+                impl PartialOrd for OrderedF32 {
+                    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                        self.0.partial_cmp(&other.0)
+                    }
+                }
+
+                impl Ord for OrderedF32 {
+                    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                        self.0
+                            .partial_cmp(&other.0)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                }
+
+                // Min-heap to keep the top-k most similar vectors (using negative similarity for min-heap behavior)
+                let mut top_k_heap: BinaryHeap<
+                    Reverse<(
+                        OrderedF32,
+                        String,
+                        String,
+                        i64,
+                        i64,
+                        i64,
+                        i64,
+                        Option<String>,
+                        Option<String>,
+                        String,
+                        String,
+                    )>,
+                > = BinaryHeap::new();
+
+                while let Some(row) = results.next().await? {
+                    let vector_id: String = row.get(0)?;
+                    let file_path: String = row.get(1)?;
+                    let chunk_index: i64 = row.get(2)?;
+                    let start_line: i64 = row.get(3)?;
+                    let end_line: i64 = row.get(4)?;
+                    let chunk_type_int: i64 = row.get(5)?; // **SECURITY:** Read as INTEGER
+                    let parent_context: Option<String> = row.get(6)?;
+                    let content: Option<String> = row.get(7)?;
+                    let embedding_json: String = row.get(8)?;
+                    let embedding_model: String = row.get(9)?;
+                    let created_at: String = row.get(10)?;
+
+                    // Parse embedding JSON
+                    let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
+                        .context("Failed to parse embedding JSON")?;
+
+                    // Compute cosine similarity
+                    let similarity = cosine_similarity(query_embedding, &embedding);
+
+                    if top_k_heap.len() < top_k {
+                        // Heap not full, just add
+                        top_k_heap.push(Reverse((
+                            OrderedF32(similarity),
+                            vector_id,
                             file_path,
-                            chunk_index: chunk_index as i32,
-                            start_line: if start_line > 0 { Some(start_line as i32) } else { None },
-                            end_line: if end_line > 0 { Some(end_line as i32) } else { None },
-                            // **SECURITY:** Use from_i32() for INTEGER storage
-                            chunk_type: ChunkType::from_i32(chunk_type_int as i32),
+                            chunk_index,
+                            start_line,
+                            end_line,
+                            chunk_type_int,
                             parent_context,
+                            content,
                             embedding_model,
-                            created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
-                                .map(|dt| dt.with_timezone(&chrono::Utc))
-                                .unwrap_or_else(|_| chrono::Utc::now()),
-                        },
-                        content,
+                            created_at,
+                        )));
+                    } else if let Some(Reverse((lowest_sim, _, _, _, _, _, _, _, _, _, _))) =
+                        top_k_heap.peek()
+                    {
+                        // If current similarity is higher than lowest in heap, replace it
+                        if similarity > lowest_sim.0 {
+                            top_k_heap.pop(); // Remove lowest
+                            top_k_heap.push(Reverse((
+                                OrderedF32(similarity),
+                                vector_id,
+                                file_path,
+                                chunk_index,
+                                start_line,
+                                end_line,
+                                chunk_type_int,
+                                parent_context,
+                                content,
+                                embedding_model,
+                                created_at,
+                            )));
+                        }
                     }
-                })
-                .collect();
+                }
 
-            Ok(search_results)
-        }).await?;
+                // Extract results from heap and sort in descending order
+                let mut scored_results: Vec<_> = top_k_heap.into_vec();
+                scored_results.sort_by(|a, b| {
+                    b.0 .0
+                         .0
+                        .partial_cmp(&a.0 .0 .0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                // Take top_k results and convert to SearchResult
+                let search_results: Vec<SearchResult> = scored_results
+                    .into_iter()
+                    .take(top_k)
+                    .map(
+                        |Reverse((
+                            similarity,
+                            vector_id,
+                            file_path,
+                            chunk_index,
+                            start_line,
+                            end_line,
+                            chunk_type_int,
+                            parent_context,
+                            content,
+                            embedding_model,
+                            created_at,
+                        ))| {
+                            SearchResult {
+                                vector_id,
+                                score: similarity.0, // Extract the actual f32 value
+                                metadata: VectorMetadata {
+                                    file_path,
+                                    chunk_index: chunk_index as i32,
+                                    start_line: if start_line > 0 {
+                                        Some(start_line as i32)
+                                    } else {
+                                        None
+                                    },
+                                    end_line: if end_line > 0 {
+                                        Some(end_line as i32)
+                                    } else {
+                                        None
+                                    },
+                                    // **SECURITY:** Use from_i32() for INTEGER storage
+                                    chunk_type: ChunkType::from_i32(chunk_type_int as i32),
+                                    parent_context,
+                                    embedding_model,
+                                    created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                                        .unwrap_or_else(|_| chrono::Utc::now()),
+                                },
+                                content,
+                            }
+                        },
+                    )
+                    .collect();
+
+                Ok(search_results)
+            })
+            .await?;
 
         // Cache results
-        self.cache.put(cache_key, search_results.clone());
+        self.cache.put(cache_key, search_results.clone())?;
 
         Ok(search_results)
     }
@@ -407,19 +489,26 @@ impl TursoVectorStore {
             return Err(anyhow::anyhow!("Cannot delete: store is shut down"));
         }
 
-        let result = self.execute_with_retry("delete_by_file", || async {
-            let conn = self.database.connect()
-                .context("Failed to get connection")?;
+        let result = self
+            .execute_with_retry("delete_by_file", || async {
+                let conn = self
+                    .database
+                    .connect()
+                    .context("Failed to get connection")?;
 
-            let result = conn.execute(
-                "DELETE FROM vectors WHERE file_path = ?1",
-                libsql::params_from_iter([libsql::Value::Text(file_path.to_string())].into_iter())
-            )
-            .await
-            .context("Failed to delete vectors")?;
+                let result = conn
+                    .execute(
+                        "DELETE FROM vectors WHERE file_path = ?1",
+                        libsql::params_from_iter(
+                            [libsql::Value::Text(file_path.to_string())].into_iter(),
+                        ),
+                    )
+                    .await
+                    .context("Failed to delete vectors")?;
 
-            Ok(result as usize)
-        }).await?;
+                Ok(result as usize)
+            })
+            .await?;
 
         if result > 0 {
             self.cache.clear();
@@ -432,14 +521,18 @@ impl TursoVectorStore {
     /// Get vector count
     pub async fn vector_count(&self) -> Result<usize> {
         self.execute_with_retry("vector_count", || async {
-            let conn = self.database.connect()
+            let conn = self
+                .database
+                .connect()
                 .context("Failed to get connection")?;
 
-            let stmt = conn.prepare("SELECT COUNT(*) FROM vectors")
+            let stmt = conn
+                .prepare("SELECT COUNT(*) FROM vectors")
                 .await
                 .context("Failed to prepare count query")?;
 
-            let mut result = stmt.query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+            let mut result = stmt
+                .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
                 .await
                 .context("Failed to execute count query")?;
 
@@ -449,11 +542,12 @@ impl TursoVectorStore {
             } else {
                 Ok(0)
             }
-        }).await
+        })
+        .await
     }
 
     /// Get cache statistics
-    pub fn cache_stats(&self) -> super::cache::CacheStats {
+    pub fn cache_stats(&self) -> Result<super::cache::CacheStats> {
         self.cache.stats()
     }
 
@@ -464,7 +558,10 @@ impl TursoVectorStore {
             return Ok(());
         }
 
-        info!("Shutting down Turso vector store: {}", self.db_path.display());
+        info!(
+            "Shutting down Turso vector store: {}",
+            self.db_path.display()
+        );
 
         self.is_shutdown.store(true, Ordering::SeqCst);
 
@@ -496,7 +593,10 @@ mod tests {
         let metadata = VectorMetadata::new("test.rs", 0);
         let content = "test content";
 
-        store.add_vector(content, embedding, metadata).await.unwrap();
+        store
+            .add_vector(content, embedding, metadata)
+            .await
+            .unwrap();
 
         let count = store.vector_count().await.unwrap();
         assert_eq!(count, 1);

@@ -10,9 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use hnswx::{
-    HNSW, HnswConfig, HnswStats, CosineSimilarity,
-};
+use hnswx::{CosineSimilarity, HnswConfig, HnswStats, HNSW};
 
 use super::cache::TtlCache;
 use super::metadata::*;
@@ -99,11 +97,17 @@ impl HnswVectorStore {
         }
 
         let content = fs::read_to_string(&vectors_path)?;
-        let stored_entries: Vec<(String, Vec<f32>, VectorMetadata)> = serde_json::from_str(&content)
-            .context("Failed to parse vectors.json")?;
+        let stored_entries: Vec<(String, Vec<f32>, VectorMetadata)> =
+            serde_json::from_str(&content).context("Failed to parse vectors.json")?;
 
-        let mut id_map = self.id_to_data.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut hnsw = self.hnsw.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut id_map = self
+            .id_to_data
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut hnsw = self
+            .hnsw
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         // Clear existing data first
         id_map.clear();
@@ -118,16 +122,22 @@ impl HnswVectorStore {
             let internal_id = new_hnsw.insert(embedding.clone());
 
             // Store metadata WITH embedding for persistence
-            id_map.insert(internal_id, VectorDataWithEmbedding {
-                id,
-                embedding,
-                metadata,
-                content: None,
-            });
+            id_map.insert(
+                internal_id,
+                VectorDataWithEmbedding {
+                    id,
+                    embedding,
+                    metadata,
+                    content: None,
+                },
+            );
         }
 
         // Replace the HNSW index
-        *self.hnsw.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))? = new_hnsw;
+        *self
+            .hnsw
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))? = new_hnsw;
 
         info!("Loaded {} vectors into HNSW index", id_map.len());
         Ok(())
@@ -157,7 +167,10 @@ impl HnswVectorStore {
     ) -> Result<String> {
         // Insert into HNSW index - returns internal ID
         let internal_id = {
-            let mut hnsw = self.hnsw.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            let mut hnsw = self
+                .hnsw
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             hnsw.insert(embedding.clone())
         };
 
@@ -165,24 +178,33 @@ impl HnswVectorStore {
 
         // Store metadata WITH embedding
         {
-            let mut id_map = self.id_to_data.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-            id_map.insert(internal_id, VectorDataWithEmbedding {
-                id: external_id.clone(),
-                embedding,
-                metadata: metadata.clone(),
-                content: Some(content.to_string()),
-            });
+            let mut id_map = self
+                .id_to_data
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            id_map.insert(
+                internal_id,
+                VectorDataWithEmbedding {
+                    id: external_id.clone(),
+                    embedding,
+                    metadata: metadata.clone(),
+                    content: Some(content.to_string()),
+                },
+            );
         }
 
         // Update metadata
         {
-            let mut meta = self.metadata.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            let mut meta = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             meta.vector_count += 1;
             meta.updated_at = chrono::Utc::now();
         }
 
         // Invalidate cache
-        self.cache.clear();
+        let _ = self.cache.clear();
 
         debug!("Added vector {} to HNSW index", external_id);
         Ok(external_id)
@@ -193,7 +215,7 @@ impl HnswVectorStore {
         let top_k = top_k.min(MAX_TOP_K);
 
         // Check cache
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         for &val in query_embedding {
             hasher.update(&val.to_le_bytes());
@@ -201,20 +223,29 @@ impl HnswVectorStore {
         hasher.update(&(top_k as u64).to_le_bytes());
         let cache_key = format!("{:x}", hasher.finalize());
 
-        if let Some(cached) = self.cache.get(&cache_key) {
+        if let Some(cached) = self.cache.get(&cache_key)? {
             debug!("Cache hit for HNSW search");
             return Ok(cached);
         }
 
         // Search HNSW index
         let results = {
-            let hnsw = self.hnsw.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            let hnsw = self
+                .hnsw
+                .read()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             hnsw.search_knn(query_embedding, top_k)
         };
 
         // Convert results, filtering out tombstones
-        let id_map = self.id_to_data.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let tombstones = self.tombstones.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let id_map = self
+            .id_to_data
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let tombstones = self
+            .tombstones
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
         let mut search_results = Vec::new();
 
         for result in results {
@@ -238,18 +269,28 @@ impl HnswVectorStore {
         }
 
         // Sort by score descending (highest similarity first)
-        search_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        search_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Cache results
-        self.cache.put(cache_key, search_results.clone());
+        self.cache.put(cache_key, search_results.clone())?;
 
         Ok(search_results)
     }
 
     /// Delete vectors by file path - marks as tombstones instead of rebuilding
     pub fn delete_by_file(&self, file_path: &str) -> Result<usize> {
-        let mut id_map = self.id_to_data.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut tombstones = self.tombstones.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut id_map = self
+            .id_to_data
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut tombstones = self
+            .tombstones
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         // Find IDs to mark as deleted
         let to_delete: Vec<usize> = id_map
@@ -267,7 +308,10 @@ impl HnswVectorStore {
 
         if deleted > 0 {
             // Update metadata
-            let mut meta = self.metadata.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            let mut meta = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             meta.vector_count = meta.vector_count.saturating_sub(deleted);
             meta.updated_at = chrono::Utc::now();
             drop(meta); // Release lock early
@@ -276,7 +320,9 @@ impl HnswVectorStore {
             let total_elements = id_map.len();
             let tombstone_count = tombstones.len();
 
-            if tombstone_count > 0 && (tombstone_count as f64) / ((total_elements + tombstone_count) as f64) > 0.1 {
+            if tombstone_count > 0
+                && (tombstone_count as f64) / ((total_elements + tombstone_count) as f64) > 0.1
+            {
                 // More than 10% are tombstones, rebuild the index
                 self.rebuild_index()?;
             }
@@ -289,8 +335,14 @@ impl HnswVectorStore {
 
     /// Rebuild the index when tombstones exceed threshold
     fn rebuild_index(&self) -> Result<()> {
-        let id_map = self.id_to_data.read().unwrap();
-        let tombstones = self.tombstones.read().unwrap();
+        let id_map = self
+            .id_to_data
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let tombstones = self
+            .tombstones
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         // Create new HNSW index
         let config = self._config.clone();
@@ -304,50 +356,78 @@ impl HnswVectorStore {
         }
 
         // Update HNSW reference
-        *self.hnsw.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))? = new_hnsw;
+        *self
+            .hnsw
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))? = new_hnsw;
 
         // Clear tombstones since we've rebuilt without them
-        self.tombstones.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?.clear();
+        self.tombstones
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?
+            .clear();
 
-        debug!("HNSW index rebuilt with {} vectors, tombstones cleared",
-               id_map.len() - tombstones.len());
+        debug!(
+            "HNSW index rebuilt with {} vectors, tombstones cleared",
+            id_map.len() - tombstones.len()
+        );
         Ok(())
     }
 
-
     /// Get vector count
-    pub fn vector_count(&self) -> usize {
-        let metadata = self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap();
-        metadata.vector_count // vector_count already accounts for deletions
+    pub fn vector_count(&self) -> Result<usize> {
+        let metadata = self
+            .metadata
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        Ok(metadata.vector_count)
     }
 
     /// Get index info
-    pub fn info(&self) -> IndexMetadata {
-        self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap().clone()
+    pub fn info(&self) -> Result<IndexMetadata> {
+        Ok(self
+            .metadata
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?
+            .clone())
     }
 
     /// Get cache statistics
-    pub fn cache_stats(&self) -> super::cache::CacheStats {
+    pub fn cache_stats(&self) -> Result<super::cache::CacheStats> {
         self.cache.stats()
     }
 
     /// Get HNSW statistics
-    pub fn hnsw_stats(&self) -> HnswStats {
-        let hnsw = self.hnsw.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap();
-        hnsw.stats()
+    pub fn hnsw_stats(&self) -> Result<HnswStats> {
+        let hnsw = self
+            .hnsw
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        Ok(hnsw.stats())
     }
 
     /// Persist index to disk - COMPLETE PERSISTENCE
     pub fn persist(&self) -> Result<()> {
         // Save metadata
         let meta_path = self.index_path.join("metadata.json");
-        let content = serde_json::to_string_pretty(&*self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?)?;
+        let content = serde_json::to_string_pretty(
+            &*self
+                .metadata
+                .read()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?,
+        )?;
         fs::write(meta_path, content)?;
 
         // Save vectors WITH embeddings for proper rebuilding
         let vectors_path = self.index_path.join("vectors.json");
-        let id_map = self.id_to_data.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let tombstones = self.tombstones.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let id_map = self
+            .id_to_data
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let tombstones = self
+            .tombstones
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         // Serialize vectors with their embeddings, excluding tombstones
         let serializable: Vec<_> = id_map
@@ -365,8 +445,10 @@ impl HnswVectorStore {
         let vectors_content = serde_json::to_string_pretty(&serializable)?;
         fs::write(vectors_path, vectors_content)?;
 
-        info!("Persisted HNSW vector store with {} vectors including embeddings",
-              id_map.len() - tombstones.len());
+        info!(
+            "Persisted HNSW vector store with {} vectors including embeddings",
+            id_map.len() - tombstones.len()
+        );
         Ok(())
     }
 }

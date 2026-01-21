@@ -72,14 +72,17 @@ impl VectorStore {
         }
 
         let content = fs::read_to_string(&vectors_path)?;
-        let stored_entries: Vec<StoredVector> = serde_json::from_str(&content)
-            .context("Failed to parse vectors.json")?;
+        let stored_entries: Vec<StoredVector> =
+            serde_json::from_str(&content).context("Failed to parse vectors.json")?;
 
-        let mut vectors = self.vectors.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut vectors = self
+            .vectors
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
         for v in stored_entries {
             if let Some(content) = &v.content {
                 let hash = VectorDeduplicator::hash_content(content);
-                self.deduplicator.register(hash, v.id.clone());
+                self.deduplicator.register(hash, v.id.clone())?;
             }
             vectors.insert(v.id.clone(), v);
         }
@@ -91,7 +94,7 @@ impl VectorStore {
     /// Load or create index metadata
     fn load_or_create_metadata(path: &Path) -> Result<IndexMetadata> {
         let meta_path = path.join("metadata.json");
-        
+
         if meta_path.exists() {
             let content = fs::read_to_string(&meta_path)?;
             serde_json::from_str(&content).context("Failed to parse index metadata")
@@ -103,7 +106,12 @@ impl VectorStore {
     /// Save index metadata
     fn save_metadata(&self) -> Result<()> {
         let meta_path = self.index_path.join("metadata.json");
-        let content = serde_json::to_string_pretty(&*self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?)?;
+        let content = serde_json::to_string_pretty(
+            &*self
+                .metadata
+                .read()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?,
+        )?;
         fs::write(meta_path, content)?;
         Ok(())
     }
@@ -117,9 +125,9 @@ impl VectorStore {
     ) -> Result<String> {
         // Check for duplicate via content hash
         let content_hash = VectorDeduplicator::hash_content(content);
-        
-        if let Some(existing_id) = self.deduplicator.get_vector_id(&content_hash) {
-            self.deduplicator.add_reference(&existing_id);
+
+        if let Some(existing_id) = self.deduplicator.get_vector_id(&content_hash)? {
+            self.deduplicator.add_reference(&existing_id)?;
             debug!("Deduplicated vector, reusing {}", existing_id);
             return Ok(existing_id);
         }
@@ -135,18 +143,25 @@ impl VectorStore {
         };
 
         // Store vector
-        self.vectors.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?.insert(vector_id.clone(), stored);
-        self.deduplicator.register(content_hash, vector_id.clone());
+        self.vectors
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?
+            .insert(vector_id.clone(), stored);
+        self.deduplicator
+            .register(content_hash, vector_id.clone())?;
 
         // Update metadata
         {
-            let mut meta = self.metadata.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            let mut meta = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             meta.vector_count += 1;
             meta.updated_at = chrono::Utc::now();
         }
 
         // Invalidate cache
-        self.cache.clear();
+        let _ = self.cache.clear();
 
         Ok(vector_id)
     }
@@ -154,22 +169,25 @@ impl VectorStore {
     /// Search for similar vectors
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);
-        
+
         // Check cache (key is hash of entire embedding + top_k)
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         for &val in query_embedding {
             hasher.update(&val.to_le_bytes());
         }
         hasher.update(&(top_k as u64).to_le_bytes());
         let cache_key = format!("{:x}", hasher.finalize());
-        
-        if let Some(cached) = self.cache.get(&cache_key) {
+
+        if let Some(cached) = self.cache.get(&cache_key)? {
             debug!("Cache hit for search");
             return Ok(cached);
         }
 
-        let vectors = self.vectors.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let vectors = self
+            .vectors
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         // Two-phase approach to avoid cache thrashing with large tuples (~150 bytes)
         // Phase 1: Compute scores only (indices + floats)
@@ -183,7 +201,9 @@ impl VectorStore {
 
         // Partially sort to get top-k scores efficiently
         if indexed_scores.len() > top_k {
-            indexed_scores.select_nth_unstable_by(top_k - 1, |a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            indexed_scores.select_nth_unstable_by(top_k - 1, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
             indexed_scores.truncate(top_k);
         }
 
@@ -194,7 +214,7 @@ impl VectorStore {
         let results: Vec<SearchResult> = indexed_scores
             .into_iter()
             .map(|(id, score)| {
-                let v = &vectors[&id];  // Safe lookup since we just got the id from the same map
+                let v = &vectors[&id]; // Safe lookup since we just got the id from the same map
                 SearchResult {
                     vector_id: v.id.clone(),
                     score,
@@ -205,19 +225,22 @@ impl VectorStore {
             .collect();
 
         // Cache results
-        self.cache.put(cache_key, results.clone());
+        self.cache.put(cache_key, results.clone())?;
 
         Ok(results)
     }
 
     /// Delete vectors by file path
     pub fn delete_by_file(&self, file_path: &str) -> Result<usize> {
-        let mut vectors = self.vectors.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut vectors = self
+            .vectors
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
         let initial_count = vectors.len();
 
         for v in vectors.values() {
             if v.metadata.file_path == file_path {
-                self.deduplicator.unregister(&v.id);
+                self.deduplicator.unregister(&v.id)?;
             }
         }
 
@@ -226,27 +249,38 @@ impl VectorStore {
         let deleted = initial_count - vectors.len();
 
         if deleted > 0 {
-            let mut meta = self.metadata.write().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            let mut meta = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             meta.vector_count = meta.vector_count.saturating_sub(deleted);
             meta.updated_at = chrono::Utc::now();
-            self.cache.clear();
+            let _ = self.cache.clear();
         }
 
         Ok(deleted)
     }
 
     /// Get vector count
-    pub fn vector_count(&self) -> usize {
-        self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap().vector_count
+    pub fn vector_count(&self) -> Result<usize> {
+        Ok(self
+            .metadata
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?
+            .vector_count)
     }
 
     /// Get index info
-    pub fn info(&self) -> IndexMetadata {
-        self.metadata.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e)).unwrap().clone()
+    pub fn info(&self) -> Result<IndexMetadata> {
+        Ok(self
+            .metadata
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?
+            .clone())
     }
 
     /// Get cache statistics
-    pub fn cache_stats(&self) -> super::cache::CacheStats {
+    pub fn cache_stats(&self) -> Result<super::cache::CacheStats> {
         self.cache.stats()
     }
 
@@ -257,16 +291,22 @@ impl VectorStore {
 
         // Save vectors
         let vectors_path = self.index_path.join("vectors.json");
-        let vectors = self.vectors.read().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let vectors = self
+            .vectors
+            .read()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
-        let serializable: Vec<_> = vectors.values().map(|v| {
-            serde_json::json!({
-                "id": v.id,
-                "embedding": v.embedding,
-                "metadata": v.metadata,
-                "content": v.content,
+        let serializable: Vec<_> = vectors
+            .values()
+            .map(|v| {
+                serde_json::json!({
+                    "id": v.id,
+                    "embedding": v.embedding,
+                    "metadata": v.metadata,
+                    "content": v.content,
+                })
             })
-        }).collect();
+            .collect();
 
         let content = serde_json::to_string(&serializable)?;
         fs::write(vectors_path, content)?;
@@ -301,9 +341,11 @@ mod tests {
         let embedding = vec![0.1; 768];
         let metadata = VectorMetadata::new("test.py", 0);
 
-        let id = store.add_vector("test content", embedding.clone(), metadata).unwrap();
+        let id = store
+            .add_vector("test content", embedding.clone(), metadata)
+            .unwrap();
         assert!(!id.is_empty());
-        assert_eq!(store.vector_count(), 1);
+        assert_eq!(store.vector_count().unwrap(), 1);
     }
 
     #[test]
@@ -317,7 +359,11 @@ mod tests {
             embedding[i] = 1.0;
             let metadata = VectorMetadata::new(&format!("file{}.py", i), i as i32);
             // Use unique content for each to avoid deduplication
-            let content = format!("unique content {} with random data {}", i, uuid::Uuid::new_v4().to_string());
+            let content = format!(
+                "unique content {} with random data {}",
+                i,
+                uuid::Uuid::new_v4().to_string()
+            );
             store.add_vector(&content, embedding, metadata).unwrap();
         }
 
@@ -325,7 +371,7 @@ mod tests {
         let mut query = vec![0.0; 768];
         query[0] = 1.0;
         let results = store.search(&query, 3).unwrap();
-        
+
         // Should have results, at least 1, possibly fewer due to deduplication
         assert!(!results.is_empty());
         // If we have more than 1 result, first should have higher score
