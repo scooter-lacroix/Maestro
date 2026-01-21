@@ -7,10 +7,9 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tokio::task;
 
-use crate::vector::{AdaptiveVectorStore, ChunkType, SearchResult, VectorMetadata, VectorStore};
+use crate::vector::{AdaptiveVectorStore, VectorMetadata, VectorStore};
 
 /// Test concurrent add and delete operations
 #[tokio::test]
@@ -66,11 +65,6 @@ async fn test_concurrent_add_delete() {
     // Verify the store is still functional
     let query = vec![0.5; 768];
     let results = store.search(&query, 10).unwrap();
-    println!(
-        "Final search returned {} results after concurrent operations",
-        results.len()
-    );
-
     // The store should still be functional even if some operations were deleted
     assert!(results.len() >= 0); // Should not panic
 }
@@ -136,10 +130,8 @@ async fn test_concurrent_mode_switch() {
     // Monitor thread to check for mode changes during operations
     let monitor_store = Arc::clone(&adaptive_store);
     let monitor_handle = task::spawn(async move {
-        for i in 0..150 {
-            let current_mode = monitor_store.mode();
-            println!("Monitor {}: Current mode: {:?}", i, current_mode);
-
+        for _i in 0..150 {
+            let _current_mode = monitor_store.mode(); // Just verify mode doesn't panic
             // Brief pause
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -159,11 +151,9 @@ async fn test_concurrent_mode_switch() {
     let results = adaptive_store.search(&query, 10).await.unwrap();
     assert!(results.len() >= 0); // Should not panic
 
-    println!("Final mode: {:?}", adaptive_store.mode());
-    println!(
-        "Final vector count: {}",
-        adaptive_store.vector_count().await.unwrap()
-    );
+    // Verify final state is valid
+    let _final_mode = adaptive_store.mode();
+    let _final_count = adaptive_store.vector_count().await.unwrap();
 }
 
 /// Test lock poisoning recovery in vector stores
@@ -232,7 +222,7 @@ async fn test_lock_poisoning_recovery() {
                     VectorMetadata::new(&format!("file_{}_{}.rs", thread_id, i), i as i32);
 
                 // Add vector - this internally uses locks
-                let result = store_clone
+                let _result = store_clone
                     .add_vector(&content, embedding, metadata)
                     .unwrap();
 
@@ -268,8 +258,6 @@ async fn test_lock_poisoning_recovery() {
         "Store should remain functional after concurrent operations"
     );
 
-    println!(
-        "Lock poisoning recovery test completed successfully - store has {} vectors",
-        store.vector_count().unwrap()
-    );
+    // Verify final count is accessible
+    let _final_count = store.vector_count().unwrap();
 }

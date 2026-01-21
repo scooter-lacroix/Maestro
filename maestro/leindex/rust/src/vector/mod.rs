@@ -9,6 +9,7 @@
 
 pub mod adaptive;
 pub mod cache;
+pub mod diagnostics;
 pub mod hnsw_store;
 pub mod metadata;
 pub mod migrations;
@@ -24,6 +25,7 @@ mod concurrency_tests;
 
 pub use adaptive::*;
 pub use cache::*;
+pub use diagnostics::*;
 pub use hnsw_store::*;
 pub use metadata::*;
 pub use migrations::*;

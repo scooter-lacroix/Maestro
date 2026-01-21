@@ -105,13 +105,8 @@ mod tests {
         }
         let elapsed = start.elapsed();
 
-        println!(
-            "SIMD cosine_similarity: {} iterations in {:?}",
-            iterations, elapsed
-        );
-        println!(
-            "Average: {:.2} µs per call",
-            elapsed.as_micros() as f64 / iterations as f64
-        );
+        // Verify performance is reasonable (should be much faster than scalar)
+        // SIMD implementation should handle 10K iterations in reasonable time
+        assert!(elapsed.as_millis() < 5000, "SIMD performance too slow: {:?}", elapsed);
     }
 }
