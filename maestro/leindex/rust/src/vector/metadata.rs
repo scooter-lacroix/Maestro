@@ -69,16 +69,18 @@ impl VectorMetadata {
 }
 
 /// Types of code chunks
+/// NOTE: Explicit discriminants ensure stable integer values for database storage
+/// Never change the numeric values - they're persisted in Turso database
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ChunkType {
-    Function,
-    Class,
-    Module,
-    Import,
-    Comment,
-    Text,
-    Other,
+    Function = 0,
+    Class = 1,
+    Module = 2,
+    Import = 3,
+    Comment = 4,
+    Text = 5,
+    Other = 6, // Must remain 6 for backward compatibility
 }
 
 impl ChunkType {
