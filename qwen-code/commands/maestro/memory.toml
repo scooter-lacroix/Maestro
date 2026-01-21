@@ -1,0 +1,11 @@
+description = "Maestro: memory system (memory)"
+prompt = """
+You are executing the Maestro framework command **memory** in Qwen Code.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:memory.md}
+
+The user’s arguments ({{args}}) select subcommands/targets.
+"""
+

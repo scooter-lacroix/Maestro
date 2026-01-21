@@ -17,9 +17,22 @@ use super::models::{ProjectScanInfo, ScanResult, TrackStatus};
 
 /// Directories to skip during scanning
 const SKIP_DIRS: &[&str] = &[
-    "node_modules", "__pycache__", "venv", "env", ".git", 
-    "dist", "build", "target", ".cargo", ".rustup", ".cache",
-    ".npm", ".yarn", "vendor", ".venv", "site-packages",
+    "node_modules",
+    "__pycache__",
+    "venv",
+    "env",
+    ".git",
+    "dist",
+    "build",
+    "target",
+    ".cargo",
+    ".rustup",
+    ".cache",
+    ".npm",
+    ".yarn",
+    "vendor",
+    ".venv",
+    "site-packages",
 ];
 
 /// Project scanner with parallel traversal
@@ -45,19 +58,26 @@ impl Scanner {
         let projects = Arc::new(Mutex::new(Vec::new()));
         let errors = Arc::new(Mutex::new(Vec::new()));
 
-        info!("Scanning {} directories with max_depth={}", base_dirs.len(), max_depth);
+        info!(
+            "Scanning {} directories with max_depth={}",
+            base_dirs.len(),
+            max_depth
+        );
 
         // Process each base directory
         for base_dir in base_dirs {
             if !base_dir.exists() {
                 warn!("Directory does not exist: {}", base_dir.display());
-                errors.lock().unwrap().push(format!("Directory not found: {}", base_dir.display()));
+                errors
+                    .lock()
+                    .unwrap()
+                    .push(format!("Directory not found: {}", base_dir.display()));
                 continue;
             }
 
             // Find all potential Maestro projects
             let found = self.find_maestro_projects(base_dir, max_depth);
-            
+
             // Process projects in parallel
             let batch_projects: Vec<ProjectScanInfo> = found
                 .par_iter()
@@ -97,7 +117,8 @@ impl Scanner {
             .max_depth(max_depth)
             .into_iter()
             .filter_entry(|e| self.should_traverse(e))
-            .filter_map(|e| e.ok()) // Intentionally skip dirs with permission errors
+            .filter_map(|e| e.ok())
+        // Intentionally skip dirs with permission errors
         {
             let path = entry.path();
             if entry.file_type().is_dir() && self.is_maestro_project(path) {
@@ -265,12 +286,14 @@ impl Scanner {
 
         if tracks_dir.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&tracks_dir) {
-                for entry in entries.filter_map(|e| e.ok()) { // Intentionally skip entries with permission errors
+                for entry in entries.filter_map(|e| e.ok()) {
+                    // Intentionally skip entries with permission errors
                     let track_path = entry.path();
                     if track_path.extension().map(|e| e == "md").unwrap_or(false) {
-                        let track_id = track_path.file_stem()
+                        let track_id = track_path
+                            .file_stem()
                             .map(|s| s.to_string_lossy().to_string());
-                        
+
                         if let Some(id) = track_id {
                             // Only add if not already in list
                             if !tracks.iter().any(|t| t.track_id.as_ref() == Some(&id)) {
@@ -306,8 +329,8 @@ struct TrackInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_scanner_empty_dir() {
@@ -324,7 +347,7 @@ mod tests {
         let maestro_dir = project_dir.join("maestro");
         fs::create_dir_all(&maestro_dir).unwrap();
         fs::write(maestro_dir.join("product.md"), "# My Project").unwrap();
-        
+
         let scanner = Scanner::new();
         let result = scanner.scan(&[dir.path().to_path_buf()], 5);
         assert_eq!(result.projects_found, 1);

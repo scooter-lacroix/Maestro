@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::token_format::{FormatMode, TokenFormatter};
-use crate::{MultiLangASTAnalyzer, MultiLangCFGAnalyzer, MultiLangCallGraphAnalyzer, ProgrammingLanguage};
+use crate::{
+    MultiLangASTAnalyzer, MultiLangCFGAnalyzer, MultiLangCallGraphAnalyzer, ProgrammingLanguage,
+};
 
 /// Directories to skip during analysis scans.
 const SKIP_DIRS: &[&str] = &[
@@ -106,7 +108,8 @@ fn collect_source_files(root: &Path, max_files: usize) -> Result<Vec<PathBuf>> {
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| !should_skip_dir(e.path()))
-        .filter_map(|e| e.ok()) // Intentionally skip dirs with permission errors
+        .filter_map(|e| e.ok())
+    // Intentionally skip dirs with permission errors
     {
         let path = entry.path();
         if is_supported_source_file(path) {
@@ -138,7 +141,12 @@ fn truncate_output(s: String, max_chars: usize) -> String {
     TokenFormatter::new().truncate(&s, max_chars)
 }
 
-fn format_block(mode: FormatMode, formatter: &TokenFormatter, s: String, max_chars: usize) -> String {
+fn format_block(
+    mode: FormatMode,
+    formatter: &TokenFormatter,
+    s: String,
+    max_chars: usize,
+) -> String {
     match mode {
         FormatMode::Verbose => truncate_output(s, max_chars),
         FormatMode::Balanced => truncate_output(s, max_chars.min(6000)),
@@ -161,7 +169,9 @@ pub fn phase1_structural_scan(opts: &PhaseOptions) -> Result<String> {
             Some(l) => l,
             None => continue,
         };
-        *lang_counts.entry(lang.display_name().to_string()).or_insert(0) += 1;
+        *lang_counts
+            .entry(lang.display_name().to_string())
+            .or_insert(0) += 1;
 
         let src = match std::fs::read_to_string(file) {
             Ok(s) => s,
@@ -356,7 +366,12 @@ pub fn phase4_critical_path(opts: &PhaseOptions) -> Result<String> {
         for m in res.function_metrics {
             let line = format!(
                 "{}::{} cc={} cog={} L{}-{}",
-                shown_path, m.function_name, m.cyclomatic_complexity, m.cognitive_complexity, m.line, m.end_line
+                shown_path,
+                m.function_name,
+                m.cyclomatic_complexity,
+                m.cognitive_complexity,
+                m.line,
+                m.end_line
             );
             hotspots.push((m.cyclomatic_complexity, line));
         }
@@ -405,7 +420,9 @@ pub fn phase5_optimization_report(opts: &PhaseOptions) -> Result<String> {
             Some(l) => l,
             None => continue,
         };
-        *lang_counts.entry(lang.display_name().to_string()).or_insert(0) += 1;
+        *lang_counts
+            .entry(lang.display_name().to_string())
+            .or_insert(0) += 1;
 
         let src = match std::fs::read_to_string(file) {
             Ok(s) => s,
@@ -420,10 +437,17 @@ pub fn phase5_optimization_report(opts: &PhaseOptions) -> Result<String> {
         }
 
         let c = cfg.analyze_with_language(&src, &shown_path, lang);
-        for m in c.function_metrics.into_iter().filter(|m| m.cyclomatic_complexity >= 10) {
+        for m in c
+            .function_metrics
+            .into_iter()
+            .filter(|m| m.cyclomatic_complexity >= 10)
+        {
             hotspots.push((
                 m.cyclomatic_complexity,
-                format!("{}::{} cc{} L{}", shown_path, m.function_name, m.cyclomatic_complexity, m.line),
+                format!(
+                    "{}::{} cc{} L{}",
+                    shown_path, m.function_name, m.cyclomatic_complexity, m.line
+                ),
             ));
         }
     }
@@ -468,7 +492,9 @@ pub fn phase5_optimization_report(opts: &PhaseOptions) -> Result<String> {
         }
     }
 
-    out.push_str("- For implementation tracks, start from /phase3 targets and keep context ultra.\n");
+    out.push_str(
+        "- For implementation tracks, start from /phase3 targets and keep context ultra.\n",
+    );
 
     Ok(truncate_output(out, opts.max_output_chars))
 }

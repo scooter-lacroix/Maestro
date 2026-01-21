@@ -348,18 +348,41 @@ impl HnswVectorStore {
         let config = self._config.clone();
         let mut new_hnsw = HNSW::new(config, CosineSimilarity::new());
 
-        // Re-insert only non-tombstoned vectors
-        for (id, data) in id_map.iter() {
-            if !tombstones.contains(id) {
-                new_hnsw.insert(data.embedding.clone());
+        // Create new id_to_data HashMap with new internal IDs
+        let mut new_id_map = HashMap::new();
+
+        // Re-insert only non-tombstoned vectors, capturing new internal IDs
+        for (old_id, data) in id_map.iter() {
+            if !tombstones.contains(old_id) {
+                // CRITICAL: Capture the new internal ID returned by insert()
+                let new_internal_id = new_hnsw.insert(data.embedding.clone());
+                // Build new HashMap with NEW internal IDs as keys
+                new_id_map.insert(new_internal_id, data.clone());
             }
         }
 
-        // Update HNSW reference
+        // Get active count BEFORE moving new_id_map
+        let active_count = new_id_map.len();
+
+        // Atomically swap BOTH HNSW and id_to_data
         *self
             .hnsw
             .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))? = new_hnsw;
+        *self
+            .id_to_data
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))? = new_id_map;
+
+        // Update vector_count to reflect actual count (excluding tombstones)
+        {
+            let mut metadata = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            metadata.vector_count = active_count;
+            metadata.updated_at = chrono::Utc::now();
+        }
 
         // Clear tombstones since we've rebuilt without them
         self.tombstones
@@ -368,8 +391,9 @@ impl HnswVectorStore {
             .clear();
 
         debug!(
-            "HNSW index rebuilt with {} vectors, tombstones cleared",
-            id_map.len() - tombstones.len()
+            "HNSW index rebuilt with {} vectors (pruned {} tombstones), ID mapping synchronized",
+            active_count,
+            tombstones.len()
         );
         Ok(())
     }

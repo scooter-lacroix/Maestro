@@ -5,9 +5,9 @@
 //! adding support for JavaScript, TypeScript, Rust, Go, Java, C, and C++.
 
 use crate::language::{
-    child_by_field, find_all_nodes, get_language_config, node_text,
-    ClassElement, FunctionElement, ImportElement, LanguageConfig,
-    MultiLanguageParser, ParameterElement, ProgrammingLanguage, VariableElement, Visibility,
+    child_by_field, find_all_nodes, get_language_config, node_text, ClassElement, FunctionElement,
+    ImportElement, LanguageConfig, MultiLanguageParser, ParameterElement, ProgrammingLanguage,
+    VariableElement, Visibility,
 };
 use serde::{Deserialize, Serialize};
 // Unused HashSet removed
@@ -68,10 +68,15 @@ impl MultiLangASTAnalyzer {
         language: ProgrammingLanguage,
     ) -> MultiLangASTAnalysis {
         let mut analysis = MultiLangASTAnalysis::new(path, language);
-        
+
         // Safety check for oversized files
         if source.len() > self.max_file_size {
-            tracing::warn!("Skipping analysis of {} (size {} exceeds limit {})", path, source.len(), self.max_file_size);
+            tracing::warn!(
+                "Skipping analysis of {} (size {} exceeds limit {})",
+                path,
+                source.len(),
+                self.max_file_size
+            );
             return analysis;
         }
 
@@ -210,10 +215,7 @@ impl MultiLangASTAnalyzer {
     fn parse_go_import(&self, text: &str, line: usize) -> Option<ImportElement> {
         let text = text.trim();
         if text.contains("\"") {
-            let module = text
-                .split('"')
-                .nth(1)?
-                .to_string();
+            let module = text.split('"').nth(1)?.to_string();
             return Some(ImportElement {
                 module,
                 name: None,
@@ -293,7 +295,7 @@ impl MultiLangASTAnalyzer {
         let name = self.extract_class_name(node, source, language)?;
 
         let bases = self.extract_class_bases(node, source, language);
-        
+
         let methods = self.extract_class_methods(node, source, language, config, &name);
 
         Some(ClassElement {
@@ -324,7 +326,7 @@ impl MultiLangASTAnalyzer {
         if let Some(name_node) = child_by_field(node, "type") {
             return Some(node_text(name_node, source).to_string());
         }
-        
+
         // Fallback: find identifier child
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -502,7 +504,7 @@ impl MultiLangASTAnalyzer {
                     if text.trim() == "self" || text.trim() == "this" {
                         continue;
                     }
-                    
+
                     let (name, type_hint) = self.parse_param_with_type(text, language);
                     if !name.is_empty() && params.len() < 8 {
                         params.push(ParameterElement {
@@ -519,9 +521,13 @@ impl MultiLangASTAnalyzer {
         params
     }
 
-    fn parse_param_with_type(&self, text: &str, language: ProgrammingLanguage) -> (String, Option<String>) {
+    fn parse_param_with_type(
+        &self,
+        text: &str,
+        language: ProgrammingLanguage,
+    ) -> (String, Option<String>) {
         let text = text.trim();
-        
+
         // Remove default value
         let text = text.split('=').next().unwrap_or(text).trim();
 
@@ -563,7 +569,7 @@ impl MultiLangASTAnalyzer {
 
     fn condense_type(&self, typ: &str) -> String {
         let mut result = typ.to_string();
-        
+
         // Common abbreviations
         let abbrevs = [
             ("Optional", "?"),
@@ -573,16 +579,16 @@ impl MultiLangASTAnalyzer {
             ("Awaitable", "Await"),
             ("Sequence", "Seq"),
         ];
-        
+
         for (full, short) in &abbrevs {
             result = result.replace(full, short);
         }
-        
+
         // Truncate long types
         if result.len() > 20 {
             result = format!("{}...", &result[..17]);
         }
-        
+
         result
     }
 
@@ -605,7 +611,9 @@ impl MultiLangASTAnalyzer {
         if let Some(arrow_idx) = text.find("->") {
             let ret_part = &text[arrow_idx + 2..];
             // Find the end (before { or :)
-            let end_idx = ret_part.find(|c| c == '{' || c == ':').unwrap_or(ret_part.len());
+            let end_idx = ret_part
+                .find(|c| c == '{' || c == ':')
+                .unwrap_or(ret_part.len());
             let ret_type = ret_part[..end_idx].trim();
             if !ret_type.is_empty() {
                 return Some(self.condense_type(ret_type));
@@ -634,7 +642,10 @@ impl MultiLangASTAnalyzer {
         for node in assign_nodes.into_iter().take(15) {
             // Only top-level assignments
             if let Some(parent) = node.parent() {
-                if parent.kind() == "module" || parent.kind() == "program" || parent.kind() == "translation_unit" {
+                if parent.kind() == "module"
+                    || parent.kind() == "program"
+                    || parent.kind() == "translation_unit"
+                {
                     if let Some(var) = self.parse_global_var(node, source) {
                         analysis.globals.push(var);
                     }
@@ -673,7 +684,10 @@ impl MultiLangASTAnalyzer {
 
         // Module docstring
         if let Some(ref doc) = analysis.module_docstring {
-            lines.push(format!("\"\"\"{}\"\"\"", doc.chars().take(100).collect::<String>()));
+            lines.push(format!(
+                "\"\"\"{}\"\"\"",
+                doc.chars().take(100).collect::<String>()
+            ));
         }
 
         // Imports (condensed)
@@ -708,7 +722,9 @@ impl MultiLangASTAnalyzer {
                 for method in cls.methods.iter().take(15) {
                     let async_prefix = if method.is_async { "async " } else { "" };
                     let params = self.format_params(&method.params);
-                    let ret = method.return_type.as_ref()
+                    let ret = method
+                        .return_type
+                        .as_ref()
                         .map(|r| format!(" -> {}", r))
                         .unwrap_or_default();
                     lines.push(format!(
@@ -729,7 +745,9 @@ impl MultiLangASTAnalyzer {
             for func in analysis.functions.iter().take(25) {
                 let async_prefix = if func.is_async { "async " } else { "" };
                 let params = self.format_params(&func.params);
-                let ret = func.return_type.as_ref()
+                let ret = func
+                    .return_type
+                    .as_ref()
                     .map(|r| format!(" -> {}", r))
                     .unwrap_or_default();
 
@@ -739,7 +757,10 @@ impl MultiLangASTAnalyzer {
                 ));
             }
             if analysis.functions.len() > 25 {
-                lines.push(format!("# +{} more functions", analysis.functions.len() - 25));
+                lines.push(format!(
+                    "# +{} more functions",
+                    analysis.functions.len() - 25
+                ));
             }
         }
 
@@ -754,13 +775,17 @@ impl MultiLangASTAnalyzer {
     }
 
     fn format_params(&self, params: &[ParameterElement]) -> String {
-        let formatted: Vec<String> = params.iter().take(5).map(|p| {
-            if let Some(ref typ) = p.type_hint {
-                format!("{}:{}", p.name, typ)
-            } else {
-                p.name.clone()
-            }
-        }).collect();
+        let formatted: Vec<String> = params
+            .iter()
+            .take(5)
+            .map(|p| {
+                if let Some(ref typ) = p.type_hint {
+                    format!("{}:{}", p.name, typ)
+                } else {
+                    p.name.clone()
+                }
+            })
+            .collect();
 
         let mut result = formatted.join(", ");
         if params.len() > 5 {
@@ -777,7 +802,9 @@ impl MultiLangASTAnalyzer {
 
         // Imports (just module names)
         if !analysis.imports.is_empty() {
-            let imp_names: Vec<&str> = analysis.imports.iter()
+            let imp_names: Vec<&str> = analysis
+                .imports
+                .iter()
                 .take(10)
                 .map(|i| i.module.split('/').last().unwrap_or(&i.module))
                 .map(|s| s.split('.').last().unwrap_or(s))
@@ -792,12 +819,15 @@ impl MultiLangASTAnalyzer {
         }
 
         // Functions (with class prefix for methods)
-        let all_funcs: Vec<String> = analysis.functions.iter()
+        let all_funcs: Vec<String> = analysis
+            .functions
+            .iter()
             .map(|f| f.name.clone())
-            .chain(
-                analysis.classes.iter()
-                    .flat_map(|c| c.methods.iter().map(move |m| format!("{}.{}", c.name, m.name)))
-            )
+            .chain(analysis.classes.iter().flat_map(|c| {
+                c.methods
+                    .iter()
+                    .map(move |m| format!("{}.{}", c.name, m.name))
+            }))
             .take(25)
             .collect();
 
@@ -834,7 +864,7 @@ class Greeter:
         return hello(name)
 "#;
         let result = analyzer.analyze(source, "test.py");
-        
+
         assert_eq!(result.language, "Python");
         assert!(!result.imports.is_empty());
         assert!(!result.functions.is_empty());
@@ -861,7 +891,7 @@ class Calculator {
 }
 "#;
         let result = analyzer.analyze(source, "test.js");
-        
+
         assert_eq!(result.language, "JavaScript");
         assert!(!result.functions.is_empty());
     }
@@ -887,7 +917,7 @@ impl Config {
 }
 "#;
         let result = analyzer.analyze(source, "test.rs");
-        
+
         assert_eq!(result.language, "Rust");
         assert!(!result.imports.is_empty());
         assert!(!result.functions.is_empty());
@@ -910,7 +940,7 @@ type Config struct {
 }
 "#;
         let result = analyzer.analyze(source, "test.go");
-        
+
         assert_eq!(result.language, "Go");
     }
 
@@ -941,19 +971,26 @@ def main():
 "#;
         let result = analyzer.analyze(source, "test.py");
         let llm_output = analyzer.to_llm_string(&result);
-        
+
         let raw_tokens = source.split_whitespace().count();
         let llm_tokens = llm_output.split_whitespace().count();
         let _savings = (1.0 - llm_tokens as f64 / raw_tokens as f64) * 100.0;
-        
+
         // Token savings scale with file size - small files have lower savings
         // For production files (100+ lines), we achieve 80%+ savings
         // For this small test file, verify output is at least more compact than raw
-        assert!(llm_tokens < raw_tokens, 
-            "LLM output should be smaller: {} < {} tokens", llm_tokens, raw_tokens);
-        
+        assert!(
+            llm_tokens < raw_tokens,
+            "LLM output should be smaller: {} < {} tokens",
+            llm_tokens,
+            raw_tokens
+        );
+
         // Also verify we captured the key elements
-        assert!(llm_output.contains("DataProcessor"), "Should contain class name");
+        assert!(
+            llm_output.contains("DataProcessor"),
+            "Should contain class name"
+        );
         assert!(llm_output.contains("process"), "Should contain method name");
         assert!(llm_output.contains("main"), "Should contain function name");
     }

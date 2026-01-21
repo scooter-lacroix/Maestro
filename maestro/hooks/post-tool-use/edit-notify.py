@@ -2,8 +2,8 @@
 """
 Maestro Post-Tool-Use Hook: Edit Notify
 
-Notifies the TLDR daemon of file changes for cache invalidation.
-Ensures TLDR analyses stay up-to-date with code changes.
+Notifies the LeIndex daemon/index layer of file changes for cache invalidation.
+Ensures LeIndex analyses stay up-to-date with code changes.
 """
 
 import json
@@ -19,18 +19,18 @@ maestro_root = Path(__file__).parent.parent.parent
 if str(maestro_root) not in sys.path:
     sys.path.insert(0, str(maestro_root))
 
-TLDRCache: Any = None
-TLRDDaemonClient: Any = None
+LeIndexCache: Any = None
+LeIndexDaemonClient: Any = None
 try:
-    TLDRCache = getattr(importlib.import_module("maestro.tldr.cache"), "TLDRCache")
-    TLRDDaemonClient = getattr(importlib.import_module("maestro.tldr.daemon"), "TLRDDaemonClient")
+    LeIndexCache = getattr(importlib.import_module("maestro.leindex.cache"), "LeIndexCache")
+    LeIndexDaemonClient = getattr(importlib.import_module("maestro.leindex.daemon"), "LeIndexDaemonClient")
 except (ImportError, AttributeError):
     pass
 
 
 def edit_notify_hook(input_data: dict) -> dict:
     """
-    Post-tool-use hook that notifies TLDR daemon of file changes.
+    Post-tool-use hook that notifies LeIndex of file changes.
 
     Args:
         input_data: Hook input data containing tool result
@@ -66,26 +66,26 @@ def edit_notify_hook(input_data: dict) -> dict:
 
         notification_sent = False
 
-        # Try to notify TLDR daemon
-        if TLRDDaemonClient is not None:
+        # Try to notify LeIndex daemon (if present)
+        if LeIndexDaemonClient is not None:
             try:
-                client = TLRDDaemonClient()
+                client = LeIndexDaemonClient()
                 notification_sent = client.notify_file_change(str(path_obj))
             except Exception:
                 # Daemon might not be running
                 pass
 
         # Fallback: invalidate cache directly
-        if not notification_sent and TLDRCache is not None:
+        if not notification_sent and LeIndexCache is not None:
             try:
-                cache = TLDRCache()
+                cache = LeIndexCache()
                 cache.invalidate(str(path_obj))
                 notification_sent = True
             except Exception:
                 pass
 
         if notification_sent:
-            input_data["tldr_notified"] = {
+            input_data["leindex_notified"] = {
                 "file_path": str(path_obj),
                 "notified_at": datetime.now(UTC).isoformat(),
             }

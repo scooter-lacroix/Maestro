@@ -4,7 +4,7 @@ Maestro Pre-Tool-Use Hook: LeIndex Read
 
 Intercepts file read operations and returns LeIndex (L1 AST + L2 Call Graph)
 context instead of full file contents, providing 90%+ token savings.
-Uses the consolidated TLDR + LeIndex system.
+Uses the LeIndex system (TLDR is deprecated and must not be referenced at runtime).
 """
 
 import importlib
@@ -31,11 +31,7 @@ def _init_cache():
             # Try LeIndex cache first
             LeIndexCache = getattr(importlib.import_module("maestro.leindex.cache"), "LeIndexCache", None)
         except (ImportError, AttributeError):
-            # Fall back to TLDR cache for compatibility
-            try:
-                LeIndexCache = getattr(importlib.import_module("maestro.tldr.cache"), "TLDRCache", None)
-            except (ImportError, AttributeError):
-                pass
+            pass
 
 
 def leindex_read_hook(input_data: dict) -> dict:
@@ -87,20 +83,20 @@ def leindex_read_hook(input_data: dict) -> dict:
                 cache = LeIndexCache()
                 # Try 'get' method for LeIndex cache
                 if hasattr(cache, 'get'):
-                    tldr_data = cache.get(str(path_obj))
+                    analysis_data = cache.get(str(path_obj))
                 else:
-                    tldr_data = None
+                    analysis_data = None
 
-                if tldr_data:
+                if analysis_data:
                     # Inject LeIndex context instead of full file
                     input_data["leindex_context"] = {
                         "file_path": str(path_obj),
-                        "ast_summary": tldr_data.get("ast", ""),
-                        "call_graph": tldr_data.get("call_graph", ""),
-                        "exports": tldr_data.get("exports", []),
-                        "imports": tldr_data.get("imports", []),
-                        "classes": tldr_data.get("classes", []),
-                        "functions": tldr_data.get("functions", []),
+                        "ast_summary": analysis_data.get("ast", ""),
+                        "call_graph": analysis_data.get("call_graph", ""),
+                        "exports": analysis_data.get("exports", []),
+                        "imports": analysis_data.get("imports", []),
+                        "classes": analysis_data.get("classes", []),
+                        "functions": analysis_data.get("functions", []),
                     }
                     input_data["leindex_enabled"] = True
             except Exception:

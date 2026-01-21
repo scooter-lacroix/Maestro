@@ -4,8 +4,8 @@
 //! Tracks variable definitions, uses, and dependencies across all languages.
 
 use crate::language::{
-    child_by_field, find_all_nodes, get_language_config, node_text,
-    MultiLanguageParser, ProgrammingLanguage,
+    child_by_field, find_all_nodes, get_language_config, node_text, MultiLanguageParser,
+    ProgrammingLanguage,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -168,7 +168,9 @@ impl MultiLangDFGAnalyzer {
         let import_nodes = find_all_nodes(root, &import_types);
         for node in import_nodes.iter().take(30) {
             let text = node_text(*node, source);
-            result.imports.push(text.lines().next().unwrap_or(&text).to_string());
+            result
+                .imports
+                .push(text.lines().next().unwrap_or(&text).to_string());
         }
     }
 
@@ -211,9 +213,7 @@ impl MultiLangDFGAnalyzer {
             }
 
             // Check for variable declarations (other languages)
-            if kind.contains("assignment")
-                || kind.contains("declaration")
-            {
+            if kind.contains("assignment") || kind.contains("declaration") {
                 if let Some(name) = self.extract_var_name(child, source) {
                     result.global_vars.push(VarDef {
                         name,
@@ -420,13 +420,25 @@ impl MultiLangDFGAnalyzer {
             if ch.is_alphanumeric() || ch == '_' {
                 current.push(ch);
             } else {
-                if !current.is_empty() && current.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) {
+                if !current.is_empty()
+                    && current
+                        .chars()
+                        .next()
+                        .map(|c| c.is_alphabetic())
+                        .unwrap_or(false)
+                {
                     out.push(current.clone());
                 }
                 current.clear();
             }
         }
-        if !current.is_empty() && current.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) {
+        if !current.is_empty()
+            && current
+                .chars()
+                .next()
+                .map(|c| c.is_alphabetic())
+                .unwrap_or(false)
+        {
             out.push(current);
         }
     }
@@ -467,7 +479,7 @@ impl MultiLangDFGAnalyzer {
             "## DFG: {} ({})",
             result.file_path, result.language
         ));
-        
+
         let total_vars: usize = result.functions.iter().map(|f| f.local_vars.len()).sum();
         lines.push(format!(
             "# {} functions, {} globals, {} local vars",
@@ -490,7 +502,12 @@ impl MultiLangDFGAnalyzer {
         lines.push("# Functions".to_string());
         for f in result.functions.iter().take(15) {
             let params = f.parameters.join(",");
-            let locals: Vec<&str> = f.local_vars.iter().take(5).map(|v| v.name.as_str()).collect();
+            let locals: Vec<&str> = f
+                .local_vars
+                .iter()
+                .take(5)
+                .map(|v| v.name.as_str())
+                .collect();
             lines.push(format!(
                 "{}({}) -> locals: {} L{}",
                 f.name,
@@ -543,11 +560,11 @@ def process(data):
     return result
 "#;
         let result = analyzer.analyze(source, "test.py");
-        
+
         assert_eq!(result.language, "Python");
         assert!(!result.global_vars.is_empty());
         assert!(!result.functions.is_empty());
-        
+
         let func = &result.functions[0];
         assert_eq!(func.name, "process");
         assert!(func.parameters.contains(&"data".to_string()));
@@ -568,7 +585,7 @@ function transform(items) {
 }
 "#;
         let result = analyzer.analyze(source, "test.js");
-        
+
         assert_eq!(result.language, "JavaScript");
         assert!(!result.functions.is_empty());
     }
@@ -590,7 +607,7 @@ fn process(data: Vec<i32>) -> Vec<i32> {
 }
 "#;
         let result = analyzer.analyze(source, "test.rs");
-        
+
         assert_eq!(result.language, "Rust");
         assert!(!result.functions.is_empty());
     }
@@ -605,7 +622,7 @@ def foo(x):
 "#;
         let result = analyzer.analyze(source, "test.py");
         let output = analyzer.to_llm_string(&result);
-        
+
         assert!(output.contains("DFG"));
         assert!(output.contains("Python"));
     }

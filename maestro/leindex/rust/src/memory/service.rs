@@ -22,11 +22,11 @@ use tracing::{info, warn};
 #[cfg(feature = "rusqlite")]
 use super::db::DatabaseManager;
 #[cfg(feature = "rusqlite")]
+use super::mcp_discovery;
+#[cfg(feature = "rusqlite")]
 use super::models::*;
 #[cfg(feature = "rusqlite")]
 use super::scanner::Scanner;
-#[cfg(feature = "rusqlite")]
-use super::mcp_discovery;
 
 #[cfg(feature = "rusqlite")]
 #[derive(Clone)]
@@ -521,27 +521,42 @@ impl MemoryService {
 
             let rows = stmt.query_map([], |row| {
                 Ok((
-                    row.get::<_, String>(0)?,                 // content
-                    row.get::<_, Option<String>>(1)?,         // summary
-                    row.get::<_, String>(2)?,                 // category
-                    row.get::<_, String>(3)?,                 // importance
-                    row.get::<_, Option<String>>(4)?,         // source
-                    row.get::<_, Option<String>>(5)?,         // session_id
-                    row.get::<_, Option<i64>>(6)?,            // project_id
-                    row.get::<_, Option<i64>>(7)?,            // track_id
-                    row.get::<_, Option<String>>(8)?,         // command
-                    row.get::<_, Option<String>>(9)?,         // command_context
-                    row.get::<_, String>(10)?,                // created_at
-                    row.get::<_, Option<String>>(11)?,        // expires_at
-                    row.get::<_, Option<String>>(12)?,        // last_accessed
-                    row.get::<_, Option<String>>(13)?,        // meta_data
-                    row.get::<_, Option<String>>(14)?,        // tags
+                    row.get::<_, String>(0)?,          // content
+                    row.get::<_, Option<String>>(1)?,  // summary
+                    row.get::<_, String>(2)?,          // category
+                    row.get::<_, String>(3)?,          // importance
+                    row.get::<_, Option<String>>(4)?,  // source
+                    row.get::<_, Option<String>>(5)?,  // session_id
+                    row.get::<_, Option<i64>>(6)?,     // project_id
+                    row.get::<_, Option<i64>>(7)?,     // track_id
+                    row.get::<_, Option<String>>(8)?,  // command
+                    row.get::<_, Option<String>>(9)?,  // command_context
+                    row.get::<_, String>(10)?,         // created_at
+                    row.get::<_, Option<String>>(11)?, // expires_at
+                    row.get::<_, Option<String>>(12)?, // last_accessed
+                    row.get::<_, Option<String>>(13)?, // meta_data
+                    row.get::<_, Option<String>>(14)?, // tags
                 ))
             })?;
 
             for row in rows.flatten() {
-                let (content, summary, category, importance, source, session_id, project_id, track_id, command, command_context, created_at, expires_at, last_accessed, meta_data, tags) =
-                    row;
+                let (
+                    content,
+                    summary,
+                    category,
+                    importance,
+                    source,
+                    session_id,
+                    project_id,
+                    track_id,
+                    command,
+                    command_context,
+                    created_at,
+                    expires_at,
+                    last_accessed,
+                    meta_data,
+                    tags,
+                ) = row;
 
                 // De-dupe: same content + created_at is considered the same memory across stores.
                 let exists = self
@@ -613,7 +628,9 @@ impl MemoryService {
                     if !file.exists() {
                         continue;
                     }
-                    if let Ok(mut extra) = mcp_discovery::discover_from_json_file("project_mcp", &file) {
+                    if let Ok(mut extra) =
+                        mcp_discovery::discover_from_json_file("project_mcp", &file)
+                    {
                         discovered.append(&mut extra);
                     }
                 }

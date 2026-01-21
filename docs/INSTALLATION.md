@@ -1,35 +1,33 @@
 # Installation
 
-Complete guide to installing Maestro for Claude Code or OpenCode.
+Maestro has a **single installer entrypoint**: `install.sh`.
+
+`install.sh` launches the Rust **Conductor Wizard** (`maestro-setup`) which can configure multiple AI coding tools in one run (Claude Code, OpenCode, Codex, Gemini, Qwen, Amp, Droid).
 
 ## Quick Install
 
-### Claude Code
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 ```
 
-### OpenCode
-
+Local (from a clone):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash
+./install.sh
 ```
 
 ---
 
 ## What Gets Installed
 
-The installer configures the following components:
+The wizard configures the following components (depending on which toggles you enable in the TUI):
 
 | Component | Description |
 |-----------|-------------|
-| **Commands** | Slash commands for project setup, track management, and implementation |
-| **Templates** | Project templates for workflow and style guides |
-| **MCP Servers** | Pre-configured Model Context Protocol servers (3) |
-| **Memory System** | Project context and semantic search |
-| **Hooks** | TypeScript build support for hooks |
-| **Zoekt** | Optional fast code search (requires Go) |
+| **Maestro protocols** | Canonical command protocols installed under `~/.maestro/integrations/commands/` (or your chosen install path) |
+| **Tool command packs** | Installs the tool-specific command/prompt pack (Claude Code commands, OpenCode skill, Codex prompts, Gemini/Qwen commands) |
+| **LeIndex MCP wiring** | Adds a `leindex` MCP server entry pointing at `maestro mcp tool-search` in each tool’s config format |
+| **Optional search stack** | Go + Zoekt (if enabled) |
+| **Rust CLI** | Installs the Rust `maestro` binary to `~/.local/bin/maestro` (after build) |
 
 ---
 
@@ -37,79 +35,45 @@ The installer configures the following components:
 
 ### Required
 
-- **Python 3.11+** - For core functionality
-- **Node.js 18+** - For TypeScript hooks (if present)
+- **Rust + Cargo** - Required to build Maestro’s Rust core (installer will install via rustup if missing)
 - **git** - For version control integration
+- **build tools** - `gcc`, `pkg-config`, `libssl-dev` (installed via the wizard on Debian/Ubuntu)
 
 ### Optional (Recommended)
 
-- **Go 1.21+** - Required for Zoekt
-- **Zoekt** - Fast indexed code search for Memory System
+- **Node.js + npm** - Required to build the Memory Dashboard frontend step (`npm install && npm run build`)
+- **Go** - Required if you enable Zoekt
 
-The installer will detect these dependencies and offer to install them if missing.
+The wizard installs some dependencies automatically (Debian/Ubuntu). For other platforms, install equivalents manually.
 
 ---
 
 ## Installation Walkthrough
 
-### Step 1: Dependency Check
+### Step 1: Run `install.sh`
 
-The installer first checks for Go and Zoekt:
+`install.sh` launches the Rust Conductor Wizard (TUI). In the configuration screen you can:
 
-```
-🔧 Checking dependencies...
-   ⚠️  Go not found
-   Install Go now? (y/N)
-```
+- Choose the Maestro home directory (default: `~/.maestro`)
+- Select which tools to integrate:
+  - Claude Code
+  - OpenCode
+  - Codex CLI
+  - Gemini CLI
+  - Qwen Code
+  - Amp CLI
+  - Droid CLI
+- Optionally enable Go/Zoekt, tmux tooling, etc
 
-**Type `y`** to install Go automatically, or `N` to skip.
+### Step 2: What “first-class integration” means (per tool)
 
-### Step 2: Zoekt Installation (if Go installed)
-
-```
-   ⚠️  Zoekt not found (optional but recommended)
-   Install Zoekt now? (y/N)
-```
-
-**Type `y`** to install Zoekt for fast code search, or `N` to skip.
-
-### Step 3: Configuration Backup
-
-If you have existing Maestro configuration, the installer creates a timestamped backup:
-
-```
-   ℹ️  Backed up existing config to ~/.claude/config.json.backup.20250113_120000
-```
-
-### Step 4: MCP Server Setup
-
-The installer creates `~/.claude/.mcp.json` with three pre-configured servers:
-
-| Server | Purpose |
-|--------|---------|
-| **filesystem** | Local file system access |
-| **brave-search** | Web search capability |
-| **github** | GitHub repository access |
-
-### Step 5: Command Installation
-
-Commands are installed to `~/.claude/commands/`:
-
-| Command | Purpose |
-|---------|---------|
-| `maestro:setup` | Initialize project |
-| `maestro:newTrack` | Create new feature/fix |
-| `maestro:implement` | Execute track |
-| `maestro:status` | View progress |
-| `maestro:revert` | Undo work |
-| `maestro:configure` | Configure agents |
-
-### Step 6: Template Installation
-
-Project templates are installed to `~/.claude/maestro-templates/`:
-
-- `workflow.md` - Development workflow configuration
-- `code_styleguides/` - Code style guide templates
+- **Claude Code**: installs commands to `~/.claude/commands/`, templates to `~/.claude/maestro-templates/`, and upserts `mcpServers.leindex` in `~/.claude/.mcp.json`
+- **OpenCode**: installs the skill to `~/.config/opencode/skill/maestro/`, copies command protocols to `~/.config/opencode/commands/`, and updates `~/.config/opencode/opencode.json` (commands + MCP)
+- **Codex**: installs custom prompts under `${CODEX_HOME:-~/.codex}/prompts/` and upserts `[mcp_servers.leindex]` in `${CODEX_HOME:-~/.codex}/config.toml`
+- **Gemini**: installs TOML commands under `~/.gemini/commands/maestro/` and upserts `mcpServers.leindex` in `~/.gemini/settings.json`
+- **Qwen**: installs TOML commands under `~/.qwen/commands/maestro/` and upserts `mcpServers.leindex` in `~/.qwen/settings.json`
+- **Amp**: upserts `amp.mcpServers.leindex` in `~/.config/amp/settings.json`
+- **Droid**: upserts `mcpServers.leindex` in `~/.factory/mcp.json` (with `type: "stdio"`)
 
 ---
 
@@ -136,14 +100,28 @@ source ~/.bashrc   # or source ~/.zshrc
 ### Verify Installation
 
 ```bash
-# Check Maestro commands are installed
-ls ~/.claude/commands/
+# Canonical Maestro command protocols
+ls ~/.maestro/integrations/commands/
 
-# Check MCP configuration
+# Claude Code (if enabled)
+ls ~/.claude/commands/
+ls ~/.claude/maestro-templates/
 cat ~/.claude/.mcp.json
 
-# Check templates
-ls ~/.claude/maestro-templates/
+# OpenCode (if enabled)
+ls ~/.config/opencode/skill/maestro/
+ls ~/.config/opencode/commands/
+cat ~/.config/opencode/opencode.json
+
+# Codex (if enabled)
+ls ${CODEX_HOME:-~/.codex}/prompts/
+cat ${CODEX_HOME:-~/.codex}/config.toml
+
+# Gemini / Qwen (if enabled)
+ls ~/.gemini/commands/maestro/
+cat ~/.gemini/settings.json
+ls ~/.qwen/commands/maestro/
+cat ~/.qwen/settings.json
 ```
 
 ### Optional: Configure Enhanced Agents
@@ -172,11 +150,11 @@ cd Maestro
 ### 2. Run Installer Script
 
 ```bash
-chmod +x install-claude-code.sh   # or install-opencode.sh
-./install-claude-code.sh
+chmod +x install.sh
+./install.sh
 ```
 
-### 3. Copy Commands Manually
+### 3. (Optional) Copy Claude Code assets manually
 
 ```bash
 # Copy commands to Claude directory

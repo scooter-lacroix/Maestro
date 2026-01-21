@@ -167,9 +167,6 @@ def recall_relevant_memories(
     try:
         # Use LeIndex memory bridge
         bridge_factory = _optional_attr("maestro.leindex.memory_integration", "get_leindex_memory_bridge")
-        if not callable(bridge_factory):
-            # Fall back to TLDR bridge for compatibility
-            bridge_factory = _optional_attr("maestro.tldr.memory_integration", "get_tldr_memory_bridge")
 
         bridge = bridge_factory() if callable(bridge_factory) else None
         if bridge is None:

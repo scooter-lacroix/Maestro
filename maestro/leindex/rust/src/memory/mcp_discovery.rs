@@ -29,14 +29,32 @@ pub fn discover_system_mcp_servers() -> Vec<DiscoveredMcpServer> {
     };
 
     let candidates: Vec<(String, PathBuf)> = vec![
-        ("claude_settings".to_string(), home.join(".claude/settings.json")),
-        ("claude_config".to_string(), home.join(".claude/.claude.json")),
-        ("claude_user_mcp".to_string(), home.join(".claude/.mcp.json")),
-        ("claude_code_fallback".to_string(), home.join(".config/claude-code/mcp.json")),
+        (
+            "claude_settings".to_string(),
+            home.join(".claude/settings.json"),
+        ),
+        (
+            "claude_config".to_string(),
+            home.join(".claude/.claude.json"),
+        ),
+        (
+            "claude_user_mcp".to_string(),
+            home.join(".claude/.mcp.json"),
+        ),
+        (
+            "claude_code_fallback".to_string(),
+            home.join(".config/claude-code/mcp.json"),
+        ),
         ("amp".to_string(), home.join(".config/amp/settings.json")),
-        ("opencode".to_string(), home.join(".config/opencode/opencode.json")),
+        (
+            "opencode".to_string(),
+            home.join(".config/opencode/opencode.json"),
+        ),
         ("cursor".to_string(), home.join(".cursor/mcp.json")),
-        ("cursor_alt".to_string(), home.join(".config/cursor/mcp.json")),
+        (
+            "cursor_alt".to_string(),
+            home.join(".config/cursor/mcp.json"),
+        ),
         ("codex".to_string(), home.join(".codex/config.toml")),
         ("qwen".to_string(), home.join(".qwen/settings.json")),
         ("gemini".to_string(), home.join(".gemini/settings.json")),
@@ -92,10 +110,17 @@ pub fn discover_from_json_file(label: &str, path: &Path) -> Result<Vec<Discovere
     Ok(out)
 }
 
-fn parse_json_server(name: &str, cfg: &serde_json::Value, source_label: &str) -> Option<DiscoveredMcpServer> {
+fn parse_json_server(
+    name: &str,
+    cfg: &serde_json::Value,
+    source_label: &str,
+) -> Option<DiscoveredMcpServer> {
     // HTTP-style server (Claude Code style)
     if cfg.get("type").and_then(|v| v.as_str()) == Some("http") || cfg.get("url").is_some() {
-        let url = cfg.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let url = cfg
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         if url.is_none() {
             return None;
         }
@@ -117,7 +142,10 @@ fn parse_json_server(name: &str, cfg: &serde_json::Value, source_label: &str) ->
 
     // OpenCode-style: command is an array
     if let Some(cmd_arr) = cfg.get("command").and_then(|v| v.as_array()) {
-        let mut parts: Vec<String> = cmd_arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+        let mut parts: Vec<String> = cmd_arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect();
         if parts.is_empty() {
             return None;
         }
@@ -136,7 +164,10 @@ fn parse_json_server(name: &str, cfg: &serde_json::Value, source_label: &str) ->
             command,
             args,
             env,
-            cwd: cfg.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            cwd: cfg
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             url: None,
             headers: None,
             source: source_label.to_string(),
@@ -148,11 +179,21 @@ fn parse_json_server(name: &str, cfg: &serde_json::Value, source_label: &str) ->
     let args: Vec<String> = cfg
         .get("args")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
-    let env = cfg.get("env").cloned().unwrap_or_else(|| serde_json::json!({}));
-    let cwd = cfg.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let env = cfg
+        .get("env")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let cwd = cfg
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     Some(DiscoveredMcpServer {
         name: name.to_string(),
@@ -184,15 +225,26 @@ pub fn discover_from_toml_file(label: &str, path: &Path) -> Result<Vec<Discovere
     Ok(out)
 }
 
-fn parse_toml_server(name: &str, cfg: &toml::Value, source_label: &str) -> Option<DiscoveredMcpServer> {
+fn parse_toml_server(
+    name: &str,
+    cfg: &toml::Value,
+    source_label: &str,
+) -> Option<DiscoveredMcpServer> {
     let table = cfg.as_table()?;
 
-    if table.get("transport").and_then(|v| v.as_str()) == Some("http") || table.get("url").is_some() {
-        let url = table.get("url").and_then(|v| v.as_str()).map(|s| s.to_string())?;
+    if table.get("transport").and_then(|v| v.as_str()) == Some("http") || table.get("url").is_some()
+    {
+        let url = table
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())?;
         // Headers can be specified as arbitrary top-level keys; keep what we can.
         let mut headers_obj = serde_json::Map::new();
         if let Some(auth) = table.get("Authorization").and_then(|v| v.as_str()) {
-            headers_obj.insert("Authorization".to_string(), serde_json::Value::String(auth.to_string()));
+            headers_obj.insert(
+                "Authorization".to_string(),
+                serde_json::Value::String(auth.to_string()),
+            );
         }
 
         return Some(DiscoveredMcpServer {
@@ -216,7 +268,11 @@ fn parse_toml_server(name: &str, cfg: &toml::Value, source_label: &str) -> Optio
     let args: Vec<String> = table
         .get("args")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     Some(DiscoveredMcpServer {
@@ -225,7 +281,10 @@ fn parse_toml_server(name: &str, cfg: &toml::Value, source_label: &str) -> Optio
         command,
         args,
         env: serde_json::json!({}),
-        cwd: table.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        cwd: table
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         url: None,
         headers: None,
         source: source_label.to_string(),

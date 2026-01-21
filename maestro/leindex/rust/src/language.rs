@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 // Unused HashSet removed
 use std::path::Path;
-use tree_sitter::{Language, Parser, Tree, Node};
+use tree_sitter::{Language, Node, Parser, Tree};
 
 /// Supported programming languages
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -222,22 +222,22 @@ impl Default for MultiLanguageParser {
 pub trait LanguageConfig {
     /// Get function definition node types
     fn function_node_types(&self) -> &'static [&'static str];
-    
+
     /// Get class/struct definition node types
     fn class_node_types(&self) -> &'static [&'static str];
-    
+
     /// Get import statement node types
     fn import_node_types(&self) -> &'static [&'static str];
-    
+
     /// Get control flow node types (if, for, while, etc.)
     fn control_flow_node_types(&self) -> &'static [&'static str];
-    
+
     /// Get assignment node types
     fn assignment_node_types(&self) -> &'static [&'static str];
-    
+
     /// Get comment node types
     fn comment_node_types(&self) -> &'static [&'static str];
-    
+
     /// Check if a name indicates a private member
     fn is_private_name(&self, name: &str) -> bool;
 }
@@ -249,29 +249,39 @@ impl LanguageConfig for PythonConfig {
     fn function_node_types(&self) -> &'static [&'static str] {
         &["function_definition"]
     }
-    
+
     fn class_node_types(&self) -> &'static [&'static str] {
         &["class_definition"]
     }
-    
+
     fn import_node_types(&self) -> &'static [&'static str] {
         &["import_statement", "import_from_statement"]
     }
-    
+
     fn control_flow_node_types(&self) -> &'static [&'static str] {
-        &["if_statement", "elif_clause", "else_clause", "for_statement", 
-          "while_statement", "try_statement", "except_clause", "finally_clause",
-          "with_statement", "match_statement", "case_clause"]
+        &[
+            "if_statement",
+            "elif_clause",
+            "else_clause",
+            "for_statement",
+            "while_statement",
+            "try_statement",
+            "except_clause",
+            "finally_clause",
+            "with_statement",
+            "match_statement",
+            "case_clause",
+        ]
     }
-    
+
     fn assignment_node_types(&self) -> &'static [&'static str] {
         &["assignment", "augmented_assignment"]
     }
-    
+
     fn comment_node_types(&self) -> &'static [&'static str] {
         &["comment"]
     }
-    
+
     fn is_private_name(&self, name: &str) -> bool {
         name.starts_with('_') && !name.starts_with("__")
     }
@@ -282,33 +292,52 @@ pub struct JavaScriptConfig;
 
 impl LanguageConfig for JavaScriptConfig {
     fn function_node_types(&self) -> &'static [&'static str] {
-        &["function_declaration", "function_expression", "arrow_function",
-          "method_definition", "generator_function_declaration"]
+        &[
+            "function_declaration",
+            "function_expression",
+            "arrow_function",
+            "method_definition",
+            "generator_function_declaration",
+        ]
     }
-    
+
     fn class_node_types(&self) -> &'static [&'static str] {
         &["class_declaration", "class"]
     }
-    
+
     fn import_node_types(&self) -> &'static [&'static str] {
         &["import_statement", "export_statement"]
     }
-    
+
     fn control_flow_node_types(&self) -> &'static [&'static str] {
-        &["if_statement", "else_clause", "for_statement", "for_in_statement",
-          "while_statement", "do_statement", "switch_statement", "switch_case",
-          "try_statement", "catch_clause", "finally_clause"]
+        &[
+            "if_statement",
+            "else_clause",
+            "for_statement",
+            "for_in_statement",
+            "while_statement",
+            "do_statement",
+            "switch_statement",
+            "switch_case",
+            "try_statement",
+            "catch_clause",
+            "finally_clause",
+        ]
     }
-    
+
     fn assignment_node_types(&self) -> &'static [&'static str] {
-        &["assignment_expression", "augmented_assignment_expression",
-          "variable_declaration", "lexical_declaration"]
+        &[
+            "assignment_expression",
+            "augmented_assignment_expression",
+            "variable_declaration",
+            "lexical_declaration",
+        ]
     }
-    
+
     fn comment_node_types(&self) -> &'static [&'static str] {
         &["comment"]
     }
-    
+
     fn is_private_name(&self, name: &str) -> bool {
         name.starts_with('#') || name.starts_with('_')
     }
@@ -321,28 +350,39 @@ impl LanguageConfig for RustConfig {
     fn function_node_types(&self) -> &'static [&'static str] {
         &["function_item"]
     }
-    
+
     fn class_node_types(&self) -> &'static [&'static str] {
         &["struct_item", "enum_item", "trait_item", "impl_item"]
     }
-    
+
     fn import_node_types(&self) -> &'static [&'static str] {
         &["use_declaration", "extern_crate_declaration"]
     }
-    
+
     fn control_flow_node_types(&self) -> &'static [&'static str] {
-        &["if_expression", "else_clause", "for_expression", "while_expression",
-          "loop_expression", "match_expression", "match_arm"]
+        &[
+            "if_expression",
+            "else_clause",
+            "for_expression",
+            "while_expression",
+            "loop_expression",
+            "match_expression",
+            "match_arm",
+        ]
     }
-    
+
     fn assignment_node_types(&self) -> &'static [&'static str] {
-        &["let_declaration", "assignment_expression", "compound_assignment_expr"]
+        &[
+            "let_declaration",
+            "assignment_expression",
+            "compound_assignment_expr",
+        ]
     }
-    
+
     fn comment_node_types(&self) -> &'static [&'static str] {
         &["line_comment", "block_comment"]
     }
-    
+
     fn is_private_name(&self, _name: &str) -> bool {
         // In Rust, visibility is explicit via `pub`, not by name
         false
@@ -356,28 +396,38 @@ impl LanguageConfig for GoConfig {
     fn function_node_types(&self) -> &'static [&'static str] {
         &["function_declaration", "method_declaration"]
     }
-    
+
     fn class_node_types(&self) -> &'static [&'static str] {
         &["type_declaration", "type_spec"] // struct, interface
     }
-    
+
     fn import_node_types(&self) -> &'static [&'static str] {
         &["import_declaration", "import_spec"]
     }
-    
+
     fn control_flow_node_types(&self) -> &'static [&'static str] {
-        &["if_statement", "for_statement", "switch_statement", "select_statement",
-          "expression_case", "default_case"]
+        &[
+            "if_statement",
+            "for_statement",
+            "switch_statement",
+            "select_statement",
+            "expression_case",
+            "default_case",
+        ]
     }
-    
+
     fn assignment_node_types(&self) -> &'static [&'static str] {
-        &["short_var_declaration", "assignment_statement", "var_declaration"]
+        &[
+            "short_var_declaration",
+            "assignment_statement",
+            "var_declaration",
+        ]
     }
-    
+
     fn comment_node_types(&self) -> &'static [&'static str] {
         &["comment"]
     }
-    
+
     fn is_private_name(&self, name: &str) -> bool {
         // In Go, lowercase first letter means package-private
         name.chars().next().map_or(false, |c| c.is_lowercase())
@@ -391,30 +441,48 @@ impl LanguageConfig for JavaConfig {
     fn function_node_types(&self) -> &'static [&'static str] {
         &["method_declaration", "constructor_declaration"]
     }
-    
+
     fn class_node_types(&self) -> &'static [&'static str] {
-        &["class_declaration", "interface_declaration", "enum_declaration",
-          "annotation_type_declaration"]
+        &[
+            "class_declaration",
+            "interface_declaration",
+            "enum_declaration",
+            "annotation_type_declaration",
+        ]
     }
-    
+
     fn import_node_types(&self) -> &'static [&'static str] {
         &["import_declaration"]
     }
-    
+
     fn control_flow_node_types(&self) -> &'static [&'static str] {
-        &["if_statement", "else", "for_statement", "enhanced_for_statement",
-          "while_statement", "do_statement", "switch_expression", "switch_label",
-          "try_statement", "catch_clause", "finally_clause"]
+        &[
+            "if_statement",
+            "else",
+            "for_statement",
+            "enhanced_for_statement",
+            "while_statement",
+            "do_statement",
+            "switch_expression",
+            "switch_label",
+            "try_statement",
+            "catch_clause",
+            "finally_clause",
+        ]
     }
-    
+
     fn assignment_node_types(&self) -> &'static [&'static str] {
-        &["assignment_expression", "local_variable_declaration", "field_declaration"]
+        &[
+            "assignment_expression",
+            "local_variable_declaration",
+            "field_declaration",
+        ]
     }
-    
+
     fn comment_node_types(&self) -> &'static [&'static str] {
         &["line_comment", "block_comment"]
     }
-    
+
     fn is_private_name(&self, _name: &str) -> bool {
         // Java uses explicit access modifiers
         false
@@ -428,29 +496,38 @@ impl LanguageConfig for CppConfig {
     fn function_node_types(&self) -> &'static [&'static str] {
         &["function_definition", "function_declarator"]
     }
-    
+
     fn class_node_types(&self) -> &'static [&'static str] {
         &["struct_specifier", "class_specifier", "enum_specifier"]
     }
-    
+
     fn import_node_types(&self) -> &'static [&'static str] {
         &["preproc_include", "preproc_import"]
     }
-    
+
     fn control_flow_node_types(&self) -> &'static [&'static str] {
-        &["if_statement", "else_clause", "for_statement", "for_range_loop",
-          "while_statement", "do_statement", "switch_statement", "case_statement",
-          "try_statement", "catch_clause"]
+        &[
+            "if_statement",
+            "else_clause",
+            "for_statement",
+            "for_range_loop",
+            "while_statement",
+            "do_statement",
+            "switch_statement",
+            "case_statement",
+            "try_statement",
+            "catch_clause",
+        ]
     }
-    
+
     fn assignment_node_types(&self) -> &'static [&'static str] {
         &["assignment_expression", "declaration", "init_declarator"]
     }
-    
+
     fn comment_node_types(&self) -> &'static [&'static str] {
         &["comment"]
     }
-    
+
     fn is_private_name(&self, _name: &str) -> bool {
         // C++ uses explicit access specifiers
         false
@@ -461,7 +538,9 @@ impl LanguageConfig for CppConfig {
 pub fn get_language_config(lang: ProgrammingLanguage) -> Box<dyn LanguageConfig> {
     match lang {
         ProgrammingLanguage::Python => Box::new(PythonConfig),
-        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => Box::new(JavaScriptConfig),
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+            Box::new(JavaScriptConfig)
+        }
         ProgrammingLanguage::Rust => Box::new(RustConfig),
         ProgrammingLanguage::Go => Box::new(GoConfig),
         ProgrammingLanguage::Java => Box::new(JavaConfig),
@@ -489,13 +568,13 @@ pub fn child_by_field<'a>(node: Node<'a>, field: &str) -> Option<Node<'a>> {
 pub fn children_by_type<'a>(node: Node<'a>, node_type: &str) -> Vec<Node<'a>> {
     let mut cursor = node.walk();
     let mut results = Vec::new();
-    
+
     for child in node.children(&mut cursor) {
         if child.kind() == node_type {
             results.push(child);
         }
     }
-    
+
     results
 }
 
@@ -503,18 +582,18 @@ pub fn children_by_type<'a>(node: Node<'a>, node_type: &str) -> Vec<Node<'a>> {
 pub fn find_all_nodes<'a>(node: Node<'a>, node_types: &[&str]) -> Vec<Node<'a>> {
     let mut results = Vec::new();
     let _cursor = node.walk();
-    
+
     fn visit<'a>(node: Node<'a>, node_types: &[&str], results: &mut Vec<Node<'a>>) {
         if node_types.contains(&node.kind()) {
             results.push(node);
         }
-        
+
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             visit(child, node_types, results);
         }
     }
-    
+
     visit(node, node_types, &mut results);
     results
 }
@@ -525,22 +604,55 @@ mod tests {
 
     #[test]
     fn test_language_detection() {
-        assert_eq!(ProgrammingLanguage::from_extension("py"), Some(ProgrammingLanguage::Python));
-        assert_eq!(ProgrammingLanguage::from_extension("js"), Some(ProgrammingLanguage::JavaScript));
-        assert_eq!(ProgrammingLanguage::from_extension("ts"), Some(ProgrammingLanguage::TypeScript));
-        assert_eq!(ProgrammingLanguage::from_extension("rs"), Some(ProgrammingLanguage::Rust));
-        assert_eq!(ProgrammingLanguage::from_extension("go"), Some(ProgrammingLanguage::Go));
-        assert_eq!(ProgrammingLanguage::from_extension("java"), Some(ProgrammingLanguage::Java));
-        assert_eq!(ProgrammingLanguage::from_extension("c"), Some(ProgrammingLanguage::C));
-        assert_eq!(ProgrammingLanguage::from_extension("cpp"), Some(ProgrammingLanguage::Cpp));
+        assert_eq!(
+            ProgrammingLanguage::from_extension("py"),
+            Some(ProgrammingLanguage::Python)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("js"),
+            Some(ProgrammingLanguage::JavaScript)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("ts"),
+            Some(ProgrammingLanguage::TypeScript)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("rs"),
+            Some(ProgrammingLanguage::Rust)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("go"),
+            Some(ProgrammingLanguage::Go)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("java"),
+            Some(ProgrammingLanguage::Java)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("c"),
+            Some(ProgrammingLanguage::C)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_extension("cpp"),
+            Some(ProgrammingLanguage::Cpp)
+        );
         assert_eq!(ProgrammingLanguage::from_extension("unknown"), None);
     }
 
     #[test]
     fn test_path_detection() {
-        assert_eq!(ProgrammingLanguage::from_path("/path/to/file.py"), Some(ProgrammingLanguage::Python));
-        assert_eq!(ProgrammingLanguage::from_path("module.ts"), Some(ProgrammingLanguage::TypeScript));
-        assert_eq!(ProgrammingLanguage::from_path("main.rs"), Some(ProgrammingLanguage::Rust));
+        assert_eq!(
+            ProgrammingLanguage::from_path("/path/to/file.py"),
+            Some(ProgrammingLanguage::Python)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_path("module.ts"),
+            Some(ProgrammingLanguage::TypeScript)
+        );
+        assert_eq!(
+            ProgrammingLanguage::from_path("main.rs"),
+            Some(ProgrammingLanguage::Rust)
+        );
     }
 
     #[test]

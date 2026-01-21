@@ -240,7 +240,10 @@ mod tests {
     fn test_condense_type() {
         let formatter = TokenFormatter::new();
         assert_eq!(formatter.condense_type("Optional[str]"), "Opt[str]");
-        assert_eq!(formatter.condense_type("Callable[[int], int]"), "Fn[[int], int]");
+        assert_eq!(
+            formatter.condense_type("Callable[[int], int]"),
+            "Fn[[int], int]"
+        );
     }
 
     #[test]

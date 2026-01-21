@@ -74,7 +74,13 @@ impl ProgramDependenceGraph {
     }
 
     /// Add a dependence edge
-    pub fn add_edge(&mut self, from_line: usize, to_line: usize, dep_type: DependenceType, variable: Option<String>) {
+    pub fn add_edge(
+        &mut self,
+        from_line: usize,
+        to_line: usize,
+        dep_type: DependenceType,
+        variable: Option<String>,
+    ) {
         self.edges.insert(DependenceEdge {
             from_line,
             to_line,
@@ -290,7 +296,12 @@ impl SlicingAnalyzer {
                 if let Some(def_lines) = var_defs.get(var) {
                     if let Some(&last_def) = def_lines.last() {
                         if last_def != line_idx {
-                            pdg.add_edge(last_def, line_idx, DependenceType::Data, Some(var.clone()));
+                            pdg.add_edge(
+                                last_def,
+                                line_idx,
+                                DependenceType::Data,
+                                Some(var.clone()),
+                            );
                         }
                     }
                 }
@@ -407,7 +418,10 @@ impl SlicingAnalyzer {
                 if *op == "=" {
                     if pos > 0 {
                         let prev = line.as_bytes().get(pos.saturating_sub(1));
-                        if matches!(prev, Some(b'!') | Some(b'<') | Some(b'>') | Some(b'=') | Some(b':')) {
+                        if matches!(
+                            prev,
+                            Some(b'!') | Some(b'<') | Some(b'>') | Some(b'=') | Some(b':')
+                        ) {
                             continue;
                         }
                     }
@@ -458,11 +472,10 @@ impl SlicingAnalyzer {
         }
 
         let keywords = [
-            "False", "None", "True", "and", "as", "assert", "async", "await",
-            "break", "class", "continue", "def", "del", "elif", "else", "except",
-            "finally", "for", "from", "global", "if", "import", "in", "is",
-            "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
-            "while", "with", "yield", "print", "len", "range", "str", "int",
+            "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
+            "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
+            "return", "try", "while", "with", "yield", "print", "len", "range", "str", "int",
         ];
 
         if keywords.contains(&s) {
@@ -591,10 +604,9 @@ impl SlicingAnalyzer {
 
             if !vars_at_line.is_empty() {
                 let unique_vars: HashSet<String> = vars_at_line.into_iter().collect();
-                result.dependencies.push((
-                    line,
-                    unique_vars.into_iter().collect::<Vec<_>>().join(", "),
-                ));
+                result
+                    .dependencies
+                    .push((line, unique_vars.into_iter().collect::<Vec<_>>().join(", ")));
             }
         }
 
@@ -721,7 +733,12 @@ impl SlicingAnalyzer {
         if !result.relevant_variables.is_empty() {
             lines.push(format!(
                 "Variables involved: {}",
-                result.relevant_variables.iter().cloned().collect::<Vec<_>>().join(", ")
+                result
+                    .relevant_variables
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
 
@@ -734,7 +751,11 @@ impl SlicingAnalyzer {
             sorted.sort();
 
             for line in sorted.iter().take(20) {
-                let marker = if *line == result.target_line { " <-" } else { "" };
+                let marker = if *line == result.target_line {
+                    " <-"
+                } else {
+                    ""
+                };
                 lines.push(format!("  L{}{}", line, marker));
             }
 

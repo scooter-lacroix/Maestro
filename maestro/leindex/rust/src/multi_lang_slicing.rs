@@ -4,8 +4,8 @@
 //! Supports backward and forward slicing across all languages.
 
 use crate::language::{
-    child_by_field, find_all_nodes, get_language_config, node_text,
-    MultiLanguageParser, ProgrammingLanguage,
+    child_by_field, find_all_nodes, get_language_config, node_text, MultiLanguageParser,
+    ProgrammingLanguage,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -54,8 +54,8 @@ pub enum SliceType {
 pub struct MultiLangPDG {
     pub file_path: String,
     pub language: String,
-    pub definitions: HashMap<String, Vec<usize>>,  // var -> def lines
-    pub uses: HashMap<String, Vec<usize>>,          // var -> use lines
+    pub definitions: HashMap<String, Vec<usize>>, // var -> def lines
+    pub uses: HashMap<String, Vec<usize>>,        // var -> use lines
     pub data_deps: Vec<Dependency>,
     pub control_deps: Vec<Dependency>,
 }
@@ -145,7 +145,10 @@ impl MultiLangSlicingAnalyzer {
         if kind.contains("assignment") || kind == "augmented_assignment" {
             if let Some(left) = child_by_field(node, "left") {
                 let var_name = node_text(left, source).to_string();
-                pdg.definitions.entry(var_name.clone()).or_default().push(line);
+                pdg.definitions
+                    .entry(var_name.clone())
+                    .or_default()
+                    .push(line);
 
                 // Right side contains uses
                 if let Some(right) = child_by_field(node, "right") {
@@ -219,10 +222,7 @@ impl MultiLangSlicingAnalyzer {
             if let Some(def_lines) = pdg.definitions.get(var) {
                 for &use_line in use_lines {
                     // Find the most recent definition before this use
-                    let reaching_def = def_lines
-                        .iter()
-                        .filter(|&&d| d < use_line)
-                        .max();
+                    let reaching_def = def_lines.iter().filter(|&&d| d < use_line).max();
 
                     if let Some(&def_line) = reaching_def {
                         pdg.data_deps.push(Dependency {
@@ -251,9 +251,14 @@ impl MultiLangSlicingAnalyzer {
     ) {
         // Find control structures and add control dependencies
         let control_types: &[&str] = &[
-            "if_statement", "for_statement", "while_statement",
-            "if_expression", "for_expression", "while_expression",
-            "match_expression", "switch_statement",
+            "if_statement",
+            "for_statement",
+            "while_statement",
+            "if_expression",
+            "for_expression",
+            "while_expression",
+            "match_expression",
+            "switch_statement",
         ];
 
         let control_nodes = find_all_nodes(root, control_types);
@@ -331,7 +336,9 @@ impl MultiLangSlicingAnalyzer {
 
             // Find dependencies that affect this line
             for dep in pdg.data_deps.iter().chain(pdg.control_deps.iter()) {
-                if dep.to.line == line || (relevant_vars.contains(&dep.to.variable) && dep.to.line <= line) {
+                if dep.to.line == line
+                    || (relevant_vars.contains(&dep.to.variable) && dep.to.line <= line)
+                {
                     if !visited.contains(&dep.from.line) {
                         worklist.push_back(dep.from.line);
                         relevant_vars.insert(dep.from.variable.clone());
@@ -373,7 +380,9 @@ impl MultiLangSlicingAnalyzer {
 
             // Find dependencies from this line
             for dep in pdg.data_deps.iter().chain(pdg.control_deps.iter()) {
-                if dep.from.line == line || (relevant_vars.contains(&dep.from.variable) && dep.from.line >= line) {
+                if dep.from.line == line
+                    || (relevant_vars.contains(&dep.from.variable) && dep.from.line >= line)
+                {
                     if !visited.contains(&dep.to.line) {
                         worklist.push_back(dep.to.line);
                         relevant_vars.insert(dep.to.variable.clone());
@@ -444,7 +453,7 @@ z = y * 2
 print(z)
 "#;
         let pdg = analyzer.build_pdg(source, "test.py");
-        
+
         assert_eq!(pdg.language, "Python");
         assert!(!pdg.definitions.is_empty());
         assert!(!pdg.uses.is_empty());
@@ -461,11 +470,14 @@ w = 100
 print(z)
 "#;
         let pdg = analyzer.build_pdg(source, "test.py");
-        let slice = analyzer.backward_slice(&pdg, SlicePoint {
-            variable: "z".to_string(),
-            line: 4,
-        });
-        
+        let slice = analyzer.backward_slice(
+            &pdg,
+            SlicePoint {
+                variable: "z".to_string(),
+                line: 4,
+            },
+        );
+
         assert_eq!(slice.slice_type, SliceType::Backward);
         assert!(!slice.lines.is_empty());
         // w = 100 should not be in the slice
@@ -481,11 +493,14 @@ z = y * 2
 print(z)
 "#;
         let pdg = analyzer.build_pdg(source, "test.py");
-        let slice = analyzer.forward_slice(&pdg, SlicePoint {
-            variable: "x".to_string(),
-            line: 2,
-        });
-        
+        let slice = analyzer.forward_slice(
+            &pdg,
+            SlicePoint {
+                variable: "x".to_string(),
+                line: 2,
+            },
+        );
+
         assert_eq!(slice.slice_type, SliceType::Forward);
         assert!(!slice.lines.is_empty());
     }
@@ -498,12 +513,15 @@ x = 10
 y = x + 5
 "#;
         let pdg = analyzer.build_pdg(source, "test.py");
-        let slice = analyzer.backward_slice(&pdg, SlicePoint {
-            variable: "y".to_string(),
-            line: 3,
-        });
+        let slice = analyzer.backward_slice(
+            &pdg,
+            SlicePoint {
+                variable: "y".to_string(),
+                line: 3,
+            },
+        );
         let output = analyzer.to_llm_string(&slice);
-        
+
         assert!(output.contains("Backward Slice"));
     }
 }

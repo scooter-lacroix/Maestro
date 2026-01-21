@@ -4,6 +4,20 @@
 
 This document describes the JSON schema format for exposing Language Server Protocol (LSP) servers via `.mcp.json` configuration files. This format enables CLI tools (Claude Code, Gemini, etc.) to communicate directly with LSP processes via stdio for latency-sensitive operations like code completion, inlay hints, and go-to-definition.
 
+## Schema Version
+
+**Current Version:** 1.0
+
+The root structure includes a `schemaVersion` field for future compatibility:
+
+```json
+{
+  "schemaVersion": "1.0",
+  "mcpServers": { ... },
+  "lsp": { ... }
+}
+```
+
 ## Design Goals
 
 1. **Backward Compatibility**: Existing `.mcp.json` files without LSP entries must continue to work
@@ -11,12 +25,33 @@ This document describes the JSON schema format for exposing Language Server Prot
 3. **Hybrid Exposure**: Support both direct stdio (for low-latency) and MCP bridge (for async operations)
 4. **Graceful Degradation**: Tools should work normally when LSPs are unavailable
 
+## Security Considerations
+
+### Shell Injection Prevention
+
+All paths and user-provided values in `.mcp.json` are properly shell-escaped when used in command strings. The implementation uses single-quote escaping with proper quote replacement to prevent shell injection attacks.
+
+### Path Validation
+
+- All project paths are validated and sanitized before use
+- Symbolic link attacks are prevented using atomic file operations with O_EXCL
+- Temporary files are created using `tempfile::NamedTempFile` for secure atomic writes
+
+### LSP Process Isolation
+
+LSP processes are spawned with:
+- Explicit working directories
+- Limited environment variables
+- No inherited file descriptors beyond stdio
+- Kill-on-drop semantics for proper cleanup
+
 ## Schema Definition
 
 ### Root Structure
 
 ```json
 {
+  "schemaVersion": "1.0",
   "mcpServers": {
     // Existing MCP servers (backward compatible)
     "maestro-tool-search": {
@@ -33,6 +68,12 @@ This document describes the JSON schema format for exposing Language Server Prot
   }
 }
 ```
+
+### Field Naming Convention
+
+- **Rust code**: `snake_case` for struct field names
+- **JSON output**: `camelCase` for JSON-RPC protocol compliance
+- Example: `session_id` in Rust → `sessionId` in JSON
 
 ### LSP Server Entry Schema
 
@@ -106,13 +147,15 @@ Example:
 }
 ```
 
-#### 2. stdio-proxy (`transport: "stdio-proxy"`)
+#### 2. stdio-proxy (`transport: "stdio-proxy"`) - NOT YET IMPLEMENTED
 
-CLI tools communicate via a Unix socket proxy:
+**Implementation Status:** The stdio-proxy transport mode is currently **not implemented**.
+
+The `stdio-proxy` mode would allow CLI tools to communicate via a Unix socket proxy:
 - Pros: Multiple concurrent clients
 - Cons: Slightly higher latency, requires proxy process
 
-Example:
+Example (future):
 ```json
 {
   "name": "rust-analyzer-session123",
@@ -123,6 +166,8 @@ Example:
   }
 }
 ```
+
+**Note:** The proxy implementation exists in `src/lsp/stdio_proxy.rs` but is not integrated with the session manager. This is intentional - the proxy requires additional production testing and configuration options.
 
 ### Capability Flags
 
@@ -147,6 +192,7 @@ LSP capabilities indicate which operations are supported:
 
 ```json
 {
+  "schemaVersion": "1.0",
   "mcpServers": {
     "maestro-tool-search": {
       "command": "maestro",
@@ -177,6 +223,7 @@ LSP capabilities indicate which operations are supported:
 
 ```json
 {
+  "schemaVersion": "1.0",
   "mcpServers": {
     "maestro-tool-search": {
       "command": "maestro",
@@ -231,6 +278,7 @@ LSP capabilities indicate which operations are supported:
 
 ```json
 {
+  "schemaVersion": "1.0",
   "mcpServers": {
     "maestro-tool-search": {
       "command": "maestro",

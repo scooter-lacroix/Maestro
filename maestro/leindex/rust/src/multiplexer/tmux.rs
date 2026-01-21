@@ -67,13 +67,28 @@ pub struct TmuxSession {
 }
 
 impl TmuxSession {
-    /// Create a new session handle
+    /// Create a new session handle (generates unique name)
     pub fn new(display_name: &str, work_dir: &str) -> Self {
         let sanitized = sanitize_name(display_name);
         let unique_suffix = generate_short_id();
 
         Self {
             name: format!("{}{}_{}", SESSION_PREFIX, sanitized, unique_suffix),
+            display_name: display_name.to_string(),
+            work_dir: work_dir.to_string(),
+            command: None,
+            created: Instant::now(),
+            state_tracker: StateTracker::default(),
+        }
+    }
+
+    /// Create session with a specific name (for restoration)
+    ///
+    /// This constructor is used when restoring a session to preserve the original
+    /// tmux session name instead of generating a new unique one.
+    pub fn with_name(name: String, display_name: &str, work_dir: &str) -> Self {
+        Self {
+            name,
             display_name: display_name.to_string(),
             work_dir: work_dir.to_string(),
             command: None,
@@ -488,6 +503,68 @@ impl TmuxMultiplexer {
 
         if !status.success() {
             bail!("Failed to attach to session: {}", session_name);
+        }
+        Ok(())
+    }
+
+    /// Get an environment variable value for a tmux session.
+    ///
+    /// Returns `Ok(None)` when the variable is unset or the session doesn't exist.
+    pub fn get_environment(session_name: &str, var: &str) -> Result<Option<String>> {
+        let output = Command::new("tmux")
+            .args(["show-environment", "-t", session_name, var])
+            .output();
+
+        let Ok(output) = output else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if line.is_empty() || line.starts_with('-') {
+            return Ok(None);
+        }
+
+        if let Some((_k, v)) = line.split_once('=') {
+            Ok(Some(v.to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Set an environment variable value for a tmux session.
+    pub fn set_environment(session_name: &str, var: &str, value: &str) -> Result<()> {
+        let output = Command::new("tmux")
+            .args(["set-environment", "-t", session_name, var, value])
+            .output()
+            .context("Failed to set tmux environment")?;
+
+        if !output.status.success() {
+            bail!(
+                "Failed to set tmux environment: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(())
+    }
+
+    /// Respawn the primary pane (0.0) with a new shell script.
+    ///
+    /// Uses `sh -lc` so the script runs under a login-like shell.
+    pub fn respawn_pane(session_name: &str, script: &str) -> Result<()> {
+        let target = format!("{}:0.0", session_name);
+        let output = Command::new("tmux")
+            .args(["respawn-pane", "-k", "-t", &target, "sh", "-lc", script])
+            .output()
+            .context("Failed to respawn tmux pane")?;
+
+        if !output.status.success() {
+            bail!(
+                "Failed to respawn tmux pane: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }

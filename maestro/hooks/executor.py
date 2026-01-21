@@ -76,14 +76,19 @@ class HookExecutor:
     Handles hook discovery, execution, and result aggregation.
     """
 
-    def __init__(self, hooks_dir: Optional[Path] = None) -> None:
+    def __init__(self, hooks_dir: Optional[Path] = None, include_global_hooks: Optional[bool] = None) -> None:
         """
         Initialize the hook executor.
 
         Args:
             hooks_dir: Directory containing hooks (default: maestro/hooks)
+            include_global_hooks: Whether to include global hooks under
+                ~/.claude/plugins/maestro/hooks. If None, defaults to True only when
+                using the default local hooks_dir (i.e. hooks_dir is None). This
+                keeps test runs hermetic when a custom hooks_dir is supplied.
         """
         # Set up local hooks directory
+        use_default_hooks_dir = hooks_dir is None
         if hooks_dir is None:
             maestro_root = Path(__file__).parent.parent
             hooks_dir = maestro_root / "hooks"
@@ -93,6 +98,9 @@ class HookExecutor:
 
         # Set up global hooks directory (~/.claude/plugins/maestro/hooks)
         self.global_hooks_dir = Path.home() / ".claude" / "plugins" / "maestro" / "hooks"
+        if include_global_hooks is None:
+            include_global_hooks = use_default_hooks_dir
+        self._include_global_hooks = include_global_hooks
 
         # Detect project root for CWD
         project_info = detect_project() if callable(detect_project) else None
@@ -123,11 +131,12 @@ class HookExecutor:
                     seen_names.add(hook_file.name)
 
         # 2. Discover global hooks (avoiding duplicates)
-        global_phase_dir = self.global_hooks_dir / phase
-        if global_phase_dir.exists():
-            for hook_file in global_phase_dir.glob("*.py"):
-                if hook_file.name != "__init__.py" and hook_file.name not in seen_names:
-                    hooks.append(hook_file)
+        if self._include_global_hooks:
+            global_phase_dir = self.global_hooks_dir / phase
+            if global_phase_dir.exists():
+                for hook_file in global_phase_dir.glob("*.py"):
+                    if hook_file.name != "__init__.py" and hook_file.name not in seen_names:
+                        hooks.append(hook_file)
 
         self._hooks_cache[phase] = sorted(hooks)
         return self._hooks_cache[phase]

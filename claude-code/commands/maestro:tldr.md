@@ -187,13 +187,13 @@ Index project for fast analysis.
 
 ## Automatic Hook Integration
 
-TLDR features **run automatically** via Maestro's hooks:
+TLDR interface features **run automatically** via Maestro's LeIndex-backed hooks:
 
-1. **tldr-read hook**: When you read a file, TLDR context is automatically available
-2. **tldr-context hook**: Before editing code, relevant context is injected
+1. **leindex-read hook**: When you read a code file, LeIndex context is available
+2. **leindex-context hook**: Before editing code, relevant context is injected
 3. **smart-search hook**: Code searches use semantic understanding
 
-You don't need to manually invoke TLDR for most operations - it works behind the scenes to provide Claude with optimal context.
+You don't need to manually invoke TLDR for most operations - the canonical implementation is LeIndex (pure Rust), with `/maestro:tldr` treated as a compatibility alias.
 
 ## Examples from llm-tldr
 
@@ -209,22 +209,18 @@ The original llm-tldr commands map to Maestro TLDR as follows:
 
 ## Python API
 
-You can also use TLDR directly in Python:
+You can also access the same capabilities via the LeIndex API surface:
 
 ```python
-from maestro.tldr import (
-    TLRDAnalyzer,
-    get_relevant_context,
-    ASTAnalyzer,
-    CallGraphAnalyzer,
-)
+from maestro.leindex import ContextExtractor, get_relevant_context
 
-# Analyze a file
-analyzer = TLRDAnalyzer("src/auth.py")
-result = analyzer.analyze(layers=["ast", "callgraph", "cfg"])
+# Token-efficient, LLM-actionable context for a file (balanced mode)
+extractor = ContextExtractor(mode="balanced")
+result = extractor.extract_for_file("src/auth.py")
+context = result.context.to_llm_string() if result else ""
 
-# Get context for LLM
-context = get_relevant_context("authenticate_user", "src/auth.py")
+# Targeted context for a function
+fn_context = get_relevant_context("authenticate_user", "src/auth.py")
 ```
 
 ## When to Use Each Layer
@@ -243,7 +239,7 @@ context = get_relevant_context("authenticate_user", "src/auth.py")
 ## Related Commands
 
 - `/maestro:leindex` - Full-text and semantic code search via LeIndex
-- `/maestro:configure` - Configure Maestro (including TLDR hooks)
+- `/maestro:configure` - Configure Maestro (including LeIndex hooks)
 
 ## See Also
 

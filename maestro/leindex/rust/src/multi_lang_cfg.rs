@@ -4,8 +4,7 @@
 //! Calculates cyclomatic/cognitive complexity for all supported languages.
 
 use crate::language::{
-    find_all_nodes, get_language_config, node_text,
-    MultiLanguageParser, ProgrammingLanguage,
+    find_all_nodes, get_language_config, node_text, MultiLanguageParser, ProgrammingLanguage,
 };
 use serde::{Deserialize, Serialize};
 // Unused HashMap removed
@@ -91,7 +90,8 @@ impl MultiLangCFGResult {
             .unwrap_or(0);
 
         if !self.function_metrics.is_empty() {
-            self.average_complexity = self.total_complexity as f64 / self.function_metrics.len() as f64;
+            self.average_complexity =
+                self.total_complexity as f64 / self.function_metrics.len() as f64;
         }
 
         self.high_complexity_functions = self
@@ -142,7 +142,9 @@ impl MultiLangCFGAnalyzer {
         let func_nodes = find_all_nodes(root, config.function_node_types());
 
         for func_node in func_nodes.iter().take(50) {
-            if let Some(metrics) = self.analyze_function(*func_node, source, language, config.as_ref()) {
+            if let Some(metrics) =
+                self.analyze_function(*func_node, source, language, config.as_ref())
+            {
                 result.function_metrics.push(metrics);
             }
         }
@@ -199,7 +201,7 @@ impl MultiLangCFGAnalyzer {
         depth: usize,
     ) {
         let kind = node.kind();
-        
+
         // Update max nesting
         metrics.max_nesting_depth = metrics.max_nesting_depth.max(depth);
 
@@ -260,7 +262,11 @@ impl MultiLangCFGAnalyzer {
         }
 
         // Recurse into children with updated depth
-        let new_depth = if is_decision || is_loop || is_exception { depth + 1 } else { depth };
+        let new_depth = if is_decision || is_loop || is_exception {
+            depth + 1
+        } else {
+            depth
+        };
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.count_control_flow(child, source, config, metrics, new_depth);
@@ -287,7 +293,11 @@ impl MultiLangCFGAnalyzer {
             lines.push(String::new());
             lines.push("# ⚠️ High complexity".to_string());
             for name in result.high_complexity_functions.iter().take(5) {
-                if let Some(m) = result.function_metrics.iter().find(|m| &m.function_name == name) {
+                if let Some(m) = result
+                    .function_metrics
+                    .iter()
+                    .find(|m| &m.function_name == name)
+                {
                     lines.push(format!(
                         "{}: cc={} cog={} L{}",
                         name, m.cyclomatic_complexity, m.cognitive_complexity, m.line
@@ -302,11 +312,7 @@ impl MultiLangCFGAnalyzer {
         for m in result.function_metrics.iter().take(20) {
             lines.push(format!(
                 "{}: cc={} loops={} depth={} L{}",
-                m.function_name,
-                m.cyclomatic_complexity,
-                m.loop_count,
-                m.max_nesting_depth,
-                m.line
+                m.function_name, m.cyclomatic_complexity, m.loop_count, m.max_nesting_depth, m.line
             ));
         }
         if result.function_metrics.len() > 20 {
@@ -334,7 +340,12 @@ impl MultiLangCFGAnalyzer {
             let top: Vec<String> = metrics
                 .iter()
                 .take(10)
-                .map(|m| format!("{}(cc{}@L{})", m.function_name, m.cyclomatic_complexity, m.line))
+                .map(|m| {
+                    format!(
+                        "{}(cc{}@L{})",
+                        m.function_name, m.cyclomatic_complexity, m.line
+                    )
+                })
                 .collect();
             lines.push(format!("hot:{}", top.join(" ")));
         }
@@ -373,17 +384,23 @@ def complex(x):
     return x
 "#;
         let result = analyzer.analyze(source, "test.py");
-        
+
         assert_eq!(result.language, "Python");
         assert!(result.function_metrics.len() >= 2);
-        
+
         // simple() should have low complexity
-        let simple = result.function_metrics.iter().find(|m| m.function_name == "simple");
+        let simple = result
+            .function_metrics
+            .iter()
+            .find(|m| m.function_name == "simple");
         assert!(simple.is_some());
         assert!(simple.unwrap().cyclomatic_complexity <= 2);
-        
+
         // complex() should have higher complexity
-        let complex = result.function_metrics.iter().find(|m| m.function_name == "complex");
+        let complex = result
+            .function_metrics
+            .iter()
+            .find(|m| m.function_name == "complex");
         assert!(complex.is_some());
         assert!(complex.unwrap().cyclomatic_complexity > 3);
     }
@@ -405,7 +422,7 @@ function process(items) {
 }
 "#;
         let result = analyzer.analyze(source, "test.js");
-        
+
         assert_eq!(result.language, "JavaScript");
         assert!(!result.function_metrics.is_empty());
     }
@@ -426,7 +443,7 @@ fn process(items: &[Item]) -> Result<(), Error> {
 }
 "#;
         let result = analyzer.analyze(source, "test.rs");
-        
+
         assert_eq!(result.language, "Rust");
         assert!(!result.function_metrics.is_empty());
     }
@@ -444,7 +461,7 @@ def b():
 "#;
         let result = analyzer.analyze(source, "test.py");
         let output = analyzer.to_llm_string(&result);
-        
+
         assert!(output.contains("CFG"));
         assert!(output.contains("Python"));
     }

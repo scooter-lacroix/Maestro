@@ -6,15 +6,15 @@
 //! The API depends on the legacy MemoryService which uses rusqlite.
 
 #[cfg(feature = "rusqlite")]
-pub mod server;
+pub mod handlers;
 #[cfg(feature = "rusqlite")]
 pub mod routes;
 #[cfg(feature = "rusqlite")]
-pub mod handlers;
+pub mod server;
 
 #[cfg(feature = "rusqlite")]
-pub use server::*;
+pub use handlers::*;
 #[cfg(feature = "rusqlite")]
 pub use routes::*;
 #[cfg(feature = "rusqlite")]
-pub use handlers::*;
+pub use server::*;

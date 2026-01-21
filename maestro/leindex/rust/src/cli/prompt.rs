@@ -42,7 +42,11 @@ pub fn ask_choice(question: &str, options: &[&str]) -> Result<Option<usize>> {
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .margin(1)
-                    .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
+                    .constraints([
+                        Constraint::Length(3),
+                        Constraint::Min(0),
+                        Constraint::Length(2),
+                    ])
                     .split(inner);
 
                 let q = Paragraph::new(question)

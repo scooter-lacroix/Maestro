@@ -45,13 +45,23 @@ impl MemorySearchIndex {
             .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
 
-        Ok(Self { index, reader, schema })
+        Ok(Self {
+            index,
+            reader,
+            schema,
+        })
     }
 
     /// Index a memory
-    pub fn index_memory(&self, id: i64, content: &str, category: &str, tags: Option<&str>) -> Result<()> {
+    pub fn index_memory(
+        &self,
+        id: i64,
+        content: &str,
+        category: &str,
+        tags: Option<&str>,
+    ) -> Result<()> {
         let mut index_writer: IndexWriter = self.index.writer(50_000_000)?; // 50MB heap
-        
+
         let id_field = self.schema.get_field("id")?;
         let content_field = self.schema.get_field("content")?;
         let category_field = self.schema.get_field("category")?;
@@ -75,12 +85,12 @@ impl MemorySearchIndex {
         let searcher = self.reader.searcher();
         let content_field = self.schema.get_field("content")?;
         let category_field = self.schema.get_field("category")?;
-        
+
         let query_parser = QueryParser::for_index(&self.index, vec![content_field, category_field]);
         let query = query_parser.parse_query(query_str)?;
 
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
-        
+
         let mut results = Vec::new();
         let id_field = self.schema.get_field("id")?;
 

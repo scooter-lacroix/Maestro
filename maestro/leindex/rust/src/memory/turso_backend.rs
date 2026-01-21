@@ -29,16 +29,18 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use libsql::{Builder, Database};
+use std::future::Future;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::future::Future;
 use tracing::{debug, info};
 
-use super::models::{Session, SessionStatus, MaestroProject, Memory, MemoryCategory, MemoryImportance};
+use super::models::{
+    MaestroProject, Memory, MemoryCategory, MemoryImportance, Session, SessionStatus,
+};
 
 /// Global OnceLock for ensuring libSQL threading is configured only once
 ///
@@ -356,12 +358,16 @@ impl TursoStorageBackend {
     pub async fn initialize(&self) -> Result<()> {
         // Check shutdown guard first
         if self.is_shutdown() {
-            return Err(anyhow::anyhow!("Cannot initialize: Turso backend is shut down"));
+            return Err(anyhow::anyhow!(
+                "Cannot initialize: Turso backend is shut down"
+            ));
         }
 
         // Check read-only mode - initialize writes schema
         if self.config.read_only {
-            return Err(anyhow::anyhow!("Cannot initialize: Database is in read-only mode"));
+            return Err(anyhow::anyhow!(
+                "Cannot initialize: Database is in read-only mode"
+            ));
         }
 
         info!("Initializing Turso database schema");
@@ -371,9 +377,12 @@ impl TursoStorageBackend {
             .connect()
             .context("Failed to get connection")?;
 
-        conn.execute("PRAGMA foreign_keys = ON;", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-            .await
-            .context("Failed to enable foreign keys")?;
+        conn.execute(
+            "PRAGMA foreign_keys = ON;",
+            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+        )
+        .await
+        .context("Failed to enable foreign keys")?;
 
         // Create all tables
         for table_sql in &[
@@ -443,27 +452,36 @@ impl TursoStorageBackend {
     /// It also enforces foreign key constraints and read-only mode if configured.
     pub async fn with_connection<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(libsql::Connection) -> Pin<Box<dyn Future<Output = Result<T>> + Send>> + Send + 'static,
+        F: FnOnce(libsql::Connection) -> Pin<Box<dyn Future<Output = Result<T>> + Send>>
+            + Send
+            + 'static,
         T: Send + 'static,
     {
         if self.is_shutdown() {
             return Err(anyhow::anyhow!("Turso backend is shut down"));
         }
 
-        let conn = self.database
+        let conn = self
+            .database
             .connect()
             .context("Failed to get connection")?;
 
         // Enforce foreign keys for every connection
-        conn.execute("PRAGMA foreign_keys = ON;", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-            .await
-            .context("Failed to enable foreign keys")?;
+        conn.execute(
+            "PRAGMA foreign_keys = ON;",
+            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+        )
+        .await
+        .context("Failed to enable foreign keys")?;
 
         // Enforce read-only mode if configured
         if self.config.read_only {
-             conn.execute("PRAGMA query_only = ON;", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-                .await
-                .context("Failed to enable query_only mode")?;
+            conn.execute(
+                "PRAGMA query_only = ON;",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to enable query_only mode")?;
         }
 
         f(conn).await
@@ -526,7 +544,10 @@ impl TursoStorageBackend {
         let started_at = session.started_at.to_rfc3339();
         let last_accessed_at = session.last_accessed_at.map(|d| d.to_rfc3339());
         let ended_at = session.ended_at.map(|d| d.to_rfc3339());
-        let metadata = session.metadata.as_ref().map(|m| serde_json::to_string(m).unwrap_or_default());
+        let metadata = session
+            .metadata
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default());
 
         self.with_connection(move |conn| {
             Box::pin(async move {
@@ -539,17 +560,31 @@ impl TursoStorageBackend {
                         libsql::Value::Text(session_id),
                         libsql::Value::Text(title),
                         libsql::Value::Text(project_path),
-                        group_path.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        group_path
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
                         libsql::Value::Integer(sort_order as i64),
-                        parent_session_id.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
-                        command.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        parent_session_id
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
+                        command
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
                         tool.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(status),
-                        multiplexer_session.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        multiplexer_session
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(started_at),
-                        last_accessed_at.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
-                        ended_at.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
-                        metadata.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
+                        last_accessed_at
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
+                        ended_at
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
+                        metadata
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
                     ]),
                 )
                 .await
@@ -597,9 +632,16 @@ impl TursoStorageBackend {
                             .ok_or_else(|| anyhow::anyhow!("Invalid session status"))?,
                         multiplexer_session: row.get(10)?,
                         started_at: parse_datetime(row.get::<String>(11)?)?,
-                        last_accessed_at: row.get::<Option<String>>(12)?.map(parse_datetime).transpose()?,
-                        ended_at: row.get::<Option<String>>(13)?.map(parse_datetime).transpose()?,
-                        metadata: row.get::<Option<String>>(14)?
+                        last_accessed_at: row
+                            .get::<Option<String>>(12)?
+                            .map(parse_datetime)
+                            .transpose()?,
+                        ended_at: row
+                            .get::<Option<String>>(13)?
+                            .map(parse_datetime)
+                            .transpose()?,
+                        metadata: row
+                            .get::<Option<String>>(14)?
                             .map(|s| serde_json::from_str::<serde_json::Value>(&s))
                             .transpose()
                             .context("Failed to parse session metadata")?,
@@ -644,12 +686,19 @@ impl TursoStorageBackend {
                         command: row.get(7)?,
                         tool: row.get(8)?,
                         status: SessionStatus::from_str(row.get::<String>(9)?.as_str())
-                             .ok_or_else(|| anyhow::anyhow!("Invalid session status"))?,
+                            .ok_or_else(|| anyhow::anyhow!("Invalid session status"))?,
                         multiplexer_session: row.get(10)?,
                         started_at: parse_datetime(row.get::<String>(11)?)?,
-                        last_accessed_at: row.get::<Option<String>>(12)?.map(parse_datetime).transpose()?,
-                        ended_at: row.get::<Option<String>>(13)?.map(parse_datetime).transpose()?,
-                        metadata: row.get::<Option<String>>(14)?
+                        last_accessed_at: row
+                            .get::<Option<String>>(12)?
+                            .map(parse_datetime)
+                            .transpose()?,
+                        ended_at: row
+                            .get::<Option<String>>(13)?
+                            .map(parse_datetime)
+                            .transpose()?,
+                        metadata: row
+                            .get::<Option<String>>(14)?
                             .map(|s| serde_json::from_str::<serde_json::Value>(&s))
                             .transpose()
                             .context("Failed to parse session metadata")?,
@@ -662,7 +711,11 @@ impl TursoStorageBackend {
     }
 
     /// Update session status
-    pub async fn update_session_status(&self, session_id: &str, status: SessionStatus) -> Result<()> {
+    pub async fn update_session_status(
+        &self,
+        session_id: &str,
+        status: SessionStatus,
+    ) -> Result<()> {
         if self.config.read_only {
             return Err(anyhow::anyhow!("Database is in read-only mode"));
         }
@@ -753,7 +806,7 @@ impl TursoStorageBackend {
         }
 
         if self.config.read_only {
-             return Err(anyhow::anyhow!("Database is in read-only mode"));
+            return Err(anyhow::anyhow!("Database is in read-only mode"));
         }
 
         // Create new project with ON CONFLICT handling
@@ -915,14 +968,20 @@ impl TursoStorageBackend {
         let project_id = memory.project_id;
         let track_id = memory.track_id;
         let command = memory.command.clone();
-        let command_context = memory.command_context.as_ref()
+        let command_context = memory
+            .command_context
+            .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_default());
         let created_at = memory.created_at.to_rfc3339();
         let expires_at = memory.expires_at.map(|d| d.to_rfc3339());
         let last_accessed = memory.last_accessed.map(|d| d.to_rfc3339());
-        let metadata = memory.metadata.as_ref()
+        let metadata = memory
+            .metadata
+            .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_default());
-        let tags = memory.tags.as_ref()
+        let tags = memory
+            .tags
+            .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_default());
 
         self.with_connection(move |conn| {
@@ -1006,16 +1065,25 @@ impl TursoStorageBackend {
                         project_id: row.get::<i64>(7)?.try_into().ok(),
                         track_id: row.get::<i64>(8)?.try_into().ok(),
                         command: row.get(9)?,
-                        command_context: row.get::<Option<String>>(10)?
+                        command_context: row
+                            .get::<Option<String>>(10)?
                             .map(|s| serde_json::from_str::<serde_json::Value>(&s))
                             .transpose()?,
                         created_at: parse_datetime(row.get::<String>(11)?)?,
-                        expires_at: row.get::<Option<String>>(12)?.map(parse_datetime).transpose()?,
-                        last_accessed: row.get::<Option<String>>(13)?.map(parse_datetime).transpose()?,
-                        metadata: row.get::<Option<String>>(14)?
+                        expires_at: row
+                            .get::<Option<String>>(12)?
+                            .map(parse_datetime)
+                            .transpose()?,
+                        last_accessed: row
+                            .get::<Option<String>>(13)?
+                            .map(parse_datetime)
+                            .transpose()?,
+                        metadata: row
+                            .get::<Option<String>>(14)?
                             .map(|s| serde_json::from_str::<serde_json::Value>(&s))
                             .transpose()?,
-                        tags: row.get::<Option<String>>(15)?
+                        tags: row
+                            .get::<Option<String>>(15)?
                             .map(|s| serde_json::from_str::<Vec<String>>(&s))
                             .transpose()?,
                     });
@@ -1035,16 +1103,16 @@ impl TursoStorageBackend {
                         "SELECT 
                             (SELECT COUNT(*) FROM maestro_projects WHERE is_active = 1),
                             (SELECT COUNT(*) FROM memories),
-                            (SELECT COUNT(*) FROM sessions)"
+                            (SELECT COUNT(*) FROM sessions)",
                     )
                     .await
                     .context("Failed to prepare stats query")?;
-                
+
                 let mut result = stmt
                     .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
                     .await
                     .context("Failed to query stats")?;
-                
+
                 if let Some(row) = result.next().await? {
                     Ok(TursoDbStats {
                         project_count: row.get::<i64>(0)? as usize,
@@ -1052,7 +1120,7 @@ impl TursoStorageBackend {
                         session_count: row.get::<i64>(2)? as usize,
                     })
                 } else {
-                     Err(anyhow::anyhow!("Failed to retrieve stats row"))
+                    Err(anyhow::anyhow!("Failed to retrieve stats row"))
                 }
             })
         })
@@ -1096,7 +1164,10 @@ impl TursoStorageBackend {
     }
 
     /// Get session statistics grouped by project path
-    pub async fn session_stats_by_project(&self, limit: Option<usize>) -> Result<Vec<ProjectSessionStats>> {
+    pub async fn session_stats_by_project(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<Vec<ProjectSessionStats>> {
         let limit = limit.unwrap_or(20);
         self.with_connection(move |conn| {
             Box::pin(async move {
@@ -1241,7 +1312,10 @@ impl TursoStorageBackend {
     }
 
     /// Get project activity summary (recent sessions and memory creation)
-    pub async fn project_activity_summary(&self, days: Option<u32>) -> Result<Vec<ProjectActivitySummary>> {
+    pub async fn project_activity_summary(
+        &self,
+        days: Option<u32>,
+    ) -> Result<Vec<ProjectActivitySummary>> {
         let days = days.unwrap_or(7);
         // Optimize: Calculate cutoff date in Rust to avoid SQLite function calls in join
         let cutoff = Utc::now() - chrono::Duration::days(days as i64);
@@ -1284,7 +1358,8 @@ impl TursoStorageBackend {
                         project_name: row.get(1)?,
                         session_count: row.get::<i64>(2)? as usize,
                         memory_count: row.get::<i64>(3)? as usize,
-                        last_session_at: row.get::<Option<String>>(4)?
+                        last_session_at: row
+                            .get::<Option<String>>(4)?
                             .map(parse_datetime)
                             .transpose()?,
                     });
@@ -1296,7 +1371,10 @@ impl TursoStorageBackend {
     }
 
     /// Get most active projects by session count
-    pub async fn most_active_projects(&self, limit: Option<usize>) -> Result<Vec<ActiveProjectStats>> {
+    pub async fn most_active_projects(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<Vec<ActiveProjectStats>> {
         let limit = limit.unwrap_or(10);
         self.with_connection(move |conn| {
             Box::pin(async move {
@@ -1331,10 +1409,12 @@ impl TursoStorageBackend {
                         project_name: row.get(1)?,
                         total_sessions: row.get::<i64>(2)? as usize,
                         active_sessions: row.get::<i64>(3)? as usize,
-                        first_session_at: row.get::<Option<String>>(4)?
+                        first_session_at: row
+                            .get::<Option<String>>(4)?
                             .map(parse_datetime)
                             .transpose()?,
-                        last_session_at: row.get::<Option<String>>(5)?
+                        last_session_at: row
+                            .get::<Option<String>>(5)?
                             .map(parse_datetime)
                             .transpose()?,
                     });
@@ -1368,7 +1448,8 @@ impl TursoStorageBackend {
                 while let Some(row) = result.next().await? {
                     stats.push(LspServerStats {
                         lsp_name: row.get(0)?,
-                        status: LspStatus::from_str(row.get::<String>(1)?.as_str()).unwrap_or(LspStatus::Stopped),
+                        status: LspStatus::from_str(row.get::<String>(1)?.as_str())
+                            .unwrap_or(LspStatus::Stopped),
                         count: row.get::<i64>(2)? as usize,
                     });
                 }
@@ -1386,7 +1467,11 @@ impl TursoStorageBackend {
     ///
     /// Searches memory content using FTS5 for fast full-text search.
     /// Supports simple queries (words) and FTS5 query syntax.
-    pub async fn search_memories(&self, query: &str, limit: Option<usize>) -> Result<Vec<MemorySearchResult>> {
+    pub async fn search_memories(
+        &self,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<MemorySearchResult>> {
         let limit = limit.unwrap_or(50);
         let query = query.to_string();
         self.with_connection(move |conn| {
@@ -1453,9 +1538,12 @@ impl TursoStorageBackend {
         self.with_connection(|conn| {
             Box::pin(async move {
                 // Start transaction
-                conn.execute("BEGIN", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-                    .await
-                    .context("Failed to start transaction")?;
+                conn.execute(
+                    "BEGIN",
+                    libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                )
+                .await
+                .context("Failed to start transaction")?;
 
                 let result: Result<usize> = async {
                     // Drop FTS table
@@ -1485,17 +1573,26 @@ impl TursoStorageBackend {
                         .context("Failed to populate FTS5 index")?;
 
                     Ok(rows_affected as usize)
-                }.await;
+                }
+                .await;
 
                 match result {
                     Ok(count) => {
-                        conn.execute("COMMIT", libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
-                            .await
-                            .context("Failed to commit transaction")?;
+                        conn.execute(
+                            "COMMIT",
+                            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                        )
+                        .await
+                        .context("Failed to commit transaction")?;
                         Ok(count)
                     }
                     Err(e) => {
-                        let _ = conn.execute("ROLLBACK", libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await;
+                        let _ = conn
+                            .execute(
+                                "ROLLBACK",
+                                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                            )
+                            .await;
                         Err(e)
                     }
                 }
@@ -1565,21 +1662,35 @@ impl TursoStorageBackend {
                     .prepare(sql)
                     .await
                     .context("Failed to prepare LSP state upsert")?
-                    .query(
-                        libsql::params_from_iter([
-                            libsql::Value::Text(state.session_id),
-                            libsql::Value::Text(state.language),
-                            libsql::Value::Text(state.lsp_name),
-                            libsql::Value::Text(state.status.as_str().to_string()),
-                            state.pid.map(libsql::Value::Integer).unwrap_or(libsql::Value::Null),
-                            state.port.map(libsql::Value::Integer).unwrap_or(libsql::Value::Null),
-                            libsql::Value::Integer(if state.auto_start { 1 } else { 0 }),
-                            state.last_started.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
-                            state.last_error.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
-                            libsql::Value::Text(state.created_at),
-                            libsql::Value::Text(state.updated_at.unwrap_or_else(|| chrono::Utc::now().to_rfc3339())),
-                        ]),
-                    )
+                    .query(libsql::params_from_iter([
+                        libsql::Value::Text(state.session_id),
+                        libsql::Value::Text(state.language),
+                        libsql::Value::Text(state.lsp_name),
+                        libsql::Value::Text(state.status.as_str().to_string()),
+                        state
+                            .pid
+                            .map(libsql::Value::Integer)
+                            .unwrap_or(libsql::Value::Null),
+                        state
+                            .port
+                            .map(libsql::Value::Integer)
+                            .unwrap_or(libsql::Value::Null),
+                        libsql::Value::Integer(if state.auto_start { 1 } else { 0 }),
+                        state
+                            .last_started
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
+                        state
+                            .last_error
+                            .map(libsql::Value::Text)
+                            .unwrap_or(libsql::Value::Null),
+                        libsql::Value::Text(state.created_at),
+                        libsql::Value::Text(
+                            state
+                                .updated_at
+                                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+                        ),
+                    ]))
                     .await
                     .context("Failed to upsert LSP state")?;
 
@@ -1604,7 +1715,11 @@ impl TursoStorageBackend {
     /// ## Returns
     ///
     /// Returns the LSP server state, or None if not found
-    pub async fn get_lsp_state(&self, session_id: &str, lsp_name: &str) -> Result<Option<LspServerState>> {
+    pub async fn get_lsp_state(
+        &self,
+        session_id: &str,
+        lsp_name: &str,
+    ) -> Result<Option<LspServerState>> {
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
         self.with_connection(move |conn| {
@@ -1633,7 +1748,8 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str())
+                            .unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1686,7 +1802,8 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str())
+                            .unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1772,7 +1889,8 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str())
+                            .unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1798,7 +1916,10 @@ impl TursoStorageBackend {
     /// ## Returns
     ///
     /// Returns a vector of LSP server states with the specified auto_start value
-    pub async fn get_lsp_states_by_auto_start(&self, auto_start: bool) -> Result<Vec<LspServerState>> {
+    pub async fn get_lsp_states_by_auto_start(
+        &self,
+        auto_start: bool,
+    ) -> Result<Vec<LspServerState>> {
         self.with_connection(move |conn| {
             Box::pin(async move {
                 let sql = r#"
@@ -1813,7 +1934,9 @@ impl TursoStorageBackend {
                     .prepare(sql)
                     .await
                     .context("Failed to prepare LSP states by auto_start query")?
-                    .query(libsql::params_from_iter([libsql::Value::Integer(if auto_start { 1 } else { 0 })]))
+                    .query(libsql::params_from_iter([libsql::Value::Integer(
+                        if auto_start { 1 } else { 0 },
+                    )]))
                     .await
                     .context("Failed to query LSP states by auto_start")?;
 
@@ -1824,7 +1947,8 @@ impl TursoStorageBackend {
                         session_id: row.get(1)?,
                         language: row.get(2)?,
                         lsp_name: row.get(3)?,
-                        status: LspStatus::from_str(row.get::<String>(4)?.as_str()).unwrap_or(LspStatus::Stopped),
+                        status: LspStatus::from_str(row.get::<String>(4)?.as_str())
+                            .unwrap_or(LspStatus::Stopped),
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
@@ -1858,7 +1982,7 @@ pub struct MemorySearchResult {
     pub session_id: Option<String>,
     pub project_id: Option<u32>,
     pub created_at: DateTime<Utc>,
-    pub snippet: Option<String>,  // HTML-highlighted snippet
+    pub snippet: Option<String>, // HTML-highlighted snippet
 }
 
 // ============================================================================
@@ -2239,11 +2363,16 @@ mod tests {
         assert!(backend.is_shutdown());
 
         // Double shutdown should be idempotent
-        backend.shutdown().await.expect("Double shutdown should succeed");
+        backend
+            .shutdown()
+            .await
+            .expect("Double shutdown should succeed");
         assert!(backend.is_shutdown());
 
         // Attempting to use connection after shutdown should fail
-        let result = backend.with_connection(|_conn| Box::pin(async { Ok(()) })).await;
+        let result = backend
+            .with_connection(|_conn| Box::pin(async { Ok(()) }))
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("shut down"));
     }
@@ -2299,43 +2428,48 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
 
         // Insert test sessions with different statuses
-        let _ = backend.insert_session(&Session {
-            id: 0,
-            session_id: "test-1".to_string(),
-            title: "Test Session 1".to_string(),
-            project_path: "/test/project".to_string(),
-            group_path: None,
-            sort_order: 0,
-            parent_session_id: None,
-            command: None,
-            tool: None,
-            status: SessionStatus::Running,
-            multiplexer_session: None,
-            started_at: Utc::now(),
-            last_accessed_at: None,
-            ended_at: None,
-            metadata: None,
-        }).await;
+        let _ = backend
+            .insert_session(&Session {
+                id: 0,
+                session_id: "test-1".to_string(),
+                title: "Test Session 1".to_string(),
+                project_path: "/test/project".to_string(),
+                group_path: None,
+                sort_order: 0,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Running,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            })
+            .await;
 
-        let _ = backend.insert_session(&Session {
-            id: 0,
-            session_id: "test-2".to_string(),
-            title: "Test Session 2".to_string(),
-            project_path: "/test/project".to_string(),
-            group_path: None,
-            sort_order: 1,
-            parent_session_id: None,
-            command: None,
-            tool: None,
-            status: SessionStatus::Idle,
-            multiplexer_session: None,
-            started_at: Utc::now(),
-            last_accessed_at: None,
-            ended_at: None,
-            metadata: None,
-        }).await;
+        let _ = backend
+            .insert_session(&Session {
+                id: 0,
+                session_id: "test-2".to_string(),
+                title: "Test Session 2".to_string(),
+                project_path: "/test/project".to_string(),
+                group_path: None,
+                sort_order: 1,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Idle,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            })
+            .await;
 
-        let stats = backend.session_stats_by_status()
+        let stats = backend
+            .session_stats_by_status()
             .await
             .expect("Failed to get session stats");
 
@@ -2354,51 +2488,60 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
 
         // Insert test memories with different categories
-        let _ = backend.insert_memory(&Memory {
-            id: 0,
-            content: "Test content 1".to_string(),
-            summary: None,
-            category: MemoryCategory::Knowledge,
-            importance: MemoryImportance::Normal,
-            source: None,
-            session_id: None,
-            project_id: None,
-            track_id: None,
-            command: None,
-            command_context: None,
-            created_at: Utc::now(),
-            expires_at: None,
-            last_accessed: None,
-            metadata: None,
-            tags: None,
-        }).await;
+        let _ = backend
+            .insert_memory(&Memory {
+                id: 0,
+                content: "Test content 1".to_string(),
+                summary: None,
+                category: MemoryCategory::Knowledge,
+                importance: MemoryImportance::Normal,
+                source: None,
+                session_id: None,
+                project_id: None,
+                track_id: None,
+                command: None,
+                command_context: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                last_accessed: None,
+                metadata: None,
+                tags: None,
+            })
+            .await;
 
-        let _ = backend.insert_memory(&Memory {
-            id: 0,
-            content: "Test content 2".to_string(),
-            summary: None,
-            category: MemoryCategory::Pattern,
-            importance: MemoryImportance::Normal,
-            source: None,
-            session_id: None,
-            project_id: None,
-            track_id: None,
-            command: None,
-            command_context: None,
-            created_at: Utc::now(),
-            expires_at: None,
-            last_accessed: None,
-            metadata: None,
-            tags: None,
-        }).await;
+        let _ = backend
+            .insert_memory(&Memory {
+                id: 0,
+                content: "Test content 2".to_string(),
+                summary: None,
+                category: MemoryCategory::Pattern,
+                importance: MemoryImportance::Normal,
+                source: None,
+                session_id: None,
+                project_id: None,
+                track_id: None,
+                command: None,
+                command_context: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                last_accessed: None,
+                metadata: None,
+                tags: None,
+            })
+            .await;
 
-        let stats = backend.memory_stats_by_category()
+        let stats = backend
+            .memory_stats_by_category()
             .await
             .expect("Failed to get memory stats");
 
         assert_eq!(stats.len(), 2);
-        assert!(stats.iter().any(|s| s.category == "knowledge" && s.count == 1));
-        assert!(stats.iter().any(|s| s.category == "pattern" && s.count == 1));
+        assert!(stats
+            .iter()
+            .any(|s| s.category == "knowledge" && s.count == 1));
+        assert!(stats
+            .iter()
+            .any(|s| s.category == "pattern" && s.count == 1));
     }
 
     #[tokio::test]
@@ -2411,28 +2554,33 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
 
         // Create a test project
-        let _ = backend.get_or_create_project("/test/project", "Test Project").await;
+        let _ = backend
+            .get_or_create_project("/test/project", "Test Project")
+            .await;
 
         // Insert a session for the project
-        let _ = backend.insert_session(&Session {
-            id: 0,
-            session_id: "test-1".to_string(),
-            title: "Test Session".to_string(),
-            project_path: "/test/project".to_string(),
-            group_path: None,
-            sort_order: 0,
-            parent_session_id: None,
-            command: None,
-            tool: None,
-            status: SessionStatus::Running,
-            multiplexer_session: None,
-            started_at: Utc::now(),
-            last_accessed_at: None,
-            ended_at: None,
-            metadata: None,
-        }).await;
+        let _ = backend
+            .insert_session(&Session {
+                id: 0,
+                session_id: "test-1".to_string(),
+                title: "Test Session".to_string(),
+                project_path: "/test/project".to_string(),
+                group_path: None,
+                sort_order: 0,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Running,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            })
+            .await;
 
-        let summary = backend.project_activity_summary(Some(7))
+        let summary = backend
+            .project_activity_summary(Some(7))
             .await
             .expect("Failed to get project activity summary");
 
@@ -2452,18 +2600,45 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
 
         // Create test projects
-        let _ = backend.get_or_create_project("/test/project1", "Project 1").await;
-        let _ = backend.get_or_create_project("/test/project2", "Project 2").await;
+        let _ = backend
+            .get_or_create_project("/test/project1", "Project 1")
+            .await;
+        let _ = backend
+            .get_or_create_project("/test/project2", "Project 2")
+            .await;
 
         // Insert sessions for project1
         for i in 0..3 {
-            let _ = backend.insert_session(&Session {
+            let _ = backend
+                .insert_session(&Session {
+                    id: 0,
+                    session_id: format!("test-{}", i),
+                    title: format!("Test Session {}", i),
+                    project_path: "/test/project1".to_string(),
+                    group_path: None,
+                    sort_order: i as i32,
+                    parent_session_id: None,
+                    command: None,
+                    tool: None,
+                    status: SessionStatus::Idle,
+                    multiplexer_session: None,
+                    started_at: Utc::now(),
+                    last_accessed_at: None,
+                    ended_at: None,
+                    metadata: None,
+                })
+                .await;
+        }
+
+        // Insert one session for project2
+        let _ = backend
+            .insert_session(&Session {
                 id: 0,
-                session_id: format!("test-{}", i),
-                title: format!("Test Session {}", i),
-                project_path: "/test/project1".to_string(),
+                session_id: "test-p2".to_string(),
+                title: "Test Session P2".to_string(),
+                project_path: "/test/project2".to_string(),
                 group_path: None,
-                sort_order: i as i32,
+                sort_order: 0,
                 parent_session_id: None,
                 command: None,
                 tool: None,
@@ -2473,29 +2648,11 @@ mod tests {
                 last_accessed_at: None,
                 ended_at: None,
                 metadata: None,
-            }).await;
-        }
+            })
+            .await;
 
-        // Insert one session for project2
-        let _ = backend.insert_session(&Session {
-            id: 0,
-            session_id: "test-p2".to_string(),
-            title: "Test Session P2".to_string(),
-            project_path: "/test/project2".to_string(),
-            group_path: None,
-            sort_order: 0,
-            parent_session_id: None,
-            command: None,
-            tool: None,
-            status: SessionStatus::Idle,
-            multiplexer_session: None,
-            started_at: Utc::now(),
-            last_accessed_at: None,
-            ended_at: None,
-            metadata: None,
-        }).await;
-
-        let stats = backend.most_active_projects(Some(10))
+        let stats = backend
+            .most_active_projects(Some(10))
             .await
             .expect("Failed to get most active projects");
 
@@ -2520,46 +2677,53 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
 
         // Insert test memories with different content
-        let cat_id = backend.insert_memory(&Memory {
-            id: 0,
-            content: "The cat sat on the mat".to_string(),
-            summary: Some("A cat story".to_string()),
-            category: MemoryCategory::Knowledge,
-            importance: MemoryImportance::Normal,
-            source: None,
-            session_id: None,
-            project_id: None,
-            track_id: None,
-            command: None,
-            command_context: None,
-            created_at: Utc::now(),
-            expires_at: None,
-            last_accessed: None,
-            metadata: None,
-            tags: None,
-        }).await.expect("Failed to insert memory");
+        let cat_id = backend
+            .insert_memory(&Memory {
+                id: 0,
+                content: "The cat sat on the mat".to_string(),
+                summary: Some("A cat story".to_string()),
+                category: MemoryCategory::Knowledge,
+                importance: MemoryImportance::Normal,
+                source: None,
+                session_id: None,
+                project_id: None,
+                track_id: None,
+                command: None,
+                command_context: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                last_accessed: None,
+                metadata: None,
+                tags: None,
+            })
+            .await
+            .expect("Failed to insert memory");
 
-        let dog_id = backend.insert_memory(&Memory {
-            id: 0,
-            content: "The dog chased the ball in the park".to_string(),
-            summary: Some("A dog story".to_string()),
-            category: MemoryCategory::Pattern,
-            importance: MemoryImportance::High,
-            source: None,
-            session_id: None,
-            project_id: None,
-            track_id: None,
-            command: None,
-            command_context: None,
-            created_at: Utc::now(),
-            expires_at: None,
-            last_accessed: None,
-            metadata: None,
-            tags: None,
-        }).await.expect("Failed to insert memory");
+        let dog_id = backend
+            .insert_memory(&Memory {
+                id: 0,
+                content: "The dog chased the ball in the park".to_string(),
+                summary: Some("A dog story".to_string()),
+                category: MemoryCategory::Pattern,
+                importance: MemoryImportance::High,
+                source: None,
+                session_id: None,
+                project_id: None,
+                track_id: None,
+                command: None,
+                command_context: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                last_accessed: None,
+                metadata: None,
+                tags: None,
+            })
+            .await
+            .expect("Failed to insert memory");
 
         // Test search for "cat"
-        let results = backend.search_memories("cat", Some(10))
+        let results = backend
+            .search_memories("cat", Some(10))
             .await
             .expect("Failed to search memories");
 
@@ -2578,35 +2742,40 @@ mod tests {
 
         // Insert test memories
         for i in 0..3 {
-            backend.insert_memory(&Memory {
-                id: 0,
-                content: format!("Test content number {}", i),
-                summary: None,
-                category: MemoryCategory::Knowledge,
-                importance: MemoryImportance::Normal,
-                source: None,
-                session_id: None,
-                project_id: None,
-                track_id: None,
-                command: None,
-                command_context: None,
-                created_at: Utc::now(),
-                expires_at: None,
-                last_accessed: None,
-                metadata: None,
-                tags: None,
-            }).await.expect("Failed to insert memory");
+            backend
+                .insert_memory(&Memory {
+                    id: 0,
+                    content: format!("Test content number {}", i),
+                    summary: None,
+                    category: MemoryCategory::Knowledge,
+                    importance: MemoryImportance::Normal,
+                    source: None,
+                    session_id: None,
+                    project_id: None,
+                    track_id: None,
+                    command: None,
+                    command_context: None,
+                    created_at: Utc::now(),
+                    expires_at: None,
+                    last_accessed: None,
+                    metadata: None,
+                    tags: None,
+                })
+                .await
+                .expect("Failed to insert memory");
         }
 
         // Rebuild FTS index
-        let count = backend.rebuild_fts_index()
+        let count = backend
+            .rebuild_fts_index()
             .await
             .expect("Failed to rebuild FTS index");
 
         assert_eq!(count, 3);
 
         // Verify search works
-        let results = backend.search_memories("content", Some(10))
+        let results = backend
+            .search_memories("content", Some(10))
             .await
             .expect("Failed to search memories");
 
@@ -2623,32 +2792,37 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
 
         // Insert a test memory
-        backend.insert_memory(&Memory {
-            id: 0,
-            content: "Test content for optimization".to_string(),
-            summary: None,
-            category: MemoryCategory::Knowledge,
-            importance: MemoryImportance::Normal,
-            source: None,
-            session_id: None,
-            project_id: None,
-            track_id: None,
-            command: None,
-            command_context: None,
-            created_at: Utc::now(),
-            expires_at: None,
-            last_accessed: None,
-            metadata: None,
-            tags: None,
-        }).await.expect("Failed to insert memory");
+        backend
+            .insert_memory(&Memory {
+                id: 0,
+                content: "Test content for optimization".to_string(),
+                summary: None,
+                category: MemoryCategory::Knowledge,
+                importance: MemoryImportance::Normal,
+                source: None,
+                session_id: None,
+                project_id: None,
+                track_id: None,
+                command: None,
+                command_context: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                last_accessed: None,
+                metadata: None,
+                tags: None,
+            })
+            .await
+            .expect("Failed to insert memory");
 
         // Optimize FTS index
-        backend.optimize_fts_index()
+        backend
+            .optimize_fts_index()
             .await
             .expect("Failed to optimize FTS index");
 
         // Verify search still works
-        let results = backend.search_memories("optimization", Some(10))
+        let results = backend
+            .search_memories("optimization", Some(10))
             .await
             .expect("Failed to search memories");
 
@@ -2680,7 +2854,8 @@ mod tests {
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        let id = backend.upsert_lsp_state(&state)
+        let id = backend
+            .upsert_lsp_state(&state)
             .await
             .expect("Failed to upsert LSP state");
 
@@ -2712,10 +2887,14 @@ mod tests {
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+        backend
+            .upsert_lsp_state(&state)
+            .await
+            .expect("Failed to upsert LSP state");
 
         // Get LSP state
-        let retrieved = backend.get_lsp_state("test-session", "rust-analyzer")
+        let retrieved = backend
+            .get_lsp_state("test-session", "rust-analyzer")
             .await
             .expect("Failed to get LSP state");
 
@@ -2751,7 +2930,10 @@ mod tests {
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+        backend
+            .upsert_lsp_state(&state)
+            .await
+            .expect("Failed to upsert LSP state");
 
         // Update LSP state
         let updated_state = LspServerState {
@@ -2760,10 +2942,14 @@ mod tests {
             ..state
         };
 
-        backend.upsert_lsp_state(&updated_state).await.expect("Failed to update LSP state");
+        backend
+            .upsert_lsp_state(&updated_state)
+            .await
+            .expect("Failed to update LSP state");
 
         // Verify update
-        let retrieved = backend.get_lsp_state("test-session", "rust-analyzer")
+        let retrieved = backend
+            .get_lsp_state("test-session", "rust-analyzer")
             .await
             .expect("Failed to get LSP state")
             .expect("LSP state not found");
@@ -2796,15 +2982,20 @@ mod tests {
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
         };
 
-        backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+        backend
+            .upsert_lsp_state(&state)
+            .await
+            .expect("Failed to upsert LSP state");
 
         // Delete LSP state
-        backend.delete_lsp_state("test-session", "rust-analyzer")
+        backend
+            .delete_lsp_state("test-session", "rust-analyzer")
             .await
             .expect("Failed to delete LSP state");
 
         // Verify deletion
-        let retrieved = backend.get_lsp_state("test-session", "rust-analyzer")
+        let retrieved = backend
+            .get_lsp_state("test-session", "rust-analyzer")
             .await
             .expect("Failed to get LSP state");
 
@@ -2827,7 +3018,11 @@ mod tests {
                 session_id: format!("session-{}", i),
                 language: "rust".to_string(),
                 lsp_name: "rust-analyzer".to_string(),
-                status: if i == 2 { LspStatus::Stopped } else { LspStatus::Running },
+                status: if i == 2 {
+                    LspStatus::Stopped
+                } else {
+                    LspStatus::Running
+                },
                 pid: Some(12345 + i as i64),
                 port: None,
                 auto_start: true,
@@ -2837,11 +3032,15 @@ mod tests {
                 updated_at: Some(chrono::Utc::now().to_rfc3339()),
             };
 
-            backend.upsert_lsp_state(&state).await.expect("Failed to upsert LSP state");
+            backend
+                .upsert_lsp_state(&state)
+                .await
+                .expect("Failed to upsert LSP state");
         }
 
         // Get running LSPs
-        let running_lsps = backend.get_lsp_states_by_status("running")
+        let running_lsps = backend
+            .get_lsp_states_by_status("running")
             .await
             .expect("Failed to get LSP states by status");
 

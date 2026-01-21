@@ -3,9 +3,9 @@
 //! Parses Criterion benchmark output and generates comprehensive comparison reports
 //! for vector search performance evaluation.
 
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
-use anyhow::{Context, Result};
 
 /// Benchmark result for a single configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -66,8 +66,7 @@ pub struct ComparisonMetrics {
 
 /// Parse Criterion JSON output
 pub fn parse_criterion_output(path: &Path) -> Result<BenchmarkReport> {
-    let _content = std::fs::read_to_string(path)
-        .context("Failed to read criterion output")?;
+    let _content = std::fs::read_to_string(path).context("Failed to read criterion output")?;
 
     // Criterion outputs JSON for each benchmark group
     // For now, we'll create a summary-based report
@@ -92,7 +91,8 @@ pub fn parse_criterion_output(path: &Path) -> Result<BenchmarkReport> {
                 memory_overhead_percent: None,
                 accuracy_difference: None,
             },
-            recommendation: "Run `cargo bench --bench vector_benchmark` to collect actual metrics.".to_string(),
+            recommendation: "Run `cargo bench --bench vector_benchmark` to collect actual metrics."
+                .to_string(),
         },
     })
 }
@@ -102,10 +102,16 @@ pub fn generate_markdown_report(report: &BenchmarkReport) -> String {
     let mut output = String::new();
 
     output.push_str("# Vector Search Performance Evaluation Report\n\n");
-    output.push_str(&format!("**Generated:** {} UTC\n\n", report.timestamp.format("%Y-%m-%d %H:%M:%S")));
+    output.push_str(&format!(
+        "**Generated:** {} UTC\n\n",
+        report.timestamp.format("%Y-%m-%d %H:%M:%S")
+    ));
 
     output.push_str("## Executive Summary\n\n");
-    output.push_str(&format!("**Recommendation:** {}\n\n", report.summary.recommendation));
+    output.push_str(&format!(
+        "**Recommendation:** {}\n\n",
+        report.summary.recommendation
+    ));
 
     // Current Implementation Results
     output.push_str("## Implementation 1: Linear Cosine Similarity\n\n");
@@ -120,7 +126,11 @@ pub fn generate_markdown_report(report: &BenchmarkReport) -> String {
     for (size, lat) in sizes.iter().zip(latencies.iter()) {
         output.push_str(&format!(
             "| {:>10} | {:>7.2} | {:>11.2} | {:>7.2} | {:>7.2} |\n",
-            size, lat, lat * 1.05, lat * 1.1, lat * 1.15
+            size,
+            lat,
+            lat * 1.05,
+            lat * 1.1,
+            lat * 1.15
         ));
     }
 
@@ -216,7 +226,8 @@ pub fn generate_markdown_report(report: &BenchmarkReport) -> String {
     output.push_str("|----------------|-----------|------------|------|\n");
     output.push_str("| Linear (Current) | 100% | 100% | Exact search |\n");
     output.push_str("| HNSW | [TBD] | [TBD] | Configurable via ef_construction parameter |\n");
-    output.push_str("| Turso (DiskANN) | [TBD] | [TBD] | Configurable via DiskANN parameters |\n\n");
+    output
+        .push_str("| Turso (DiskANN) | [TBD] | [TBD] | Configurable via DiskANN parameters |\n\n");
 
     // Recommendations
     output.push_str("## Recommendations\n\n");
@@ -309,7 +320,9 @@ pub fn generate_markdown_report(report: &BenchmarkReport) -> String {
     output.push_str("Benchmark results are saved to `target/criterion/`.\n\n");
 
     output.push_str("### Sources\n\n");
-    output.push_str("- [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)\n");
+    output.push_str(
+        "- [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)\n",
+    );
     output.push_str("- [Turso AI & Embeddings Documentation](https://docs.turso.tech/features/ai-and-embeddings)\n");
     output.push_str("- [DiskANN Paper](https://arxiv.org/abs/1901.08726)\n");
     output.push_str("- [HNSW Paper](https://arxiv.org/abs/1603.09320)\n");
@@ -320,8 +333,7 @@ pub fn generate_markdown_report(report: &BenchmarkReport) -> String {
 /// Save report to file
 pub fn save_report(report: &BenchmarkReport, path: &Path) -> Result<()> {
     let markdown = generate_markdown_report(report);
-    std::fs::write(path, markdown)
-        .context("Failed to write report")?;
+    std::fs::write(path, markdown).context("Failed to write report")?;
     Ok(())
 }
 

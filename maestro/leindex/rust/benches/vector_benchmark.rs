@@ -16,8 +16,8 @@ use std::time::Duration;
 
 // Import vector store types
 use leindex_analyzers::vector::{
-    VectorStore, HnswVectorStore, TursoVectorStore, VectorMetadata, ChunkType,
-    metadata::DEFAULT_EMBEDDING_DIM,
+    metadata::DEFAULT_EMBEDDING_DIM, ChunkType, HnswVectorStore, TursoVectorStore, VectorMetadata,
+    VectorStore,
 };
 
 /// Vector sizes to benchmark (number of vectors in index)
@@ -28,7 +28,7 @@ const VECTOR_SIZES: &[usize] = &[
     100, 500, 1_000, 5_000, 10_000,
     // Granular range for crossover point determination:
     50_000, 55_000, 60_000, 65_000, 70_000, 75_000, 80_000, 85_000, 90_000, 95_000, 100_000,
-    300_000, 500_000
+    300_000, 500_000,
 ];
 
 /// K values for top-k search
@@ -63,15 +63,27 @@ fn generate_code_dataset(size: usize) -> Vec<(String, Vec<f32>, VectorMetadata)>
             let base = match chunk_type {
                 ChunkType::Function => {
                     // Functions: higher values in early dimensions (keywords)
-                    if j < 100 { 0.8 } else { 0.1 }
+                    if j < 100 {
+                        0.8
+                    } else {
+                        0.1
+                    }
                 }
                 ChunkType::Class => {
                     // Classes: distributed across middle dimensions
-                    if j >= 100 && j < 400 { 0.7 } else { 0.2 }
+                    if j >= 100 && j < 400 {
+                        0.7
+                    } else {
+                        0.2
+                    }
                 }
                 ChunkType::Import => {
                     // Imports: sparse pattern
-                    if j % 50 == 0 { 0.9 } else { 0.05 }
+                    if j % 50 == 0 {
+                        0.9
+                    } else {
+                        0.05
+                    }
                 }
                 _ => {
                     // Comments: uniform distribution
@@ -129,24 +141,22 @@ fn bench_current_vector_store(c: &mut Criterion) {
         // Populate the store
         let dataset = generate_code_dataset(size);
         for (content, embedding, metadata) in &dataset {
-            store.add_vector(content, embedding.clone(), metadata.clone()).unwrap();
+            store
+                .add_vector(content, embedding.clone(), metadata.clone())
+                .unwrap();
         }
 
         // Benchmark search with k=10
         group.throughput(Throughput::Elements(size as u64));
-        group.bench_with_input(
-            BenchmarkId::new("search_k10", size),
-            &store,
-            |b, store| {
-                // Use varied queries to bypass CPU cache - critical for TRUE performance measurement
-                let mut query_idx = 0;
-                b.iter(|| {
-                    let query_embedding = &dataset[query_idx % dataset.len()].1;
-                    query_idx += 1;
-                    black_box(store.search(black_box(query_embedding), 10).unwrap())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("search_k10", size), &store, |b, store| {
+            // Use varied queries to bypass CPU cache - critical for TRUE performance measurement
+            let mut query_idx = 0;
+            b.iter(|| {
+                let query_embedding = &dataset[query_idx % dataset.len()].1;
+                query_idx += 1;
+                black_box(store.search(black_box(query_embedding), 10).unwrap())
+            });
+        });
     }
 
     group.finish();
@@ -166,23 +176,21 @@ fn bench_current_vector_store_k_values(c: &mut Criterion) {
 
     let dataset = generate_code_dataset(size);
     for (content, embedding, metadata) in &dataset {
-        store.add_vector(content, embedding.clone(), metadata.clone()).unwrap();
+        store
+            .add_vector(content, embedding.clone(), metadata.clone())
+            .unwrap();
     }
 
     for &k in K_VALUES {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(k),
-            &k,
-            |b, &k| {
-                // Use varied queries to bypass CPU cache - critical for TRUE performance measurement
-                let mut query_idx = 0;
-                b.iter(|| {
-                    let query_embedding = &dataset[query_idx % dataset.len()].1;
-                    query_idx += 1;
-                    black_box(store.search(black_box(query_embedding), k).unwrap())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(k), &k, |b, &k| {
+            // Use varied queries to bypass CPU cache - critical for TRUE performance measurement
+            let mut query_idx = 0;
+            b.iter(|| {
+                let query_embedding = &dataset[query_idx % dataset.len()].1;
+                query_idx += 1;
+                black_box(store.search(black_box(query_embedding), k).unwrap())
+            });
+        });
     }
 
     group.finish();
@@ -205,24 +213,22 @@ fn bench_hnsw_vector_store(c: &mut Criterion) {
         // Populate the store
         let dataset = generate_code_dataset(size);
         for (content, embedding, metadata) in &dataset {
-            store.add_vector(content, embedding.clone(), metadata.clone()).unwrap();
+            store
+                .add_vector(content, embedding.clone(), metadata.clone())
+                .unwrap();
         }
 
         // Benchmark search with k=10
         group.throughput(Throughput::Elements(size as u64));
-        group.bench_with_input(
-            BenchmarkId::new("search_k10", size),
-            &store,
-            |b, store| {
-                // Use varied queries to bypass CPU cache - critical for TRUE performance measurement
-                let mut query_idx = 0;
-                b.iter(|| {
-                    let query_embedding = &dataset[query_idx % dataset.len()].1;
-                    query_idx += 1;
-                    black_box(store.search(black_box(query_embedding), 10).unwrap())
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("search_k10", size), &store, |b, store| {
+            // Use varied queries to bypass CPU cache - critical for TRUE performance measurement
+            let mut query_idx = 0;
+            b.iter(|| {
+                let query_embedding = &dataset[query_idx % dataset.len()].1;
+                query_idx += 1;
+                black_box(store.search(black_box(query_embedding), 10).unwrap())
+            });
+        });
     }
 
     group.finish();
@@ -250,7 +256,10 @@ fn bench_turso_vector_store(c: &mut Criterion) {
         let dataset = generate_code_dataset(size);
         rt.block_on(async {
             for (content, embedding, metadata) in &dataset {
-                store.add_vector(content, embedding.clone(), metadata.clone()).await.unwrap();
+                store
+                    .add_vector(content, embedding.clone(), metadata.clone())
+                    .await
+                    .unwrap();
             }
         });
 
@@ -291,30 +300,36 @@ fn bench_vector_insertion(c: &mut Criterion) {
 
                 b.iter(|| {
                     let temp_dir = tempfile::tempdir().unwrap();
-                    let store = VectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
+                    let store =
+                        VectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
                     for (content, embedding, metadata) in &dataset {
-                        black_box(store.add_vector(content, embedding.clone(), metadata.clone()).unwrap());
+                        black_box(
+                            store
+                                .add_vector(content, embedding.clone(), metadata.clone())
+                                .unwrap(),
+                        );
                     }
                 });
             },
         );
 
         // HNSW
-        group.bench_with_input(
-            BenchmarkId::new("hnsw", size),
-            &size,
-            |b, &size| {
-                let dataset = generate_code_dataset(size);
+        group.bench_with_input(BenchmarkId::new("hnsw", size), &size, |b, &size| {
+            let dataset = generate_code_dataset(size);
 
-                b.iter(|| {
-                    let temp_dir = tempfile::tempdir().unwrap();
-                    let store = HnswVectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
-                    for (content, embedding, metadata) in &dataset {
-                        black_box(store.add_vector(content, embedding.clone(), metadata.clone()).unwrap());
-                    }
-                });
-            },
-        );
+            b.iter(|| {
+                let temp_dir = tempfile::tempdir().unwrap();
+                let store =
+                    HnswVectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
+                for (content, embedding, metadata) in &dataset {
+                    black_box(
+                        store
+                            .add_vector(content, embedding.clone(), metadata.clone())
+                            .unwrap(),
+                    );
+                }
+            });
+        });
     }
 
     group.finish();
@@ -335,11 +350,16 @@ fn bench_memory_usage(c: &mut Criterion) {
             |b, &size| {
                 b.iter(|| {
                     let temp_dir = tempfile::tempdir().unwrap();
-                    let store = VectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
+                    let store =
+                        VectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
                     let dataset = generate_code_dataset(size);
 
                     for (content, embedding, metadata) in &dataset {
-                        black_box(store.add_vector(content, embedding.clone(), metadata.clone()).unwrap());
+                        black_box(
+                            store
+                                .add_vector(content, embedding.clone(), metadata.clone())
+                                .unwrap(),
+                        );
                     }
 
                     // Force memory measurement
@@ -355,11 +375,16 @@ fn bench_memory_usage(c: &mut Criterion) {
             |b, &size| {
                 b.iter(|| {
                     let temp_dir = tempfile::tempdir().unwrap();
-                    let store = HnswVectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
+                    let store =
+                        HnswVectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
                     let dataset = generate_code_dataset(size);
 
                     for (content, embedding, metadata) in &dataset {
-                        black_box(store.add_vector(content, embedding.clone(), metadata.clone()).unwrap());
+                        black_box(
+                            store
+                                .add_vector(content, embedding.clone(), metadata.clone())
+                                .unwrap(),
+                        );
                     }
 
                     // Force memory measurement

@@ -571,7 +571,7 @@ AskUserQuestion:
        - label: "Yes, enable LeIndex MCP"
          description: "Enable MCP server for code search and analysis"
        - label: "No, skip MCP setup"
-         description: "TLDR hooks work automatically, MCP is optional"
+         description: "LeIndex hooks work automatically, MCP is optional"
      multiSelect: false
    ```
 
@@ -581,15 +581,15 @@ AskUserQuestion:
    - Provide MCP configuration example
 
 4. **Display Feature Status:**
-   > "TLDR & LeIndex Status:
+   > "LeIndex Status:
    >
    > **Automatic Features (always active):**
-   > - ✅ TLDR context injection (pre-edit hooks)
+   > - ✅ LeIndex context injection (pre-edit hooks)
    > - ✅ Smart search (semantic understanding)
    > - ✅ File read optimization
    >
    > **Manual Access (via slash commands):**
-   > - `/maestro:tldr <command>` - Access 5-layer analysis
+   > - `/maestro:tldr <command>` - Access 5-layer analysis (compat alias → LeIndex)
    > - `/maestro:leindex <command>` - Code search and indexing
    >
    > **CLI Tools (outside Claude Code):**
@@ -598,7 +598,7 @@ AskUserQuestion:
    >
    > **Python API:**
    > ```python
-   > from maestro.tldr import TLRDAnalyzer, get_relevant_context
+   > from maestro.leindex import ContextExtractor, get_relevant_context
    > ```"
 
 5. **Provide Quick Examples:**
@@ -611,17 +611,17 @@ AskUserQuestion:
    >
    > **Understand who calls a function:**
    > ```bash
-   > /maestro:tldr callers authenticate_user
+   > /maestro:tldr callers authenticate_user  # compat alias → LeIndex
    > ```
    >
    > **Get LLM-ready context:**
    > ```bash
-   > /maestro:tldr context main.py
+   > /maestro:tldr context main.py  # compat alias → LeIndex
    > ```
    >
    > **Analyze code complexity:**
    > ```bash
-   > /maestro:tldr cfg src/auth.py
+   > /maestro:tldr cfg src/auth.py  # compat alias → LeIndex
    > ```"
 
 ---
@@ -1068,4 +1068,3 @@ This file contains global Maestro settings...
 - v2.1 (2026-01-13): Added TLDR & LeIndex configuration with automatic hooks and MCP integration
 - v2.0 (2026-01-05): Added automated agent creation for CLI tools (gemini, qwen, codex) with environment detection for both Claude Code and OpenCode
 - v1.0 (2026-01-04): Initial configuration protocol with model selection, analysis frequency, and claude-hud integration
-

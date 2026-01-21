@@ -170,6 +170,11 @@ impl VectorStore {
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);
 
+        // CRITICAL: Early return for top_k == 0 to prevent panic (select_nth_unstable_by would underflow)
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+
         // Check cache (key is hash of entire embedding + top_k)
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();

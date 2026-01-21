@@ -11,7 +11,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::memory::{MemoryService, MemoryCategory};
+use crate::memory::{MemoryCategory, MemoryService};
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -31,19 +31,25 @@ pub struct ApiResponse<T> {
 
 impl<T: Serialize> ApiResponse<T> {
     pub fn ok(data: T) -> (StatusCode, Json<Self>) {
-        (StatusCode::OK, Json(Self {
-            success: true,
-            data: Some(data),
-            error: None,
-        }))
+        (
+            StatusCode::OK,
+            Json(Self {
+                success: true,
+                data: Some(data),
+                error: None,
+            }),
+        )
     }
 
     pub fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<Self>) {
-        (status, Json(Self {
-            success: false,
-            data: None,
-            error: Some(msg.to_string()),
-        }))
+        (
+            status,
+            Json(Self {
+                success: false,
+                data: None,
+                error: Some(msg.to_string()),
+            }),
+        )
     }
 }
 
@@ -93,7 +99,7 @@ pub async fn health() -> Json<HealthResponse> {
 /// Get system status
 pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let stats_result = tokio::task::spawn_blocking(move || state.service.stats()).await;
-    
+
     match stats_result {
         Ok(Ok(stats)) => ApiResponse::ok(StatusResponse {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -110,7 +116,7 @@ pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 /// List all projects
 pub async fn list_projects(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(move || state.service.list_projects()).await;
-    
+
     match result {
         Ok(Ok(projects)) => ApiResponse::ok(projects),
         Ok(Err(e)) => ApiResponse::err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -124,7 +130,7 @@ pub async fn get_project(
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(move || state.service.get_project(id)).await;
-    
+
     match result {
         Ok(Ok(Some(project))) => ApiResponse::ok(project),
         Ok(Ok(None)) => ApiResponse::err(StatusCode::NOT_FOUND, "Project not found"),
@@ -139,7 +145,7 @@ pub async fn list_tracks(
     Path(project_id): Path<i64>,
 ) -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(move || state.service.list_tracks(project_id)).await;
-    
+
     match result {
         Ok(Ok(tracks)) => ApiResponse::ok(tracks),
         Ok(Err(e)) => ApiResponse::err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -155,8 +161,9 @@ pub async fn search_memories(
     let query = params.q.unwrap_or_default();
     let limit = params.limit.unwrap_or(50).min(1000); // Cap limit
 
-    let result = tokio::task::spawn_blocking(move || state.service.search_memories(&query, limit)).await;
-    
+    let result =
+        tokio::task::spawn_blocking(move || state.service.search_memories(&query, limit)).await;
+
     match result {
         Ok(Ok(memories)) => ApiResponse::ok(memories),
         Ok(Err(e)) => ApiResponse::err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -190,7 +197,8 @@ pub async fn store_memory(
     };
 
     let content = req.content.clone();
-    let result = tokio::task::spawn_blocking(move || state.service.store_memory(&content, category)).await;
+    let result =
+        tokio::task::spawn_blocking(move || state.service.store_memory(&content, category)).await;
 
     match result {
         Ok(Ok(id)) => ApiResponse::ok(serde_json::json!({ "id": id })),
@@ -213,7 +221,8 @@ pub async fn scan_projects(
     let paths: Vec<std::path::PathBuf> = req.paths.iter().map(|p| p.into()).collect();
     let depth = req.max_depth.unwrap_or(5).min(10); // Cap depth
 
-    let result = tokio::task::spawn_blocking(move || state.service.scan_directories(&paths, depth)).await;
+    let result =
+        tokio::task::spawn_blocking(move || state.service.scan_directories(&paths, depth)).await;
 
     match result {
         Ok(Ok(result)) => ApiResponse::ok(result),

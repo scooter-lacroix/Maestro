@@ -3,13 +3,12 @@
 //! Performs code analysis on files using the multi-language analyzers.
 
 use anyhow::Result;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 use leindex_analyzers::{
-    MultiLangASTAnalyzer, MultiLangCallGraphAnalyzer,
-    MultiLangCFGAnalyzer, MultiLangDFGAnalyzer, MultiLangSlicingAnalyzer,
-    ProgrammingLanguage,
+    MultiLangASTAnalyzer, MultiLangCFGAnalyzer, MultiLangCallGraphAnalyzer, MultiLangDFGAnalyzer,
+    MultiLangSlicingAnalyzer, ProgrammingLanguage,
 };
 
 pub async fn run(
@@ -42,7 +41,8 @@ pub async fn run(
         ProgrammingLanguage::from_path(&path_str)
     };
 
-    let lang = lang.ok_or_else(|| anyhow::anyhow!("Could not detect language for: {}", path_str))?;
+    let lang =
+        lang.ok_or_else(|| anyhow::anyhow!("Could not detect language for: {}", path_str))?;
 
     println!("Analyzing {} ({})", path_str, lang.display_name());
     println!();
@@ -67,7 +67,10 @@ pub async fn run(
             run_slicing_analysis(&source, &path_str, lang, &format);
         }
         _ => {
-            eprintln!("Unknown analysis type: {}. Use: ast, callgraph, cfg, dfg, slicing, all", analysis);
+            eprintln!(
+                "Unknown analysis type: {}. Use: ast, callgraph, cfg, dfg, slicing, all",
+                analysis
+            );
         }
     }
 
@@ -79,7 +82,10 @@ fn run_ast_analysis(source: &str, path: &str, lang: ProgrammingLanguage, format:
     let analysis = analyzer.analyze_with_language(source, path, lang);
 
     match format {
-        "json" => println!("{}", serde_json::to_string_pretty(&analysis).unwrap_or_default()),
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&analysis).unwrap_or_default()
+        ),
         "ultra" => println!("{}", analyzer.to_ultra_condensed(&analysis)),
         _ => println!("{}", analyzer.to_llm_string(&analysis)),
     }
@@ -90,7 +96,10 @@ fn run_callgraph_analysis(source: &str, path: &str, lang: ProgrammingLanguage, f
     let graph = analyzer.build_graph_with_language(source, path, lang);
 
     match format {
-        "json" => println!("{}", serde_json::to_string_pretty(&graph).unwrap_or_default()),
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&graph).unwrap_or_default()
+        ),
         "ultra" => println!("{}", analyzer.to_ultra_condensed(&graph)),
         _ => println!("{}", analyzer.to_llm_string(&graph)),
     }
@@ -101,7 +110,10 @@ fn run_cfg_analysis(source: &str, path: &str, lang: ProgrammingLanguage, format:
     let result = analyzer.analyze_with_language(source, path, lang);
 
     match format {
-        "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        ),
         "ultra" => println!("{}", analyzer.to_ultra_condensed(&result)),
         _ => println!("{}", analyzer.to_llm_string(&result)),
     }
@@ -112,7 +124,10 @@ fn run_dfg_analysis(source: &str, path: &str, lang: ProgrammingLanguage, format:
     let result = analyzer.analyze_with_language(source, path, lang);
 
     match format {
-        "json" => println!("{}", serde_json::to_string_pretty(&result).unwrap_or_default()),
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap_or_default()
+        ),
         _ => println!("{}", analyzer.to_llm_string(&result)),
     }
 }
@@ -125,8 +140,12 @@ fn run_slicing_analysis(source: &str, path: &str, lang: ProgrammingLanguage, for
         "json" => println!("{}", serde_json::to_string_pretty(&pdg).unwrap_or_default()),
         _ => {
             println!("## PDG: {} ({})", path, lang.display_name());
-            println!("# {} definitions, {} data deps, {} control deps",
-                pdg.definitions.len(), pdg.data_deps.len(), pdg.control_deps.len());
+            println!(
+                "# {} definitions, {} data deps, {} control deps",
+                pdg.definitions.len(),
+                pdg.data_deps.len(),
+                pdg.control_deps.len()
+            );
         }
     }
 }

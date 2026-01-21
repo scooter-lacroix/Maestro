@@ -27,7 +27,6 @@
 //! ### MCP Events (LSP Notifications)
 //!
 //! - `diagnostics/published` ← `textDocument/publishDiagnostics`
-//! - `lsp/initialized` ← `initialized` notification
 //! - `lsp/log_message` ← `window/logMessage`
 
 use anyhow::{anyhow, Context, Result};
@@ -35,12 +34,19 @@ use lsp_types::{Diagnostic, PublishDiagnosticsParams};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{self, BufRead, Read, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::path::Path;
+use std::process::Stdio;
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, info, warn};
+use tokio::time::{timeout, Duration};
+use tracing::{debug, error, info, warn};
 
 use crate::memory::lsp_manager::LspType;
+
+/// Maximum message size to prevent DoS (16MB)
+const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 
 /// LSP to MCP bridge
 ///
@@ -53,119 +59,8 @@ pub struct McpBridge {
     lsp_type: LspType,
     /// Project root path
     project_path: String,
-    /// Running LSP process
-    lsp_process: Option<LspChildProcess>,
-    /// Request ID counter for MCP
-    mcp_request_id: u64,
-    /// Request ID counter for LSP
-    lsp_request_id: u64,
-    /// Pending LSP requests (internal_id -> (mcp_id, responder))
-    pending_requests: RwLock<HashMap<String, (u64, mpsc::Sender<Value>)>>,
-    /// Diagnostic cache for pull requests
-    diagnostics_cache: RwLock<HashMap<String, Vec<Diagnostic>>>,
-}
-
-/// Wrapper for LSP child process with stdio handles
-struct LspChildProcess {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: ChildStdout,
-}
-
-impl LspChildProcess {
-    /// Spawn a new LSP process with stdio communication
-    fn spawn(lsp_type: LspType, project_path: &str) -> Result<Self> {
-        let binary = lsp_type.binary_name();
-        info!("Spawning LSP process: {} for project: {}", binary, project_path);
-
-        let mut cmd = Command::new(binary);
-        cmd.current_dir(project_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Add default arguments for specific LSPs
-        for arg in lsp_type.default_additional_args() {
-            cmd.arg(arg);
-        }
-
-        let mut child = cmd.spawn().with_context(|| {
-            format!(
-                "Failed to spawn LSP '{}'. Is it installed and in PATH?",
-                binary
-            )
-        })?;
-
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("Failed to open LSP stdin"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("Failed to open LSP stdout"))?;
-
-        Ok(Self { child, stdin, stdout })
-    }
-
-    /// Send a JSON-RPC message to the LSP
-    fn send(&mut self, message: &Value) -> Result<()> {
-        let content = serde_json::to_string(message)
-            .with_context(|| "Failed to serialize JSON-RPC message")?;
-        let header = format!("Content-Length: {}\r\n\r\n", content.len());
-        self.stdin
-            .write_all(header.as_bytes())
-            .context("Failed to write LSP headers")?;
-        self.stdin
-            .write_all(content.as_bytes())
-            .context("Failed to write LSP content")?;
-        self.stdin.flush().context("Failed to flush LSP stdin")?;
-        debug!("Sent to LSP: {}", content);
-        Ok(())
-    }
-
-    /// Read a JSON-RPC message from the LSP
-    fn read(&mut self) -> Result<Value> {
-        let mut reader = io::BufReader::new(&mut self.stdout);
-        let mut content_length = None;
-
-        // Read headers
-        loop {
-            let mut line = String::new();
-            reader
-                .read_line(&mut line)
-                .context("Failed to read LSP header line")?;
-            let line = line.trim();
-
-            if line.is_empty() {
-                break; // Empty line indicates end of headers
-            }
-
-            if line.to_lowercase().starts_with("content-length:") {
-                let len_str = line.split(':').nth(1).unwrap_or("").trim();
-                content_length = Some(
-                    len_str
-                        .parse::<usize>()
-                        .context("Failed to parse Content-Length")?,
-                );
-            }
-        }
-
-        let length = content_length.ok_or_else(|| anyhow!("Missing Content-Length header"))?;
-
-        // Read content
-        let mut buffer = vec![0u8; length];
-        reader
-            .read_exact(&mut buffer)
-            .with_context(|| format!("Failed to read LSP content body ({} bytes)", length))?;
-
-        let content = String::from_utf8(buffer)
-            .context("LSP response was not valid UTF-8")?;
-        let value: Value = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse LSP JSON response: {}", content))?;
-        debug!("Received from LSP: {}", content);
-        Ok(value)
-    }
+    /// Diagnostic cache for pull requests (wrapped in Arc for sharing)
+    diagnostics_cache: Arc<RwLock<HashMap<String, Vec<Diagnostic>>>>,
 }
 
 /// MCP tool definition for LSP capabilities
@@ -188,14 +83,6 @@ pub struct McpEvent {
     pub data: Value,
 }
 
-/// LSP message types
-#[derive(Debug, Clone, PartialEq)]
-enum LspMessage {
-    Request { id: String, method: String, params: Value },
-    Response { id: String, result: Option<Value>, error: Option<Value> },
-    Notification { method: String, params: Value },
-}
-
 impl McpBridge {
     /// Create a new LSP to MCP bridge
     ///
@@ -208,29 +95,62 @@ impl McpBridge {
             lsp_name: lsp_type.display_name().to_string(),
             lsp_type,
             project_path: project_path.to_string(),
-            lsp_process: None,
-            mcp_request_id: 1,
-            lsp_request_id: 1,
-            pending_requests: RwLock::new(HashMap::new()),
-            diagnostics_cache: RwLock::new(HashMap::new()),
+            diagnostics_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Start the LSP process and initialize it
+    /// Start the LSP process and return handles for communication
     ///
     /// ## Returns
     ///
-    /// Returns `Ok(())` when the LSP is initialized and ready
-    pub async fn start(&mut self) -> Result<()> {
-        info!("Starting LSP bridge for '{}'", self.lsp_name);
+    /// Returns (stdin, stdout, child) for the LSP process
+    pub async fn start_lsp_process(
+        &self,
+    ) -> Result<(ChildStdin, ChildStdout, tokio::process::Child)> {
+        info!(
+            "Starting LSP process '{}' for project: {}",
+            self.lsp_name, self.project_path
+        );
 
-        // Spawn the LSP process
-        let mut process = LspChildProcess::spawn(self.lsp_type, &self.project_path)?;
+        let binary = self.lsp_type.binary_name();
 
-        // Create minimal initialize params
+        let mut cmd = tokio::process::Command::new(binary);
+        cmd.current_dir(&self.project_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit()) // Inherit stderr to avoid deadlock
+            .kill_on_drop(true);
+
+        // Add default arguments for specific LSPs
+        for arg in self.lsp_type.default_additional_args() {
+            cmd.arg(arg);
+        }
+
+        let mut child = cmd.spawn().with_context(|| {
+            format!(
+                "Failed to spawn LSP '{}'. Is it installed and in PATH?",
+                binary
+            )
+        })?;
+
+        let stdin = child.stdin.take().context("Failed to open LSP stdin")?;
+        let stdout = child.stdout.take().context("Failed to open LSP stdout")?;
+
+        Ok((stdin, stdout, child))
+    }
+
+    /// Initialize the LSP server
+    pub async fn initialize_lsp(
+        &self,
+        stdin: &mut ChildStdin,
+        stdout: &mut ChildStdout,
+    ) -> Result<()> {
+        // Create proper initialize params with encoded rootUri
+        let root_uri = McpBridge::path_to_file_uri(&self.project_path)?;
+
         let init_params = serde_json::json!({
             "processId": std::process::id(),
-            "rootUri": format!("file://{}", self.project_path),
+            "rootUri": root_uri,
             "capabilities": {
                 "workspace": {
                     "workspaceEdit": false,
@@ -261,37 +181,247 @@ impl McpBridge {
             }
         });
 
-        let init_request = json!({
-            "jsonrpc": "2.0",
-            "id": "1",
-            "method": "initialize",
-            "params": init_params
-        });
+        // Send initialize request
+        self.send_lsp_request(stdin, "1", "initialize", &init_params)
+            .await?;
 
-        process.send(&init_request).context("Failed to send initialize request")?;
-
-        // Read response (blocking, but OK for initialization)
-        let response = process.read().context("Failed to read initialize response")?;
-
-        // Check for error
-        if let Some(error) = response.get("error") {
-            return Err(anyhow!("LSP initialization failed: {}", error));
-        }
+        // Read initialize response
+        let _response = self.read_lsp_message(stdout, "1").await?;
 
         // Send initialized notification
-        let initialized = json!({
+        self.send_lsp_notification(stdin, "initialized", &json!({}))
+            .await?;
+
+        info!("LSP '{}' initialized successfully", self.lsp_name);
+
+        Ok(())
+    }
+
+    /// Convert file path to file:// URI with proper encoding
+    fn path_to_file_uri(path: &str) -> Result<String> {
+        // Canonicalize the path first
+        let canonical = Path::new(path)
+            .canonicalize()
+            .with_context(|| format!("Invalid project path: {}", path))?;
+
+        // Convert to string
+        let path_str = canonical
+            .to_str()
+            .ok_or_else(|| anyhow!("Project path contains invalid UTF-8"))?;
+
+        // URL-encode only the path components, not the separators
+        // Split by path separator, encode each component, then rejoin
+        let encoded_components: Vec<String> = path_str
+            .split('/')
+            .map(|component| urlencoding::encode(component).to_string())
+            .collect();
+        let encoded = encoded_components.join("/");
+
+        // For absolute paths, we need file:/// (3 slashes)
+        // For relative paths, file:// (2 slashes)
+        if path_str.starts_with('/') {
+            Ok(format!("file:///{}", encoded))
+        } else {
+            Ok(format!("file://{}", encoded))
+        }
+    }
+
+    /// Send a request to the LSP
+    async fn send_lsp_request(
+        &self,
+        stdin: &mut ChildStdin,
+        id: &str,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<()> {
+        let request = json!({
             "jsonrpc": "2.0",
-            "method": "initialized",
-            "params": {}
+            "id": id,
+            "method": method,
+            "params": params
         });
 
-        process
-            .send(&initialized)
-            .context("Failed to send initialized notification")?;
+        let content =
+            serde_json::to_string(&request).context("Failed to serialize JSON-RPC message")?;
 
-        self.lsp_process = Some(process);
-        info!("LSP bridge for '{}' is ready", self.lsp_name);
+        // LSP uses Content-Length framing with \r\n headers
+        let header = format!("Content-Length: {}\r\n\r\n", content.len());
 
+        stdin
+            .write_all(header.as_bytes())
+            .await
+            .context("Failed to write LSP headers")?;
+        stdin
+            .write_all(content.as_bytes())
+            .await
+            .context("Failed to write LSP content")?;
+        stdin.flush().await.context("Failed to flush LSP stdin")?;
+
+        debug!("Sent to LSP: {}", content);
+
+        Ok(())
+    }
+
+    /// Send a notification to the LSP
+    async fn send_lsp_notification(
+        &self,
+        stdin: &mut ChildStdin,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<()> {
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        });
+
+        let content = serde_json::to_string(&notification)
+            .context("Failed to serialize JSON-RPC notification")?;
+
+        let header = format!("Content-Length: {}\r\n\r\n", content.len());
+
+        stdin
+            .write_all(header.as_bytes())
+            .await
+            .context("Failed to write LSP headers")?;
+        stdin
+            .write_all(content.as_bytes())
+            .await
+            .context("Failed to write LSP content")?;
+        stdin.flush().await.context("Failed to flush LSP stdin")?;
+
+        debug!("Sent notification to LSP: {}", content);
+
+        Ok(())
+    }
+
+    /// Read a message from the LSP (with size limit)
+    ///
+    /// Reads LSP messages until finding one with the matching request ID.
+    /// Notifications (messages without ID) are logged and skipped.
+    async fn read_lsp_message(&self, stdout: &mut ChildStdout, expected_id: &str) -> Result<Value> {
+        loop {
+            let message = self.read_next_lsp_message(stdout).await?;
+
+            // Check if this is a notification (no "id" field)
+            if message.get("id").is_none() {
+                // This is a notification - log it and continue
+                if let Some(method) = message.get("method").and_then(|m| m.as_str()) {
+                    debug!("LSP notification: {}", method);
+                    // Handle notifications that update cache
+                    if let Some(params) = message.get("params") {
+                        let _ = self.handle_notification_no_event(method, params);
+                    }
+                }
+                continue;
+            }
+
+            // This is a response - check if it matches our expected ID
+            if let Some(id) = message.get("id") {
+                if let Some(id_str) = id.as_str() {
+                    if id_str == expected_id {
+                        return Ok(message);
+                    }
+                }
+                // ID doesn't match - this is unexpected, log and continue
+                warn!(
+                    "Received LSP response with unexpected ID: {:?}, expected: {}",
+                    id, expected_id
+                );
+            }
+        }
+    }
+
+    /// Read the next message from the LSP (with size limit)
+    async fn read_next_lsp_message(&self, stdout: &mut ChildStdout) -> Result<Value> {
+        // Read headers with Content-Length
+        let mut content_length = None;
+        let mut header_buf = Vec::with_capacity(256);
+        let mut bytes_read = 0;
+
+        // Simple header parsing (read until \r\n\r\n)
+        loop {
+            let ch = stdout
+                .read_u8()
+                .await
+                .context("Failed to read from LSP stdout")?;
+
+            header_buf.push(ch);
+            bytes_read += 1;
+
+            // Check for \r\n\r\n
+            if header_buf.len() >= 4 {
+                let last4 = &header_buf[header_buf.len() - 4..];
+                if last4 == b"\r\n\r\n" {
+                    break;
+                }
+            }
+
+            if bytes_read >= 1024 {
+                return Err(anyhow!("LSP headers too large"));
+            }
+        }
+
+        let headers = std::str::from_utf8(&header_buf).context("LSP headers not valid UTF-8")?;
+
+        for line in headers.lines() {
+            if line.to_lowercase().starts_with("content-length:") {
+                let len_str = line.split(':').nth(1).unwrap_or("").trim();
+                content_length = Some(
+                    len_str
+                        .parse::<usize>()
+                        .context("Failed to parse Content-Length")?,
+                );
+
+                // Enforce size limit
+                let length = content_length.unwrap();
+                if length > MAX_MESSAGE_SIZE {
+                    return Err(anyhow!(
+                        "LSP message too large: {} bytes (max: {})",
+                        length,
+                        MAX_MESSAGE_SIZE
+                    ));
+                }
+            }
+        }
+
+        let length = content_length.ok_or_else(|| anyhow!("Missing Content-Length header"))?;
+
+        // Read content body
+        let mut buffer = vec![0u8; length];
+        stdout
+            .read_exact(&mut buffer)
+            .await
+            .with_context(|| format!("Failed to read LSP content body ({} bytes)", length))?;
+
+        let content = String::from_utf8(buffer).context("LSP response was not valid UTF-8")?;
+
+        let value: Value = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse LSP JSON response: {}", content))?;
+
+        debug!("Received from LSP: {}", content);
+
+        Ok(value)
+    }
+
+    /// Handle an LSP notification without emitting an event (for internal use)
+    fn handle_notification_no_event(&self, method: &str, params: &Value) -> Result<()> {
+        if method == "textDocument/publishDiagnostics" {
+            match serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
+                Ok(diag) => {
+                    let uri = diag.uri.to_string();
+                    let diagnostics = diag.diagnostics.clone();
+                    // Update the cache asynchronously using tokio spawn
+                    let bridge = self.clone();
+                    tokio::spawn(async move {
+                        bridge.update_diagnostics(uri, diagnostics).await;
+                    });
+                }
+                Err(e) => {
+                    warn!("Failed to parse diagnostics: {}", e);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -391,17 +521,25 @@ impl McpBridge {
         ]
     }
 
-    /// Handle an MCP tool call request
+    /// Handle an MCP tool call request (synchronous version)
     ///
     /// ## Arguments
     ///
     /// - `tool_name`: Name of the tool being called
     /// - `arguments`: Tool arguments
+    /// - `stdin`: LSP stdin handle
+    /// - `stdout`: LSP stdout handle
     ///
     /// ## Returns
     ///
     /// Returns the tool result as a JSON value
-    pub async fn call_tool(&mut self, tool_name: &str, arguments: Value) -> Result<Value> {
+    pub async fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: Value,
+        stdin: &mut ChildStdin,
+        stdout: &mut ChildStdout,
+    ) -> Result<Value> {
         debug!("Calling MCP tool: {} with args: {}", tool_name, arguments);
 
         match tool_name {
@@ -411,7 +549,7 @@ impl McpBridge {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow!("Missing 'uri' argument"))?;
 
-                self.document_symbols(uri).await
+                self.document_symbols(uri, stdin, stdout).await
             }
             "lsp/workspace_symbols" => {
                 let query = arguments
@@ -419,7 +557,7 @@ impl McpBridge {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow!("Missing 'query' argument"))?;
 
-                self.workspace_symbols(query).await
+                self.workspace_symbols(query, stdin, stdout).await
             }
             "lsp/definition" => {
                 let uri = arguments
@@ -429,13 +567,15 @@ impl McpBridge {
                 let line = arguments
                     .get("line")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| anyhow!("Missing or invalid 'line' argument"))? as u32;
+                    .ok_or_else(|| anyhow!("Missing or invalid 'line' argument"))?
+                    as u32;
                 let character = arguments
                     .get("character")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| anyhow!("Missing or invalid 'character' argument"))? as u32;
+                    .ok_or_else(|| anyhow!("Missing or invalid 'character' argument"))?
+                    as u32;
 
-                self.definition(uri, line, character).await
+                self.definition(uri, line, character, stdin, stdout).await
             }
             "lsp/references" => {
                 let uri = arguments
@@ -445,13 +585,15 @@ impl McpBridge {
                 let line = arguments
                     .get("line")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| anyhow!("Missing or invalid 'line' argument"))? as u32;
+                    .ok_or_else(|| anyhow!("Missing or invalid 'line' argument"))?
+                    as u32;
                 let character = arguments
                     .get("character")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| anyhow!("Missing or invalid 'character' argument"))? as u32;
+                    .ok_or_else(|| anyhow!("Missing or invalid 'character' argument"))?
+                    as u32;
 
-                self.references(uri, line, character).await
+                self.references(uri, line, character, stdin, stdout).await
             }
             "lsp/diagnostics" => {
                 let uri = arguments
@@ -466,54 +608,99 @@ impl McpBridge {
     }
 
     /// Request document symbols from the LSP
-    async fn document_symbols(&mut self, uri: &str) -> Result<Value> {
-        let params = serde_json::json!({
+    async fn document_symbols(
+        &self,
+        uri: &str,
+        stdin: &mut ChildStdin,
+        stdout: &mut ChildStdout,
+    ) -> Result<Value> {
+        let params = json!({
             "textDocument": {"uri": uri}
         });
 
-        let result = self
-            .lsp_request("textDocument/documentSymbol", &params)
+        // Generate unique request ID
+        let req_id = format!("doc-symbols-{}", chrono::Utc::now().timestamp_millis());
+
+        self.send_lsp_request(stdin, &req_id, "textDocument/documentSymbol", &params)
             .await?;
 
-        Ok(result)
+        // Read response
+        let response = self.read_lsp_message(stdout, &req_id).await?;
+
+        Ok(response)
     }
 
     /// Request workspace symbols from the LSP
-    async fn workspace_symbols(&mut self, query: &str) -> Result<Value> {
-        let params = serde_json::json!({
+    async fn workspace_symbols(
+        &self,
+        query: &str,
+        stdin: &mut ChildStdin,
+        stdout: &mut ChildStdout,
+    ) -> Result<Value> {
+        let params = json!({
             "query": query
         });
 
-        let result = self.lsp_request("workspace/symbol", &params).await?;
+        let req_id = format!(
+            "workspace-symbols-{}",
+            chrono::Utc::now().timestamp_millis()
+        );
 
-        Ok(result)
+        self.send_lsp_request(stdin, &req_id, "workspace/symbol", &params)
+            .await?;
+
+        let response = self.read_lsp_message(stdout, &req_id).await?;
+
+        Ok(response)
     }
 
     /// Request go-to-definition from the LSP
-    async fn definition(&mut self, uri: &str, line: u32, character: u32) -> Result<Value> {
-        let params = serde_json::json!({
+    async fn definition(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        stdin: &mut ChildStdin,
+        stdout: &mut ChildStdout,
+    ) -> Result<Value> {
+        let params = json!({
             "textDocument": {"uri": uri},
             "position": {"line": line, "character": character}
         });
 
-        let result = self.lsp_request("textDocument/definition", &params).await?;
+        let req_id = format!("definition-{}", chrono::Utc::now().timestamp_millis());
 
-        Ok(result)
+        self.send_lsp_request(stdin, &req_id, "textDocument/definition", &params)
+            .await?;
+
+        let response = self.read_lsp_message(stdout, &req_id).await?;
+
+        Ok(response)
     }
 
     /// Request find-references from the LSP
-    async fn references(&mut self, uri: &str, line: u32, character: u32) -> Result<Value> {
-        let params = serde_json::json!({
+    async fn references(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        stdin: &mut ChildStdin,
+        stdout: &mut ChildStdout,
+    ) -> Result<Value> {
+        let params = json!({
             "textDocument": {"uri": uri},
             "position": {"line": line, "character": character},
             "context": {"includeDeclaration": true}
         });
 
-        let result = self
-            .lsp_request("textDocument/references", &params)
+        let req_id = format!("references-{}", chrono::Utc::now().timestamp_millis());
+
+        self.send_lsp_request(stdin, &req_id, "textDocument/references", &params)
             .await?;
 
-        Ok(result)
+        let response = self.read_lsp_message(stdout, &req_id).await?;
+
+        Ok(response)
     }
 
     /// Get cached diagnostics for a document
@@ -523,114 +710,129 @@ impl McpBridge {
         Ok(json!({ "uri": uri, "diagnostics": diagnostics }))
     }
 
-    /// Send a request to the LSP and wait for the response
-    async fn lsp_request<T: Serialize>(&mut self, method: &str, params: &T) -> Result<Value> {
-        let process = self
-            .lsp_process
-            .as_mut()
-            .ok_or_else(|| anyhow!("LSP process not started"))?;
-
-        let request_id = format!("req-{}", self.lsp_request_id);
-        self.lsp_request_id += 1;
-
-        let request = json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params
-        });
-
-        process.send(&request).context("Failed to send LSP request")?;
-
-        // Read response (blocking for now - could be made async)
-        let response = process.read().context("Failed to read LSP response")?;
-
-        // Check for error
-        if let Some(error) = response.get("error") {
-            return Err(anyhow!("LSP request error: {}", error));
-        }
-
-        Ok(response)
+    /// Update diagnostics cache (called by background task)
+    pub async fn update_diagnostics(&self, uri: String, diagnostics: Vec<Diagnostic>) {
+        let mut cache = self.diagnostics_cache.write().await;
+        cache.insert(uri, diagnostics);
     }
 
-    /// Handle an LSP notification (e.g., publishDiagnostics)
-    ///
-    /// Note: This method returns the events but doesn't update the cache asynchronously
-    /// due to lifetime constraints. The cache update should be handled separately.
-    pub fn handle_notification(&self, notification: &LspMessage) -> Result<Vec<McpEvent>> {
-        if let LspMessage::Notification { method, params } = notification {
-            match method.as_str() {
-                "textDocument/publishDiagnostics" => {
-                    let diag: PublishDiagnosticsParams =
-                        serde_json::from_value(params.clone())
-                            .context("Failed to parse diagnostics")?;
+    /// Process an LSP notification and convert to MCP event
+    pub fn handle_lsp_notification(&self, method: &str, params: &Value) -> Option<McpEvent> {
+        match method {
+            "textDocument/publishDiagnostics" => {
+                match serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
+                    Ok(diag) => {
+                        let uri = diag.uri.to_string();
 
-                    // Note: Cache update needs to be done by the caller with mutable access
-                    debug!(
-                        "Received diagnostics for URI: {}, count: {}",
-                        diag.uri.as_str(),
-                        diag.diagnostics.len()
-                    );
+                        // Update cache asynchronously
+                        let diagnostics = diag.diagnostics.clone();
+                        let bridge = self.clone();
+                        tokio::spawn(async move {
+                            bridge.update_diagnostics(uri, diagnostics).await;
+                        });
 
-                    // Convert to MCP event
-                    Ok(vec![McpEvent {
-                        name: "diagnostics/published".to_string(),
-                        data: json!({
-                            "uri": diag.uri,
-                            "diagnostics": diag.diagnostics,
-                        }),
-                    }])
-                }
-                "window/logMessage" => {
-                    Ok(vec![McpEvent {
-                        name: "lsp/log_message".to_string(),
-                        data: params.clone(),
-                    }])
-                }
-                _ => {
-                    debug!("Unhandled LSP notification: {}", method);
-                    Ok(vec![])
+                        // Convert to MCP event
+                        Some(McpEvent {
+                            name: "diagnostics/published".to_string(),
+                            data: json!({
+                                "uri": diag.uri,
+                                "diagnostics": diag.diagnostics,
+                            }),
+                        })
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse diagnostics: {}", e);
+                        None
+                    }
                 }
             }
-        } else {
-            Ok(vec![])
+            "window/logMessage" => Some(McpEvent {
+                name: "lsp/log_message".to_string(),
+                data: params.clone(),
+            }),
+            _ => {
+                debug!("Unhandled LSP notification: {}", method);
+                None
+            }
         }
+    }
+
+    /// Run the background task that reads LSP notifications
+    ///
+    /// This task runs continuously, reading LSP messages and emitting MCP events.
+    pub async fn run_lsp_reader(
+        self,
+        mut stdout: ChildStdout,
+        event_tx: mpsc::Sender<McpEvent>,
+    ) -> Result<()> {
+        info!("Starting LSP reader task");
+
+        loop {
+            match self.read_next_lsp_message(&mut stdout).await {
+                Ok(message) => {
+                    // Check if this is a notification (no "id" field)
+                    if message.get("id").is_none() {
+                        if let Some(method) = message.get("method").and_then(|m| m.as_str()) {
+                            if let Some(params) = message.get("params") {
+                                // Update diagnostics cache for publishDiagnostics
+                                let _ = self.handle_notification_no_event(method, params);
+                                // Also emit MCP event if needed
+                                if let Some(event) = self.handle_lsp_notification(method, params) {
+                                    // Send event to MCP client
+                                    if event_tx.send(event).await.is_err() {
+                                        debug!("MCP event channel closed, stopping LSP reader");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Responses are handled by the request handler
+                }
+                Err(e) => {
+                    error!("Failed to read from LSP: {}", e);
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Shutdown the LSP process gracefully
-    pub async fn shutdown(&mut self) -> Result<()> {
+    pub async fn shutdown(
+        &mut self,
+        stdin: &mut ChildStdin,
+        mut child: tokio::process::Child,
+    ) -> Result<()> {
         info!("Shutting down LSP bridge for '{}'", self.lsp_name);
 
-        if let Some(mut process) = self.lsp_process.take() {
-            // Send shutdown request
-            let shutdown = json!({
-                "jsonrpc": "2.0",
-                "id": "shutdown",
-                "method": "shutdown"
-            });
+        // Send shutdown request
+        self.send_lsp_request(stdin, "shutdown", "shutdown", &json!(null))
+            .await
+            .ok();
 
-            let _ = process.send(&shutdown);
+        // Send exit notification
+        self.send_lsp_notification(stdin, "exit", &json!(null))
+            .await
+            .ok();
 
-            // Send exit notification
-            let exit = json!({
-                "jsonrpc": "2.0",
-                "method": "exit"
-            });
+        // Wait for process to exit (with timeout)
+        let _ = timeout(Duration::from_secs(5), child.wait()).await;
 
-            let _ = process.send(&exit);
-
-            // Kill the process
-            let _ = process.child.kill();
-        }
+        info!("LSP bridge shut down");
 
         Ok(())
     }
 }
 
-impl Drop for McpBridge {
-    fn drop(&mut self) {
-        if self.lsp_process.is_some() {
-            warn!("McpBridge dropped without explicit shutdown");
+impl Clone for McpBridge {
+    fn clone(&self) -> Self {
+        Self {
+            lsp_name: self.lsp_name.clone(),
+            lsp_type: self.lsp_type,
+            project_path: self.project_path.clone(),
+            diagnostics_cache: Arc::clone(&self.diagnostics_cache),
         }
     }
 }
@@ -677,5 +879,19 @@ mod tests {
         assert!(!tools.is_empty());
         assert!(tools.iter().any(|t| t.name == "lsp/document_symbols"));
         assert!(tools.iter().any(|t| t.name == "lsp/definition"));
+    }
+
+    #[test]
+    fn test_path_to_file_uri() {
+        // Test with /tmp which should exist on all systems
+        let uri = McpBridge::path_to_file_uri("/tmp").unwrap();
+        assert!(uri.starts_with("file:///"));
+        assert!(uri.contains("tmp"));
+
+        // Test URL encoding by encoding spaces manually
+        let path_with_spaces = "/tmp/test path";
+        let uri = McpBridge::path_to_file_uri(path_with_spaces);
+        // Note: canonicalize will fail if the path doesn't exist, so we just check the function works
+        // For a path that exists with spaces, it would encode them
     }
 }

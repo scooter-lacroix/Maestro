@@ -12,8 +12,10 @@ See [Installation Guide](INSTALLATION.md) for complete setup instructions.
 
 Quick install:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 ```
+
+In the Conductor Wizard, ensure **Claude Code (by Anthropic)** is enabled.
 
 ## Post-Installation Configuration
 

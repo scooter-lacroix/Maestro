@@ -109,7 +109,11 @@ impl ASTAnalyzer {
 
             // Check for multiline string start
             if raw_line.contains("\"\"\"") || raw_line.contains("'''") {
-                let quote = if raw_line.contains("\"\"\"") { "\"\"\"" } else { "'''" };
+                let quote = if raw_line.contains("\"\"\"") {
+                    "\"\"\""
+                } else {
+                    "'''"
+                };
                 let count = raw_line.matches(quote).count();
                 if count == 1 {
                     in_multiline_string = true;
@@ -187,8 +191,7 @@ impl ASTAnalyzer {
                         func.class_name = Some(class_name.clone());
 
                         // Add to the class's methods list
-                        if let Some(cls) = self.classes.iter_mut().find(|c| c.name == *class_name)
-                        {
+                        if let Some(cls) = self.classes.iter_mut().find(|c| c.name == *class_name) {
                             cls.methods.push(func.clone());
                         }
                     } else {
@@ -392,7 +395,11 @@ impl ASTAnalyzer {
             if eq_pos > 0 {
                 let before_eq = &line[..eq_pos];
                 let char_before = before_eq.chars().last().unwrap_or(' ');
-                if char_before == '!' || char_before == '<' || char_before == '>' || char_before == '=' {
+                if char_before == '!'
+                    || char_before == '<'
+                    || char_before == '>'
+                    || char_before == '='
+                {
                     return None;
                 }
             }
@@ -403,7 +410,10 @@ impl ASTAnalyzer {
             let target = line[..eq_pos].trim();
             // Check if it's a simple name (not attribute access, not subscript)
             if target.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && target.chars().next().map_or(false, |c| c.is_alphabetic() || c == '_')
+                && target
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_alphabetic() || c == '_')
             {
                 return Some(target.to_string());
             }
@@ -570,7 +580,10 @@ impl ASTAnalyzer {
                 }
             }
             if self.imports.len() > 15 {
-                lines.push(format!("# ... and {} more imports", self.imports.len() - 15));
+                lines.push(format!(
+                    "# ... and {} more imports",
+                    self.imports.len() - 15
+                ));
             }
         }
 

@@ -4,8 +4,8 @@
 //! Supports all languages from the language module.
 
 use crate::language::{
-    child_by_field, find_all_nodes, get_language_config, node_text,
-    MultiLanguageParser, ProgrammingLanguage,
+    child_by_field, find_all_nodes, get_language_config, node_text, MultiLanguageParser,
+    ProgrammingLanguage,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -197,7 +197,14 @@ impl MultiLangCallGraphAnalyzer {
 
         // First pass: collect all function/method definitions
         let mut known_functions: HashMap<String, String> = HashMap::new();
-        self.collect_functions(&mut graph, root, source, language, config.as_ref(), &mut known_functions);
+        self.collect_functions(
+            &mut graph,
+            root,
+            source,
+            language,
+            config.as_ref(),
+            &mut known_functions,
+        );
 
         // Second pass: find all call expressions
         self.collect_calls(&mut graph, root, source, language, &known_functions);
@@ -230,7 +237,7 @@ impl MultiLangCallGraphAnalyzer {
 
             // Check if inside a class
             let (is_method, class_name) = self.check_class_context(*node, source, config);
-            
+
             let qualified_name = if let Some(ref cls) = class_name {
                 format!("{}.{}", cls, name)
             } else {
@@ -264,7 +271,7 @@ impl MultiLangCallGraphAnalyzer {
         if let Some(name_node) = child_by_field(node, "name") {
             return Some(node_text(name_node, source).to_string());
         }
-        
+
         // Try declarator field (C/C++)
         if let Some(decl) = child_by_field(node, "declarator") {
             if let Some(name_node) = child_by_field(decl, "declarator") {
@@ -512,7 +519,9 @@ impl MultiLangCallGraphAnalyzer {
                     lines.push(format!("# +{} more calls", graph.edges.len() - 20));
                     break;
                 }
-                if let (Some(from), Some(to)) = (graph.nodes.get(&edge.from_id), graph.nodes.get(&edge.to_id)) {
+                if let (Some(from), Some(to)) =
+                    (graph.nodes.get(&edge.from_id), graph.nodes.get(&edge.to_id))
+                {
                     lines.push(format!("{} → {} L{}", from.name, to.name, edge.line));
                     shown += 1;
                 }
@@ -522,7 +531,12 @@ impl MultiLangCallGraphAnalyzer {
         // External calls
         if !graph.external_calls.is_empty() {
             lines.push(String::new());
-            let ext_calls: Vec<&str> = graph.external_calls.iter().take(10).map(|s| s.as_str()).collect();
+            let ext_calls: Vec<&str> = graph
+                .external_calls
+                .iter()
+                .take(10)
+                .map(|s| s.as_str())
+                .collect();
             lines.push(format!("# External: {}", ext_calls.join(", ")));
         }
 
@@ -559,7 +573,9 @@ impl MultiLangCallGraphAnalyzer {
                 if shown >= 15 {
                     break;
                 }
-                if let (Some(from), Some(to)) = (graph.nodes.get(&edge.from_id), graph.nodes.get(&edge.to_id)) {
+                if let (Some(from), Some(to)) =
+                    (graph.nodes.get(&edge.from_id), graph.nodes.get(&edge.to_id))
+                {
                     edges.push(format!("{}>{}", from.name, to.name));
                     shown += 1;
                 }
@@ -575,7 +591,12 @@ impl MultiLangCallGraphAnalyzer {
         }
 
         if !graph.external_calls.is_empty() {
-            let ext: Vec<&str> = graph.external_calls.iter().take(10).map(|s| s.as_str()).collect();
+            let ext: Vec<&str> = graph
+                .external_calls
+                .iter()
+                .take(10)
+                .map(|s| s.as_str())
+                .collect();
             lines.push(format!("ext:{}", ext.join(" ")));
         }
 
@@ -605,7 +626,7 @@ def main():
     print(result)
 "#;
         let graph = analyzer.build_graph(source, "test.py");
-        
+
         assert_eq!(graph.language, "Python");
         assert!(graph.nodes.len() >= 2);
     }
@@ -624,7 +645,7 @@ function main() {
 }
 "#;
         let graph = analyzer.build_graph(source, "test.js");
-        
+
         assert_eq!(graph.language, "JavaScript");
         assert!(graph.nodes.len() >= 2);
     }
@@ -643,7 +664,7 @@ fn main() {
 }
 "#;
         let graph = analyzer.build_graph(source, "test.rs");
-        
+
         assert_eq!(graph.language, "Rust");
         assert!(graph.nodes.len() >= 2);
     }
@@ -663,7 +684,7 @@ def c():
 "#;
         let graph = analyzer.build_graph(source, "test.py");
         let output = analyzer.to_llm_string(&graph);
-        
+
         assert!(output.contains("Call Graph"));
         assert!(output.contains("Python"));
     }

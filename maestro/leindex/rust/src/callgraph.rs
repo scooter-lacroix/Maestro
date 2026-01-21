@@ -158,7 +158,8 @@ impl CallGraphAnalyzer {
         // Add all functions as nodes
         for func in &ast.functions {
             let node_id = format!("{}:{}", file_path, func.name);
-            self.known_functions.insert(func.name.clone(), node_id.clone());
+            self.known_functions
+                .insert(func.name.clone(), node_id.clone());
 
             graph.add_node(CallNode {
                 id: node_id,
@@ -178,8 +179,10 @@ impl CallGraphAnalyzer {
             for method in &cls.methods {
                 let full_name = format!("{}.{}", cls.name, method.name);
                 let node_id = format!("{}:{}", file_path, full_name);
-                self.known_functions.insert(full_name.clone(), node_id.clone());
-                self.known_functions.insert(method.name.clone(), node_id.clone());
+                self.known_functions
+                    .insert(full_name.clone(), node_id.clone());
+                self.known_functions
+                    .insert(method.name.clone(), node_id.clone());
 
                 graph.add_node(CallNode {
                     id: node_id,
@@ -331,13 +334,61 @@ impl CallGraphAnalyzer {
 
     fn is_builtin(&self, name: &str) -> bool {
         let builtins = [
-            "print", "len", "range", "str", "int", "float", "bool", "list", "dict", "set",
-            "tuple", "type", "isinstance", "issubclass", "hasattr", "getattr", "setattr",
-            "delattr", "callable", "iter", "next", "enumerate", "zip", "map", "filter",
-            "sorted", "reversed", "all", "any", "sum", "min", "max", "abs", "round",
-            "open", "input", "format", "repr", "id", "hash", "dir", "vars", "locals",
-            "globals", "super", "property", "staticmethod", "classmethod", "object",
-            "Exception", "ValueError", "TypeError", "KeyError", "IndexError", "AttributeError",
+            "print",
+            "len",
+            "range",
+            "str",
+            "int",
+            "float",
+            "bool",
+            "list",
+            "dict",
+            "set",
+            "tuple",
+            "type",
+            "isinstance",
+            "issubclass",
+            "hasattr",
+            "getattr",
+            "setattr",
+            "delattr",
+            "callable",
+            "iter",
+            "next",
+            "enumerate",
+            "zip",
+            "map",
+            "filter",
+            "sorted",
+            "reversed",
+            "all",
+            "any",
+            "sum",
+            "min",
+            "max",
+            "abs",
+            "round",
+            "open",
+            "input",
+            "format",
+            "repr",
+            "id",
+            "hash",
+            "dir",
+            "vars",
+            "locals",
+            "globals",
+            "super",
+            "property",
+            "staticmethod",
+            "classmethod",
+            "object",
+            "Exception",
+            "ValueError",
+            "TypeError",
+            "KeyError",
+            "IndexError",
+            "AttributeError",
         ];
         builtins.contains(&name)
     }
@@ -391,9 +442,7 @@ impl CallGraphAnalyzer {
             let callees: Vec<&str> = node
                 .callees
                 .iter()
-                .filter_map(|callee_id| {
-                    graph.nodes.get(callee_id).map(|n| n.name.as_str())
-                })
+                .filter_map(|callee_id| graph.nodes.get(callee_id).map(|n| n.name.as_str()))
                 .take(5)
                 .collect();
 

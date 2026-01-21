@@ -187,8 +187,8 @@ impl Default for RetryConfig {
 impl RetryConfig {
     /// Calculate delay for a retry attempt
     pub fn calculate_delay(&self, attempt: u32) -> u64 {
-        let delay = (self.initial_delay_ms as f64
-            * self.exponential_base.powi(attempt as i32)) as u64;
+        let delay =
+            (self.initial_delay_ms as f64 * self.exponential_base.powi(attempt as i32)) as u64;
         let delay = delay.min(self.max_delay_ms);
 
         if self.jitter {
@@ -204,18 +204,18 @@ impl RetryConfig {
 mod rand {
     pub fn random() -> f64 {
         use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hasher};
-        
+        use std::hash::Hasher;
+
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        
+
         // Hash the nanos to get a pseudo-random distribution
         let mut hasher = DefaultHasher::new();
         hasher.write_u128(nanos);
         let h = hasher.finish();
-        
+
         (h as f64) / (u64::MAX as f64)
     }
 }

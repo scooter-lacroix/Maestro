@@ -18,7 +18,10 @@ pub async fn serve() -> Result<()> {
 
     let pool = McpPool::new(service.clone());
     let started = pool.start_all_from_db().await.unwrap_or(0);
-    println!("maestro mcp serve: started {} pooled MCP server(s)", started);
+    println!(
+        "maestro mcp serve: started {} pooled MCP server(s)",
+        started
+    );
 
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -37,7 +40,11 @@ pub async fn proxy(server_name: String) -> Result<()> {
                 .find(|s| s.name == server_name)
                 .and_then(|s| s.socket_path)
         })
-        .unwrap_or_else(|| McpPool::socket_path_for(&server_name).to_string_lossy().to_string());
+        .unwrap_or_else(|| {
+            McpPool::socket_path_for(&server_name)
+                .to_string_lossy()
+                .to_string()
+        });
 
     let stream = UnixStream::connect(&socket_path)
         .await
@@ -261,15 +268,26 @@ impl ToolSearchServer {
     }
 
     async fn tool_search(&self, args: serde_json::Value) -> Result<serde_json::Value> {
-        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         if query.is_empty() {
             return Ok(serde_json::json!({"results": []}));
         }
-        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20).min(200) as usize;
-        let restrict_servers: Option<Vec<String>> = args
-            .get("servers")
-            .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect());
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(200) as usize;
+        let restrict_servers: Option<Vec<String>> =
+            args.get("servers").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            });
 
         let mut results: Vec<serde_json::Value> = Vec::new();
         let servers = self.service.list_mcp_servers().unwrap_or_default();
@@ -286,12 +304,8 @@ impl ToolSearchServer {
 
             let tools = self.get_tools_for_server(&s.name).await.unwrap_or_default();
             for t in tools {
-                let hay = format!(
-                    "{}\n{}",
-                    t.name,
-                    t.description.clone().unwrap_or_default()
-                )
-                .to_lowercase();
+                let hay = format!("{}\n{}", t.name, t.description.clone().unwrap_or_default())
+                    .to_lowercase();
                 if hay.contains(&query.to_lowercase()) {
                     results.push(serde_json::json!({
                         "server": s.name,
@@ -309,8 +323,16 @@ impl ToolSearchServer {
     }
 
     async fn tool_describe(&self, args: serde_json::Value) -> Result<serde_json::Value> {
-        let server = args.get("server").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let tool = args.get("tool").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let server = args
+            .get("server")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tool = args
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let tools = self.get_tools_for_server(&server).await.unwrap_or_default();
         let found = tools.into_iter().find(|t| t.name == tool);
         Ok(match found {
@@ -325,9 +347,20 @@ impl ToolSearchServer {
     }
 
     async fn tool_call(&self, args: serde_json::Value) -> Result<serde_json::Value> {
-        let server = args.get("server").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let tool = args.get("tool").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let arguments = args.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({}));
+        let server = args
+            .get("server")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tool = args
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let arguments = args
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
 
         let mut client = UnixMcpClient::connect(&server, &self.service).await?;
         client.initialize().await?;
@@ -350,21 +383,41 @@ impl ToolSearchServer {
         client.initialize().await?;
         let resp = client.request("tools/list", serde_json::json!({})).await?;
 
-        let tools_val = resp.get("tools").cloned().unwrap_or_else(|| serde_json::json!([]));
+        let tools_val = resp
+            .get("tools")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([]));
         let mut tools: Vec<McpTool> = Vec::new();
         if let Some(arr) = tools_val.as_array() {
             for t in arr {
-                let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = t
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if name.is_empty() {
                     continue;
                 }
-                let description = t.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let input_schema = t.get("inputSchema").cloned().unwrap_or_else(|| serde_json::json!({}));
-                tools.push(McpTool { name, description, input_schema });
+                let description = t
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let input_schema = t
+                    .get("inputSchema")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                tools.push(McpTool {
+                    name,
+                    description,
+                    input_schema,
+                });
             }
         }
 
-        self.cache.lock().await.insert(server_name.to_string(), tools.clone());
+        self.cache
+            .lock()
+            .await
+            .insert(server_name.to_string(), tools.clone());
         Ok(tools)
     }
 }
@@ -380,12 +433,23 @@ impl UnixMcpClient {
         let socket_path = service
             .list_mcp_servers()
             .ok()
-            .and_then(|list| list.into_iter().find(|s| s.name == server_name).and_then(|s| s.socket_path))
-            .unwrap_or_else(|| McpPool::socket_path_for(server_name).to_string_lossy().to_string());
+            .and_then(|list| {
+                list.into_iter()
+                    .find(|s| s.name == server_name)
+                    .and_then(|s| s.socket_path)
+            })
+            .unwrap_or_else(|| {
+                McpPool::socket_path_for(server_name)
+                    .to_string_lossy()
+                    .to_string()
+            });
 
-        let stream = UnixStream::connect(&socket_path)
-            .await
-            .with_context(|| format!("Failed to connect to pooled server '{}' at {}", server_name, socket_path))?;
+        let stream = UnixStream::connect(&socket_path).await.with_context(|| {
+            format!(
+                "Failed to connect to pooled server '{}' at {}",
+                server_name, socket_path
+            )
+        })?;
 
         let (r, w) = stream.into_split();
         Ok(Self {
@@ -408,17 +472,26 @@ impl UnixMcpClient {
             .await?;
         // MCP requires an initialized notification.
         let note = serde_json::json!({ "jsonrpc":"2.0", "method":"notifications/initialized", "params":{} });
-        self.writer.write_all(format!("{}\n", note).as_bytes()).await?;
+        self.writer
+            .write_all(format!("{}\n", note).as_bytes())
+            .await?;
         self.writer.flush().await?;
         Ok(())
     }
 
-    async fn request(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    async fn request(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
 
-        let req = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        self.writer.write_all(format!("{}\n", req).as_bytes()).await?;
+        let req =
+            serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        self.writer
+            .write_all(format!("{}\n", req).as_bytes())
+            .await?;
         self.writer.flush().await?;
 
         while let Some(line) = self.reader.next_line().await? {
@@ -430,7 +503,10 @@ impl UnixMcpClient {
                 if let Some(err) = v.get("error") {
                     return Ok(serde_json::json!({ "error": err }));
                 }
-                return Ok(v.get("result").cloned().unwrap_or_else(|| serde_json::json!({})));
+                return Ok(v
+                    .get("result")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({})));
             }
         }
 

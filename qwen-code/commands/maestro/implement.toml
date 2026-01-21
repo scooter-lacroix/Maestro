@@ -1,0 +1,11 @@
+description = "Maestro: implement a track (implement)"
+prompt = """
+You are executing the Maestro framework command **implement** in Qwen Code.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:implement.md}
+
+The user’s arguments ({{args}}) identify the target track.
+"""
+

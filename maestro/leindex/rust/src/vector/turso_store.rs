@@ -551,6 +551,73 @@ impl TursoVectorStore {
         self.cache.stats()
     }
 
+    /// Get all vectors from the store for migration purposes
+    /// Returns (content, embedding, metadata) tuples for all stored vectors
+    pub async fn get_all_vectors(&self) -> Result<Vec<(String, Vec<f32>, VectorMetadata)>> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(anyhow::anyhow!("Cannot get vectors: store is shut down"));
+        }
+
+        self.execute_with_retry("get_all_vectors", || async {
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
+
+            let stmt = conn
+                .prepare(
+                    "SELECT content, embedding, file_path, chunk_index, start_line, end_line,
+                            chunk_type, parent_context, embedding_model, created_at
+                     FROM vectors",
+                )
+                .await
+                .context("Failed to prepare get_all_vectors query")?;
+
+            let mut results = stmt
+                .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                .await
+                .context("Failed to execute get_all_vectors query")?;
+
+            let mut vectors = Vec::new();
+
+            while let Some(row) = results.next().await? {
+                let content: Option<String> = row.get(0)?;
+                let embedding_json: String = row.get(1)?;
+                let file_path: String = row.get(2)?;
+                let chunk_index: i64 = row.get(3)?;
+                let start_line: i64 = row.get(4)?;
+                let end_line: i64 = row.get(5)?;
+                let chunk_type_int: i64 = row.get(6)?;
+                let parent_context: Option<String> = row.get(7)?;
+                let embedding_model: String = row.get(8)?;
+                let created_at: String = row.get(9)?;
+
+                let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
+                    .context("Failed to parse embedding JSON")?;
+
+                let content_str = content.unwrap_or_default();
+
+                let metadata = VectorMetadata {
+                    file_path,
+                    chunk_index: chunk_index as i32,
+                    start_line: if start_line > 0 { Some(start_line as i32) } else { None },
+                    end_line: if end_line > 0 { Some(end_line as i32) } else { None },
+                    chunk_type: ChunkType::from_i32(chunk_type_int as i32),
+                    parent_context,
+                    embedding_model,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now()),
+                };
+
+                vectors.push((content_str, embedding, metadata));
+            }
+
+            Ok(vectors)
+        })
+        .await
+    }
+
     /// Shutdown the store gracefully
     pub async fn shutdown(&self) -> Result<()> {
         if self.is_shutdown.load(Ordering::SeqCst) {

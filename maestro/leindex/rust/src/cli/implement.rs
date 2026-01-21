@@ -121,7 +121,9 @@ fn tmux_current_pane_target() -> Option<String> {
 }
 
 fn tmux_current_session_target() -> Option<String> {
-    tmux_display("#{session_name}").ok().filter(|s| !s.is_empty())
+    tmux_display("#{session_name}")
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 fn tmux_display(format: &str) -> Result<String> {
@@ -134,4 +136,3 @@ fn tmux_display(format: &str) -> Result<String> {
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
-

@@ -52,7 +52,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use libsql::{Connection, Database, params_from_iter};
+use libsql::{params_from_iter, Connection, Database};
 use std::fmt;
 use std::sync::Arc;
 
@@ -328,7 +328,7 @@ impl MigrationConfig {
             migrations_table,
             create_table_if_missing: true,
             max_concurrent_migrations: 1, // Sequential by default
-            use_transactions: true,      // Use transactions by default
+            use_transactions: true,       // Use transactions by default
         })
     }
 
@@ -531,13 +531,19 @@ impl MigrationManager {
             table_name
         );
 
-        conn.execute(&create_sql, libsql::params_from_iter(std::iter::empty::<&str>()))
-            .await
-            .with_context(|| format!("Failed to create migrations table: {}", table_name))?;
+        conn.execute(
+            &create_sql,
+            libsql::params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await
+        .with_context(|| format!("Failed to create migrations table: {}", table_name))?;
 
-        conn.execute(&create_index_sql, libsql::params_from_iter(std::iter::empty::<&str>()))
-            .await
-            .context("Failed to create migrations state index")?;
+        conn.execute(
+            &create_index_sql,
+            libsql::params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await
+        .context("Failed to create migrations state index")?;
 
         tracing::info!("Initialized migrations table: {}", table_name);
         Ok(())
@@ -649,9 +655,17 @@ impl MigrationManager {
             table_name
         );
 
-        conn.execute(&sql, params_from_iter([migration.version(), checksum, &description]))
-            .await
-            .with_context(|| format!("Failed to record migration as applied: {}", migration.version()))?;
+        conn.execute(
+            &sql,
+            params_from_iter([migration.version(), checksum, &description]),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to record migration as applied: {}",
+                migration.version()
+            )
+        })?;
 
         Ok(())
     }
@@ -696,11 +710,7 @@ impl MigrationManager {
     ///
     /// `Ok(true)` if migration was applied, `Ok(false)` if skipped,
     /// or an error.
-    pub async fn migrate_up(
-        &self,
-        migration: &dyn Migration,
-        force: bool,
-    ) -> Result<bool> {
+    pub async fn migrate_up(&self, migration: &dyn Migration, force: bool) -> Result<bool> {
         let version = migration.version();
         let is_applied = self.is_migration_applied(version).await?;
 
@@ -713,9 +723,12 @@ impl MigrationManager {
 
         // Use transaction if configured
         if self.config.use_transactions {
-            conn.execute("BEGIN", params_from_iter(std::iter::empty::<libsql::Value>()))
-                .await
-                .context("Failed to begin transaction")?;
+            conn.execute(
+                "BEGIN",
+                params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to begin transaction")?;
         }
 
         // Apply the migration
@@ -724,19 +737,27 @@ impl MigrationManager {
         match apply_result {
             Ok(_) => {
                 let checksum = migration.checksum();
-                let record_result = self.record_migration_applied(&conn, migration, &checksum).await;
+                let record_result = self
+                    .record_migration_applied(&conn, migration, &checksum)
+                    .await;
 
                 // Commit or rollback based on results
                 if self.config.use_transactions {
                     if let Err(e) = record_result {
-                        conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
-                            .await
-                            .context("Failed to rollback transaction")?;
+                        conn.execute(
+                            "ROLLBACK",
+                            params_from_iter(std::iter::empty::<libsql::Value>()),
+                        )
+                        .await
+                        .context("Failed to rollback transaction")?;
                         return Err(e.context("Failed to record migration as applied"));
                     }
-                    conn.execute("COMMIT", params_from_iter(std::iter::empty::<libsql::Value>()))
-                        .await
-                        .context("Failed to commit transaction")?;
+                    conn.execute(
+                        "COMMIT",
+                        params_from_iter(std::iter::empty::<libsql::Value>()),
+                    )
+                    .await
+                    .context("Failed to commit transaction")?;
                 } else {
                     record_result?;
                 }
@@ -744,7 +765,11 @@ impl MigrationManager {
             Err(e) => {
                 // If application failed, we must rollback the transaction
                 if self.config.use_transactions {
-                     let _ = conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                    let _ = conn
+                        .execute(
+                            "ROLLBACK",
+                            params_from_iter(std::iter::empty::<libsql::Value>()),
+                        )
                         .await;
                 }
                 return Err(e);
@@ -779,9 +804,12 @@ impl MigrationManager {
 
         // Use transaction if configured
         if self.config.use_transactions {
-            conn.execute("BEGIN", params_from_iter(std::iter::empty::<libsql::Value>()))
-                .await
-                .context("Failed to begin transaction")?;
+            conn.execute(
+                "BEGIN",
+                params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to begin transaction")?;
         }
 
         // Rollback the migration
@@ -794,14 +822,20 @@ impl MigrationManager {
                 // Commit or rollback based on results
                 if self.config.use_transactions {
                     if let Err(e) = record_result {
-                        conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
-                            .await
-                            .context("Failed to rollback transaction")?;
+                        conn.execute(
+                            "ROLLBACK",
+                            params_from_iter(std::iter::empty::<libsql::Value>()),
+                        )
+                        .await
+                        .context("Failed to rollback transaction")?;
                         return Err(e.context("Failed to record migration as rolled back"));
                     }
-                    conn.execute("COMMIT", params_from_iter(std::iter::empty::<libsql::Value>()))
-                        .await
-                        .context("Failed to commit transaction")?;
+                    conn.execute(
+                        "COMMIT",
+                        params_from_iter(std::iter::empty::<libsql::Value>()),
+                    )
+                    .await
+                    .context("Failed to commit transaction")?;
                 } else {
                     record_result?;
                 }
@@ -809,7 +843,11 @@ impl MigrationManager {
             Err(e) => {
                 // If rollback failed, we must rollback the transaction
                 if self.config.use_transactions {
-                    let _ = conn.execute("ROLLBACK", params_from_iter(std::iter::empty::<libsql::Value>()))
+                    let _ = conn
+                        .execute(
+                            "ROLLBACK",
+                            params_from_iter(std::iter::empty::<libsql::Value>()),
+                        )
                         .await;
                 }
                 return Err(e);
@@ -913,15 +951,20 @@ impl MigrationManager {
 
         let records = self.get_migration_records().await?;
 
-        let applied_count = records.iter().filter(|r| r.state == MigrationState::Applied).count();
+        let applied_count = records
+            .iter()
+            .filter(|r| r.state == MigrationState::Applied)
+            .count();
 
-        let pending_count = records.iter().filter(|r| r.state == MigrationState::Pending).count();
+        let pending_count = records
+            .iter()
+            .filter(|r| r.state == MigrationState::Pending)
+            .count();
 
-        let rolled_back_count =
-            records
-                .iter()
-                .filter(|r| r.state == MigrationState::RolledBack)
-                .count();
+        let rolled_back_count = records
+            .iter()
+            .filter(|r| r.state == MigrationState::RolledBack)
+            .count();
 
         Ok(MigrationStatus {
             applied_count,
@@ -1055,7 +1098,7 @@ impl MigrationStatus {
 /// Sorts migrations by version in ascending order.
 ///
 /// # Arguments
-    ///
+///
 /// * `migrations` - Slice of migrations to sort
 ///
 /// # Returns
@@ -1149,7 +1192,7 @@ impl Migration for CreateBaseSchema {
             params_from_iter(std::iter::empty::<&str>()),
         )
         .await?;
-        
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_path ON sessions(project_path)",
             params_from_iter(std::iter::empty::<&str>()),
@@ -1516,9 +1559,7 @@ mod tests {
         // across connections in libsql
         let temp_dir = tempfile::TempDir::new()?;
         let db_path = temp_dir.path().join("test.db");
-        let db = libsql::Builder::new_local(db_path)
-            .build()
-            .await?;
+        let db = libsql::Builder::new_local(db_path).build().await?;
         // Keep temp_dir alive by leaking it - the OS will clean up on process exit
         std::mem::forget(temp_dir);
         Ok(Arc::new(db))
@@ -1550,14 +1591,16 @@ mod tests {
 
         async fn up(&self, conn: &Connection) -> Result<()> {
             if !self.up_sql.is_empty() {
-                conn.execute(self.up_sql, params_from_iter(std::iter::empty::<&str>())).await?;
+                conn.execute(self.up_sql, params_from_iter(std::iter::empty::<&str>()))
+                    .await?;
             }
             Ok(())
         }
 
         async fn down(&self, conn: &Connection) -> Result<()> {
             if !self.down_sql.is_empty() {
-                conn.execute(self.down_sql, params_from_iter(std::iter::empty::<&str>())).await?;
+                conn.execute(self.down_sql, params_from_iter(std::iter::empty::<&str>()))
+                    .await?;
             }
             Ok(())
         }
@@ -1698,7 +1741,9 @@ mod tests {
         let migration_v1 = TestMigration::new("2024_01_15_001_create_users", "", "");
         let migration_v2 = TestMigration::new("2024_01_15_002_add_email", "", "");
 
-        manager.run_migrations(&[&migration_v1, &migration_v2], false).await?;
+        manager
+            .run_migrations(&[&migration_v1, &migration_v2], false)
+            .await?;
 
         let latest = manager.get_latest_version().await?;
         assert_eq!(latest, Some("2024_01_15_002_add_email".to_string()));
@@ -1874,7 +1919,10 @@ mod tests {
                 params_from_iter(std::iter::empty::<&str>()),
             )
             .await?;
-        assert!(rows.next().await?.is_some(), "lsp_servers table should exist");
+        assert!(
+            rows.next().await?.is_some(),
+            "lsp_servers table should exist"
+        );
 
         // Check that memories table exists
         let mut rows = conn
@@ -1892,7 +1940,10 @@ mod tests {
                 params_from_iter(std::iter::empty::<&str>()),
             )
             .await?;
-        assert!(rows.next().await?.is_some(), "maestro_projects table should exist");
+        assert!(
+            rows.next().await?.is_some(),
+            "maestro_projects table should exist"
+        );
 
         Ok(())
     }
@@ -1918,7 +1969,10 @@ mod tests {
                 params_from_iter(std::iter::empty::<&str>()),
             )
             .await?;
-        assert!(rows.next().await?.is_some(), "memories_fts table should exist");
+        assert!(
+            rows.next().await?.is_some(),
+            "memories_fts table should exist"
+        );
 
         Ok(())
     }
@@ -1944,7 +1998,10 @@ mod tests {
                 params_from_iter(std::iter::empty::<&str>()),
             )
             .await?;
-        assert!(rows.next().await?.is_some(), "v_active_sessions view should exist");
+        assert!(
+            rows.next().await?.is_some(),
+            "v_active_sessions view should exist"
+        );
 
         Ok(())
     }
@@ -1968,7 +2025,10 @@ mod tests {
 
         // Second run should apply 0 migrations (all already applied)
         assert_eq!(count1, 3, "First run should apply 3 migrations");
-        assert_eq!(count2, 0, "Second run should apply 0 migrations (idempotent)");
+        assert_eq!(
+            count2, 0,
+            "Second run should apply 0 migrations (idempotent)"
+        );
 
         Ok(())
     }

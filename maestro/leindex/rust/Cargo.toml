@@ -27,6 +27,18 @@ path = "src/setup_main.rs"
 name = "maestro-lsp-mcp-bridge"
 path = "src/lsp/bin/mcp_bridge.rs"
 
+[[bin]]
+name = "vector-benchmark-report"
+path = "src/cli/vector_benchmark.rs"
+
+[[bin]]
+name = "simple-bench"
+path = "benches/simple_bench.rs"
+
+[[bin]]
+name = "vector-granular-bench"
+path = "benches/granular_bench.rs"
+
 [dependencies]
 # CLI
 clap = { version = "4.5", features = ["derive"] }
@@ -86,20 +98,32 @@ dirs = "5"
 libc = "0.2"
 walkdir = "2"
 regex = "1"
+tempfile = "3.8"  # Secure temporary file creation for atomic writes
 
 # Full-text search (preserves existing Tantivy capability)
 tantivy = "0.22"
 sha2 = "0.10.9"
 uuid = { version = "1.19.0", features = ["v4"] }
 
+# Vector search (HNSW implementation)
+hnswx = "0.2.5"
+wide = "1.1"  # SIMD-accelerated cosine similarity
+
 # LSP support for on-demand language server integration
 lsp-types = "0.97"  # LSP protocol types
+urlencoding = "2.1"  # URL encoding for file:// URIs
 # tokio already has "full" features which includes process::Command for LSP spawning
 
 # Database migrations
 async-trait = "0.1"  # Async trait support for migration framework
 
+[[bench]]
+name = "vector_benchmark"
+harness = false
+
 [dev-dependencies]
+# Benchmarking
+criterion = "0.5"
 tempfile = "3.8"
 
 [profile.release]

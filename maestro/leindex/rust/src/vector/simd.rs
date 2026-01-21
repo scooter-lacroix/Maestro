@@ -95,7 +95,13 @@ mod tests {
         }
         let elapsed = start.elapsed();
 
-        println!("SIMD cosine_similarity: {} iterations in {:?}", iterations, elapsed);
-        println!("Average: {:.2} µs per call", elapsed.as_micros() as f64 / iterations as f64);
+        println!(
+            "SIMD cosine_similarity: {} iterations in {:?}",
+            iterations, elapsed
+        );
+        println!(
+            "Average: {:.2} µs per call",
+            elapsed.as_micros() as f64 / iterations as f64
+        );
     }
 }

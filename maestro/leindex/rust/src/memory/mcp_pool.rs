@@ -19,7 +19,7 @@ use std::sync::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Mutex, RwLock, watch};
+use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tracing::{error, info, warn};
 
 use super::models::{McpServer, McpStatus, McpTransport};
@@ -45,7 +45,13 @@ impl McpPool {
         let mut p = std::env::temp_dir();
         let safe = name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
         p.push(format!("maestro-mcp-{}.sock", safe));
         p
@@ -55,7 +61,13 @@ impl McpPool {
         let mut p = std::env::temp_dir();
         let safe = name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
         p.push(format!("maestro-mcp-{}.log", safe));
         p
@@ -78,7 +90,10 @@ impl McpPool {
 
     pub async fn start_server_record(&self, server: &McpServer) -> Result<String> {
         if server.transport != McpTransport::Stdio {
-            anyhow::bail!("Cannot start non-stdio MCP server '{}' in pool", server.name);
+            anyhow::bail!(
+                "Cannot start non-stdio MCP server '{}' in pool",
+                server.name
+            );
         }
 
         let mut proxies = self.proxies.write().await;
@@ -209,8 +224,13 @@ impl SocketProxy {
             let _ = std::fs::remove_file(&self.socket_path);
         }
 
-        let listener = UnixListener::bind(&self.socket_path).context("Failed to bind UNIX socket")?;
-        info!("MCP pool '{}' listening on {}", self.name, self.socket_path.display());
+        let listener =
+            UnixListener::bind(&self.socket_path).context("Failed to bind UNIX socket")?;
+        info!(
+            "MCP pool '{}' listening on {}",
+            self.name,
+            self.socket_path.display()
+        );
 
         let mut cmd = Command::new(&self.command);
         cmd.args(&self.args).envs(&self.env);
@@ -231,8 +251,10 @@ impl SocketProxy {
 
         let stdin = Arc::new(Mutex::new(stdin));
 
-        let clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending: Arc<Mutex<HashMap<String, PendingRequest>>> = Arc::new(Mutex::new(HashMap::new()));
+        let clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<HashMap<String, PendingRequest>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         *self.status.write().await = McpStatus::Running;
 
@@ -258,9 +280,7 @@ impl SocketProxy {
                             if !msg.is_empty() {
                                 warn!("mcp[{}] {}", name, msg);
                                 if let Some(f) = log_file.as_mut() {
-                                    let _ = f
-                                        .write_all(format!("{}\n", msg).as_bytes())
-                                        .await;
+                                    let _ = f.write_all(format!("{}\n", msg).as_bytes()).await;
                                 }
                             }
                         }
@@ -430,7 +450,10 @@ impl SocketProxy {
                     req_seq = req_seq.wrapping_add(1);
                     pending_reader.lock().await.insert(
                         internal_id.clone(),
-                        PendingRequest { client_id, original_id: orig_id },
+                        PendingRequest {
+                            client_id,
+                            original_id: orig_id,
+                        },
                     );
                     if let Some(obj) = msg.as_object_mut() {
                         obj.insert("id".to_string(), serde_json::Value::String(internal_id));

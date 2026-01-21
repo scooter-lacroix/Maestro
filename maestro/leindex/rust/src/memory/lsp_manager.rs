@@ -34,8 +34,8 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -228,14 +228,20 @@ impl LspProcess {
 
         // First, shut down the stdio proxy if it's running
         if let Some(proxy_task) = self.proxy_task.take() {
-            debug!("Aborting stdio proxy task for LSP '{}'", self.lsp_type.display_name());
+            debug!(
+                "Aborting stdio proxy task for LSP '{}'",
+                self.lsp_type.display_name()
+            );
             proxy_task.abort();
 
             // Clean up socket file if it exists
             if let Some(ref socket_path) = self.proxy_socket_path {
                 if let Err(e) = std::fs::remove_file(socket_path) {
                     // Log error but don't fail - the file might already be gone
-                    debug!("Failed to remove proxy socket file {:?}: {}", socket_path, e);
+                    debug!(
+                        "Failed to remove proxy socket file {:?}: {}",
+                        socket_path, e
+                    );
                 }
             }
 
@@ -243,18 +249,17 @@ impl LspProcess {
         }
 
         if let Some(mut child) = self.child.take() {
-            debug!(
-                "Stopping LSP process (PID: {:?}, PGID: {:?})",
-                pid,
-                pgid
-            );
+            debug!("Stopping LSP process (PID: {:?}, PGID: {:?})", pid, pgid);
 
             #[cfg(unix)]
             {
                 if let Some(pgid) = pgid {
                     // Try SIGTERM first.
                     if let Err(e) = unix_kill_process_group(pgid, libc::SIGTERM) {
-                        warn!("Failed to SIGTERM LSP process group (PGID: {}): {}", pgid, e);
+                        warn!(
+                            "Failed to SIGTERM LSP process group (PGID: {}): {}",
+                            pgid, e
+                        );
                     }
 
                     match timeout(max_wait, child.wait()).await {
@@ -271,7 +276,10 @@ impl LspProcess {
                                 max_wait
                             );
                             if let Err(e) = unix_kill_process_group(pgid, libc::SIGKILL) {
-                                warn!("Failed to SIGKILL LSP process group (PGID: {}): {}", pgid, e);
+                                warn!(
+                                    "Failed to SIGKILL LSP process group (PGID: {}): {}",
+                                    pgid, e
+                                );
                             }
                             match timeout(max_wait, child.wait()).await {
                                 Ok(Ok(exit_status)) => {
@@ -279,7 +287,10 @@ impl LspProcess {
                                 }
                                 Ok(Err(e)) => {
                                     self.child = Some(child);
-                                    return Err(anyhow!("LSP process wait failed after SIGKILL: {}", e));
+                                    return Err(anyhow!(
+                                        "LSP process wait failed after SIGKILL: {}",
+                                        e
+                                    ));
                                 }
                                 Err(_) => {
                                     self.child = Some(child);
@@ -335,7 +346,10 @@ impl LspProcess {
             #[cfg(unix)]
             if let Some(pgid) = pgid {
                 if let Err(e) = unix_kill_process_group(pgid, libc::SIGKILL) {
-                    warn!("Failed to SIGKILL LSP process group (PGID: {}): {}", pgid, e);
+                    warn!(
+                        "Failed to SIGKILL LSP process group (PGID: {}): {}",
+                        pgid, e
+                    );
                 }
             }
         }
@@ -371,7 +385,10 @@ impl LspProcess {
         if let Some(mut child) = self.child.take() {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    debug!("LSP process (PID: {:?}) exited with status: {:?}", self.pid, status);
+                    debug!(
+                        "LSP process (PID: {:?}) exited with status: {:?}",
+                        self.pid, status
+                    );
                     self.status = LspStatus::Error;
                     self.pid = None;
                     self.last_error = Some(format!(
@@ -438,14 +455,12 @@ fn unix_kill_process_group(pgid: i32, signal: i32) -> std::io::Result<()> {
 /// Get the process group ID for a process
 #[cfg(unix)]
 fn get_process_group_id(pid: Option<u32>) -> Option<i32> {
-    pid.and_then(|p| {
-        unsafe {
-            let pgid = libc::getpgid(p as i32);
-            if pgid < 0 {
-                None
-            } else {
-                Some(pgid)
-            }
+    pid.and_then(|p| unsafe {
+        let pgid = libc::getpgid(p as i32);
+        if pgid < 0 {
+            None
+        } else {
+            Some(pgid)
         }
     })
 }
@@ -549,7 +564,11 @@ impl LspManager {
             let running = self.running_lsps.read().await;
             if let Some(existing) = running.get(&lsp_key) {
                 if existing.status == LspStatus::Running {
-                    debug!("LSP '{}' already running for session '{}'", lsp_type.display_name(), session_id);
+                    debug!(
+                        "LSP '{}' already running for session '{}'",
+                        lsp_type.display_name(),
+                        session_id
+                    );
                     return Ok(());
                 }
             }
@@ -640,10 +659,14 @@ impl LspManager {
 
                 // Spawn stdio proxy if enabled
                 if use_proxy {
-                    let project_path = std::env::current_dir()
-                        .unwrap_or_else(|_| PathBuf::from("."));
+                    let project_path =
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-                    match LspStdioProxy::new(lsp_type, session_id, project_path.to_string_lossy().as_ref()) {
+                    match LspStdioProxy::new(
+                        lsp_type,
+                        session_id,
+                        project_path.to_string_lossy().as_ref(),
+                    ) {
                         Ok(mut proxy) => {
                             let socket_path = proxy.socket_path().clone();
                             let socket_path_for_log = socket_path.clone();
@@ -659,7 +682,9 @@ impl LspManager {
                                     }
                                     drop(running);
                                     // Persist to database
-                                    if let Err(e) = self.persist_lsp_state(session_id, lsp_type).await {
+                                    if let Err(e) =
+                                        self.persist_lsp_state(session_id, lsp_type).await
+                                    {
                                         warn!("Failed to persist LSP state to database: {}", e);
                                     }
                                     return Ok(());
@@ -832,10 +857,16 @@ impl LspManager {
     /// ## Returns
     ///
     /// Returns the socket path if proxy is enabled, or `None` if not tracking this LSP or proxy is not enabled
-    pub async fn get_proxy_socket_path(&self, session_id: &str, lsp_type: LspType) -> Option<PathBuf> {
+    pub async fn get_proxy_socket_path(
+        &self,
+        session_id: &str,
+        lsp_type: LspType,
+    ) -> Option<PathBuf> {
         let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
         let running = self.running_lsps.read().await;
-        running.get(&lsp_key).and_then(|p| p.proxy_socket_path.clone())
+        running
+            .get(&lsp_key)
+            .and_then(|p| p.proxy_socket_path.clone())
     }
 
     /// Persist LSP state to database
@@ -858,7 +889,10 @@ impl LspManager {
             // Persist to database with graceful degradation
             match self.storage.upsert_lsp_state(&state).await {
                 Ok(id) => {
-                    debug!("Persisted LSP state: {} (status: {}, id: {})", state.lsp_name, state.status, id);
+                    debug!(
+                        "Persisted LSP state: {} (status: {}, id: {})",
+                        state.lsp_name, state.status, id
+                    );
                 }
                 Err(e) => {
                     warn!("Failed to persist LSP state to database: {}", e);
@@ -925,7 +959,11 @@ impl LspManager {
                 }
             }
         } else {
-            debug!("LSP '{}' not found for session '{}'", lsp_type.display_name(), session_id);
+            debug!(
+                "LSP '{}' not found for session '{}'",
+                lsp_type.display_name(),
+                session_id
+            );
             Ok(false)
         }
     }
@@ -983,9 +1021,7 @@ impl LspManager {
             if let Err(e) = self.storage.upsert_lsp_state(&state).await {
                 warn!(
                     "Failed to persist crashed LSP state for session '{}' ({}): {}",
-                    state.session_id,
-                    state.lsp_name,
-                    e
+                    state.session_id, state.lsp_name, e
                 );
             }
         }
@@ -1096,13 +1132,19 @@ impl LspManager {
     /// ## Graceful Degradation
     ///
     /// If directory traversal fails or any error occurs during scanning, this method returns an empty set
-    pub async fn detect_languages_from_project(&self, project_path: &std::path::Path) -> Result<std::collections::HashSet<LspType>> {
+    pub async fn detect_languages_from_project(
+        &self,
+        project_path: &std::path::Path,
+    ) -> Result<std::collections::HashSet<LspType>> {
         use std::collections::HashSet;
         use walkdir::WalkDir;
 
         let mut detected_languages = HashSet::new();
 
-        debug!("Scanning project directory for language detection: {:?}", project_path);
+        debug!(
+            "Scanning project directory for language detection: {:?}",
+            project_path
+        );
 
         // Walk through the project directory recursively, skipping hidden directories/files
         // entirely (e.g. `.git/`).
@@ -1138,7 +1180,10 @@ impl LspManager {
                     }
                 }
                 Err(e) => {
-                    warn!("Error reading directory entry during language detection: {}", e);
+                    warn!(
+                        "Error reading directory entry during language detection: {}",
+                        e
+                    );
                     // Continue with other entries - graceful degradation
                     continue;
                 }
@@ -1163,13 +1208,23 @@ impl LspManager {
     /// ## Sorting Order
     ///
     /// Languages are sorted in the order: Rust, Python, TypeScript
-    pub async fn recommend_lsps_for_session(&self, session_id: &str, project_path: &std::path::Path) -> Result<Vec<LspType>> {
-        debug!("Recommending LSPs for session '{}' based on project: {:?}", session_id, project_path);
+    pub async fn recommend_lsps_for_session(
+        &self,
+        session_id: &str,
+        project_path: &std::path::Path,
+    ) -> Result<Vec<LspType>> {
+        debug!(
+            "Recommending LSPs for session '{}' based on project: {:?}",
+            session_id, project_path
+        );
 
         let detected_languages = match self.detect_languages_from_project(project_path).await {
             Ok(langs) => langs,
             Err(e) => {
-                warn!("Failed to detect languages for session '{}': {}", session_id, e);
+                warn!(
+                    "Failed to detect languages for session '{}': {}",
+                    session_id, e
+                );
                 // Return empty vector on error - graceful degradation
                 std::collections::HashSet::new()
             }
@@ -1190,7 +1245,10 @@ impl LspManager {
             }
         });
 
-        debug!("Recommended LSPs for session '{}': {:?}", session_id, recommended_lsps);
+        debug!(
+            "Recommended LSPs for session '{}': {:?}",
+            session_id, recommended_lsps
+        );
         Ok(recommended_lsps)
     }
 
@@ -1208,14 +1266,27 @@ impl LspManager {
     /// ## Graceful Degradation
     ///
     /// If any LSP fails to start, this method continues with other LSPs and returns the ones that succeeded
-    pub async fn auto_start_lsps_for_session(&self, session_id: &str, project_path: &std::path::Path) -> Result<Vec<LspType>> {
-        debug!("Auto-starting LSPs for session '{}' based on project: {:?}", session_id, project_path);
+    pub async fn auto_start_lsps_for_session(
+        &self,
+        session_id: &str,
+        project_path: &std::path::Path,
+    ) -> Result<Vec<LspType>> {
+        debug!(
+            "Auto-starting LSPs for session '{}' based on project: {:?}",
+            session_id, project_path
+        );
 
         // Get recommended LSPs for the session
-        let recommended_lsps = self.recommend_lsps_for_session(session_id, project_path).await.unwrap_or_else(|e| {
-            warn!("Failed to recommend LSPs for session '{}': {}", session_id, e);
-            vec![]
-        });
+        let recommended_lsps = self
+            .recommend_lsps_for_session(session_id, project_path)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(
+                    "Failed to recommend LSPs for session '{}': {}",
+                    session_id, e
+                );
+                vec![]
+            });
 
         let mut started_lsps = Vec::new();
 
@@ -1223,19 +1294,31 @@ impl LspManager {
         for lsp_type in recommended_lsps {
             match self.start_lsp(session_id, lsp_type, None).await {
                 Ok(()) => {
-                    info!("Successfully auto-started LSP '{}' for session '{}'", lsp_type.display_name(), session_id);
+                    info!(
+                        "Successfully auto-started LSP '{}' for session '{}'",
+                        lsp_type.display_name(),
+                        session_id
+                    );
                     started_lsps.push(lsp_type);
                 }
                 Err(e) => {
-                    warn!("Failed to auto-start LSP '{}' for session '{}': {}",
-                          lsp_type.display_name(), session_id, e);
+                    warn!(
+                        "Failed to auto-start LSP '{}' for session '{}': {}",
+                        lsp_type.display_name(),
+                        session_id,
+                        e
+                    );
                     // Continue with other LSPs - graceful degradation
                 }
             }
         }
 
-        debug!("Auto-started {} LSPs for session '{}': {:?}",
-               started_lsps.len(), session_id, started_lsps);
+        debug!(
+            "Auto-started {} LSPs for session '{}': {:?}",
+            started_lsps.len(),
+            session_id,
+            started_lsps
+        );
         Ok(started_lsps)
     }
 
@@ -1261,7 +1344,10 @@ impl LspManager {
             }
         };
 
-        debug!("Found {} auto-start LSP states to restore", auto_start_states.len());
+        debug!(
+            "Found {} auto-start LSP states to restore",
+            auto_start_states.len()
+        );
 
         for state in auto_start_states {
             // Parse the LSP type from the language name
@@ -1270,29 +1356,47 @@ impl LspManager {
                 "python" => LspType::Python,
                 "typescript" => LspType::TypeScript,
                 _ => {
-                    warn!("Unknown language '{}' for LSP state, skipping restoration", state.language);
+                    warn!(
+                        "Unknown language '{}' for LSP state, skipping restoration",
+                        state.language
+                    );
                     continue;
                 }
             };
 
             // Only restart if the LSP was previously running
             if state.status == LspStatus::Running || state.status == LspStatus::Starting {
-                info!("Restoring LSP '{}' for session '{}'", lsp_type.display_name(), state.session_id);
+                info!(
+                    "Restoring LSP '{}' for session '{}'",
+                    lsp_type.display_name(),
+                    state.session_id
+                );
 
                 match self.start_lsp(&state.session_id, lsp_type, None).await {
                     Ok(()) => {
-                        info!("Successfully restored LSP '{}' for session '{}'",
-                              lsp_type.display_name(), state.session_id);
+                        info!(
+                            "Successfully restored LSP '{}' for session '{}'",
+                            lsp_type.display_name(),
+                            state.session_id
+                        );
                     }
                     Err(e) => {
-                        warn!("Failed to restore LSP '{}' for session '{}': {}",
-                              lsp_type.display_name(), state.session_id, e);
+                        warn!(
+                            "Failed to restore LSP '{}' for session '{}': {}",
+                            lsp_type.display_name(),
+                            state.session_id,
+                            e
+                        );
                         // Continue with other LSPs - graceful degradation
                     }
                 }
             } else {
-                debug!("Skipping restoration of LSP '{}' for session '{}' (status: {})",
-                       lsp_type.display_name(), state.session_id, state.status);
+                debug!(
+                    "Skipping restoration of LSP '{}' for session '{}' (status: {})",
+                    lsp_type.display_name(),
+                    state.session_id,
+                    state.status
+                );
             }
         }
 
@@ -1324,18 +1428,30 @@ impl LspManager {
         // First, try to stop the LSP
         match self.stop_lsp(session_id, lsp_type).await {
             Ok(()) => {
-                debug!("LSP '{}' stopped successfully for session '{}'", lsp_type.display_name(), session_id);
+                debug!(
+                    "LSP '{}' stopped successfully for session '{}'",
+                    lsp_type.display_name(),
+                    session_id
+                );
             }
             Err(e) => {
-                warn!("Failed to stop LSP '{}' for session '{}': {}",
-                      lsp_type.display_name(), session_id, e);
+                warn!(
+                    "Failed to stop LSP '{}' for session '{}': {}",
+                    lsp_type.display_name(),
+                    session_id,
+                    e
+                );
                 // Continue anyway - try to start the LSP
             }
         }
 
         // Then, start the LSP again with the same configuration
         // First, get the existing configuration from the database if it exists
-        let config = match self.storage.get_lsp_state(session_id, lsp_type.binary_name()).await {
+        let config = match self
+            .storage
+            .get_lsp_state(session_id, lsp_type.binary_name())
+            .await
+        {
             Ok(Some(state)) => {
                 // If we have a saved state, we can preserve the auto_start setting
                 Some(LspConfig {
@@ -1348,8 +1464,11 @@ impl LspManager {
                 Some(LspConfig::default())
             }
             Err(e) => {
-                warn!("Failed to get existing LSP state for '{}', using default config: {}",
-                      lsp_type.binary_name(), e);
+                warn!(
+                    "Failed to get existing LSP state for '{}', using default config: {}",
+                    lsp_type.binary_name(),
+                    e
+                );
                 Some(LspConfig::default())
             }
         };
@@ -1357,13 +1476,20 @@ impl LspManager {
         // Start the LSP with the preserved configuration
         match self.start_lsp(session_id, lsp_type, config).await {
             Ok(()) => {
-                info!("LSP '{}' restarted successfully for session '{}'",
-                      lsp_type.display_name(), session_id);
+                info!(
+                    "LSP '{}' restarted successfully for session '{}'",
+                    lsp_type.display_name(),
+                    session_id
+                );
                 Ok(())
             }
             Err(e) => {
-                warn!("Failed to start LSP '{}' for session '{}' after restart: {}",
-                      lsp_type.display_name(), session_id, e);
+                warn!(
+                    "Failed to start LSP '{}' for session '{}' after restart: {}",
+                    lsp_type.display_name(),
+                    session_id,
+                    e
+                );
                 // Don't return error - graceful degradation
                 Ok(())
             }
@@ -1385,7 +1511,12 @@ impl LspManager {
     /// ## Graceful Degradation
     ///
     /// If database persistence fails, this method updates in-memory state and continues
-    pub async fn set_auto_start(&self, session_id: &str, lsp_type: LspType, enabled: bool) -> Result<bool> {
+    pub async fn set_auto_start(
+        &self,
+        session_id: &str,
+        lsp_type: LspType,
+        enabled: bool,
+    ) -> Result<bool> {
         let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
 
         info!(
@@ -1412,15 +1543,23 @@ impl LspManager {
         let mut db_updated = false;
 
         // Update in database WITHOUT holding lock
-        match self.storage.get_lsp_state(session_id, lsp_type.binary_name()).await {
+        match self
+            .storage
+            .get_lsp_state(session_id, lsp_type.binary_name())
+            .await
+        {
             Ok(Some(mut state)) => {
                 // Update the existing state
                 if state.auto_start != enabled {
                     state.auto_start = enabled;
                     match self.storage.upsert_lsp_state(&state).await {
                         Ok(_) => {
-                            debug!("Updated auto-start flag for LSP '{}' in session '{}' to {}",
-                                   lsp_type.binary_name(), session_id, enabled);
+                            debug!(
+                                "Updated auto-start flag for LSP '{}' in session '{}' to {}",
+                                lsp_type.binary_name(),
+                                session_id,
+                                enabled
+                            );
                             db_updated = true;
                         }
                         Err(e) => {
@@ -1449,8 +1588,11 @@ impl LspManager {
 
                 match self.storage.upsert_lsp_state(&new_state).await {
                     Ok(_) => {
-                        debug!("Created new LSP state with auto-start flag for '{}' in session '{}'",
-                               lsp_type.binary_name(), session_id);
+                        debug!(
+                            "Created new LSP state with auto-start flag for '{}' in session '{}'",
+                            lsp_type.binary_name(),
+                            session_id
+                        );
                         db_updated = true;
                     }
                     Err(e) => {
@@ -1460,7 +1602,11 @@ impl LspManager {
                 }
             }
             Err(e) => {
-                warn!("Failed to get existing LSP state for '{}': {}", lsp_type.binary_name(), e);
+                warn!(
+                    "Failed to get existing LSP state for '{}': {}",
+                    lsp_type.binary_name(),
+                    e
+                );
                 // Continue anyway - graceful degradation
             }
         }
@@ -1524,13 +1670,21 @@ impl LspManager {
         };
 
         if already_enabled {
-            debug!("Proxy mode already enabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+            debug!(
+                "Proxy mode already enabled for LSP '{}' in session '{}'",
+                lsp_type.display_name(),
+                session_id
+            );
             return Ok(false);
         }
 
         // Restart the LSP with proxy mode enabled
         // First, get the existing configuration from the database if it exists
-        let _config = match self.storage.get_lsp_state(session_id, lsp_type.binary_name()).await {
+        let _config = match self
+            .storage
+            .get_lsp_state(session_id, lsp_type.binary_name())
+            .await
+        {
             Ok(Some(state)) => {
                 // If we have a saved state, we can preserve the existing settings
                 Some(LspConfig {
@@ -1548,8 +1702,11 @@ impl LspManager {
                 })
             }
             Err(e) => {
-                warn!("Failed to get existing LSP state for '{}', using default config: {}",
-                      lsp_type.binary_name(), e);
+                warn!(
+                    "Failed to get existing LSP state for '{}', using default config: {}",
+                    lsp_type.binary_name(),
+                    e
+                );
                 Some(LspConfig {
                     auto_start: true,
                     use_proxy: true,
@@ -1568,11 +1725,19 @@ impl LspManager {
                 }
                 drop(running);
 
-                info!("Proxy mode enabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+                info!(
+                    "Proxy mode enabled for LSP '{}' in session '{}'",
+                    lsp_type.display_name(),
+                    session_id
+                );
                 Ok(true)
             }
             Err(e) => {
-                warn!("Failed to restart LSP '{}' for proxy mode: {}", lsp_type.display_name(), e);
+                warn!(
+                    "Failed to restart LSP '{}' for proxy mode: {}",
+                    lsp_type.display_name(),
+                    e
+                );
                 // Don't return error - graceful degradation
                 Ok(false)
             }
@@ -1613,7 +1778,11 @@ impl LspManager {
         };
 
         if !is_enabled {
-            debug!("Proxy mode already disabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+            debug!(
+                "Proxy mode already disabled for LSP '{}' in session '{}'",
+                lsp_type.display_name(),
+                session_id
+            );
             return Ok(false);
         }
 
@@ -1627,11 +1796,19 @@ impl LspManager {
                 }
                 drop(running);
 
-                info!("Proxy mode disabled for LSP '{}' in session '{}'", lsp_type.display_name(), session_id);
+                info!(
+                    "Proxy mode disabled for LSP '{}' in session '{}'",
+                    lsp_type.display_name(),
+                    session_id
+                );
                 Ok(true)
             }
             Err(e) => {
-                warn!("Failed to restart LSP '{}' to disable proxy mode: {}", lsp_type.display_name(), e);
+                warn!(
+                    "Failed to restart LSP '{}' to disable proxy mode: {}",
+                    lsp_type.display_name(),
+                    e
+                );
                 // Don't return error - graceful degradation
                 Ok(false)
             }
@@ -1677,12 +1854,19 @@ impl LspManager {
         for (lsp_type, _) in session_lsps {
             match self.stop_lsp(session_id, lsp_type).await {
                 Ok(()) => {
-                    debug!("Successfully stopped LSP '{}' for session '{}'",
-                           lsp_type.display_name(), session_id);
+                    debug!(
+                        "Successfully stopped LSP '{}' for session '{}'",
+                        lsp_type.display_name(),
+                        session_id
+                    );
                 }
                 Err(e) => {
-                    warn!("Failed to stop LSP '{}' for session '{}': {}",
-                          lsp_type.display_name(), session_id, e);
+                    warn!(
+                        "Failed to stop LSP '{}' for session '{}': {}",
+                        lsp_type.display_name(),
+                        session_id,
+                        e
+                    );
                     // Continue with other LSPs - graceful degradation
                 }
             }
@@ -1744,7 +1928,7 @@ impl LspManager {
             .arg(project_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())  // Inherit stderr to avoid deadlock
+            .stderr(Stdio::inherit()) // Inherit stderr to avoid deadlock
             .kill_on_drop(true);
 
         #[cfg(unix)]
@@ -1830,7 +2014,10 @@ impl LspManager {
                 if let Some(pgid) = get_process_group_id(child_handle.id()) {
                     // Try SIGTERM first
                     if let Err(e) = unix_kill_process_group(pgid, libc::SIGTERM) {
-                        warn!("Failed to SIGTERM bridge process group (PGID: {}): {}", pgid, e);
+                        warn!(
+                            "Failed to SIGTERM bridge process group (PGID: {}): {}",
+                            pgid, e
+                        );
                     }
 
                     // Wait up to 5 seconds for graceful shutdown
@@ -1895,7 +2082,10 @@ impl LspManager {
 
         // Then, start the MCP bridge (don't fail if LSP failed)
         let bridge_pid = if lsp_result.is_ok() {
-            match self.start_mcp_bridge(session_id, lsp_type, project_path).await {
+            match self
+                .start_mcp_bridge(session_id, lsp_type, project_path)
+                .await
+            {
                 Ok(pid) => pid,
                 Err(_) => 0, // Bridge failed to start, but LSP is running
             }
@@ -1947,7 +2137,10 @@ mod tests {
     fn test_lsp_type_properties() {
         assert_eq!(LspType::Rust.binary_name(), "rust-analyzer");
         assert_eq!(LspType::Python.binary_name(), "ruff-lsp");
-        assert_eq!(LspType::TypeScript.binary_name(), "typescript-language-server");
+        assert_eq!(
+            LspType::TypeScript.binary_name(),
+            "typescript-language-server"
+        );
 
         assert_eq!(LspType::Rust.language(), "rust");
         assert_eq!(LspType::Python.language(), "python");
@@ -1955,7 +2148,10 @@ mod tests {
 
         assert_eq!(LspType::Rust.file_extensions(), &["rs"]);
         assert_eq!(LspType::Python.file_extensions(), &["py"]);
-        assert_eq!(LspType::TypeScript.file_extensions(), &["ts", "tsx", "js", "jsx"]);
+        assert_eq!(
+            LspType::TypeScript.file_extensions(),
+            &["ts", "tsx", "js", "jsx"]
+        );
     }
 
     #[test]
@@ -2028,7 +2224,10 @@ mod tests {
             .expect("Failed to create storage");
         let manager = LspManager::new(storage);
 
-        let detected = manager.detect_languages_from_project(project_path).await.unwrap();
+        let detected = manager
+            .detect_languages_from_project(project_path)
+            .await
+            .unwrap();
 
         // Check that the correct languages were detected
         assert!(detected.contains(&LspType::Rust));
@@ -2056,7 +2255,10 @@ mod tests {
             .expect("Failed to create storage");
         let manager = LspManager::new(storage);
 
-        let recommended = manager.recommend_lsps_for_session("test-session", project_path).await.unwrap();
+        let recommended = manager
+            .recommend_lsps_for_session("test-session", project_path)
+            .await
+            .unwrap();
 
         // Check that all three languages were detected
         assert_eq!(recommended.len(), 3);
@@ -2079,7 +2281,10 @@ mod tests {
             .expect("Failed to create storage");
         let manager = LspManager::new(storage);
 
-        let detected = manager.detect_languages_from_project(project_path).await.unwrap();
+        let detected = manager
+            .detect_languages_from_project(project_path)
+            .await
+            .unwrap();
 
         // Should return empty set for empty directory
         assert_eq!(detected.len(), 0);
@@ -2094,7 +2299,11 @@ mod tests {
 
         fs::write(project_path.join("main.rs"), "fn main() {}").unwrap();
         fs::create_dir_all(project_path.join(".git")).unwrap();
-        fs::write(project_path.join(".git").join("ignored.py"), "print('nope')").unwrap();
+        fs::write(
+            project_path.join(".git").join("ignored.py"),
+            "print('nope')",
+        )
+        .unwrap();
         fs::write(project_path.join(".hidden.ts"), "console.log('nope');").unwrap();
 
         let storage = TursoStorageBackend::in_memory(None)
@@ -2102,7 +2311,10 @@ mod tests {
             .expect("Failed to create storage");
         let manager = LspManager::new(storage);
 
-        let detected = manager.detect_languages_from_project(project_path).await.unwrap();
+        let detected = manager
+            .detect_languages_from_project(project_path)
+            .await
+            .unwrap();
 
         assert!(detected.contains(&LspType::Rust));
         assert!(!detected.contains(&LspType::Python));

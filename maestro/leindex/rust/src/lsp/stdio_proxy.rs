@@ -31,7 +31,6 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -39,16 +38,24 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, watch, Mutex, RwLock};
-use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::memory::lsp_manager::LspType;
+
+// Type alias for the reader half of UnixStream (used in client handler)
+type ClientReader = BufReader<tokio::net::unix::OwnedReadHalf>;
 
 /// Maximum message size to prevent DoS (16MB)
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Maximum header size for LSP messages
 const MAX_HEADER_SIZE: usize = 1024;
+
+/// Maximum client line size to prevent DoS
+const MAX_CLIENT_LINE: usize = 64 * 1024; // 64KB
+
+/// Maximum pending requests per client
+const MAX_PENDING_PER_CLIENT: usize = 100;
 
 /// Buffer size for socket I/O
 const BUFFER_SIZE: usize = 16 * 1024;
@@ -146,7 +153,13 @@ impl LspStdioProxy {
     pub fn socket_path_for(lsp_type: LspType, session_id: &str) -> PathBuf {
         let sanitized = session_id
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
 
         let filename = format!("maestro-lsp-{}-{}.sock", lsp_type.language(), sanitized);
@@ -163,8 +176,9 @@ impl LspStdioProxy {
 
         // Remove stale socket file if exists
         if self.socket_path.exists() {
-            std::fs::remove_file(&self.socket_path)
-                .with_context(|| format!("Failed to remove stale socket file: {:?}", self.socket_path))?;
+            std::fs::remove_file(&self.socket_path).with_context(|| {
+                format!("Failed to remove stale socket file: {:?}", self.socket_path)
+            })?;
         }
 
         // Bind Unix socket
@@ -191,17 +205,23 @@ impl LspStdioProxy {
             lsp_command.arg(arg);
         }
 
-        let mut lsp_child = lsp_command.spawn()
+        let mut lsp_child = lsp_command
+            .spawn()
             .with_context(|| format!("Failed to spawn LSP: {}", self.lsp_type.binary_name()))?;
 
-        let lsp_stdin = lsp_child.stdin.take()
-            .context("Failed to open LSP stdin")?;
-        let lsp_stdout = lsp_child.stdout.take()
+        let lsp_stdin = lsp_child.stdin.take().context("Failed to open LSP stdin")?;
+        let lsp_stdout = lsp_child
+            .stdout
+            .take()
             .context("Failed to open LSP stdout")?;
 
         // Shared state
-        let clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending: Arc<Mutex<HashMap<String, PendingLspRequest>>> = Arc::new(Mutex::new(HashMap::new()));
+        let clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<HashMap<String, PendingLspRequest>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        // Track pending request count per client for DoS protection
+        let pending_count: Arc<Mutex<HashMap<u64, usize>>> = Arc::new(Mutex::new(HashMap::new()));
         let lsp_stdin_arc = Arc::new(Mutex::new(lsp_stdin));
 
         *self.status.write().await = LspProxyStatus::Running;
@@ -213,9 +233,17 @@ impl LspStdioProxy {
         let lsp_stdout_task = {
             let clients_clone = Arc::clone(&clients);
             let pending_clone = Arc::clone(&pending);
+            let pending_count_clone = Arc::clone(&pending_count);
             let status_clone = Arc::clone(&self.status);
             tokio::spawn(async move {
-                if let Err(e) = Self::route_lsp_output(lsp_stdout, clients_clone, pending_clone).await {
+                if let Err(e) = Self::route_lsp_output(
+                    lsp_stdout,
+                    clients_clone,
+                    pending_clone,
+                    pending_count_clone,
+                )
+                .await
+                {
                     error!("LSP stdout router error: {}", e);
                     *status_clone.write().await = LspProxyStatus::Error;
                 }
@@ -243,6 +271,7 @@ impl LspStdioProxy {
                             let lsp_stdin_clone = Arc::clone(&lsp_stdin_arc);
                             let clients_clone = Arc::clone(&clients);
                             let pending_clone = Arc::clone(&pending);
+                            let pending_count_clone = Arc::clone(&pending_count);
                             let status_clone = Arc::clone(&self.status);
 
                             tokio::spawn(async move {
@@ -252,6 +281,7 @@ impl LspStdioProxy {
                                     lsp_stdin_clone,
                                     clients_clone,
                                     pending_clone,
+                                    pending_count_clone,
                                     status_clone,
                                 ).await {
                                     warn!("Client {} handler error: {}", client_id, e);
@@ -291,9 +321,10 @@ impl LspStdioProxy {
         lsp_stdin: Arc<Mutex<ChildStdin>>,
         clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>>,
         pending: Arc<Mutex<HashMap<String, PendingLspRequest>>>,
+        pending_count: Arc<Mutex<HashMap<u64, usize>>>,
         _status: Arc<RwLock<LspProxyStatus>>,
     ) -> Result<()> {
-        let (mut reader, mut writer) = socket.into_split();
+        let (reader, mut writer) = socket.into_split();
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(CLIENT_CHANNEL_CAPACITY);
 
         // Add client to shared map
@@ -309,20 +340,18 @@ impl LspStdioProxy {
             }
         });
 
-        // Read messages from client and forward to LSP
-        let mut buf_reader = BufReader::with_capacity(BUFFER_SIZE, reader);
-        let mut line = String::new();
+        // Read messages from client using proper LSP framing
+        let mut reader = BufReader::with_capacity(BUFFER_SIZE, reader);
 
         loop {
-            line.clear();
-            match buf_reader.read_line(&mut line).await {
-                Ok(0) => {
+            match Self::read_client_message(&mut reader).await {
+                Ok(None) => {
                     debug!("Client {} disconnected", client_id);
                     break;
                 }
-                Ok(_) => {
+                Ok(Some(json_bytes)) => {
                     // Parse JSON-RPC from client
-                    let json_str = line.trim();
+                    let json_str = std::str::from_utf8(&json_bytes)?;
                     if let Ok(request) = serde_json::from_str::<Value>(json_str) {
                         // Rewrite request ID to prevent collisions
                         if let Some(id) = request.get("id") {
@@ -330,12 +359,29 @@ impl LspStdioProxy {
                             let mut modified = request.clone();
                             modified["id"] = Value::String(internal_id.clone());
 
+                            // Check pending count limit before adding
+                            let mut count_guard = pending_count.lock().await;
+                            let current_count = count_guard.get(&client_id).copied().unwrap_or(0);
+                            if current_count >= MAX_PENDING_PER_CLIENT {
+                                warn!(
+                                    "Client {} exceeded pending limit ({}), dropping request",
+                                    client_id, MAX_PENDING_PER_CLIENT
+                                );
+                                drop(count_guard);
+                                continue;
+                            }
+
                             // Store pending request
                             let pending_req = PendingLspRequest {
                                 client_id,
                                 original_id: id.clone(),
                             };
-                            pending.lock().await.insert(internal_id.clone(), pending_req);
+                            pending
+                                .lock()
+                                .await
+                                .insert(internal_id.clone(), pending_req);
+                            *count_guard.entry(client_id).or_insert(0) += 1;
+                            drop(count_guard);
 
                             // Forward to LSP with Content-Length framing
                             let lsp_json = serde_json::to_string(&modified)?;
@@ -345,6 +391,16 @@ impl LspStdioProxy {
                             let lsp_json = serde_json::to_string(&request)?;
                             Self::write_lsp_message_to_stdin(&lsp_stdin, &lsp_json).await?;
                         }
+                    } else {
+                        // Invalid JSON - log error
+                        warn!(
+                            "Invalid JSON from client {}: {}",
+                            client_id,
+                            String::from_utf8_lossy(&json_bytes)
+                                .chars()
+                                .take(100)
+                                .collect::<String>()
+                        );
                     }
                 }
                 Err(e) => {
@@ -354,11 +410,73 @@ impl LspStdioProxy {
             }
         }
 
-        // Cleanup
+        // Cleanup: remove client and all pending requests for this client
         writer_task.abort();
         clients.lock().await.remove(&client_id);
 
+        // Clean up pending requests for this client (prevent memory leak)
+        let mut pending_guard = pending.lock().await;
+        pending_guard.retain(|_, req| req.client_id != client_id);
+        drop(pending_guard);
+
+        // Clean up pending count
+        pending_count.lock().await.remove(&client_id);
+
         Ok(())
+    }
+
+    /// Read a message from client using proper LSP Content-Length framing
+    /// Returns Ok(None) on EOF, Ok(Some(bytes)) on success, Err on failure
+    async fn read_client_message(reader: &mut ClientReader) -> Result<Option<Vec<u8>>> {
+        let mut content_length: Option<usize> = None;
+        let mut header_buf = Vec::new();
+
+        // Read headers until \r\n\r\n
+        loop {
+            let byte = match reader.read_u8().await {
+                Ok(b) => b,
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    // Clean EOF
+                    return Ok(None);
+                }
+                Err(e) => return Err(e.into()),
+            };
+
+            header_buf.push(byte);
+
+            if header_buf.len() >= 4 {
+                let last4 = &header_buf[header_buf.len() - 4..];
+                if last4 == b"\r\n\r\n" {
+                    break;
+                }
+            }
+
+            if header_buf.len() > MAX_HEADER_SIZE {
+                return Err(anyhow!("Client header too large"));
+            }
+
+            // Parse headers as we go
+            let header = String::from_utf8_lossy(&header_buf);
+            if let Some(line) = header.strip_suffix("\r\n") {
+                if let Some(value) = line.strip_prefix("Content-Length: ") {
+                    if let Ok(len) = value.trim().parse::<usize>() {
+                        content_length = Some(len);
+                    }
+                }
+            }
+        }
+
+        let length =
+            content_length.ok_or_else(|| anyhow!("No Content-Length in client message"))?;
+
+        if length > MAX_CLIENT_LINE {
+            return Err(anyhow!("Client message too large: {} bytes", length));
+        }
+
+        // Read exact body
+        let mut body = vec![0u8; length];
+        reader.read_exact(&mut body).await?;
+        Ok(Some(body))
     }
 
     /// Read LSP stdout and route responses to clients
@@ -366,6 +484,7 @@ impl LspStdioProxy {
         mut lsp_stdout: tokio::process::ChildStdout,
         clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>>,
         pending: Arc<Mutex<HashMap<String, PendingLspRequest>>>,
+        pending_count: Arc<Mutex<HashMap<u64, usize>>>,
     ) -> Result<()> {
         loop {
             match Self::read_next_lsp_message(&mut lsp_stdout).await {
@@ -374,23 +493,44 @@ impl LspStdioProxy {
                     if let Some(id_value) = message.get("id") {
                         // This is a response - route to specific client
                         if let Some(id_str) = id_value.as_str() {
-                            let pending_guard = pending.lock().await;
-                            if let Some(pending_req) = pending_guard.get(id_str) {
-                                let mut response = message.clone();
-                                response["id"] = pending_req.original_id.clone();
+                            // Clone data we need, then drop locks before await
+                            let (tx, original_id, client_id) = {
+                                let pending_guard = pending.lock().await;
+                                if let Some(pending_req) = pending_guard.get(id_str) {
+                                    let clients_guard = clients.lock().await;
+                                    let tx = clients_guard.get(&pending_req.client_id).cloned();
+                                    (tx, pending_req.original_id.clone(), pending_req.client_id)
+                                } else {
+                                    continue;
+                                }
+                            }; // Locks dropped here
 
-                                let clients_guard = clients.lock().await;
-                                if let Some(tx) = clients_guard.get(&pending_req.client_id) {
-                                    let response_json = format!("{}\n", serde_json::to_string(&response)?);
-                                    let _ = tx.send(response_json.into_bytes()).await;
+                            // Now await without holding locks
+                            if let Some(tx) = tx {
+                                let mut response = message.clone();
+                                response["id"] = original_id;
+
+                                let response_json =
+                                    format!("{}\n", serde_json::to_string(&response)?);
+                                let _ = tx.send(response_json.into_bytes()).await;
+
+                                // Decrement pending count for this client
+                                let mut count_guard = pending_count.lock().await;
+                                if let Some(count) = count_guard.get_mut(&client_id) {
+                                    *count = count.saturating_sub(1);
                                 }
                             }
+
+                            // Remove from pending after processing (prevent memory leak)
+                            pending.lock().await.remove(id_str);
                         }
                     } else {
                         // This is a notification - broadcast to all clients
+                        // Clone all senders, drop lock, then broadcast
+                        let senders: Vec<_> = clients.lock().await.values().cloned().collect();
                         let notification_json = format!("{}\n", serde_json::to_string(&message)?);
-                        let clients_guard = clients.lock().await;
-                        for tx in clients_guard.values() {
+
+                        for tx in senders {
                             let _ = tx.send(notification_json.clone().into_bytes()).await;
                         }
                     }
@@ -416,33 +556,38 @@ impl LspStdioProxy {
         Ok(())
     }
 
-    /// Read the next LSP message from stdout
+    /// Read the next LSP message from stdout (optimized with BufReader pattern)
     async fn read_next_lsp_message(stdout: &mut tokio::process::ChildStdout) -> Result<Value> {
+        let mut headers = Vec::new();
+        let mut line = String::new();
+        let mut reader = BufReader::new(stdout);
+
         // Read headers
-        let mut content_length = None;
-        let mut header_buf = Vec::with_capacity(256);
-
         loop {
-            let ch = stdout.read_u8().await?;
-            header_buf.push(ch);
-
-            if header_buf.len() >= 4 {
-                let last4 = &header_buf[header_buf.len() - 4..];
-                if last4 == b"\r\n\r\n" {
-                    break;
-                }
+            line.clear();
+            let n = reader.read_line(&mut line).await?;
+            if n == 0 {
+                return Err(anyhow!("EOF reading LSP headers"));
             }
 
-            if header_buf.len() >= MAX_HEADER_SIZE {
+            headers.push(line.clone());
+            if line == "\r\n" || line == "\n" {
+                break;
+            }
+
+            if headers.len() > MAX_HEADER_SIZE {
                 return Err(anyhow!("LSP headers too large"));
             }
         }
 
-        let headers = std::str::from_utf8(&header_buf)?;
-        for line in headers.lines() {
-            if line.to_lowercase().starts_with("content-length:") {
-                let len_str = line.split(':').nth(1).unwrap_or("").trim();
-                content_length = Some(len_str.parse::<usize>()?);
+        // Parse Content-Length
+        let mut content_length = None;
+        for header in &headers {
+            let header_lower = header.to_lowercase();
+            if header_lower.starts_with("content-length:") {
+                let len_str = header[15..].trim();
+                content_length = len_str.parse::<usize>().ok();
+                break;
             }
         }
 
@@ -454,7 +599,7 @@ impl LspStdioProxy {
 
         // Read body
         let mut buffer = vec![0u8; length];
-        stdout.read_exact(&mut buffer).await?;
+        reader.read_exact(&mut buffer).await?;
 
         let content = String::from_utf8(buffer)?;
         Ok(serde_json::from_str(&content)?)
@@ -505,7 +650,7 @@ mod tests {
         let path_str = path.to_string_lossy();
         // Check that session-specific special chars are sanitized
         assert!(path_str.contains("session_test_123") || path_str.contains("session@test_123"));
-        // The @ should be replaced
+        // The @ and / should be replaced
         assert!(!path_str.contains("session@test/123"));
     }
 

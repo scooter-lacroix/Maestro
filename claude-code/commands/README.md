@@ -19,7 +19,7 @@ This directory contains the Maestro slash commands for Claude Code and OpenCode.
 
 These files are automatically installed by the Maestro plugin marketplace or by running the installer script:
 - Marketplace: `/plugin marketplace add scooter-lacroix/maestro` then `/plugin install maestro`
-- Manual: `./install-claude-code.sh` (copies to `~/.claude/commands/`)
+- Manual: `./install.sh` (enable “Claude Code (by Anthropic)” in the Conductor Wizard)
 
 ## Usage
 

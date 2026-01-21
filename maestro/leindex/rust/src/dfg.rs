@@ -328,7 +328,9 @@ impl DFGAnalyzer {
         // Multiple assignment: a, b = value
 
         // Find assignment operators
-        let assignment_ops = ["=", "+=", "-=", "*=", "/=", "//=", "%=", "**=", "&=", "|=", "^="];
+        let assignment_ops = [
+            "=", "+=", "-=", "*=", "/=", "//=", "%=", "**=", "&=", "|=", "^=",
+        ];
 
         for op in &assignment_ops {
             if let Some(eq_pos) = line.find(op) {
@@ -336,7 +338,10 @@ impl DFGAnalyzer {
                 if op == &"=" {
                     if eq_pos > 0 {
                         let prev_char = line.as_bytes().get(eq_pos.saturating_sub(1));
-                        if matches!(prev_char, Some(b'!') | Some(b'<') | Some(b'>') | Some(b'=') | Some(b':')) {
+                        if matches!(
+                            prev_char,
+                            Some(b'!') | Some(b'<') | Some(b'>') | Some(b'=') | Some(b':')
+                        ) {
                             continue;
                         }
                     }
@@ -361,9 +366,10 @@ impl DFGAnalyzer {
 
                     defined_vars.insert(target.clone());
 
-                    let var_info = dfg.variables.entry(target.clone()).or_insert_with(|| {
-                        VariableInfo::new(&target, line_num, scope)
-                    });
+                    let var_info = dfg
+                        .variables
+                        .entry(target.clone())
+                        .or_insert_with(|| VariableInfo::new(&target, line_num, scope));
 
                     var_info.accesses.push(VariableAccess {
                         name: target.clone(),
@@ -391,9 +397,10 @@ impl DFGAnalyzer {
 
                     defined_vars.insert(target.clone());
 
-                    let var_info = dfg.variables.entry(target.clone()).or_insert_with(|| {
-                        VariableInfo::new(&target, line_num, scope)
-                    });
+                    let var_info = dfg
+                        .variables
+                        .entry(target.clone())
+                        .or_insert_with(|| VariableInfo::new(&target, line_num, scope));
 
                     var_info.accesses.push(VariableAccess {
                         name: target.clone(),
@@ -507,7 +514,10 @@ impl DFGAnalyzer {
             if ch.is_alphanumeric() || ch == '_' {
                 current.push(ch);
             } else {
-                if !current.is_empty() && self.is_valid_identifier(&current) && !self.is_keyword(&current) {
+                if !current.is_empty()
+                    && self.is_valid_identifier(&current)
+                    && !self.is_keyword(&current)
+                {
                     identifiers.push(current.clone());
                 }
                 current.clear();
@@ -524,11 +534,10 @@ impl DFGAnalyzer {
     /// Check if identifier is a Python keyword
     fn is_keyword(&self, s: &str) -> bool {
         let keywords = [
-            "False", "None", "True", "and", "as", "assert", "async", "await",
-            "break", "class", "continue", "def", "del", "elif", "else", "except",
-            "finally", "for", "from", "global", "if", "import", "in", "is",
-            "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
-            "while", "with", "yield",
+            "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
+            "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
+            "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
+            "return", "try", "while", "with", "yield",
         ];
         keywords.contains(&s)
     }
@@ -545,7 +554,10 @@ impl DFGAnalyzer {
             }
 
             // Skip function/class definitions
-            if line.starts_with("def ") || line.starts_with("class ") || line.starts_with("async def ") {
+            if line.starts_with("def ")
+                || line.starts_with("class ")
+                || line.starts_with("async def ")
+            {
                 continue;
             }
 
@@ -553,7 +565,10 @@ impl DFGAnalyzer {
             if let Some(eq_pos) = line.find('=') {
                 if eq_pos > 0 {
                     let prev_char = line.as_bytes().get(eq_pos.saturating_sub(1));
-                    if matches!(prev_char, Some(b'!') | Some(b'<') | Some(b'>') | Some(b'=') | Some(b':')) {
+                    if matches!(
+                        prev_char,
+                        Some(b'!') | Some(b'<') | Some(b'>') | Some(b'=') | Some(b':')
+                    ) {
                         continue;
                     }
                 }
@@ -632,7 +647,11 @@ impl DFGAnalyzer {
             if !dfg.globals_used.is_empty() {
                 lines.push(format!(
                     "  Globals: {}",
-                    dfg.globals_used.iter().cloned().collect::<Vec<_>>().join(", ")
+                    dfg.globals_used
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
             }
         }

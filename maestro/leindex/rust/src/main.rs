@@ -8,9 +8,9 @@ use std::path::PathBuf;
 
 mod cli;
 
-use cli::{analyze, implement, memory, tui};
-use cli::mcp;
 use cli::implement::ImplementSessionTarget;
+use cli::mcp;
+use cli::{analyze, implement, memory, tui};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -143,30 +143,30 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("maestro=info".parse()?)
+                .add_directive("maestro=info".parse()?),
         )
         .init();
 
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Analyze { path, format, language, analysis } => {
-            analyze::run(path, format, language, analysis).await
-        }
+        Commands::Analyze {
+            path,
+            format,
+            language,
+            analysis,
+        } => analyze::run(path, format, language, analysis).await,
         Commands::Memory { command } => match command {
-            MemoryCommands::Serve { port, host, db, debug } => {
-                memory::serve(port, host, db, debug).await
-            }
-            MemoryCommands::Status { db } => {
-                memory::status(db).await
-            }
-            MemoryCommands::Scan { paths, depth } => {
-                memory::scan(paths, depth).await
-            }
+            MemoryCommands::Serve {
+                port,
+                host,
+                db,
+                debug,
+            } => memory::serve(port, host, db, debug).await,
+            MemoryCommands::Status { db } => memory::status(db).await,
+            MemoryCommands::Scan { paths, depth } => memory::scan(paths, depth).await,
         },
-        Commands::Tui => {
-            tui::run().await
-        }
+        Commands::Tui => tui::run().await,
         Commands::Implement {
             command,
             description,

@@ -27,36 +27,27 @@ This document summarizes the cross-platform compatibility analysis performed on 
   - Sets proper working directory using `cwd=self.project_root`
 - **Verified Platforms**: Linux, macOS, Windows, WSL
 
-### 3. Installation Script (`install-claude-code.sh`)
+### 3. Installation Script (`install.sh`)
 - **Status**: ✅ Mostly Cross-Platform (with minor limitations)
 - **Details**:
-  - Uses `detect_os()` function to identify platform:
-    - Linux variants (Ubuntu, Debian, Fedora, etc.)
-    - macOS
-    - Falls back to "unknown" for unsupported platforms
-  - Implements OS-specific package manager detection
-  - Uses portable shell constructs and avoids bashisms where possible
-  - Includes fallback mechanisms for different environments
-  - Uses `OSTYPE` variable for OS detection
+  - Bash wrapper that installs Rust (via rustup) if missing
+  - Launches the Rust Conductor Wizard (`cargo run --release --bin maestro-setup`)
+  - Uses package-manager detection (primarily Debian/Ubuntu via `apt-get` in the wizard today)
 - **Limitations**:
   - Primarily designed for Unix-like systems (Linux/macOS)
   - Windows support would require WSL or Cygwin
   - Contains some Linux-specific paths and commands
 - **Verified Platforms**: Linux, macOS, WSL
 
-### 4. LeIndex System (`maestro/leindex/`)
+### 4. LeIndex System (`maestro/leindex/rust/`)
 - **Status**: ✅ Mostly Cross-Platform
 - **Details**:
-  - Uses standard Python `os`, `pathlib`, and `platform` modules
-  - Implements cross-platform path handling with `pathlib.Path`
-  - Uses `os.scandir()` which is cross-platform
-  - Properly handles file system differences in `fast_scanner.py`
-  - Uses `os.path.join()` for cross-platform path construction
+  - Rust implementation using cross-platform filesystem primitives
+  - Tool integrations and config patching currently target common Unix paths by default
 - **Potential Issues**:
-  - Some hardcoded Unix-style paths in examples/comments
-  - May have issues with Windows path limits (260 character limitation)
-  - Some system utility functions assume POSIX-like behavior
-- **Verified Platforms**: Linux, macOS, Windows (with limitations), WSL
+  - Some integrations assume Unix-style home directories and paths
+  - Windows support likely requires WSL today for parity
+- **Verified Platforms**: Linux, macOS (best-effort), Windows via WSL
 
 ## Specific Cross-Platform Features
 
@@ -111,6 +102,6 @@ This document summarizes the cross-platform compatibility analysis performed on 
 
 ## Conclusion
 
-Maestro v2 demonstrates strong cross-platform compatibility with most components designed to work across Linux, macOS, and Windows. The file locking mechanism, hook execution system, and leindex components all implement proper cross-platform patterns. The main limitation is the installation script which is primarily Unix-focused, though the core Python components work well across platforms.
+Maestro v2 demonstrates strong cross-platform compatibility with most components designed to work across Linux, macOS, and Windows. The main limitation is the installer, which is primarily Unix-focused today (Windows support via WSL). The Rust core is portable, but some tool integrations use OS-specific config paths.
 
 The codebase follows good practices for cross-platform development including conditional imports, platform detection, and abstraction layers for platform-specific operations.

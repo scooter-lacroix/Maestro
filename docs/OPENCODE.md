@@ -12,22 +12,24 @@ See [Installation Guide](INSTALLATION.md) for complete setup instructions.
 
 Quick install:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 ```
+
+In the Conductor Wizard, ensure **OpenCode (Independent)** is enabled.
 
 ## What Gets Installed
 
-- **Skill**: OpenCode skill at `~/.opencode/skill/maestro/`
-- **Commands**: Command files in `~/.claude/commands/`
-- **Templates**: Project templates in `~/.claude/maestro-templates/`
+- **Skill**: OpenCode skill at `~/.config/opencode/skill/maestro/`
+- **Commands**: Maestro command files at `~/.config/opencode/commands/`
+- **Templates**: Project templates bundled with the skill at `~/.config/opencode/skill/maestro/templates/`
 - **Configuration**: OpenCode command entries in `~/.config/opencode/opencode.json`
 
 ## Post-Installation Configuration
 
-**Recommended:** After installation, run `/maestro:configure` to set up enhanced agent capabilities.
+**Recommended:** After installation, run `/maestro configure` to set up enhanced agent capabilities.
 
 ```
-/maestro:configure
+/maestro configure
 ```
 
 This will:
@@ -37,13 +39,13 @@ This will:
 - Verify tool functionality
 - Configure fallback behavior for missing tools
 
-**Benefits of /maestro:configure:**
+**Benefits of /maestro configure:**
 - Access to specialized agents for large codebase analysis (gemini-analyzer)
 - Enhanced refactoring and test generation (qwen-coder)
 - Production-quality code review (codex-reviewer)
 - Automatic fallback to built-in agents if CLI tools unavailable
 
-**Note:** Maestro works without `/maestro:configure`, but with reduced agent capabilities.
+**Note:** Maestro works without `/maestro configure`, but with reduced agent capabilities.
 
 ## Quick Start
 
@@ -223,11 +225,11 @@ Maestro integrates with all OpenCode agents:
 Maestro skill maps to command files:
 
 ```
-/maestro setup → ~/.claude/commands/maestro:setup.md
-/maestro newTrack → ~/.claude/commands/maestro:newTrack.md
-/maestro implement → ~/.claude/commands/maestro:implement.md
-/maestro status → ~/.claude/commands/maestro:status.md
-/maestro revert → ~/.claude/commands/maestro:revert.md
+/maestro setup → ~/.config/opencode/commands/maestro:setup.md
+/maestro newTrack → ~/.config/opencode/commands/maestro:newTrack.md
+/maestro implement → ~/.config/opencode/commands/maestro:implement.md
+/maestro status → ~/.config/opencode/commands/maestro:status.md
+/maestro revert → ~/.config/opencode/commands/maestro:revert.md
 ```
 
 ### Configuration
@@ -242,7 +244,7 @@ Commands are registered in `~/.config/opencode/opencode.json`:
       "description": "Maestro spec-driven development framework"
     },
     "maestro:setup": {
-      "template": "Read and execute from ~/.claude/commands/maestro:setup.md with args: $ARGUMENTS",
+      "template": "Read and execute from ~/.config/opencode/commands/maestro:setup.md with args: $ARGUMENTS",
       "description": "Maestro setup command"
     }
   }
@@ -334,7 +336,7 @@ cat ~/.config/opencode/opencode.json | grep maestro
 ### Templates not found
 **Solution**:
 ```bash
-ls ~/.claude/maestro-templates/
+ls ~/.config/opencode/skill/maestro/templates/
 # Should show workflow.md and code_styleguides/
 ```
 
@@ -413,22 +415,20 @@ Setup can resume from any step.
 ## Skill Structure
 
 ```
-~/.opencode/skill/maestro/
+~/.config/opencode/skill/maestro/
 ├── SKILL.md              # Main skill definition
 ├── README.md             # Skill documentation
-├── commands/             # Command symlinks
-│   ├── maestro:setup.md
-│   ├── maestro:newTrack.md
-│   ├── maestro:implement.md
-│   ├── maestro:status.md
-│   └── maestro:revert.md
-├── templates/            # Template symlinks
+├── templates/            # Templates (bundled)
 │   ├── workflow.md
 │   └── code_styleguides/
 └── scripts/              # Utility scripts
     ├── load_templates.sh
     └── fix_templates.sh
 ```
+
+Maestro command protocol files are installed separately:
+
+`~/.config/opencode/commands/maestro:*.md`
 
 ## See Also
 

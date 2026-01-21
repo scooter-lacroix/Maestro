@@ -29,13 +29,13 @@
 //! - `diagnostics/published` - When LSP publishes diagnostics
 //! - `lsp/log_message` - When LSP logs a message
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use leindex_analyzers::lsp::McpBridge;
 use leindex_analyzers::memory::lsp_manager::LspType;
-use std::io::{self, BufRead, Write};
-use std::process;
-use tokio::runtime::Runtime;
+use serde_json::json;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -79,7 +79,8 @@ impl From<LspTypeCli> for LspType {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging
@@ -108,32 +109,28 @@ fn main() -> Result<()> {
         args.project_path
     );
 
-    // Create Tokio runtime
-    let rt = Runtime::new().context("Failed to create async runtime")?;
-
-    rt.block_on(async {
-        if let Err(e) = run_bridge(LspType::from(args.lsp_type), &args.project_path).await {
-            error!("Bridge error: {}", e);
-            process::exit(1);
-        }
-    });
-
-    Ok(())
+    run_bridge(LspType::from(args.lsp_type), &args.project_path).await
 }
 
 async fn run_bridge(lsp_type: LspType, project_path: &str) -> Result<()> {
-    // Create and start the bridge
-    let mut bridge = McpBridge::new(lsp_type, project_path);
-    bridge.start().await.context("Failed to start LSP bridge")?;
+    // Create the bridge
+    let bridge = Arc::new(McpBridge::new(lsp_type, project_path));
 
-    info!("LSP bridge started, listening for MCP requests on stdio");
+    // Start LSP process
+    let (mut stdin, mut stdout, _child) = bridge.start_lsp_process().await?;
+
+    // Initialize LSP
+    bridge.initialize_lsp(&mut stdin, &mut stdout).await?;
+
+    info!("LSP bridge ready, starting main stdio loop");
 
     // Enter the main communication loop
-    run_stdio_loop(&mut bridge).await?;
+    let (_stdin, _stdout) = run_stdio_loop(bridge, stdin, stdout).await?;
 
     // Shutdown gracefully
-    bridge.shutdown().await?;
-    info!("LSP bridge shut down cleanly");
+    // Note: We can't call shutdown on &Arc<McpBridge> since shutdown takes &mut self
+    // The child process will be killed on drop due to kill_on_drop(true)
+    info!("LSP bridge shutting down (child will be killed on drop)");
 
     Ok(())
 }
@@ -141,32 +138,36 @@ async fn run_bridge(lsp_type: LspType, project_path: &str) -> Result<()> {
 /// Main stdio communication loop
 ///
 /// Reads MCP JSON-RPC requests from stdin, processes them, and writes responses to stdout.
-async fn run_stdio_loop(bridge: &mut McpBridge) -> Result<()> {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let stdin_lock = stdin.lock();
-    let mut reader = io::BufReader::new(stdin_lock);
+///
+/// Uses tokio for async I/O to avoid blocking the runtime.
+async fn run_stdio_loop(
+    bridge: Arc<McpBridge>,
+    mut stdin: tokio::process::ChildStdin,
+    mut stdout: tokio::process::ChildStdout,
+) -> Result<(tokio::process::ChildStdin, tokio::process::ChildStdout)> {
+    let mut reader = BufReader::new(tokio::io::stdin());
+    let mut stdout_writer = tokio::io::stdout();
+    let mut line = String::new();
 
     loop {
-        // Read a line (MCP over stdio is typically newline-delimited JSON)
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
+        line.clear();
+        match reader.read_line(&mut line).await {
             Ok(0) => {
                 // EOF - client disconnected
                 info!("Client disconnected (EOF)");
                 break;
             }
             Ok(_) => {
-                let line = line.trim();
-                if line.is_empty() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
                     continue;
                 }
 
-                debug!("Received: {}", line);
+                debug!("Received: {}", trimmed);
 
                 // Parse JSON-RPC request
                 let request: serde_json::Value =
-                    serde_json::from_str(line).unwrap_or_else(|e| {
+                    serde_json::from_str(trimmed).unwrap_or_else(|e| {
                         warn!("Failed to parse JSON: {}", e);
                         serde_json::Value::Null
                     });
@@ -175,28 +176,38 @@ async fn run_stdio_loop(bridge: &mut McpBridge) -> Result<()> {
                     continue;
                 }
 
+                // Clone request before moving it
+                let request_id = request.get("id").cloned();
+
                 // Process the request
-                let response = match process_request(bridge, request).await {
-                    Ok(Some(resp)) => resp,
-                    Ok(None) => continue, // Notification, no response
-                    Err(e) => {
-                        error!("Request error: {}", e);
-                        serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "error": {
-                                "code": -32603,
-                                "message": e.to_string()
-                            }
-                        })
-                    }
-                };
+                let response =
+                    match process_request(bridge.clone(), &mut stdin, &mut stdout, request).await {
+                        Ok(Some(resp)) => resp,
+                        Ok(None) => continue, // Notification, no response
+                        Err(e) => {
+                            error!("Request error: {}", e);
+                            json!({
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": {
+                                    "code": -32603,
+                                    "message": e.to_string()
+                                }
+                            })
+                        }
+                    };
 
                 // Write response
                 let response_str = serde_json::to_string(&response).unwrap_or_default();
-                if let Err(e) = writeln!(stdout, "{}", response_str) {
+                if let Err(e) = stdout_writer.write_all(response_str.as_bytes()).await {
                     error!("Failed to write response: {}", e);
                     break;
                 }
+                if let Err(e) = stdout_writer.write_all(b"\n").await {
+                    error!("Failed to write newline: {}", e);
+                    break;
+                }
+                let _ = stdout_writer.flush().await;
             }
             Err(e) => {
                 error!("Failed to read from stdin: {}", e);
@@ -205,14 +216,16 @@ async fn run_stdio_loop(bridge: &mut McpBridge) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok((stdin, stdout))
 }
 
 /// Process an MCP request
 ///
 /// Returns Ok(Some(response)) for requests, Ok(None) for notifications, or Err on failure.
 async fn process_request(
-    bridge: &mut McpBridge,
+    bridge: Arc<McpBridge>,
+    stdin: &mut tokio::process::ChildStdin,
+    stdout: &mut tokio::process::ChildStdout,
     request: serde_json::Value,
 ) -> Result<Option<serde_json::Value>> {
     let jsonrpc = request.get("jsonrpc").and_then(|v| v.as_str());
@@ -225,13 +238,16 @@ async fn process_request(
         .get("method")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("Missing method"))?;
-    let params = request.get("params").cloned().unwrap_or(serde_json::Value::Null);
+    let params = request
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     match method {
         // MCP: tools/list
         "tools/list" => {
             let tools = bridge.get_tools();
-            Ok(Some(serde_json::json!({
+            Ok(Some(json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
@@ -249,16 +265,18 @@ async fn process_request(
 
             let arguments = params.get("arguments").cloned().unwrap_or_default();
 
-            let result = bridge.call_tool(tool_name, arguments).await?;
+            let result = bridge
+                .call_tool(tool_name, arguments, stdin, stdout)
+                .await?;
 
-            Ok(Some(serde_json::json!({
+            Ok(Some(json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
                     "content": [
                         {
                             "type": "text",
-                            "text": serde_json::to_string_pretty(&result).unwrap_or_default()
+                            "text": serde_json::to_string(&result).unwrap_or_default()
                         }
                     ]
                 }
@@ -266,31 +284,30 @@ async fn process_request(
         }
 
         // MCP: ping
-        "ping" => Ok(Some(serde_json::json!({
+        "ping" => Ok(Some(json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": {}
         }))),
 
         // MCP: initialize
-        "initialize" => {
-            Ok(Some(serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "maestro-lsp-mcp-bridge",
-                        "version": "2.0.0"
-                    }
+        "initialize" => Ok(Some(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {},
+                    "events": {}
+                },
+                "serverInfo": {
+                    "name": "maestro-lsp-mcp-bridge",
+                    "version": "2.0.0"
                 }
-            })))
-        }
+            }
+        }))),
 
-        // MCP: initialized (notification)
+        // MCP: notifications/initialized (notification)
         "notifications/initialized" => {
             info!("MCP client initialized");
             Ok(None)

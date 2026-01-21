@@ -12,13 +12,13 @@ pub enum CFGNodeType {
     Entry,
     Exit,
     BasicBlock,
-    Condition,      // if/elif
-    Loop,           // for/while
+    Condition, // if/elif
+    Loop,      // for/while
     Try,
     Except,
     Finally,
     With,
-    Match,          // match statement (Python 3.10+)
+    Match, // match statement (Python 3.10+)
 }
 
 /// A node in the control flow graph
@@ -175,7 +175,9 @@ impl CFGAnalyzer {
 
             // Extract function body and analyze
             let metrics = self.analyze_function_body(&lines, start_line, end_line, func_indent);
-            result.function_metrics.insert(func_name.clone(), metrics.clone());
+            result
+                .function_metrics
+                .insert(func_name.clone(), metrics.clone());
 
             if metrics.cyclomatic_complexity > 10 {
                 result.high_complexity_functions.push(func_name);

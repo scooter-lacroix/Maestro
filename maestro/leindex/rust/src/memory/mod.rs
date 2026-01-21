@@ -3,42 +3,42 @@
 //! Pure Rust implementation of the Maestro Memory System.
 //! Provides database, scanner, and service functionality.
 
-pub mod models;
-pub mod schema;
-pub mod scanner;
-pub mod search;
-pub mod mcp_discovery;
-pub mod turso_backend;
 pub mod lsp_manager;
+pub mod mcp_discovery;
+pub mod models;
+pub mod scanner;
+pub mod schema;
+pub mod search;
+pub mod turso_backend;
 
 // Legacy rusqlite-based modules (only available with "rusqlite" feature)
 #[cfg(feature = "rusqlite")]
 pub mod db;
 #[cfg(feature = "rusqlite")]
-pub mod service;
+pub mod mcp_pool;
 #[cfg(feature = "rusqlite")]
 pub mod migration;
 #[cfg(feature = "rusqlite")]
-pub mod session_manager;
+pub mod service;
 #[cfg(feature = "rusqlite")]
-pub mod mcp_pool;
+pub mod session_manager;
 
-pub use models::*;
-pub use schema::*;
-pub use scanner::*;
-pub use search::*;
-pub use mcp_discovery::*;
-pub use turso_backend::*;
 pub use lsp_manager::*;
+pub use mcp_discovery::*;
+pub use models::*;
+pub use scanner::*;
+pub use schema::*;
+pub use search::*;
+pub use turso_backend::*;
 
 // Legacy rusqlite-based re-exports (only available with "rusqlite" feature)
 #[cfg(feature = "rusqlite")]
 pub use db::*;
 #[cfg(feature = "rusqlite")]
-pub use service::*;
+pub use mcp_pool::*;
 #[cfg(feature = "rusqlite")]
 pub use migration::*;
 #[cfg(feature = "rusqlite")]
-pub use session_manager::*;
+pub use service::*;
 #[cfg(feature = "rusqlite")]
-pub use mcp_pool::*;
+pub use session_manager::*;

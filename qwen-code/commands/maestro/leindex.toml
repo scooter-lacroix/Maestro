@@ -1,0 +1,11 @@
+description = "Maestro: LeIndex tooling (leindex)"
+prompt = """
+You are executing the Maestro framework command **leindex** in Qwen Code.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:leindex.md}
+
+The user’s arguments ({{args}}) select subcommands/targets.
+"""
+

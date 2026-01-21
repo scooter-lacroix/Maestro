@@ -27,16 +27,16 @@ pub const THEMES: &[(&str, &str)] = &[
 pub fn theme_from_name(name: &str) -> Theme {
     match name.trim().to_lowercase().as_str() {
         "catppuccin-mocha" | "catppuccin" => Theme {
-            bg: Color::Rgb(17, 17, 27),        // base
-            panel_bg: Color::Rgb(24, 24, 37),  // mantle
-            fg: Color::Rgb(205, 214, 244),     // text
-            muted: Color::Rgb(127, 132, 156),  // overlay1
-            accent: Color::Rgb(137, 180, 250), // blue
+            bg: Color::Rgb(17, 17, 27),            // base
+            panel_bg: Color::Rgb(24, 24, 37),      // mantle
+            fg: Color::Rgb(205, 214, 244),         // text
+            muted: Color::Rgb(127, 132, 156),      // overlay1
+            accent: Color::Rgb(137, 180, 250),     // blue
             accent_alt: Color::Rgb(203, 166, 247), // mauve
-            success: Color::Rgb(166, 227, 161), // green
-            warning: Color::Rgb(249, 226, 175), // yellow
-            error: Color::Rgb(243, 139, 168),   // red
-            highlight_bg: Color::Rgb(49, 50, 68), // surface0
+            success: Color::Rgb(166, 227, 161),    // green
+            warning: Color::Rgb(249, 226, 175),    // yellow
+            error: Color::Rgb(243, 139, 168),      // red
+            highlight_bg: Color::Rgb(49, 50, 68),  // surface0
             highlight_fg: Color::Rgb(205, 214, 244),
         },
         "tokyo-night" | "tokyonight" => Theme {
@@ -106,4 +106,3 @@ pub fn theme_from_name(name: &str) -> Theme {
         },
     }
 }
-

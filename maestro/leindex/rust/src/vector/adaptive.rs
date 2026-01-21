@@ -177,6 +177,9 @@ impl AdaptiveVectorStore {
             return Err(anyhow::anyhow!("Cannot add vector: store is shut down"));
         }
 
+        // CRITICAL: Acquire read lock to prevent mode switch during operation
+        let _mode_lock = self.mode_switch_lock.read().await;
+
         // Always add to Turso for persistence
         let turso_id = if let Some(ref turso) = self.turso {
             Some(
@@ -228,6 +231,9 @@ impl AdaptiveVectorStore {
             return Err(anyhow::anyhow!("Cannot search: store is shut down"));
         }
 
+        // CRITICAL: Acquire read lock to prevent mode switch during operation
+        let _mode_lock = self.mode_switch_lock.read().await;
+
         match self.mode() {
             StoreMode::Linear => {
                 let linear_guard = self.linear.read().await;
@@ -272,6 +278,9 @@ impl AdaptiveVectorStore {
             return Err(anyhow::anyhow!("Cannot delete: store is shut down"));
         }
 
+        // CRITICAL: Acquire read lock to prevent mode switch during operation
+        let _mode_lock = self.mode_switch_lock.read().await;
+
         let mut deleted = 0;
 
         // Delete from in-memory stores
@@ -314,6 +323,7 @@ impl AdaptiveVectorStore {
         info!("Switching to HNSW mode...");
 
         // Acquire mode switch lock to prevent concurrent switches
+        // NOTE: This blocks all add_vector/search/delete operations during switch
         let _lock = self.mode_switch_lock.write().await;
 
         // Get the current linear store and take ownership of it
@@ -326,25 +336,41 @@ impl AdaptiveVectorStore {
         let mut new_hnsw_store = HnswVectorStore::new(Some(self.index_path.clone()), None)
             .context("Failed to create HNSW store")?;
 
-        // Migrate data from old linear store to new HNSW store if it exists
-        if let Some(old_store) = old_linear_store {
-            info!("Migrating data from Linear store to HNSW store...");
+        // CRITICAL: Proper data migration via Turso (the common persistence layer)
+        // All vectors are in Turso because add_vector always adds to Turso
+        if let Some(ref turso) = self.turso {
+            info!("Migrating data from Turso to new HNSW store...");
 
-            // We need to get all vectors from the old store and add them to the new one
-            // Since there's no direct method to get all vectors, we'll need to implement
-            // a way to iterate through them. For now, we'll just recreate the store
-            // and rely on persistence to handle the data migration properly.
+            let all_vectors = turso
+                .get_all_vectors()
+                .await
+                .context("Failed to get all vectors from Turso for migration")?;
 
-            // Persist the old store to disk first to ensure all data is saved
+            let vector_count = all_vectors.len();
+
+            info!(
+                "Migrating {} vectors from Turso to HNSW store...",
+                vector_count
+            );
+
+            for (content, embedding, metadata) in all_vectors {
+                new_hnsw_store
+                    .add_vector(&content, embedding, metadata)
+                    .context("Failed to add vector to HNSW store during migration")?;
+            }
+
+            info!("Data migration completed: {} vectors migrated", vector_count);
+        } else if let Some(old_store) = old_linear_store {
+            warn!("No Turso store available, migrating from Linear store (may lose unsaved data)");
+            // Fallback: persist old store to disk first
             old_store
                 .persist()
                 .context("Failed to persist old linear store before migration")?;
 
             // Create a new HNSW store and load the data from disk
+            // Note: This only works if vectors were persisted, may lose in-memory-only data
             new_hnsw_store = HnswVectorStore::new(Some(self.index_path.clone()), None)
                 .context("Failed to create new HNSW store after migration")?;
-
-            info!("Data migration completed");
         }
 
         // Replace the HNSW store with the new one
@@ -365,6 +391,7 @@ impl AdaptiveVectorStore {
         info!("Switching to Linear mode...");
 
         // Acquire mode switch lock to prevent concurrent switches
+        // NOTE: This blocks all add_vector/search/delete operations during switch
         let _lock = self.mode_switch_lock.write().await;
 
         // Get the current HNSW store and take ownership of it
@@ -377,20 +404,41 @@ impl AdaptiveVectorStore {
         let mut new_linear_store = VectorStore::new(Some(self.index_path.clone()), None)
             .context("Failed to create Linear store")?;
 
-        // Migrate data from old HNSW store to new linear store if it exists
-        if let Some(old_store) = old_hnsw_store {
-            info!("Migrating data from HNSW store to Linear store...");
+        // CRITICAL: Proper data migration via Turso (the common persistence layer)
+        // All vectors are in Turso because add_vector always adds to Turso
+        if let Some(ref turso) = self.turso {
+            info!("Migrating data from Turso to new Linear store...");
 
-            // Persist the old store to disk first to ensure all data is saved
+            let all_vectors = turso
+                .get_all_vectors()
+                .await
+                .context("Failed to get all vectors from Turso for migration")?;
+
+            let vector_count = all_vectors.len();
+
+            info!(
+                "Migrating {} vectors from Turso to Linear store...",
+                vector_count
+            );
+
+            for (content, embedding, metadata) in all_vectors {
+                new_linear_store
+                    .add_vector(&content, embedding, metadata)
+                    .context("Failed to add vector to Linear store during migration")?;
+            }
+
+            info!("Data migration completed: {} vectors migrated", vector_count);
+        } else if let Some(old_store) = old_hnsw_store {
+            warn!("No Turso store available, migrating from HNSW store (may lose unsaved data)");
+            // Fallback: persist old store to disk first
             old_store
                 .persist()
                 .context("Failed to persist old HNSW store before migration")?;
 
             // Create a new linear store and load the data from disk
+            // Note: This only works if vectors were persisted, may lose in-memory-only data
             new_linear_store = VectorStore::new(Some(self.index_path.clone()), None)
                 .context("Failed to create new linear store after migration")?;
-
-            info!("Data migration completed");
         }
 
         // Replace the linear store with the new one

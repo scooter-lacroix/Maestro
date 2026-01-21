@@ -314,7 +314,7 @@ All tasks follow a strict lifecycle:
       **Note:** Set the `OBSIDIAN_VAULT_PATH` environment variable to your Obsidian vault location.
 
 12. **Get and Record Task Commit SHA:**
-    - **Step 12.1: Update Plan:** Read `plan.md`, find the line for the completed task, update its status from `[~]` to `[x]`, and append the first 7 characters of the *just-completed commit's* commit hash.
+    - **Step 12.1: Update Plan:** Read `plan.md`, find the line for the completed task, update its status from `[~]` to `[x]`, and append the first 7 characters of the *just-completed commits commit hash.
     - **Step 12.2: Write Plan:** Write the updated content back to `plan.md`.
 
 13. **Commit Plan Update:**
@@ -423,7 +423,7 @@ Be brutal. Be thorough. Be excellent.
 2. **Collect Phase Commits:** List all commit hashes for the phase
 3. **Invoke codex-reviewer:** Use the directive template above
 4. **Review Findings:** Address ALL critical issues
-5. **Re-test:** Ensure fixes don't break anything
+5. **Re-test:** Ensure fixes do not break anything
 6. **Document Review:** Create summary of review findings
 7. **Update Phase Status:** Mark phase as "Reviewed & Approved"
 8. **Only Then Proceed:** Move to next phase

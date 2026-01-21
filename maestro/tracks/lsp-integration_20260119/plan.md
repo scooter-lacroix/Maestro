@@ -505,6 +505,442 @@ Address critical findings from Phase 7 Tzar review before proceeding to Phase 8.
 
 ---
 
+## Phase 7.6: Complete Tzar Review Remediation (All Findings)
+
+### Status
+**IN PROGRESS** - Created 2026-01-21
+
+### Objective
+Address **ALL** findings from the Phase 7.5 Tzar of Excellence review without exception. This includes:
+- 9 Critical Issues (must fix before proceeding)
+- 6 Improvements Needed (should fix for excellence)
+- 4 Optimization Opportunities
+- 5 Edge Cases Not Handled
+- 4 Security Concerns
+- 4 Performance Issues
+
+### Background
+**Trigger:** Codex Tzar review of Phase 7.5 (commit 1233caf) returned **FAIL verdict**
+
+**Review Findings Summary:**
+- Multiple ship-stopper correctness bugs (HNSW rebuild broken, adaptive switching loses data)
+- Panic paths remaining (`.unwrap()` on locks, `top_k==0` underflow, system clock anomalies)
+- Incomplete migrations (mode switch commented "for now", no DB schema migration)
+- Security fixes not fully deployed (no migration path for existing databases)
+- Performance claims compromised (caches interfere with benchmarks, O(n) full-scan search)
+- Tests do not validate promised behaviors (mode switch test never switches, poisoning not exercised)
+
+**Zero Tolerance Directive:** No shortcuts, workarounds, or simplified approaches. Every single finding must be completely addressed with production-grade implementation.
+
+### Tasks: Group 1 - Critical Correctness Issues (Foundation)
+
+- [ ] **Task 7.6.1:** Fix HNSW rebuild logic with correct ID mapping
+  - **[CRITICAL - DATA CORRUPTION]** `rebuild_index()` creates new HNSW but doesn't rebuild `id_to_data` mapping
+  - Internal IDs from new index don't correspond to old HashMap keys → missing/wrong results
+  - **Implementation:**
+    - Create new `HNSW` instance
+    - Create new `id_to_data` HashMap with new internal IDs from each `insert()`
+    - Only copy non-tombstoned entries
+    - Clear tombstones HashSet
+    - Update vector_count to reflect actual count (not counting tombstones)
+    - Atomically swap both HNSW and id_to_data
+  - **Files:** `src/vector/hnsw_store.rs`
+  - **Tests:** Add test that verifies search results after rebuild trigger
+  - **Commit:** `fix(hnsw): fix rebuild_index with correct ID mapping and tombstone pruning`
+
+- [ ] **Task 7.6.2:** Fix HNSW rebuild lock poisoning panic
+  - **[CRITICAL - PANIC]** `rebuild_index()` uses `.unwrap()` on poisonable RwLocks (lines 292-293)
+  - **Implementation:** Replace all `.unwrap()` with `.map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?`
+  - **Files:** `src/vector/hnsw_store.rs`
+  - **Commit:** `fix(hnsw): remove lock unwrap() in rebuild_index`
+
+- [ ] **Task 7.6.3:** Fix VectorStore top_k==0 panic
+  - **[CRITICAL - PANIC - DOS]** `select_nth_unstable_by(top_k - 1, ...)` underflows when `top_k == 0`
+  - **Implementation:**
+    - Early-return empty `Vec::new()` when `top_k == 0`
+    - Add test `test_search_top_k_zero()` to verify no panic
+  - **Files:** `src/vector/store.rs`
+  - **Commit:** `fix(store): handle top_k==0 without panic`
+
+- [ ] **Task 7.6.4:** Implement proper adaptive mode switch migration
+  - **[CRITICAL - DATA LOSS]** Current switch is commented "for now" - not implemented
+  - **Implementation:**
+    - In `switch_to_hnsw()`:
+      1. Take old Linear store
+      2. Persist old store to disk
+      3. Create new HNSW store
+      4. **Load all vectors from old store and add to new store**
+      5. Clear old store reference
+    - In `switch_to_linear()`:
+      1. Take old HNSW store
+      2. Persist old store to disk
+      3. Create new Linear store
+      4. **Load all vectors from old store and add to new store**
+      5. Clear old store reference
+  - **Files:** `src/vector/adaptive.rs`
+  - **Tests:** Add test that switches modes and verifies all vectors migrated
+  - **Commit:** `fix(adaptive): implement proper data migration during mode switches`
+
+- [ ] **Task 7.6.5:** Fix adaptive store concurrency during mode switches
+  - **[CRITICAL - DATA LOSS]** Operations during switch can fall back to Turso-only, then disappear
+  - **Implementation:**
+    - Add `mode_switch_lock: Arc<RwLock<()>>` if not present
+    - All `add_vector()`, `search()`, `delete_by_file()` must:
+      - Acquire `mode_switch_lock.read().await` before accessing active store
+      - Release after operation completes
+    - Switch functions acquire `mode_switch_lock.write().await`
+    - This blocks all operations during switch (acceptable since switches are rare)
+  - **Files:** `src/vector/adaptive.rs`
+  - **Commit:** `fix(adaptive): prevent operations during mode switch with read lock`
+
+### Tasks: Group 2 - Lock Poisoning & Error Handling (Safety)
+
+- [ ] **Task 7.6.6:** Fix remaining lock unwrap() in VectorStore
+  - **[HIGH - PANIC]** `vector_count()`, `info()` use `.unwrap()` on RwLock reads
+  - **Implementation:**
+    - Change return type to `Result<usize>` and `Result<IndexMetadata>`
+    - Replace `.unwrap()` with `.map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?`
+    - Update all call sites to handle Result
+  - **Files:** `src/vector/store.rs`
+  - **Commit:** `fix(store): return Result for vector_count and info`
+
+- [ ] **Task 7.6.7:** Fix remaining lock unwrap() in HnswVectorStore
+  - **[HIGH - PANIC]** `vector_count()`, `info()`, `hnsw_stats()` use `.unwrap()` on RwLock reads
+  - **Implementation:** Same as Task 7.6.6
+  - **Files:** `src/vector/hnsw_store.rs`
+  - **Commit:** `fix(hnsw): return Result for vector_count, info, hnsw_stats`
+
+- [ ] **Task 7.6.8:** Fix Mutex lock unwrap() in cache module
+  - **[HIGH - PANIC]** `TtlCache` uses `.lock().unwrap()` throughout
+  - **Implementation:**
+    - Change all lock operations to return `Result`
+    - Use `.map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?`
+    - Update methods to return Result where locks are used
+  - **Files:** `src/vector/cache.rs`
+  - **Commit:** `fix(cache): return Result for all Mutex operations`
+
+- [ ] **Task 7.6.9:** Add lock poisoning recovery strategy
+  - **[MEDIUM - RESILIENCE]** Define deterministic fallback for poisoned locks
+  - **Implementation:**
+    - Create `PoisonedLockError` type
+    - Implement recovery using `RwLock::into_inner()` or `Mutex::into_inner()`
+    - Strategy choices:
+      - Option A: Return error and let caller decide (preferred for correctness)
+      - Option B: Reinitialize with empty data (data loss but system continues)
+      - Document chosen strategy in code comments
+  - **Files:** All vector store files
+  - **Commit:** `feat(vector): add lock poisoning recovery strategy`
+
+### Tasks: Group 3 - Data Consistency & Migration (Integrity)
+
+- [ ] **Task 7.6.10:** Implement schema migration for SQL injection fix
+  - **[CRITICAL - SECURITY]** Existing databases keep old TEXT schema - security fix not deployed
+  - **Implementation:**
+    - Create `migrations` module in vector package
+    - Add `migrate_chunk_type_to_integer()` function:
+      1. Check current schema with `PRAGMA table_info(vectors)`
+      2. If `chunk_type` is TEXT, run migration:
+         - Create new table with INTEGER schema
+         - Copy data with `ChunkType::from_i32()` conversion
+         - Drop old table
+         - Rename new table
+      3. If already INTEGER, skip
+    - Call migration in `TursoVectorStore::initialize()`
+    - Add migration version tracking
+  - **Files:** `src/vector/turso_store.rs`, `src/vector/migrations.rs` (new)
+  - **Tests:** Test migration from TEXT to INTEGER schema
+  - **Commit:** `fix(turso): add schema migration for chunk_type TEXT→INTEGER`
+
+- [ ] **Task 7.6.11:** Fix HNSW content persistence
+  - **[HIGH - DATA LOSS]** `HnswVectorStore::persist()` doesn't save content field
+  - **Implementation:**
+    - Add `content` field to `StoredVector` struct in HnswVectorStore
+    - Include content in serialization in `persist()`
+    - Load content in `load_vectors()`
+  - **Files:** `src/vector/hnsw_store.rs`
+  - **Tests:** Verify content survives restart
+  - **Commit:** `fix(hnsw): persist and load content field`
+
+- [ ] **Task 7.6.12:** Unify vector identity across backends
+  - **[MEDIUM - CONSISTENCY]** Different ID formats per backend complicate reconciliation
+  - **Implementation:**
+    - Generate single `vector_id` using UUID in `AdaptiveVectorStore::add_vector()`
+    - Pass same `vector_id` to all backends
+    - Store backend-specific internal ID separately
+    - Use unified `vector_id` for all user-facing operations
+  - **Files:** `src/vector/adaptive.rs`, all store implementations
+  - **Commit:** `refactor(vector): unify vector identity across backends`
+
+### Tasks: Group 4 - Type Safety & Validation (Correctness)
+
+- [ ] **Task 7.6.13:** Fix Turso float ordering with proper comparison
+  - **[CRITICAL - CORRECTNESS]** `OrderedF32` violates `Eq` for NaN, `Ord` is not total order
+  - **Implementation:**
+    - Replace custom `OrderedF32` with `ordered_float::NotNan<f32>` OR
+    - Use `f32::total_cmp()` for deterministic comparison
+    - Define NaN policy: treat as worst similarity (score = -1.0 or similar)
+  - **Files:** `src/vector/turso_store.rs`
+  - **Tests:** Test with NaN embeddings to verify deterministic behavior
+  - **Commit:** `fix(turso): use sound float ordering for top-k heap`
+
+- [ ] **Task 7.6.14:** Add NaN/Inf embedding handling
+  - **[MEDIUM - STABILITY]** NaN/Inf embeddings can propagate through SIMD
+  - **Implementation:**
+    - In `cosine_similarity()` (SIMD), check result after computation
+    - If result is NaN or Inf, return 0.0 (no similarity)
+    - Alternative: Validate embeddings at input and reject invalid
+    - Document chosen strategy
+  - **Files:** `src/vector/simd.rs`, `src/vector/store.rs`
+  - **Tests:** Test with NaN/Inf embeddings
+  - **Commit:** `fix(vector): handle NaN/Inf embeddings gracefully`
+
+- [ ] **Task 7.6.15:** Make enum-to-integer mapping explicit and stable
+  - **[MEDIUM - CORRUPTION]** `ChunkType::to_i32()` depends on variant order
+  - **Implementation:**
+    - Add `#[repr(i32)]` to `ChunkType` enum
+    - Add explicit discriminants:
+      ```rust
+      #[repr(i32)]
+      enum ChunkType {
+          Function = 0,
+          Class = 1,
+          Module = 2,
+          Import = 3,
+          Comment = 4,
+          Text = 5,
+          Other = 6,
+      }
+      ```
+    - Update `from_i32()` to return `Result` for unknown values
+  - **Files:** `src/vector/metadata.rs`
+  - **Commit:** `fix(metadata): add explicit enum discriminants for stability`
+
+- [ ] **Task 7.6.16:** Avoid sentinel values for optional DB fields
+  - **[MEDIUM - CORRECTNESS]** Storing `0`/`""` for Option collapses semantics
+  - **Implementation:**
+    - For `start_line`/`end_line`: store NULL instead of 0
+    - For `parent_context`: store NULL instead of empty string
+    - Use `libsql::Value::Null` for None
+    - Parse as `Option<T>` from database
+  - **Files:** `src/vector/turso_store.rs`
+  - **Tests:** Test with None values verify correct handling
+  - **Commit:** `fix(turso): use NULL instead of sentinels for optional fields`
+
+### Tasks: Group 5 - Concurrency & Race Conditions (Safety)
+
+- [ ] **Task 7.6.17:** Re-check mode during switch (prevent double-switch)
+  - **[MEDIUM - CORRECTNESS]** Second switch can replace newly built store
+  - **Implementation:**
+    - In `switch_to_hnsw()` after acquiring lock:
+      - Check if already in HNSW mode
+      - If yes, return early
+    - Same for `switch_to_linear()`
+  - **Files:** `src/vector/adaptive.rs`
+  - **Commit:** `fix(adaptive): prevent redundant mode switches`
+
+- [ ] **Task 7.6.18:** Use tokio::sync::RwLock instead of std::sync in async contexts
+  - **[MEDIUM - CORRECTNESS]** std::sync can block executor threads
+  - **Implementation:**
+    - Replace `std::sync::RwLock` with `tokio::sync::RwLock` where used in async
+    - Update all `.read()`/`.write()` to `.read().await`/`.write().await`
+  - **Files:** `src/vector/store.rs` (if used in async)
+  - **Note:** HNSW stores use std::sync because they're synchronous APIs
+  - **Commit:** `fix(vector): use tokio RwLock in async contexts`
+
+### Tasks: Group 6 - Testing & Validation (Quality Assurance)
+
+- [ ] **Task 7.6.19:** Add effective concurrency test for mode switches
+  - **[HIGH - VALIDATION]** Current test never reaches 90K threshold
+  - **Implementation:**
+    - Lower threshold for test only (via test constructor)
+    - Or pre-populate to near threshold
+    - Add vectors concurrently while switch triggers
+    - Verify no data loss after switch
+  - **Files:** `src/vector/concurrency_tests.rs`
+  - **Commit:** `test(vector): add effective mode switch concurrency test`
+
+- [ ] **Task 7.6.20:** Add boundary tests for top_k
+  - **[HIGH - VALIDATION]** Edge cases not covered
+  - **Implementation:**
+    - `test_search_top_k_zero()` - returns empty vec
+    - `test_search_top_k_one()` - returns exactly one
+    - `test_search_top_k_larger_than_dataset()` - returns all
+    - `test_search_top_k_equals_dataset()` - returns all
+  - **Files:** `src/vector/store.rs` (tests module)
+  - **Commit:** `test(store): add top_k boundary tests`
+
+- [ ] **Task 7.6.21:** Add actual lock poisoning tests
+  - **[HIGH - VALIDATION]** Current tests don't exercise poisoning
+  - **Implementation:**
+    - Create test that intentionally poisons lock (panic in thread)
+    - Verify error handling works correctly
+    - Test recovery strategy
+  - **Files:** `src/vector/concurrency_tests.rs`
+  - **Commit:** `test(vector): add lock poisoning recovery tests`
+
+- [ ] **Task 7.6.22:** Add NaN/Inf embedding tests
+  - **[MEDIUM - VALIDATION]**
+  - **Implementation:**
+    - Test search with NaN embeddings
+    - Test search with Inf embeddings
+    - Verify no panic, deterministic results
+  - **Files:** `src/vector/simd.rs` (tests)
+  - **Commit:** `test(simd): add NaN/Inf embedding tests`
+
+### Tasks: Group 7 - Performance & Optimization (Efficiency)
+
+- [ ] **Task 7.6.23:** Implement Turso native vector search
+  - **[HIGH - PERFORMANCE]** Current is O(n) full-scan with JSON parsing
+  - **Implementation:**
+    - Store embeddings in binary format (BLOB) instead of JSON
+    - Use `vector_top_k()` function if available in libsql
+    - Or implement DiskANN index properly
+    - If native search unavailable, add streaming to avoid loading all rows
+  - **Files:** `src/vector/turso_store.rs`
+  - **Benchmarks:** Compare before/after latency
+  - **Commit:** `perf(turso): implement native vector search indexing`
+
+- [ ] **Task 7.6.24:** Optimize linear store score computation
+  - **[MEDIUM - PERFORMANCE]** Clones String IDs for every vector
+  - **Implementation:**
+    - Collect `(score, &str)` references first
+    - Only clone for final top-k results
+    - Or use stable numeric indices
+  - **Files:** `src/vector/store.rs`
+  - **Benchmarks:** Measure allocation reduction
+  - **Commit:** `perf(store): reduce String cloning in scoring`
+
+- [ ] **Task 7.6.25:** Fix cache implementation to avoid O(n) eviction
+  - **[LOW - PERFORMANCE]** `TtlCache::put` scans all entries for LRU
+  - **Implementation:**
+    - Implement true LRU with `std::collections::linked_hash_map` or similar
+    - Or use `lru` crate
+  - **Files:** `src/vector/cache.rs`
+  - **Benchmarks:** Measure eviction performance
+  - **Commit:** `perf(cache): implement O(1) LRU eviction`
+
+- [ ] **Task 7.6.26:** Implement parallel score computation option
+  - **[LOW - PERFORMANCE]** Linear search is embarrassingly parallel
+  - **Implementation:**
+    - Use `rayon` for parallel scoring when N is large
+    - Ensure deterministic ordering
+    - Make opt-in via feature flag or configuration
+  - **Files:** `src/vector/store.rs`
+  - **Benchmarks:** Measure speedup on large datasets
+  - **Commit:** `feat(store): add parallel scoring with rayon`
+
+- [ ] **Task 7.6.27:** Fix benchmark cache interference
+  - **[HIGH - VALIDATION]** Caches can still cause cache-hit measurements
+  - **Implementation:**
+    - Add benchmark-only constructor that disables caches
+    - Or add cache-invalidation method and call in benchmarks
+    - Verify varied queries + disabled cache = true search performance
+  - **Files:** `benches/vector_benchmark.rs`, vector stores
+  - **Validation:** Run benchmark, verify no cache hits in logs
+  - **Commit:** `fix(bench): disable caches during benchmark runs`
+
+### Tasks: Group 8 - Input Validation & Security (Robustness)
+
+- [ ] **Task 7.6.28:** Validate embedding dimensions
+  - **[MEDIUM - VALIDATION]**
+  - **Implementation:**
+    - Check `embedding.len() == expected_dim` at input
+    - Return `Err` if dimension mismatch
+  - **Files:** All `add_vector()` implementations
+  - **Tests:** Test with wrong dimensions
+  - **Commit:** `feat(vector): validate embedding dimensions`
+
+- [ ] **Task 7.6.29:** Validate and enforce MAX limits
+  - **[MEDIUM - VALIDATION]** Limits defined but not enforced
+  - **Implementation:**
+    - Check `MAX_QUERY_LENGTH` on query embeddings
+    - Check `MAX_CONTENT_SIZE` on content
+    - Check `MAX_VECTORS` on add_vector
+    - Return clear error messages
+  - **Files:** All stores
+  - **Tests:** Test limit enforcement
+  - **Commit:** `feat(vector): enforce MAX limits consistently`
+
+- [ ] **Task 7.6.30:** Add schema validation on Turso init
+  - **[MEDIUM - VALIDATION]** No check for schema drift
+  - **Implementation:**
+    - On `initialize()`, query current schema
+    - Compare expected vs actual column types
+    - Log warning or return error if mismatch
+    - Provide migration path if drift detected
+  - **Files:** `src/vector/turso_store.rs`
+  - **Tests:** Test with mismatched schema
+  - **Commit:** `feat(turso): add schema validation on init`
+
+- [ ] **Task 7.6.31:** Fix system clock panic in retry jitter
+  - **[MEDIUM - PANIC]** `SystemTime::duration_since().unwrap()` can panic
+  - **Implementation:**
+    - Use `unwrap_or(Duration::from_secs(0))` for fallback
+    - Or use `SystemTime::now().duration_since(UNIX_EPOCH).ok()`
+  - **Files:** `src/vector/metadata.rs`
+  - **Tests:** Mock clock skew scenario
+  - **Commit:** `fix(metadata): handle system clock anomalies gracefully`
+
+### Tasks: Group 9 - Code Quality & Maintainability (Excellence)
+
+- [ ] **Task 7.6.32:** Fix timestamp "healing" to return Result
+  - **[MEDIUM - CORRECTNESS]** Silently replaces corrupted timestamps with "now"
+  - **Implementation:**
+    - Change `created_at` parse to return `Result<DateTime<Utc>>`
+    - Propagate error instead of masking
+    - Allow caller to decide fallback strategy
+  - **Files:** `src/vector/turso_store.rs`
+  - **Commit:** `fix(turso): return Result for timestamp parsing`
+
+- [ ] **Task 7.6.33:** Remove debug print noise from tests
+  - **[LOW - QUALITY]** Concurrency tests print heavily
+  - **Implementation:**
+    - Replace `println!` with proper assertions
+    - Use `tracing::debug!` for optional logging
+    - Make output quiet by default
+  - **Files:** `src/vector/concurrency_tests.rs`
+  - **Commit:** `refactor(test): remove debug noise from concurrency tests`
+
+- [ ] **Task 7.6.34:** Add diagnostic helpers for debugging
+  - **[LOW - MAINTAINABILITY]**
+  - **Implementation:**
+    - Add `dump_state()` method to stores for debugging
+    - Add `validate_internal_state()` method
+    - Document in comments how to use
+  - **Files:** All store implementations
+  - **Commit:** `feat(vector): add diagnostic helpers`
+
+### Tasks: Group 10 - Final Verification & Re-review
+
+- [ ] **Task 7.6.35:** Run comprehensive test suite
+  - **[PREREQUISITE]** All Tasks 7.6.1-7.6.34 complete
+  - Run all vector tests (target: 31+ tests passing)
+  - Run full cargo test suite
+  - Verify no warnings in clippy
+  - Verify formatting passes
+  - **Commit:** `test(phase7.6): verify all tests pass`
+
+- [ ] **Task 7.6.36:** Run benchmarks with corrected methodology
+  - **[PREREQUISITE]** Task 7.6.27 complete (caches disabled)
+  - Run granular benchmarks (50K-100K)
+  - Verify TRUE search performance measured
+  - Establish valid crossover point if needed
+  - Document baseline performance
+  - **Commit:** `bench(phase7.6): establish corrected performance baseline`
+
+- [ ] **Task 7.6.37:** Re-run Tzar of Excellence review
+  - **[PREREQUISITE]** All tasks complete, all tests passing
+  - Verify ALL 32 findings from previous review addressed
+  - No critical issues remaining
+  - No high issues remaining
+  - Code quality meets production standard
+  - Performance claims validated
+  - Security fixes fully deployed
+  - Tzar review must **PASS**
+  - **Commit:** `docs(phase7.6): document Tzar re-review PASS results`
+
+---
+
 ## Phase 8: Testing and Quality Assurance
 
 ### Objective
