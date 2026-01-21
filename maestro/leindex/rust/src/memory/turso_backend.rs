@@ -354,7 +354,8 @@ impl TursoStorageBackend {
     ///
     /// ## Returns
     ///
-    /// Returns error if backend is shut down, in read-only mode, or on schema creation failure.
+    /// Returns error if backend is shut down, in read-only mode with no existing database,
+    /// or on schema creation failure.
     pub async fn initialize(&self) -> Result<()> {
         // Check shutdown guard first
         if self.is_shutdown() {
@@ -363,11 +364,57 @@ impl TursoStorageBackend {
             ));
         }
 
-        // Check read-only mode - initialize writes schema
+        // In read-only mode, verify database exists and has schema
         if self.config.read_only {
-            return Err(anyhow::anyhow!(
-                "Cannot initialize: Database is in read-only mode"
-            ));
+            // Check if database file exists
+            if !self.db_path.exists() {
+                return Err(anyhow::anyhow!(
+                    "Cannot initialize in read-only mode: Database file does not exist at {}",
+                    self.db_path.display()
+                ));
+            }
+
+            // Verify schema exists by checking for a key table
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
+
+            // Check if sessions table exists (indicates schema is present)
+            let stmt = conn
+                .prepare(
+                    "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name='sessions'",
+                )
+                .await
+                .context("Failed to prepare schema check query")?;
+
+            let mut result = stmt
+                .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+                .await
+                .context("Failed to check for existing schema")?;
+
+            let has_schema = match result.next().await {
+                Ok(Some(row)) => {
+                    let count: i32 = row.get(0).unwrap_or(0i32);
+                    (count as i64) > 0
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    return Err(anyhow::anyhow!(
+                        "Failed to check schema: {}",
+                        e
+                    ));
+                }
+            };
+
+            if has_schema {
+                info!("Read-only mode: Database with existing schema opened successfully");
+                return Ok(());
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Cannot initialize in read-only mode: Database exists but has no schema"
+                ));
+            }
         }
 
         info!("Initializing Turso database schema");

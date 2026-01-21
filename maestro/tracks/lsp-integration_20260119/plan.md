@@ -1041,14 +1041,15 @@ Comprehensive testing of all components, including unit tests, integration tests
   - **Commit:** `test(mcp-bridge): add comprehensive unit tests for MCP bridge` (ff4759f)
   - **Status:** COMPLETE ✅ - All 12 tests pass (5 existing + 7 new)
 
-- [ ] **Task 8.4:** Write integration tests for LSP integration
+- [x] **Task 8.4:** Write integration tests for LSP integration
   - Test end-to-end LSP lifecycle
   - Test LSP + session interaction
   - Test MCP bridge + LSP interaction
   - Test .mcp.json generation and loading
   - Test CLI tool access to LSP
   - Target: >95% coverage of integration paths
-  - **Commit:** `test(integration): write integration tests for LSP`
+  - **Commit:** `test(lsp): add rigorous integration tests for LSP integration` (18e6e47)
+  - **Status:** COMPLETE ✅ - All 11 tests pass in 0.53s
 
 - [ ] **Task 8.5:** Write migration tests
   - Test SQLite → Turso migration
