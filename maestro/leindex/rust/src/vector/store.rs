@@ -262,13 +262,12 @@ impl VectorStore {
 
         // Two-phase approach to avoid cache thrashing with large tuples (~150 bytes)
         // Phase 1: Compute scores only (indices + floats)
-        let mut indexed_scores: Vec<(String, f32)> = vectors
-            .iter()
-            .map(|(id, v)| {
-                let score = cosine_similarity(query_embedding, &v.embedding);
-                (id.clone(), score)
-            })
-            .collect();
+        // PERF: Task 7.6.28 - Pre-allocate to avoid reallocations in hot path
+        let mut indexed_scores: Vec<(String, f32)> = Vec::with_capacity(vectors.len());
+        indexed_scores.extend(vectors.iter().map(|(id, v)| {
+            let score = cosine_similarity(query_embedding, &v.embedding);
+            (id.clone(), score)
+        }));
 
         // Partially sort to get top-k scores efficiently
         if indexed_scores.len() > top_k {
@@ -282,18 +281,17 @@ impl VectorStore {
         indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Phase 2: Lookup metadata for top-k results
-        let results: Vec<SearchResult> = indexed_scores
-            .into_iter()
-            .map(|(id, score)| {
-                let v = &vectors[&id]; // Safe lookup since we just got the id from the same map
-                SearchResult {
-                    vector_id: v.id.clone(),
-                    score,
-                    metadata: v.metadata.clone(),
-                    content: v.content.clone(),
-                }
-            })
-            .collect();
+        // PERF: Task 7.6.28 - Pre-allocate for exact top_k size
+        let mut results: Vec<SearchResult> = Vec::with_capacity(top_k);
+        results.extend(indexed_scores.into_iter().map(|(id, score)| {
+            let v = &vectors[&id]; // Safe lookup since we just got the id from the same map
+            SearchResult {
+                vector_id: v.id.clone(),
+                score,
+                metadata: v.metadata.clone(),
+                content: v.content.clone(),
+            }
+        }));
 
         // Cache results
         self.cache.put(cache_key, results.clone())?;

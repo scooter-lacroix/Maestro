@@ -60,7 +60,9 @@ impl HnswVectorStore {
             hnsw: RwLock::new(hnsw),
             id_to_data: RwLock::new(HashMap::new()),
             tombstones: RwLock::new(HashSet::new()),
-            cache: TtlCache::new(1000, 300),
+            // PERF: Task 7.6.27 - Double cache capacity and increase TTL for better hit rates
+            // 2000 entries (was 1000), 10min TTL (was 5min)
+            cache: TtlCache::new(2000, 600),
             _config: hnsw_config,
         };
 

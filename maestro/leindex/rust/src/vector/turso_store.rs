@@ -735,6 +735,203 @@ impl TursoVectorStore {
         .await
     }
 
+    /// Batch add vectors with transaction support (Task 7.6.29)
+    ///
+    /// # Arguments
+    /// * `items` - Vector of (content, embedding, metadata) tuples
+    ///
+    /// # Returns
+    /// * Vector of generated vector IDs
+    ///
+    /// # Performance
+    /// Uses a single transaction for all inserts, much faster than individual inserts.
+    pub async fn add_vectors_batch(
+        &self,
+        items: Vec<(String, Vec<f32>, VectorMetadata)>,
+    ) -> Result<Vec<String>> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(anyhow::anyhow!("Cannot add vectors: store is shut down"));
+        }
+
+        // Generate all IDs upfront
+        let vector_ids: Vec<String> = items
+            .iter()
+            .map(|_| {
+                format!(
+                    "vec_{}",
+                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                )
+            })
+            .collect();
+
+        self.execute_with_retry("add_vectors_batch", || async {
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
+
+            // Begin transaction for atomic batch insert
+            conn.execute(
+                "BEGIN TRANSACTION",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to begin transaction")?;
+
+            for ((content, embedding, metadata), vector_id) in items.iter().zip(vector_ids.iter())
+            {
+                let embedding_json =
+                    serde_json::to_string(embedding).context("Failed to serialize embedding")?;
+                let chunk_type_int = metadata.chunk_type.to_i32();
+
+                conn.execute(
+                    r#"
+                    INSERT INTO vectors (
+                        vector_id, file_path, chunk_index, start_line, end_line,
+                        chunk_type, parent_context, content, embedding,
+                        embedding_model, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    "#,
+                    libsql::params_from_iter(
+                        [
+                            libsql::Value::Text(vector_id.clone()),
+                            libsql::Value::Text(metadata.file_path.clone()),
+                            libsql::Value::Integer(metadata.chunk_index as i64),
+                            metadata
+                                .start_line
+                                .map(|v| libsql::Value::Integer(v as i64))
+                                .unwrap_or(libsql::Value::Null),
+                            metadata
+                                .end_line
+                                .map(|v| libsql::Value::Integer(v as i64))
+                                .unwrap_or(libsql::Value::Null),
+                            libsql::Value::Integer(chunk_type_int as i64),
+                            libsql::Value::Text(
+                                metadata
+                                    .parent_context
+                                    .clone()
+                                    .unwrap_or_default(),
+                            ),
+                            libsql::Value::Text(content.to_string()),
+                            libsql::Value::Text(embedding_json.clone()),
+                            libsql::Value::Text(metadata.embedding_model.clone()),
+                            libsql::Value::Text(metadata.created_at.to_rfc3339()),
+                        ]
+                        .into_iter(),
+                    ),
+                )
+                .await
+                .context("Failed to insert vector")?;
+            }
+
+            // Commit transaction
+            conn.execute(
+                "COMMIT",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to commit transaction")?;
+
+            Ok(())
+        })
+        .await?;
+
+        // Invalidate cache
+        let _ = self.cache.clear();
+
+        debug!("Added {} vectors in batch", items.len());
+        Ok(vector_ids)
+    }
+
+    /// Get vectors with pagination support (Task 7.6.30)
+    ///
+    /// # Arguments
+    /// * `offset` - Number of vectors to skip
+    /// * `limit` - Maximum number of vectors to return
+    ///
+    /// # Returns
+    /// * Vector of (content, embedding, metadata) tuples
+    ///
+    /// # Performance
+    /// Enables lazy loading of large datasets instead of loading all vectors at once.
+    pub async fn get_vectors_paginated(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<(String, Vec<f32>, VectorMetadata)>> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(anyhow::anyhow!(
+                "Cannot get vectors: store is shut down"
+            ));
+        }
+
+        self.execute_with_retry("get_vectors_paginated", || async {
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
+
+            let stmt = conn
+                .prepare(
+                    "SELECT content, embedding, file_path, chunk_index, start_line, end_line,
+                            chunk_type, parent_context, embedding_model, created_at
+                     FROM vectors
+                     LIMIT ?1 OFFSET ?2",
+                )
+                .await
+                .context("Failed to prepare paginated query")?;
+
+            let mut results = stmt
+                .query(libsql::params_from_iter(
+                    [
+                        libsql::Value::Integer(limit as i64),
+                        libsql::Value::Integer(offset as i64),
+                    ]
+                    .into_iter(),
+                ))
+                .await
+                .context("Failed to execute paginated query")?;
+
+            let mut vectors = Vec::with_capacity(limit);
+
+            while let Some(row) = results.next().await? {
+                let content: Option<String> = row.get(0)?;
+                let embedding_json: String = row.get(1)?;
+                let file_path: String = row.get(2)?;
+                let chunk_index: i64 = row.get(3)?;
+                let start_line: Option<i64> = row.get(4)?;
+                let end_line: Option<i64> = row.get(5)?;
+                let chunk_type_int: i64 = row.get(6)?;
+                let parent_context: Option<String> = row.get(7)?;
+                let embedding_model: String = row.get(8)?;
+                let created_at: String = row.get(9)?;
+
+                let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
+                    .context("Failed to parse embedding JSON")?;
+
+                let content_str = content.unwrap_or_default();
+
+                let metadata = VectorMetadata {
+                    file_path,
+                    chunk_index: chunk_index as i32,
+                    start_line: start_line.map(|v| v as i32),
+                    end_line: end_line.map(|v| v as i32),
+                    chunk_type: ChunkType::from_i32(chunk_type_int as i32),
+                    parent_context,
+                    embedding_model,
+                    created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now()),
+                };
+
+                vectors.push((content_str, embedding, metadata));
+            }
+
+            Ok(vectors)
+        })
+        .await
+    }
+
     /// Shutdown the store gracefully
     pub async fn shutdown(&self) -> Result<()> {
         if self.is_shutdown.load(Ordering::SeqCst) {
