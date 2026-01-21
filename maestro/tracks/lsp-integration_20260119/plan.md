@@ -1051,13 +1051,15 @@ Comprehensive testing of all components, including unit tests, integration tests
   - **Commit:** `test(lsp): add rigorous integration tests for LSP integration` (18e6e47)
   - **Status:** COMPLETE ✅ - All 11 tests pass in 0.53s
 
-- [ ] **Task 8.5:** Write migration tests
+- [x] **Task 8.5:** Write migration tests
   - Test SQLite → Turso migration
   - Test DuckDB → Turso migration
   - Test Tantivy → FTS5 migration
   - Test rollback capability
   - Test migration idempotency
-  - **Commit:** `test(migrations): write migration tests`
+  - **Commit:** `fix(turso): support read-only mode for existing databases + add migration tests` (e77e668)
+  - **Status:** COMPLETE ✅ - All 8 tests pass in 2.06s
+  - **System Fix:** Read-only mode now works for existing databases (test revealed issue)
 
 - [ ] **Task 8.6:** Write TUI tests
   - Test LSP status indicator rendering
