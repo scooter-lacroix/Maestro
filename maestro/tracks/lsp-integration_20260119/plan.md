@@ -1032,13 +1032,14 @@ Comprehensive testing of all components, including unit tests, integration tests
   - **Commit:** `test(lsp): add comprehensive unit tests for LspManager` (652427a)
   - **Status:** COMPLETE ✅ - All 18 tests pass in 0.12s (serial execution)
 
-- [ ] **Task 8.3:** Write unit tests for MCP bridge
+- [x] **Task 8.3:** Write unit tests for MCP bridge
   - Test LSP → MCP translation
   - Test diagnostics events
   - Test symbol tools
   - Test error handling
   - Target: >98% code coverage
-  - **Commit:** `test(lsp-mcp): write unit tests for MCP bridge`
+  - **Commit:** `test(mcp-bridge): add comprehensive unit tests for MCP bridge` (ff4759f)
+  - **Status:** COMPLETE ✅ - All 12 tests pass (5 existing + 7 new)
 
 - [ ] **Task 8.4:** Write integration tests for LSP integration
   - Test end-to-end LSP lifecycle
