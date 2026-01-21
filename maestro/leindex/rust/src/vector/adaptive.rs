@@ -320,6 +320,12 @@ impl AdaptiveVectorStore {
     async fn switch_to_hnsw(&self) -> Result<()> {
         info!("Switching to HNSW mode...");
 
+        // Task 7.6.17: Check current mode to prevent redundant switches
+        if self.mode() == StoreMode::Hnsw {
+            debug!("Already in HNSW mode, skipping switch");
+            return Ok(());
+        }
+
         // Acquire mode switch lock to prevent concurrent switches
         // NOTE: This blocks all add_vector/search/delete operations during switch
         let _lock = self.mode_switch_lock.write().await;
@@ -387,6 +393,12 @@ impl AdaptiveVectorStore {
     /// Switch to Linear mode
     async fn switch_to_linear(&self) -> Result<()> {
         info!("Switching to Linear mode...");
+
+        // Task 7.6.17: Check current mode to prevent redundant switches
+        if self.mode() == StoreMode::Linear {
+            debug!("Already in Linear mode, skipping switch");
+            return Ok(());
+        }
 
         // Acquire mode switch lock to prevent concurrent switches
         // NOTE: This blocks all add_vector/search/delete operations during switch
