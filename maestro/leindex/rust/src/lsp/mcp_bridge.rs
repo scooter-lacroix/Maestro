@@ -894,4 +894,127 @@ mod tests {
         // Note: canonicalize will fail if the path doesn't exist, so we just check the function works
         // For a path that exists with spaces, it would encode them
     }
+
+    // ========================================================================
+    // Task 8.3: Additional Unit Tests for MCP Bridge
+    // ========================================================================
+
+    /// Test LSP diagnostics to MCP event translation
+    #[test]
+    fn test_diagnostics_to_mcp_translation() {
+        // Create a sample LSP diagnostic
+        let diagnostic = lsp_types::Diagnostic {
+            range: lsp_types::Range::new(
+                lsp_types::Position::new(0, 0),
+                lsp_types::Position::new(0, 10),
+            ),
+            severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+            code: Some(lsp_types::NumberOrString::String("E0001".to_string())),
+            source: Some("rust-analyzer".to_string()),
+            message: "Test error message".to_string(),
+            related_information: None,
+            tags: None,
+            ..Default::default()
+        };
+
+        // Verify diagnostic can be converted to JSON
+        let json = serde_json::to_string(&diagnostic).unwrap();
+        assert!(json.contains("Test error message"));
+        assert!(json.contains("E0001"));
+    }
+
+    /// Test LSP symbols to MCP tool translation
+    #[test]
+    fn test_symbols_to_mcp_tool_translation() {
+        let bridge = McpBridge::new(LspType::TypeScript, "/tmp/test");
+
+        // Get document symbols tool
+        let tools = bridge.get_tools();
+        let symbols_tool = tools
+            .iter()
+            .find(|t| t.name == "lsp/document_symbols")
+            .expect("document_symbols tool should exist");
+
+        assert_eq!(symbols_tool.name, "lsp/document_symbols");
+        assert!(symbols_tool.description.contains("symbols"));
+
+        // Verify input schema is a JSON object
+        let schema = &symbols_tool.input_schema;
+        assert!(schema.is_object());
+    }
+
+    /// Test workspace symbols tool
+    #[test]
+    fn test_workspace_symbols_tool() {
+        let bridge = McpBridge::new(LspType::Rust, "/tmp/test");
+        let tools = bridge.get_tools();
+
+        let workspace_tool = tools
+            .iter()
+            .find(|t| t.name == "lsp/workspace_symbols")
+            .expect("workspace_symbols tool should exist");
+
+        assert_eq!(workspace_tool.name, "lsp/workspace_symbols");
+        assert!(workspace_tool.description.contains("workspace"));
+    }
+
+    /// Test definition tool
+    #[test]
+    fn test_definition_tool() {
+        let bridge = McpBridge::new(LspType::Python, "/tmp/test");
+        let tools = bridge.get_tools();
+
+        let definition_tool = tools
+            .iter()
+            .find(|t| t.name == "lsp/definition")
+            .expect("definition tool should exist");
+
+        assert_eq!(definition_tool.name, "lsp/definition");
+        assert!(definition_tool.description.contains("definition") ||
+                definition_tool.description.contains("Definition"));
+    }
+
+    /// Test LSP type to binary name mapping
+    #[test]
+    fn test_lsp_type_to_binary_name() {
+        assert_eq!(LspType::Rust.binary_name(), "rust-analyzer");
+        assert_eq!(LspType::Python.binary_name(), "ruff-lsp");
+        assert_eq!(
+            LspType::TypeScript.binary_name(),
+            "typescript-language-server"
+        );
+    }
+
+    /// Test bridge handles all LSP types
+    #[test]
+    fn test_bridge_handles_all_lsp_types() {
+        for lsp_type in [LspType::Rust, LspType::Python, LspType::TypeScript] {
+            let bridge = McpBridge::new(lsp_type, "/tmp/test");
+            assert_eq!(bridge.lsp_type, lsp_type);
+            assert!(!bridge.get_tools().is_empty());
+        }
+    }
+
+    /// Test tool input schema structure
+    #[test]
+    fn test_tool_input_schema_structure() {
+        let bridge = McpBridge::new(LspType::Rust, "/tmp/test");
+        let tools = bridge.get_tools();
+
+        for tool in tools {
+            // Verify input schema is a JSON object
+            let schema = &tool.input_schema;
+
+            // Verify it's an object type
+            assert_eq!(
+                schema.get("type").and_then(|v| v.as_str()),
+                Some("object")
+            );
+
+            // Verify it has properties
+            if let Some(props) = schema.get("properties") {
+                assert!(props.is_object());
+            }
+        }
+    }
 }

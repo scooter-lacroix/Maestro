@@ -1021,7 +1021,7 @@ Comprehensive testing of all components, including unit tests, integration tests
   - **Commit:** `test(turso): add comprehensive threading safety tests for Turso backend` (294e08a)
   - **Status:** COMPLETE ✅ - All 25 tests pass in both serial and parallel modes
 
-- [ ] **Task 8.2:** Write unit tests for LspManager
+- [x] **Task 8.2:** Write unit tests for LspManager
   - Test LSP process spawning
   - Test LSP process monitoring
   - Test language detection
@@ -1029,7 +1029,8 @@ Comprehensive testing of all components, including unit tests, integration tests
   - Test manual controls
   - Test graceful degradation
   - Target: >98% code coverage
-  - **Commit:** `test(lsp): write unit tests for LspManager`
+  - **Commit:** `test(lsp): add comprehensive unit tests for LspManager` (652427a)
+  - **Status:** COMPLETE ✅ - All 18 tests pass in 0.12s (serial execution)
 
 - [ ] **Task 8.3:** Write unit tests for MCP bridge
   - Test LSP → MCP translation
