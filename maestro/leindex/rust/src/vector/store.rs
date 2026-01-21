@@ -166,6 +166,72 @@ impl VectorStore {
         Ok(vector_id)
     }
 
+    /// Add a vector with a specific ID (for unified identity across backends - Task 7.6.12)
+    pub fn add_vector_with_id(
+        &self,
+        vector_id: &str,
+        content: &str,
+        embedding: Vec<f32>,
+        metadata: VectorMetadata,
+    ) -> Result<String> {
+        // Validate vector_id format (must start with "vec_")
+        if !vector_id.starts_with("vec_") {
+            return Err(anyhow::anyhow!(
+                "Invalid vector_id format: must start with 'vec_', got: {}",
+                vector_id
+            ));
+        }
+
+        // Check for duplicate via content hash
+        let content_hash = VectorDeduplicator::hash_content(content);
+
+        if let Some(existing_id) = self.deduplicator.get_vector_id(&content_hash)? {
+            // Content already exists, return existing ID
+            // This ensures deduplication works even with specific IDs
+            self.deduplicator.add_reference(&existing_id)?;
+            debug!(
+                "Deduplicated vector (with_id), reusing existing {}",
+                existing_id
+            );
+            return Ok(existing_id);
+        }
+
+        // Use the provided vector_id
+        let stored = StoredVector {
+            id: vector_id.to_string(),
+            embedding,
+            metadata,
+            content: Some(content.to_string()),
+        };
+
+        // Store vector
+        self.vectors
+            .write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?
+            .insert(vector_id.to_string(), stored);
+        self.deduplicator
+            .register(content_hash, vector_id.to_string())?;
+
+        // Update metadata
+        {
+            let mut meta = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            meta.vector_count += 1;
+            meta.updated_at = chrono::Utc::now();
+        }
+
+        // Invalidate cache
+        let _ = self.cache.clear();
+
+        debug!(
+            "Added vector {} to Linear store (with specific ID)",
+            vector_id
+        );
+        Ok(vector_id.to_string())
+    }
+
     /// Search for similar vectors
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);

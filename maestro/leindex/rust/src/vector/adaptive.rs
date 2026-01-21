@@ -180,37 +180,35 @@ impl AdaptiveVectorStore {
         // CRITICAL: Acquire read lock to prevent mode switch during operation
         let _mode_lock = self.mode_switch_lock.read().await;
 
-        // Always add to Turso for persistence
-        let turso_id = if let Some(ref turso) = self.turso {
-            Some(
-                turso
-                    .add_vector(content, embedding.clone(), metadata.clone())
-                    .await?,
-            )
-        } else {
-            None
-        };
+        // CRITICAL: Generate unified UUID for all backends (Task 7.6.12)
+        // This ensures the same vector has the same ID across all stores
+        let unified_id = format!("vec_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
 
-        // Add to active in-memory store
-        let vector_id = match self.mode() {
+        // Always add to Turso for persistence (with unified ID)
+        if let Some(ref turso) = self.turso {
+            turso
+                .add_vector_with_id(&unified_id, content, embedding.clone(), metadata.clone())
+                .await?;
+        }
+
+        // Add to active in-memory store (with unified ID)
+        match self.mode() {
             StoreMode::Linear => {
                 let linear_guard = self.linear.read().await;
                 if let Some(ref linear) = *linear_guard {
-                    linear.add_vector(content, embedding, metadata)?
-                } else {
-                    turso_id.ok_or_else(|| anyhow::anyhow!("No active store"))?
+                    linear.add_vector_with_id(&unified_id, content, embedding, metadata)?;
                 }
             }
             StoreMode::Hnsw => {
                 let hnsw_guard = self.hnsw.read().await;
                 if let Some(ref hnsw) = *hnsw_guard {
-                    hnsw.add_vector(content, embedding, metadata)?
-                } else {
-                    turso_id.ok_or_else(|| anyhow::anyhow!("No active store"))?
+                    hnsw.add_vector_with_id(&unified_id, content, embedding, metadata)?;
                 }
             }
-            StoreMode::Turso => turso_id.ok_or_else(|| anyhow::anyhow!("No active store"))?,
-        };
+            StoreMode::Turso => {
+                // Already added to Turso above
+            }
+        }
 
         // Check if we need to switch modes
         let count = self.vector_count().await?;
@@ -222,7 +220,7 @@ impl AdaptiveVectorStore {
             self.switch_to_hnsw().await?;
         }
 
-        Ok(vector_id)
+        Ok(unified_id)
     }
 
     /// Search for similar vectors

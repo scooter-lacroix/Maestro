@@ -211,6 +211,68 @@ impl HnswVectorStore {
         Ok(external_id)
     }
 
+    /// Add a vector with a specific external ID (for unified identity across backends - Task 7.6.12)
+    pub fn add_vector_with_id(
+        &self,
+        external_id: &str,
+        content: &str,
+        embedding: Vec<f32>,
+        metadata: VectorMetadata,
+    ) -> Result<String> {
+        // Validate external_id format (must start with "vec_")
+        if !external_id.starts_with("vec_") {
+            return Err(anyhow::anyhow!(
+                "Invalid external_id format: must start with 'vec_', got: {}",
+                external_id
+            ));
+        }
+
+        // Insert into HNSW index - returns internal ID
+        let internal_id = {
+            let mut hnsw = self
+                .hnsw
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            hnsw.insert(embedding.clone())
+        };
+
+        // Store metadata WITH embedding, using the provided external_id
+        {
+            let mut id_map = self
+                .id_to_data
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            id_map.insert(
+                internal_id,
+                VectorDataWithEmbedding {
+                    id: external_id.to_string(),
+                    embedding,
+                    metadata: metadata.clone(),
+                    content: Some(content.to_string()),
+                },
+            );
+        }
+
+        // Update metadata
+        {
+            let mut meta = self
+                .metadata
+                .write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            meta.vector_count += 1;
+            meta.updated_at = chrono::Utc::now();
+        }
+
+        // Invalidate cache
+        let _ = self.cache.clear();
+
+        debug!(
+            "Added vector {} to HNSW index (with specific external ID)",
+            external_id
+        );
+        Ok(external_id.to_string())
+    }
+
     /// Search for similar vectors using HNSW
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);

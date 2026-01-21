@@ -90,6 +90,22 @@ impl TursoVectorStore {
         // Initialize schema
         store.initialize().await?;
 
+        // CRITICAL: Run schema migration for SQL injection fix (Task 7.6.10)
+        // This migrates existing databases from TEXT to INTEGER for chunk_type
+        match super::migrations::migrate_chunk_type_to_integer(&store.database).await {
+            Ok(migrated) => {
+                if migrated {
+                    info!(
+                        "Successfully migrated database schema from TEXT to INTEGER"
+                    );
+                }
+            }
+            Err(e) => {
+                // Log warning but don't fail - database may still be usable
+                warn!("Schema migration failed: {}, continuing...", e);
+            }
+        }
+
         info!("Turso VectorStore initialized at {:?}", store.db_path);
         Ok(store)
     }
@@ -112,6 +128,19 @@ impl TursoVectorStore {
         };
 
         store.initialize().await?;
+
+        // CRITICAL: Run schema migration for SQL injection fix (Task 7.6.10)
+        // This migrates existing databases from TEXT to INTEGER for chunk_type
+        match super::migrations::migrate_chunk_type_to_integer(&store.database).await {
+            Ok(migrated) => {
+                if migrated {
+                    info!("Successfully migrated in-memory database schema");
+                }
+            }
+            Err(e) => {
+                warn!("Schema migration failed for in-memory database: {}, continuing...", e);
+            }
+        }
 
         info!("In-memory Turso VectorStore initialized");
         Ok(store)
@@ -270,6 +299,91 @@ impl TursoVectorStore {
 
         debug!("Added vector {} to Turso vector store", vector_id);
         Ok(vector_id)
+    }
+
+    /// Add a vector with a specific ID (for unified identity across backends - Task 7.6.12)
+    pub async fn add_vector_with_id(
+        &self,
+        vector_id: &str,
+        content: &str,
+        embedding: Vec<f32>,
+        metadata: VectorMetadata,
+    ) -> Result<String> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(anyhow::anyhow!(
+                "Cannot add vector with ID: store is shut down"
+            ));
+        }
+
+        // Validate vector_id format (must start with "vec_")
+        if !vector_id.starts_with("vec_") {
+            return Err(anyhow::anyhow!(
+                "Invalid vector_id format: must start with 'vec_', got: {}",
+                vector_id
+            ));
+        }
+
+        // Serialize embedding as JSON array for storage
+        let embedding_json =
+            serde_json::to_string(&embedding).context("Failed to serialize embedding")?;
+
+        // **SECURITY:** Use INTEGER for chunk_type (prevents SQL injection)
+        let chunk_type_int = metadata.chunk_type.to_i32();
+
+        // Execute the database operation with retry
+        self.execute_with_retry("add_vector_with_id", || async {
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
+
+            conn.execute(
+                r#"
+                INSERT INTO vectors (
+                    vector_id, file_path, chunk_index, start_line, end_line,
+                    chunk_type, parent_context, content, embedding,
+                    embedding_model, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                "#,
+                libsql::params_from_iter(
+                    [
+                        libsql::Value::Text(vector_id.to_string()),
+                        libsql::Value::Text(metadata.file_path.clone()),
+                        libsql::Value::Integer(metadata.chunk_index as i64),
+                        // FIX: Use NULL for optional fields instead of sentinel 0 (Task 7.6.16)
+                        metadata
+                            .start_line
+                            .map(|v| libsql::Value::Integer(v as i64))
+                            .unwrap_or(libsql::Value::Null),
+                        metadata
+                            .end_line
+                            .map(|v| libsql::Value::Integer(v as i64))
+                            .unwrap_or(libsql::Value::Null),
+                        libsql::Value::Integer(chunk_type_int as i64),
+                        libsql::Value::Text(metadata.parent_context.clone().unwrap_or_default()),
+                        libsql::Value::Text(content.to_string()),
+                        libsql::Value::Text(embedding_json.clone()),
+                        libsql::Value::Text(metadata.embedding_model.clone()),
+                        libsql::Value::Text(metadata.created_at.to_rfc3339()),
+                    ]
+                    .into_iter(),
+                ),
+            )
+            .await
+            .context("Failed to insert vector with specific ID")?;
+
+            Ok(())
+        })
+        .await?;
+
+        // Invalidate cache
+        let _ = self.cache.clear();
+
+        debug!(
+            "Added vector {} to Turso vector store (with specific ID)",
+            vector_id
+        );
+        Ok(vector_id.to_string())
     }
 
     /// Search for similar vectors using cosine distance
