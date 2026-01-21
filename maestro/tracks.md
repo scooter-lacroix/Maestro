@@ -78,14 +78,14 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 7 Ready)
+## [~] Track: On-Demand LSP Integration for Maestro TUI (Phase 8 Ready)
 *Link: [./maestro/tracks/lsp-integration_20260119/](./maestro/tracks/lsp-integration_20260119/)*
 
 **Description**: On-Demand LSP Integration for Maestro TUI - Add on-demand Language Server Protocol (LSP) support with 3 core Rust-based LSPs (rust-analyzer, ruff-lsp, typescript-language-server), hybrid MCP+stdio exposure, TUI integration with dedicated tab and inline indicators, auto-start lifecycle, and migrate entire database architecture to Turso (libSQL) replacing SQLite/DuckDB/Tantivy with vector search evaluation.
 
 **Type**: Feature
 
-**Status**: **In Progress** - Phases 1-6: COMPLETE ✅ | Phase 7: Vector Search Performance Evaluation (NEXT)
+**Status**: **In Progress** - Phases 1-7: COMPLETE ✅ | Phase 7.5: COMPLETE ✅ | Phase 8: Testing and Quality Assurance (NEXT)
 
 **Phases**:
 - [x] Phase 1: Foundation and Setup (4 tasks) - COMPLETE ✅
@@ -104,22 +104,60 @@ This file tracks all major tracks for the project. Each track has its own detail
   - LSP controls (toggle, restart) (0891dd4)
   - LSP log viewer extension (5081077)
   - LSP installation guidance (99e0794)
-- [ ] Phase 7: Vector Search Performance Evaluation (5 tasks) - NEXT
-- [ ] Phase 8: Testing and Quality Assurance (7 tasks)
+- [x] Phase 7: Vector Search Performance Evaluation (5 tasks) - COMPLETE ✅
+- [x] Phase 7.5: Critical Fixes and Benchmark Corrections (12 tasks) - COMPLETE ✅
+  - Tzar Review: PASSED - All 14 critical/high issues resolved (commit 1233caf)
+  - All 31 vector tests passing (28 original + 3 concurrency tests)
+  - SQL injection fixed (INTEGER storage)
+  - Data loss on mode switch fixed (migration + hysteresis)
+  - Race conditions fixed (mode_switch_lock)
+  - Flawed benchmarks fixed (varied queries)
+  - HNSW delete performance fixed (tombstone strategy)
+  - Lock poisoning panics fixed (proper error handling)
+  - Content persistence fixed (JSON serialization)
+  - Retry logic added (RetryConfig with exponential backoff)
+  - O(n) memory fixed (min-heap top-k)
+  - SIMD comparison fixed (epsilon)
+  - Quickselect optimized (two-phase approach)
+  - Concurrency tests added
+- [ ] Phase 8: Testing and Quality Assurance (7 tasks) - NEXT
 - [ ] Phase 9: Documentation and Refinement (5 tasks)
 - [ ] Phase 10: Final Review and Release (5 tasks)
 
-**Total Tasks**: 63
+**Total Tasks**: 75 (63 original + 12 Phase 7.5 tasks)
 
-**Estimated Time**: 22 days
+**Estimated Time**: 29.1 days (22 original + 6.6 Phase 7.5 + 0.5 Phase 8 increase)
 
 **Execution**: `/maestro:implement lsp-integration_20260119`
 
-**Progress Summary (2026-01-20):**
-- **30/63 tasks complete (48%)**
-- **Phases 1-6: COMPLETE ✅**
+**Progress Summary (2026-01-21):**
+- **42/75 tasks complete (56%)**
+- **Phases 1-7: COMPLETE ✅**
   - All core LSP infrastructure implemented and tested
   - TUI integration complete with status indicators, controls, logs, and installation guidance
+  - Vector search evaluation complete with adaptive router (Linear <90K, HNSW >=90K, Turso backup)
   - Tzar of Excellence Review: PASSED for Phase 2
-  - All critical issues resolved (schema, errors, NULL handling, transactions, foreign keys, read-only, XSS)
-- Next phase: Vector Search Performance Evaluation (Phase 7)
+  - Tzar of Excellence Review: PASSED for Phase 7.5 (commit 1233caf)
+- **Phase 7.5: COMPLETE ✅**
+  - All 14 critical/high issues from Phase 7 Tzar review resolved
+  - Benchmark methodology fixed (varied queries, not cache hits)
+  - All 31 vector tests passing (28 original + 3 new concurrency tests)
+- Next phase: Testing and Quality Assurance (Phase 8)
+
+---
+
+## [ ] Track: Maestro v2.5 - Cockpit v2 + LeIndex Rust Core + Orchestrate Pane
+*Link: [./maestro/tracks/v2-5_20260121/](./maestro/tracks/v2-5_20260121/)*
+
+**Description**: Reorganize Maestro so the Rust Cockpit v2 is the canonical TUI (Go TUI fully retired), LeIndex in pure Rust fully absorbs TLDR (no `maestro.tldr` usage), and add an Orchestrate pane by porting/rebranding `subsy/ralph-tui` with LeIndex-powered token-efficient loop execution.
+
+**Type**: Master Orchestration Track
+
+**Status**: Planning (v2.5 scope definition complete; implementation pending)
+
+**Sub-Tracks**:
+- [ ] 01-cockpit-tui-reorg
+- [ ] 02-leindex-core-rust
+- [ ] 03-orchestrate-pane-ralph
+
+**Execution**: `/maestro:orchestrate v2-5_20260121` (once orchestration wiring is restored)
