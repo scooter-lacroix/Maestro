@@ -448,4 +448,53 @@ mod tests {
             assert!(results[0].score >= results[1].score);
         }
     }
+
+    // Task 7.6.23: Test top_k==0 panic fix
+    #[test]
+    fn test_search_top_k_zero() {
+        let dir = tempdir().unwrap();
+        let store = VectorStore::new(Some(dir.path().to_path_buf()), None).unwrap();
+
+        // Add a vector
+        let embedding = vec![0.1; 768];
+        let metadata = VectorMetadata::new("test.py", 0);
+        store
+            .add_vector("test content", embedding, metadata)
+            .unwrap();
+
+        // Search with top_k==0 should not panic and return empty results
+        let query = vec![0.1; 768];
+        let results = store.search(&query, 0).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    // Task 7.6.24: Test NaN/Inf embedding handling
+    #[test]
+    fn test_nan_inf_embedding_handling() {
+        let dir = tempdir().unwrap();
+        let store = VectorStore::new(Some(dir.path().to_path_buf()), None).unwrap();
+
+        // Add a normal vector
+        let embedding = vec![0.1; 768];
+        let metadata = VectorMetadata::new("test.py", 0);
+        store
+            .add_vector("test content", embedding.clone(), metadata)
+            .unwrap();
+
+        // Search with NaN in query embedding - should return 0.0 similarity
+        let mut query_with_nan = vec![0.1; 768];
+        query_with_nan[0] = f32::NAN;
+        let results = store.search(&query_with_nan, 10).unwrap();
+        // NaN embedding returns neutral 0.0 similarity - results may exist but score is 0.0
+        // Check that at least one result exists (the one we added) but has 0.0 similarity
+        assert!(!results.is_empty(), "Should return results even with NaN");
+        assert_eq!(results[0].score, 0.0, "NaN query should return 0.0 similarity");
+
+        // Search with Inf in query embedding - should return 0.0 similarity
+        let mut query_with_inf = vec![0.1; 768];
+        query_with_inf[0] = f32::INFINITY;
+        let results = store.search(&query_with_inf, 10).unwrap();
+        assert!(!results.is_empty(), "Should return results even with Inf");
+        assert_eq!(results[0].score, 0.0, "Inf query should return 0.0 similarity");
+    }
 }

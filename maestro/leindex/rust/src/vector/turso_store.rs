@@ -982,4 +982,49 @@ mod tests {
         let count = store.vector_count().await.unwrap();
         assert_eq!(count, 1);
     }
+
+    // Task 7.6.26: Test NULL handling in optional fields
+    #[tokio::test]
+    async fn test_null_handling_in_optional_fields() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test_vectors.db");
+        let store = TursoVectorStore::new(Some(db_path)).await.unwrap();
+
+        let embedding = vec![0.1; 768];
+        let metadata = VectorMetadata::new("test.rs", 0);
+
+        // Store the vector
+        store
+            .add_vector("test content", embedding, metadata)
+            .await
+            .unwrap();
+
+        // Get all vectors and verify NULL fields are handled correctly
+        let vectors = store.get_all_vectors().await.unwrap();
+        assert_eq!(vectors.len(), 1);
+
+        let (_content, _embedding, retrieved_metadata) = &vectors[0];
+
+        // start_line and end_line should be None (NULL in database)
+        assert_eq!(retrieved_metadata.start_line, None);
+        assert_eq!(retrieved_metadata.end_line, None);
+
+        // Now test with explicit start_line/end_line values
+        let mut metadata_with_lines = VectorMetadata::new("test2.rs", 1);
+        metadata_with_lines.start_line = Some(10);
+        metadata_with_lines.end_line = Some(20);
+
+        store
+            .add_vector("test content 2", vec![0.2; 768], metadata_with_lines)
+            .await
+            .unwrap();
+
+        let vectors = store.get_all_vectors().await.unwrap();
+        assert_eq!(vectors.len(), 2);
+
+        // Second vector should have the line numbers
+        let (_content, _embedding, retrieved_metadata2) = &vectors[1];
+        assert_eq!(retrieved_metadata2.start_line, Some(10));
+        assert_eq!(retrieved_metadata2.end_line, Some(20));
+    }
 }

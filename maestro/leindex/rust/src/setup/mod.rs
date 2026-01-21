@@ -141,6 +141,15 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             dst_cmd.display()
                         ));
 
+                        // Skill pack (Agent Skills standard)
+                        let src_skill = repo_root.join("claude-code").join("skills").join("maestro");
+                        let dst_skill = home_dir()?.join(".claude").join("skills").join("maestro");
+                        copy_dir_recursive(&src_skill, &dst_skill)?;
+                        logs.push(format!(
+                            "Installed Claude Code skill to {}",
+                            dst_skill.display()
+                        ));
+
                         // Templates
                         let src_tpl = repo_root.join("claude-code").join("templates");
                         let dst_tpl = home_dir()?.join(".claude").join("maestro-templates");
@@ -193,6 +202,15 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         logs.push(format!(
                             "Installed Gemini custom commands to {}",
                             dst.display()
+                        ));
+
+                        // Skill pack (Agent Skills standard)
+                        let src_skill = repo_root.join("gemini-cli").join("skills").join("maestro");
+                        let dst_skill = home_dir()?.join(".gemini").join("skills").join("maestro");
+                        copy_dir_recursive(&src_skill, &dst_skill)?;
+                        logs.push(format!(
+                            "Installed Gemini skill to {}",
+                            dst_skill.display()
                         ));
 
                         // MCP server config in ~/.gemini/settings.json under mcpServers.leindex
@@ -348,6 +366,20 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     description: "Integrating Maestro into Amp CLI...".to_string(),
                     action: StepAction::Internal(Box::new(|| {
                         let mut logs = Vec::new();
+                        // Skill pack (Agent Skills standard) installed to user scope
+                        let repo_root = find_repo_root()?;
+                        let src_skill = repo_root.join("amp-cli").join("skills").join("maestro");
+                        let dst_skill = home_dir()?
+                            .join(".config")
+                            .join("agents")
+                            .join("skills")
+                            .join("maestro");
+                        copy_dir_recursive(&src_skill, &dst_skill)?;
+                        logs.push(format!(
+                            "Installed Amp skill to {}",
+                            dst_skill.display()
+                        ));
+
                         let cfg_path = home_dir()?
                             .join(".config")
                             .join("amp")
