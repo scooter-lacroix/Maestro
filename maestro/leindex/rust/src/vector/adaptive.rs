@@ -166,6 +166,63 @@ impl AdaptiveVectorStore {
         Ok(0)
     }
 
+    /// Add multiple vectors to the store in batch
+    pub async fn add_vectors(
+        &self,
+        items: Vec<(String, Vec<f32>, VectorMetadata)>,
+    ) -> Result<Vec<String>> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(anyhow::anyhow!("Cannot add vectors: store is shut down"));
+        }
+
+        // CRITICAL: Acquire read lock to prevent mode switch during operation
+        let _mode_lock = self.mode_switch_lock.read().await;
+
+        // Generate unified IDs for all (Task 7.6.12)
+        let mut items_with_ids = Vec::with_capacity(items.len());
+        let mut unified_ids = Vec::with_capacity(items.len());
+        
+        for (content, embedding, metadata) in items {
+            let unified_id = format!("vec_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+            unified_ids.push(unified_id.clone());
+            items_with_ids.push((unified_id, content, embedding, metadata));
+        }
+
+        // Always add to Turso for persistence (Task 7.6.29)
+        if let Some(ref turso) = self.turso {
+            turso.add_vectors_batch_with_ids(items_with_ids.clone()).await?;
+        }
+
+        // Add to active in-memory store in batch (Task 8.7)
+        match self.mode() {
+            StoreMode::Linear => {
+                let linear_guard = self.linear.read().await;
+                if let Some(ref linear) = *linear_guard {
+                    linear.add_vectors_batch_with_ids(items_with_ids)?;
+                }
+            }
+            StoreMode::Hnsw => {
+                let hnsw_guard = self.hnsw.read().await;
+                if let Some(ref hnsw) = *hnsw_guard {
+                    hnsw.add_vectors_batch_with_ids(items_with_ids)?;
+                }
+            }
+            StoreMode::Turso => {}
+        }
+
+        // Check if we need to switch modes
+        let count = self.vector_count().await?;
+        if self.mode() == StoreMode::Linear && count >= HNSW_SWITCH_UP_THRESHOLD {
+            info!(
+                "Vector count reached {}K, switching to HNSW mode",
+                count / 1000
+            );
+            self.switch_to_hnsw().await?;
+        }
+
+        Ok(unified_ids)
+    }
+
     /// Add a vector to the store
     pub async fn add_vector(
         &self,

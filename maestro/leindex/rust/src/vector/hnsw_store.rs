@@ -283,6 +283,133 @@ impl HnswVectorStore {
         Ok(external_id.to_string())
     }
 
+    /// Batch add vectors (optimized for bulk indexing using hnsw.insert_batch)
+    ///
+    /// CRITICAL: This uses hnsw.insert_batch() which is MUCH faster than individual inserts
+    /// by optimizing graph construction for bulk operations.
+    pub fn add_vectors_batch(
+        &self,
+        items: Vec<(String, Vec<f32>, VectorMetadata)>,
+    ) -> Result<Vec<String>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let items_count = items.len();
+
+        // Parallel validation
+        use rayon::prelude::*;
+        items.par_iter().try_for_each(|(_, embedding, metadata)| {
+            validate_embedding_dim(embedding)?;
+            validate_chunk_index(metadata.chunk_index)?;
+            validate_file_path(&metadata.file_path)?;
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        // Extract vectors for batch insert
+        let vectors: Vec<Vec<f32>> = items.iter()
+            .map(|(_, embedding, _)| embedding.clone())
+            .collect();
+
+        // OPTIMIZATION: Use hnsw.insert_batch() instead of loop
+        // This is CRITICAL for performance - batch insert optimizes graph construction
+        let internal_ids = {
+            let mut hnsw = self.hnsw.write()
+                .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            hnsw.insert_batch(vectors)
+        };
+
+        // Now store metadata with IDs (single write lock)
+        let mut id_map = self.id_to_data.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut meta = self.metadata.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
+        let mut external_ids = Vec::with_capacity(internal_ids.len());
+        for (i, (content, embedding, metadata)) in items.into_iter().enumerate() {
+            let internal_id = internal_ids[i];
+            let external_id = format!("vec_{}", internal_id);
+
+            id_map.insert(
+                internal_id,
+                VectorDataWithEmbedding {
+                    id: external_id.clone(),
+                    embedding,
+                    metadata,
+                    content: Some(content),
+                },
+            );
+
+            external_ids.push(external_id);
+        }
+
+        meta.vector_count += items_count;
+        meta.updated_at = chrono::Utc::now();
+
+        // Invalidate cache
+        let _ = self.cache.clear();
+
+        debug!("Added {} vectors to HNSW index (batch)", items_count);
+        Ok(external_ids)
+    }
+
+    /// Batch add vectors with pre-generated IDs (Task 7.6.12/29)
+    ///
+    /// NOTE: This is slower than add_vectors_batch() because it can't use hnsw.insert_batch()
+    /// due to the need to preserve specific external IDs. Uses individual inserts.
+    pub fn add_vectors_batch_with_ids(
+        &self,
+        items: Vec<(String, String, Vec<f32>, VectorMetadata)>,
+    ) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+
+        // Parallel validation
+        use rayon::prelude::*;
+        items.par_iter().try_for_each(|(id, _, embedding, metadata)| {
+            validate_vector_id(id)?;
+            validate_embedding_dim(embedding)?;
+            validate_chunk_index(metadata.chunk_index)?;
+            validate_file_path(&metadata.file_path)?;
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        let mut hnsw_guard = self.hnsw.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut id_map_guard = self.id_to_data.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut meta_guard = self.metadata.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
+        for (vector_id, content, embedding, metadata) in items {
+            // Insert into HNSW index - returns internal ID
+            let internal_id = hnsw_guard.insert(embedding.clone());
+
+            // Store metadata WITH embedding, using the provided external_id
+            id_map_guard.insert(
+                internal_id,
+                VectorDataWithEmbedding {
+                    id: vector_id,
+                    embedding,
+                    metadata,
+                    content: Some(content),
+                },
+            );
+
+            meta_guard.vector_count += 1;
+        }
+
+        meta_guard.updated_at = chrono::Utc::now();
+        let _ = self.cache.clear();
+
+        debug!(
+            "Added {} vectors to HNSW store in batch",
+            meta_guard.vector_count
+        );
+        Ok(())
+    }
+
     /// Search for similar vectors using HNSW
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);

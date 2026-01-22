@@ -240,6 +240,62 @@ impl VectorStore {
         Ok(vector_id.to_string())
     }
 
+    /// Batch add vectors with pre-generated IDs (Task 7.6.12/29)
+    pub fn add_vectors_batch_with_ids(
+        &self,
+        items: Vec<(String, String, Vec<f32>, VectorMetadata)>,
+    ) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+
+        // Parallel validation
+        use rayon::prelude::*;
+        items.par_iter().try_for_each(|(id, _, embedding, metadata)| {
+            validate_vector_id(id)?;
+            validate_embedding_dim(embedding)?;
+            validate_chunk_index(metadata.chunk_index)?;
+            validate_file_path(&metadata.file_path)?;
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        let mut vectors_guard = self.vectors.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        let mut meta_guard = self.metadata.write()
+            .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+
+        let mut added_count = 0;
+        for (vector_id, content, embedding, metadata) in items {
+            // Check for duplicate via content hash
+            let content_hash = VectorDeduplicator::hash_content(&content);
+            if let Some(existing_id) = self.deduplicator.get_vector_id(&content_hash)? {
+                self.deduplicator.add_reference(&existing_id)?;
+                continue;
+            }
+
+            let stored = StoredVector {
+                id: vector_id.clone(),
+                embedding,
+                metadata,
+                content: Some(content),
+            };
+
+            vectors_guard.insert(vector_id.clone(), stored);
+            self.deduplicator.register(content_hash, vector_id)?;
+            added_count += 1;
+        }
+
+        meta_guard.vector_count += added_count;
+        meta_guard.updated_at = chrono::Utc::now();
+        let _ = self.cache.clear();
+
+        debug!(
+            "Added {} vectors to Linear store in batch",
+            added_count
+        );
+        Ok(())
+    }
+
     /// Search for similar vectors
     pub fn search(&self, query_embedding: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         let top_k = top_k.min(MAX_TOP_K);

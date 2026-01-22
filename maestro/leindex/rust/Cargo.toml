@@ -99,6 +99,7 @@ libc = "0.2"
 walkdir = "2"
 regex = "1"
 tempfile = "3.8"  # Secure temporary file creation for atomic writes
+base64 = "0.22"  # For libsql vector extension encoding
 
 # Full-text search (preserves existing Tantivy capability)
 tantivy = "0.22"

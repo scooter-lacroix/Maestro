@@ -10,7 +10,56 @@ use tracing::{info, warn};
 use super::metadata::ChunkType;
 
 /// Current migration version
-pub const CURRENT_MIGRATION_VERSION: i32 = 1;
+pub const CURRENT_MIGRATION_VERSION: i32 = 2;
+
+/// Run all pending migrations
+pub async fn run_migrations(database: &libsql::Database) -> Result<bool> {
+    let conn = database.connect().context("Failed to get connection for migration check")?;
+
+    // Check if this is an in-memory database - if so, skip migrations
+    // In-memory databases are created fresh each time with the correct schema
+    let is_in_memory = {
+        let mut db_check = conn
+            .prepare("PRAGMA database_list")
+            .await
+            .context("Failed to prepare database list check")?
+            .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+            .await
+            .context("Failed to execute database list check")?;
+
+        let mut in_memory = false;
+        while let Some(row) = db_check.next().await? {
+            let name: String = row.get(1).unwrap_or_default();
+            let file: String = row.get(2).unwrap_or_default();
+            // Check for in-memory indicators: empty file, contains :memory:, or starts with file::
+            if name == "main" && (file.is_empty() || file.contains(":memory:") || file.starts_with("file::")) {
+                in_memory = true;
+                info!("Detected in-memory database (file={:?}), skipping migrations", file);
+                break;
+            }
+        }
+        // db_check cursor is dropped here, releasing lock
+        in_memory
+    };
+
+    if is_in_memory {
+        return Ok(false);
+    }
+
+    let mut applied = false;
+
+    // Migration v1: chunk_type TEXT -> INTEGER
+    if migrate_chunk_type_to_integer(database).await? {
+        applied = true;
+    }
+
+    // Migration v2: Add embedding_vector column and DiskANN index
+    if migrate_add_embedding_vector_column(database).await? {
+        applied = true;
+    }
+
+    Ok(applied)
+}
 
 /// Migrate chunk_type column from TEXT to INTEGER (Task 7.6.10)
 ///
@@ -202,6 +251,127 @@ pub async fn migrate_chunk_type_to_integer(database: &Database) -> Result<bool> 
     Ok(true)
 }
 
+/// Migration v2: Add embedding_vector column and DiskANN index
+pub async fn migrate_add_embedding_vector_column(database: &libsql::Database) -> Result<bool> {
+    let conn = database
+        .connect()
+        .context("Failed to get connection for migration v2")?;
+
+    // Step 1: Check migration version
+    let migration_version = check_migration_version(&conn).await?;
+    if migration_version >= 2 {
+        return Ok(false);
+    }
+
+    info!("Starting migration v2: Add embedding_vector column and DiskANN index");
+
+    // Step 2: Check if column already exists
+    // CRITICAL: Wrap in block to ensure rows cursor is dropped before backfill
+    // to prevent SQLite lock contention
+    let column_exists = {
+        let mut rows = conn
+            .prepare("PRAGMA table_info(vectors)")
+            .await
+            .context("Failed to prepare table_info query")?
+            .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+            .await
+            .context("Failed to execute table_info query")?;
+
+        let mut exists = false;
+        while let Some(row) = rows.next().await? {
+            let name: String = row.get(1)?;
+            if name == "embedding_vector" {
+                exists = true;
+                break;
+            }
+        }
+        // rows is dropped here, releasing any database lock
+        exists
+    };
+
+    if !column_exists {
+        // Add column
+        conn.execute(
+            "ALTER TABLE vectors ADD COLUMN embedding_vector BLOB",
+            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+        )
+        .await
+        .context("Failed to add embedding_vector column")?;
+        info!("Added embedding_vector BLOB column to vectors table");
+    }
+
+    // Step 3: Backfill data
+    let backfilled = backfill_embedding_vectors(database).await?;
+    info!("Backfilled {} vectors with base64 embeddings", backfilled);
+
+    // Step 4: Create DiskANN index
+    // Note: We use execute instead of a prepared statement because 'USING' might 
+    // be rejected by some parsers if not supported, but we want to try it.
+    let result = conn.execute(
+        "CREATE INDEX IF NOT EXISTS vectors_diskann_idx ON vectors USING libsql_vector_idx(embedding_vector)",
+        libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+    ).await;
+
+    match result {
+        Ok(_) => info!("Successfully created DiskANN index: vectors_diskann_idx"),
+        Err(e) => {
+            warn!("Could not create DiskANN index (this is expected if vector extension is not loaded): {}", e);
+            // We don't fail the migration because we want search to still work with fallback
+        }
+    }
+
+    // Step 5: Update migration version
+    update_migration_version(&conn, 2).await?;
+
+    info!("Migration v2 completed successfully");
+    Ok(true)
+}
+
+/// Migration: backfill embedding_vector column for existing rows
+pub async fn backfill_embedding_vectors(database: &libsql::Database) -> Result<usize> {
+    let conn = database.connect()
+        .context("Failed to get connection for backfill")?;
+
+    // Get all vectors without embedding_vector
+    let stmt = conn.prepare(
+        "SELECT id, embedding FROM vectors WHERE embedding_vector IS NULL"
+    ).await.context("Failed to prepare backfill query")?;
+
+    let mut rows = stmt.query(libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await?;
+    let mut migrated = 0;
+
+    // Use a transaction for efficiency if there are many rows
+    conn.execute("BEGIN TRANSACTION", libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await?;
+
+    while let Some(row) = rows.next().await? {
+        let id: i64 = row.get(0)?;
+        let embedding_json: String = row.get(1)?;
+
+        let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
+            .context("Failed to parse embedding JSON for backfill")?;
+        
+        // PERF: Store raw bytes in BLOB (Task 8.7)
+        let mut embedding_bytes = Vec::with_capacity(embedding.len() * 4);
+        for &f in &embedding {
+            embedding_bytes.extend_from_slice(&f.to_le_bytes());
+        }
+
+        conn.execute(
+            "UPDATE vectors SET embedding_vector = ?1 WHERE id = ?2",
+            libsql::params_from_iter([
+                libsql::Value::Blob(embedding_bytes),
+                libsql::Value::Integer(id),
+            ].into_iter())
+        ).await.context("Failed to update row during backfill")?;
+
+        migrated += 1;
+    }
+
+    conn.execute("COMMIT", libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await?;
+
+    Ok(migrated)
+}
+
 /// Convert TEXT representation of ChunkType to enum variant
 ///
 /// Handles various string formats (lowercase, uppercase, with underscores, etc.)
@@ -225,6 +395,7 @@ fn chunk_type_from_text(text: &str) -> ChunkType {
 
 /// Check if chunk_type column is TEXT type
 async fn check_chunk_type_is_text(conn: &libsql::Connection) -> Result<bool> {
+    // CRITICAL: Ensure cursor is fully consumed to avoid lock contention
     let mut rows = conn
         .prepare("PRAGMA table_info(vectors)")
         .await
@@ -233,17 +404,18 @@ async fn check_chunk_type_is_text(conn: &libsql::Connection) -> Result<bool> {
         .await
         .context("Failed to execute table_info query")?;
 
+    let mut is_text = true; // Default to TEXT if column not found
     while let Some(row) = rows.next().await? {
         let name: String = row.get(1)?;
         if name == "chunk_type" {
             let typ: String = row.get(2)?;
             // In SQLite, TEXT type may be reported as "TEXT" or contain "TEXT"
-            return Ok(typ == "TEXT" || typ.contains("TEXT"));
+            is_text = typ == "TEXT" || typ.contains("TEXT");
+            break;
         }
     }
-
-    // If column not found, assume old schema (TEXT)
-    Ok(true)
+    // rows is fully consumed here, releasing the lock
+    Ok(is_text)
 }
 
 /// Check current migration version

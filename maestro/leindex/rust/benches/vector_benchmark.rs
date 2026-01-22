@@ -22,17 +22,40 @@ use leindex_analyzers::vector::{
 
 /// Vector sizes to benchmark (number of vectors in index)
 ///
-/// Granular sizes between 50K-100K are critical for determining the TRUE Linear vs HNSW crossover point.
-/// The previous 90K threshold was based on FLAWED benchmarks (measuring cache hits, not search performance).
+/// **CRITICAL FIX:** Cap at 50k to prevent OOM crashes and excessive runtime.
+/// Previous sizes of 300k/500k caused:
+/// - ~1.4GB raw data per dataset (768 dims * 4 bytes * 500k)
+/// - Dataset duplication in Turso bench (~3GB memory)
+/// - O(N) full scans in Turso (500k rows * JSON parse per query)
+/// - 10+ minute runtimes leading to crashes
+///
+/// Granular sizes between 10K-50K are sufficient for determining Linear vs HNSW crossover.
+/// For larger scale testing, use environment variable `BENCHMARK_LARGE_SCALE=1`.
 const VECTOR_SIZES: &[usize] = &[
     100, 500, 1_000, 5_000, 10_000,
     // Granular range for crossover point determination:
-    50_000, 55_000, 60_000, 65_000, 70_000, 75_000, 80_000, 85_000, 90_000, 95_000, 100_000,
-    300_000, 500_000,
+    20_000, 30_000, 40_000, 50_000,
+];
+
+/// Large scale sizes (only enabled via BENCHMARK_LARGE_SCALE=1)
+/// These require significant memory and time - use only for intentional scale testing.
+const VECTOR_SIZES_LARGE: &[usize] = &[
+    100_000, 200_000, 300_000, 500_000,
 ];
 
 /// K values for top-k search
 const K_VALUES: &[usize] = &[5, 10, 20, 50, 100];
+
+/// Get vector sizes based on environment configuration
+///
+/// Returns default VECTOR_SIZES, or includes LARGE_SIZES if BENCHMARK_LARGE_SCALE=1.
+fn get_vector_sizes() -> &'static [usize] {
+    if std::env::var("BENCHMARK_LARGE_SCALE").is_ok() {
+        VECTOR_SIZES_LARGE
+    } else {
+        VECTOR_SIZES
+    }
+}
 
 /// Generate synthetic code search dataset
 ///
@@ -252,15 +275,10 @@ fn bench_turso_vector_store(c: &mut Criterion) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let store = rt.block_on(TursoVectorStore::new(Some(db_path))).unwrap();
 
-        // Populate the store
+        // Populate the store using batch insert for performance (Task 8.7)
         let dataset = generate_code_dataset(size);
         rt.block_on(async {
-            for (content, embedding, metadata) in &dataset {
-                store
-                    .add_vector(content, embedding.clone(), metadata.clone())
-                    .await
-                    .unwrap();
-            }
+            store.add_vectors_batch(dataset.clone()).await.unwrap();
         });
 
         // Benchmark search with k=10

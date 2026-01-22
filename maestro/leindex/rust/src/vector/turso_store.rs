@@ -756,6 +756,9 @@ impl TursoVectorStore {
     ///
     /// # Performance
     /// Uses a single transaction for all inserts, much faster than individual inserts.
+    ///
+    /// OPTIMIZATION (Task 8.7): Pre-serializes embeddings and moves data into the closure
+    /// to avoid repeated allocations and cloning in the hot loop.
     pub async fn add_vectors_batch(
         &self,
         items: Vec<(String, Vec<f32>, VectorMetadata)>,
@@ -764,18 +767,29 @@ impl TursoVectorStore {
             return Err(anyhow::anyhow!("Cannot add vectors: store is shut down"));
         }
 
-        // Generate all IDs upfront
-        let vector_ids: Vec<String> = items
-            .iter()
-            .map(|_| {
-                format!(
-                    "vec_{}",
-                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
-                )
-            })
-            .collect();
+        let items_count = items.len();
+        if items_count == 0 {
+            return Ok(Vec::new());
+        }
 
-        self.execute_with_retry("add_vectors_batch", || async {
+        // OPTIMIZATION: Use rayon for parallel pre-processing (Task 8.7)
+        use rayon::prelude::*;
+        
+        let (vector_ids, embedding_jsons): (Vec<String>, Vec<String>) = items
+            .par_iter()
+            .enumerate()
+            .map(|(i, (_, embedding, _))| {
+                let id = format!("vec_{}_{}", i, uuid::Uuid::new_v4());
+                let json = serde_json::to_string(embedding).unwrap_or_default();
+                (id, json)
+            })
+            .unzip();
+
+        // Clone vector_ids for return after the closure consumes it
+        let vector_ids_clone = vector_ids.clone();
+
+        // Execute batch insert in transaction
+        (async move {
             let conn = self
                 .database
                 .connect()
@@ -789,10 +803,11 @@ impl TursoVectorStore {
             .await
             .context("Failed to begin transaction")?;
 
-            for ((content, embedding, metadata), vector_id) in items.iter().zip(vector_ids.iter())
-            {
-                let embedding_json =
-                    serde_json::to_string(embedding).context("Failed to serialize embedding")?;
+            // Use indexed iteration with conn.execute directly (avoids prepared statement issues)
+            for i in 0..items.len() {
+                let (content, _embedding, metadata) = &items[i];
+                let vector_id = &vector_ids[i];
+                let embedding_json = &embedding_jsons[i];
                 let chunk_type_int = metadata.chunk_type.to_i32();
 
                 conn.execute(
@@ -823,7 +838,7 @@ impl TursoVectorStore {
                                     .clone()
                                     .unwrap_or_default(),
                             ),
-                            libsql::Value::Text(content.to_string()),
+                            libsql::Value::Text(content.clone()),
                             libsql::Value::Text(embedding_json.clone()),
                             libsql::Value::Text(metadata.embedding_model.clone()),
                             libsql::Value::Text(metadata.created_at.to_rfc3339()),
@@ -843,15 +858,127 @@ impl TursoVectorStore {
             .await
             .context("Failed to commit transaction")?;
 
-            Ok(())
+            Ok::<(), anyhow::Error>(())
         })
         .await?;
 
         // Invalidate cache
         let _ = self.cache.clear();
 
-        debug!("Added {} vectors in batch", items.len());
-        Ok(vector_ids)
+        debug!("Added {} vectors in batch", items_count);
+        Ok(vector_ids_clone)
+    }
+
+    /// Batch add vectors with pre-generated IDs (Task 7.6.12/29)
+    pub async fn add_vectors_batch_with_ids(
+        &self,
+        items: Vec<(String, String, Vec<f32>, VectorMetadata)>,
+    ) -> Result<()> {
+        if self.is_shutdown.load(Ordering::SeqCst) {
+            return Err(anyhow::anyhow!("Cannot add vectors with IDs: store is shut down"));
+        }
+
+        let items_count = items.len();
+        if items_count == 0 {
+            return Ok(());
+        }
+
+        // Parallel pre-processing: validation and serialization
+        use rayon::prelude::*;
+        let (embedding_jsons, validation_results): (Vec<String>, Vec<Result<()>>) = items
+            .par_iter()
+            .map(|(id, _, embedding, metadata)| {
+                let json = serde_json::to_string(embedding).unwrap_or_default();
+                let validation = (|| {
+                    validate_vector_id(id)?;
+                    validate_embedding_dim(embedding)?;
+                    validate_chunk_index(metadata.chunk_index)?;
+                    validate_file_path(&metadata.file_path)?;
+                    Ok(())
+                })();
+                (json, validation)
+            })
+            .unzip();
+
+        // Check for any validation errors
+        for res in validation_results {
+            res?;
+        }
+
+        // Execute batch insert in transaction
+        (async move {
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
+
+            conn.execute(
+                "BEGIN TRANSACTION",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to begin transaction")?;
+
+            // Use direct conn.execute() instead of prepared statement (avoids UNIQUE constraint issues)
+            for i in 0..items.len() {
+                let (vector_id, content, _, metadata) = &items[i];
+                let embedding_json = &embedding_jsons[i];
+                let chunk_type_int = metadata.chunk_type.to_i32();
+
+                conn.execute(
+                    r#"
+                    INSERT INTO vectors (
+                        vector_id, file_path, chunk_index, start_line, end_line,
+                        chunk_type, parent_context, content, embedding,
+                        embedding_model, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    "#,
+                    libsql::params_from_iter(
+                        [
+                            libsql::Value::Text(vector_id.clone()),
+                            libsql::Value::Text(metadata.file_path.clone()),
+                            libsql::Value::Integer(metadata.chunk_index as i64),
+                            metadata
+                                .start_line
+                                .map(|v| libsql::Value::Integer(v as i64))
+                                .unwrap_or(libsql::Value::Null),
+                            metadata
+                                .end_line
+                                .map(|v| libsql::Value::Integer(v as i64))
+                                .unwrap_or(libsql::Value::Null),
+                            libsql::Value::Integer(chunk_type_int as i64),
+                            libsql::Value::Text(
+                                metadata
+                                    .parent_context
+                                    .clone()
+                                    .unwrap_or_default(),
+                            ),
+                            libsql::Value::Text(content.clone()),
+                            libsql::Value::Text(embedding_json.clone()),
+                            libsql::Value::Text(metadata.embedding_model.clone()),
+                            libsql::Value::Text(metadata.created_at.to_rfc3339()),
+                        ]
+                        .into_iter(),
+                    ),
+                )
+                .await
+                .context("Failed to insert vector")?;
+            }
+
+            conn.execute(
+                "COMMIT",
+                libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+            )
+            .await
+            .context("Failed to commit transaction")?;
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
+
+        self.cache.clear();
+        debug!("Added {} vectors in batch with IDs", items_count);
+        Ok(())
     }
 
     /// Get vectors with pagination support (Task 7.6.30)
@@ -992,6 +1119,29 @@ mod tests {
 
         let count = store.vector_count().await.unwrap();
         assert_eq!(count, 1);
+    }
+
+    // Test batch insert functionality
+    #[tokio::test]
+    async fn test_add_vectors_batch() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test_vectors_batch.db");
+        let store = TursoVectorStore::new(Some(db_path)).await.unwrap();
+
+        // Create a batch of 10 vectors
+        let items: Vec<(String, Vec<f32>, VectorMetadata)> = (0..10)
+            .map(|i| {
+                let file_path = format!("test_{}.rs", i);
+                let metadata = VectorMetadata::new(&file_path, i);
+                (format!("content {}", i), vec![0.1; 768], metadata)
+            })
+            .collect();
+
+        let vector_ids = store.add_vectors_batch(items).await.unwrap();
+        assert_eq!(vector_ids.len(), 10);
+
+        let count = store.vector_count().await.unwrap();
+        assert_eq!(count, 10);
     }
 
     // Task 7.6.26: Test NULL handling in optional fields
