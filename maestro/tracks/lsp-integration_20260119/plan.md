@@ -1172,12 +1172,13 @@ Create comprehensive documentation and refine the implementation based on testin
   - Document LSP lifecycle
   - **Commit:** `docs(lsp): write LSP integration documentation`
 
-- [ ] **Task 9.2:** Write Turso migration documentation
-  - Document migration process
-  - Document schema changes
-  - Document rollback procedure
-  - Document troubleshooting
-  - **Commit:** `docs(storage): write Turso migration documentation`
+- [ ] **Task 9.2:** Write adaptive vector store documentation
+  - Document Linear + HNSW + Turso adaptive architecture
+  - Document auto-switching logic and thresholds (90K vector crossover)
+  - Document mode switch migration via Turso persistence layer
+  - Document when each store is used and performance characteristics
+  - Document batch insert APIs for all three stores
+  - **Commit:** `docs(vector): write adaptive vector store documentation`
 
 - [ ] **Task 9.3:** Write TUI user guide
   - Document LSPs tab usage
