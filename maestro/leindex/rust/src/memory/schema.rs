@@ -231,4 +231,27 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         CREATE INDEX IF NOT EXISTS idx_sessions_group_sort ON sessions(group_path, sort_order);
     "#,
     ),
+    (
+        "008_lsp_servers_table",
+        r#"
+        CREATE TABLE IF NOT EXISTS lsp_servers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            language TEXT NOT NULL,
+            lsp_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'stopped',
+            pid INTEGER,
+            port INTEGER,
+            auto_start INTEGER DEFAULT 1,
+            use_proxy INTEGER NOT NULL DEFAULT 0,
+            last_started TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            updated_at TEXT,
+            UNIQUE(session_id, lsp_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_lsp_session ON lsp_servers(session_id);
+        CREATE INDEX IF NOT EXISTS idx_lsp_status ON lsp_servers(status);
+    "#,
+    ),
 ];

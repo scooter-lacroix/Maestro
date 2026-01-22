@@ -6,6 +6,47 @@
 //! - Turso backup: Provides persistence and recovery
 //!
 //! All implementations use SIMD-accelerated cosine similarity.
+//!
+//! ## Vector ID Preservation
+//!
+//! **Critical:** The adaptive store maintains unified vector IDs across all backends
+//! (Turso, Linear, HNSW) to ensure consistency during mode switches.
+//!
+//! ### ID Generation
+//!
+//! When a vector is added via `add_vector()` or `add_vectors()`:
+//! 1. A unified UUID is generated: `format!("vec_{}", uuid::Uuid::new_v4())`
+//! 2. The vector is stored in Turso with this ID (persistent layer)
+//! 3. The vector is stored in the active in-memory backend with the same ID
+//!
+//! ### Mode Switch Behavior
+//!
+//! When crossing the 90K vector threshold, mode switches occur automatically:
+//!
+//! - **Linear → HNSW** (at 90K vectors):
+//!   - All vectors are migrated from Turso to a new HNSW store
+//!   - Original IDs are preserved via `get_all_vectors_with_ids()` + `add_vector_with_id()`
+//!   - No ID regeneration occurs
+//!
+//! - **HNSW → Linear** (when dropping below 80K vectors):
+//!   - All vectors are migrated from Turso to a new Linear store
+//!   - Original IDs are preserved via the same mechanism
+//!   - No ID regeneration occurs
+//!
+//! ### Why ID Preservation Matters
+//!
+//! - **Search Results:** Clients may cache vector IDs for referencing
+//! - **Deduplication:** Same content should always have the same ID
+//! - **Consistency:** Mode switches should be transparent to users
+//! - **Debugging:** Stable IDs make tracing issues easier
+//!
+//! ### Implementation Notes
+//!
+//! - The `TursoVectorStore::get_all_vectors_with_ids()` method returns vectors with
+//!   their original IDs from the database.
+//! - Both `VectorStore::add_vector_with_id()` and `HnswVectorStore::add_vector_with_id()`
+//!   accept predefined IDs instead of generating new ones.
+//! - Mode switches are protected by `mode_switch_lock` to prevent concurrent switches.
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -399,11 +440,12 @@ impl AdaptiveVectorStore {
 
         // CRITICAL: Proper data migration via Turso (the common persistence layer)
         // All vectors are in Turso because add_vector always adds to Turso
+        // CRITICAL: Preserve unified vector IDs during mode switch (Task 10.1)
         if let Some(ref turso) = self.turso {
             info!("Migrating data from Turso to new HNSW store...");
 
             let all_vectors = turso
-                .get_all_vectors()
+                .get_all_vectors_with_ids()
                 .await
                 .context("Failed to get all vectors from Turso for migration")?;
 
@@ -414,9 +456,9 @@ impl AdaptiveVectorStore {
                 vector_count
             );
 
-            for (content, embedding, metadata) in all_vectors {
+            for (content, embedding, metadata, vector_id) in all_vectors {
                 new_hnsw_store
-                    .add_vector(&content, embedding, metadata)
+                    .add_vector_with_id(&vector_id, &content, embedding, metadata)
                     .context("Failed to add vector to HNSW store during migration")?;
             }
 
@@ -473,11 +515,12 @@ impl AdaptiveVectorStore {
 
         // CRITICAL: Proper data migration via Turso (the common persistence layer)
         // All vectors are in Turso because add_vector always adds to Turso
+        // CRITICAL: Preserve unified vector IDs during mode switch (Task 10.1)
         if let Some(ref turso) = self.turso {
             info!("Migrating data from Turso to new Linear store...");
 
             let all_vectors = turso
-                .get_all_vectors()
+                .get_all_vectors_with_ids()
                 .await
                 .context("Failed to get all vectors from Turso for migration")?;
 
@@ -488,9 +531,9 @@ impl AdaptiveVectorStore {
                 vector_count
             );
 
-            for (content, embedding, metadata) in all_vectors {
+            for (content, embedding, metadata, vector_id) in all_vectors {
                 new_linear_store
-                    .add_vector(&content, embedding, metadata)
+                    .add_vector_with_id(&vector_id, &content, embedding, metadata)
                     .context("Failed to add vector to Linear store during migration")?;
             }
 
@@ -588,6 +631,11 @@ impl AdaptiveVectorStore {
         Ok(())
     }
 }
+
+// Task 10.1: Note on Drop implementation
+// We do NOT implement Drop here because calling async shutdown from Drop
+// causes issues with tokio runtime during test cleanup.
+// Instead, rely on resources being dropped naturally via RAII.
 
 #[cfg(test)]
 mod tests {

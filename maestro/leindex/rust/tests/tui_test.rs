@@ -144,6 +144,7 @@ async fn test_lsp_state_transitions_for_tui() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: None,
         last_error: None,
         created_at: Utc::now().to_rfc3339(),
@@ -194,7 +195,8 @@ async fn test_lsp_state_transitions_for_tui() {
     let stopped_state = LspServerState {
         status: LspStatus::Stopped,
         pid: None,
-        auto_start: false,  // User disabled auto-start
+        auto_start: false,
+        use_proxy: false,  // User disabled auto-start
         ..error_state
     };
     storage.upsert_lsp_state(&stopped_state).await.unwrap();
@@ -235,6 +237,7 @@ async fn test_lsp_tab_data_structure() {
                 pid: if i % 2 == 0 { Some(10000 + i as i64) } else { None },
                 port: None,
                 auto_start: true,
+                use_proxy: false,
                 last_started: if i % 2 == 0 { Some(Utc::now().to_rfc3339()) } else { None },
                 last_error: None,
                 created_at: Utc::now().to_rfc3339(),
@@ -294,6 +297,7 @@ async fn test_lsp_autostart_flag_for_tui() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: None,
         last_error: None,
         created_at: Utc::now().to_rfc3339(),
@@ -304,6 +308,7 @@ async fn test_lsp_autostart_flag_for_tui() {
     // TUI "Disable Auto-Start" action
     let auto_off_state = LspServerState {
         auto_start: false,
+        use_proxy: false,
         ..auto_on_state
     };
     storage.upsert_lsp_state(&auto_off_state).await.unwrap();
@@ -315,6 +320,7 @@ async fn test_lsp_autostart_flag_for_tui() {
     // TUI "Enable Auto-Start" action
     let reenabled_state = LspServerState {
         auto_start: true,
+        use_proxy: false,
         ..retrieved
     };
     storage.upsert_lsp_state(&reenabled_state).await.unwrap();
@@ -346,6 +352,7 @@ async fn test_lsp_error_display_for_tui() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: Some(Utc::now().to_rfc3339()),
         last_error: Some("Failed to start: binary not found in PATH".to_string()),
         created_at: Utc::now().to_rfc3339(),
@@ -458,6 +465,7 @@ async fn test_session_lsp_count_for_tui() {
             pid: Some(10000),
             port: None,
             auto_start: true,
+        use_proxy: false,
             last_started: Some(Utc::now().to_rfc3339()),
             last_error: None,
             created_at: Utc::now().to_rfc3339(),
@@ -476,6 +484,7 @@ async fn test_session_lsp_count_for_tui() {
         pid: Some(10001),
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: Some(Utc::now().to_rfc3339()),
         last_error: None,
         created_at: Utc::now().to_rfc3339(),
@@ -524,6 +533,7 @@ async fn test_tui_lsp_refresh_logic() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: Some(Utc::now().to_rfc3339()),
         last_error: None,
         created_at: Utc::now().to_rfc3339(),
@@ -541,6 +551,7 @@ async fn test_tui_lsp_refresh_logic() {
         pid: Some(54321),
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: Some(Utc::now().to_rfc3339()),
         last_error: None,
         created_at: Utc::now().to_rfc3339(),
@@ -584,6 +595,7 @@ async fn test_tui_lsp_control_actions() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: Some(Utc::now().to_rfc3339()),
         last_error: Some("Process crashed unexpectedly".to_string()),
         created_at: Utc::now().to_rfc3339(),
@@ -645,6 +657,7 @@ async fn test_tui_lsp_log_data() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: Some(Utc::now().to_rfc3339()),
         last_error: Some("[ERROR] Failed to connect to LSP: Connection refused".to_string()),
         created_at: Utc::now().to_rfc3339(),
@@ -707,6 +720,7 @@ async fn test_tui_multi_language_session_display() {
             pid: Some(10000),
             port: None,
             auto_start: true,
+        use_proxy: false,
             last_started: Some(Utc::now().to_rfc3339()),
             last_error: None,
             created_at: Utc::now().to_rfc3339(),

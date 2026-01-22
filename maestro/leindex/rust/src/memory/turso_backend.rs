@@ -125,6 +125,7 @@ pub struct LspServerState {
     pub pid: Option<i64>,
     pub port: Option<i64>,
     pub auto_start: bool,
+    pub use_proxy: bool,
     pub last_started: Option<String>,
     pub last_error: Option<String>,
     pub created_at: String,
@@ -1692,13 +1693,14 @@ impl TursoStorageBackend {
             Box::pin(async move {
                 let sql = r#"
                 INSERT INTO lsp_servers (session_id, language, lsp_name, status, pid, port,
-                                       auto_start, last_started, last_error, created_at, updated_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                                       auto_start, use_proxy, last_started, last_error, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 ON CONFLICT(session_id, lsp_name) DO UPDATE SET
                     status = excluded.status,
                     pid = excluded.pid,
                     port = excluded.port,
                     auto_start = excluded.auto_start,
+                    use_proxy = excluded.use_proxy,
                     last_started = excluded.last_started,
                     last_error = excluded.last_error,
                     updated_at = excluded.updated_at
@@ -1723,6 +1725,7 @@ impl TursoStorageBackend {
                             .map(libsql::Value::Integer)
                             .unwrap_or(libsql::Value::Null),
                         libsql::Value::Integer(if state.auto_start { 1 } else { 0 }),
+                        libsql::Value::Integer(if state.use_proxy { 1 } else { 0 }),
                         state
                             .last_started
                             .map(libsql::Value::Text)
@@ -1773,7 +1776,7 @@ impl TursoStorageBackend {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
-                       auto_start, last_started, last_error, created_at, updated_at
+                       auto_start, use_proxy, last_started, last_error, created_at, updated_at
                 FROM lsp_servers
                 WHERE session_id = ? AND lsp_name = ?
                 "#;
@@ -1800,10 +1803,11 @@ impl TursoStorageBackend {
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
-                        last_started: row.get::<Option<String>>(8)?,
-                        last_error: row.get::<Option<String>>(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get::<Option<String>>(11)?,
+                        use_proxy: row.get::<i32>(8)? == 1, // Column 8 is use_proxy
+                        last_started: row.get::<Option<String>>(9)?,
+                        last_error: row.get::<Option<String>>(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get::<Option<String>>(12)?,
                     }))
                 } else {
                     Ok(None)
@@ -1828,7 +1832,7 @@ impl TursoStorageBackend {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
-                       auto_start, last_started, last_error, created_at, updated_at
+                       auto_start, use_proxy, last_started, last_error, created_at, updated_at
                 FROM lsp_servers
                 WHERE session_id = ?
                 ORDER BY lsp_name
@@ -1854,10 +1858,11 @@ impl TursoStorageBackend {
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
-                        last_started: row.get::<Option<String>>(8)?,
-                        last_error: row.get::<Option<String>>(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get::<Option<String>>(11)?,
+                        use_proxy: row.get::<i32>(8)? == 1,
+                        last_started: row.get::<Option<String>>(9)?,
+                        last_error: row.get::<Option<String>>(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get::<Option<String>>(12)?,
                     });
                 }
 
@@ -1915,7 +1920,7 @@ impl TursoStorageBackend {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
-                       auto_start, last_started, last_error, created_at, updated_at
+                       auto_start, use_proxy, last_started, last_error, created_at, updated_at
                 FROM lsp_servers
                 WHERE status = ?
                 ORDER BY session_id, lsp_name
@@ -1941,10 +1946,11 @@ impl TursoStorageBackend {
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
-                        last_started: row.get::<Option<String>>(8)?,
-                        last_error: row.get::<Option<String>>(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get::<Option<String>>(11)?,
+                        use_proxy: row.get::<i32>(8)? == 1,
+                        last_started: row.get::<Option<String>>(9)?,
+                        last_error: row.get::<Option<String>>(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get::<Option<String>>(12)?,
                     });
                 }
 
@@ -1971,7 +1977,7 @@ impl TursoStorageBackend {
             Box::pin(async move {
                 let sql = r#"
                 SELECT id, session_id, language, lsp_name, status, pid, port,
-                       auto_start, last_started, last_error, created_at, updated_at
+                       auto_start, use_proxy, last_started, last_error, created_at, updated_at
                 FROM lsp_servers
                 WHERE auto_start = ?
                 ORDER BY session_id, lsp_name
@@ -1999,10 +2005,11 @@ impl TursoStorageBackend {
                         pid: row.get::<Option<i64>>(5)?,
                         port: row.get::<Option<i64>>(6)?,
                         auto_start: row.get::<i32>(7)? == 1,
-                        last_started: row.get::<Option<String>>(8)?,
-                        last_error: row.get::<Option<String>>(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get::<Option<String>>(11)?,
+                        use_proxy: row.get::<i32>(8)? == 1,
+                        last_started: row.get::<Option<String>>(9)?,
+                        last_error: row.get::<Option<String>>(10)?,
+                        created_at: row.get(11)?,
+                        updated_at: row.get::<Option<String>>(12)?,
                     });
                 }
 
@@ -2012,6 +2019,11 @@ impl TursoStorageBackend {
         .await
     }
 }
+
+// Task 10.1: Note on Drop implementation
+// We do NOT implement Drop here because calling async shutdown from Drop
+// causes issues with tokio runtime during test cleanup.
+// Instead, rely on resources being dropped naturally via RAII.
 
 // ============================================================================
 // FTS5 Result Types
@@ -2214,6 +2226,7 @@ CREATE TABLE IF NOT EXISTS lsp_servers (
     pid INTEGER,
     port INTEGER,
     auto_start INTEGER DEFAULT 1,
+    use_proxy INTEGER DEFAULT 0,
     last_started TEXT,
     last_error TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -2899,6 +2912,7 @@ mod tests {
             pid: Some(12345),
             port: None,
             auto_start: true,
+            use_proxy: false,
             last_started: Some(chrono::Utc::now().to_rfc3339()),
             last_error: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -2932,6 +2946,7 @@ mod tests {
             pid: Some(12345),
             port: None,
             auto_start: true,
+            use_proxy: false,
             last_started: Some(chrono::Utc::now().to_rfc3339()),
             last_error: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -2975,6 +2990,7 @@ mod tests {
             pid: Some(12345),
             port: None,
             auto_start: true,
+            use_proxy: false,
             last_started: Some(chrono::Utc::now().to_rfc3339()),
             last_error: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -3027,6 +3043,7 @@ mod tests {
             pid: Some(12345),
             port: None,
             auto_start: true,
+            use_proxy: false,
             last_started: Some(chrono::Utc::now().to_rfc3339()),
             last_error: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -3077,6 +3094,7 @@ mod tests {
                 pid: Some(12345 + i as i64),
                 port: None,
                 auto_start: true,
+                use_proxy: false,
                 last_started: Some(chrono::Utc::now().to_rfc3339()),
                 last_error: None,
                 created_at: chrono::Utc::now().to_rfc3339(),

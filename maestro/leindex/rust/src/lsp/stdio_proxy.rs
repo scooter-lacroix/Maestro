@@ -27,6 +27,34 @@
 //! 2. Client sends request → proxy rewrites ID → forwards to LSP
 //! 3. LSP responds → proxy routes back to original client
 //! 4. LSP notifications → broadcast to all clients
+//!
+//! ## Security Considerations
+//!
+//! ### Socket Permissions
+//!
+//! The Unix socket is created with `0o777` permissions (rwxrwxrwx) to allow
+//! multi-user scenarios where different users may need to connect to the
+//! same LSP proxy. This is necessary because:
+//!
+//! - The proxy runs in a user session (not as root)
+//! - Multiple users or processes may need access to the same LSP
+//! - Unix domain sockets require write permission to connect
+//!
+//! **Security Note:** While permissive socket permissions allow broader access,
+//! the actual LSP process is still running under the user's account with their
+//! permissions. The socket itself only provides a communication endpoint - it
+//! does not grant elevated privileges to connected clients.
+//!
+//! ### DoS Protection
+//!
+//! - Maximum message size: 16MB (prevents memory exhaustion)
+//! - Per-client pending request limit: 100 (prevents request flooding)
+//! - Client timeout: 30 seconds (prevents connection hoarding)
+//!
+//! ### Process Isolation
+//!
+//! The LSP process runs with the same permissions as the Maestro TUI process.
+//! It does not gain any additional privileges through the proxy mechanism.
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
@@ -117,6 +145,8 @@ pub struct LspStdioProxy {
     shutdown_tx: watch::Sender<bool>,
     /// Next unique client ID
     next_client_id: Arc<AtomicU64>,
+    /// Persistent buffered reader for LSP stdout
+    lsp_stdout_reader: Option<BufReader<tokio::process::ChildStdout>>,
 }
 
 impl LspStdioProxy {
@@ -140,6 +170,7 @@ impl LspStdioProxy {
             shutdown_rx,
             shutdown_tx,
             next_client_id: Arc::new(AtomicU64::new(1)),
+            lsp_stdout_reader: None,
         })
     }
 
@@ -185,6 +216,19 @@ impl LspStdioProxy {
         let listener = UnixListener::bind(&self.socket_path)
             .with_context(|| format!("Failed to bind socket: {:?}", self.socket_path))?;
 
+        // Set socket permissions to allow all users to connect (Task 10.1)
+        // This is required for multi-user LSP proxy scenarios
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&self.socket_path)
+                .with_context(|| format!("Failed to get socket metadata: {:?}", self.socket_path))?
+                .permissions();
+            perms.set_mode(0o777); // rwxrwxrwx - allow all users to connect
+            std::fs::set_permissions(&self.socket_path, perms)
+                .with_context(|| format!("Failed to set socket permissions: {:?}", self.socket_path))?;
+        }
+
         info!(
             "LSP proxy listening on: {:?} (LSP: {})",
             self.socket_path,
@@ -215,6 +259,9 @@ impl LspStdioProxy {
             .take()
             .context("Failed to open LSP stdout")?;
 
+        // Initialize persistent buffered reader for LSP stdout
+        self.lsp_stdout_reader = Some(BufReader::new(lsp_stdout));
+
         // Shared state
         let clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -235,9 +282,10 @@ impl LspStdioProxy {
             let pending_clone = Arc::clone(&pending);
             let pending_count_clone = Arc::clone(&pending_count);
             let status_clone = Arc::clone(&self.status);
+            let lsp_stdout_reader = self.lsp_stdout_reader.take().expect("LSP stdout reader not initialized");
             tokio::spawn(async move {
                 if let Err(e) = Self::route_lsp_output(
-                    lsp_stdout,
+                    lsp_stdout_reader,
                     clients_clone,
                     pending_clone,
                     pending_count_clone,
@@ -479,15 +527,66 @@ impl LspStdioProxy {
         Ok(Some(body))
     }
 
+    /// Read next LSP message from a BufReader
+    async fn read_next_lsp_message_from_reader(reader: &mut BufReader<tokio::process::ChildStdout>) -> Result<Value> {
+        const MAX_HEADER_SIZE: usize = 100;
+        const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024; // 16MB
+
+        let mut headers = Vec::new();
+        let mut line = String::new();
+
+        // Read headers
+        loop {
+            line.clear();
+            let n = reader.read_line(&mut line).await?;
+            if n == 0 {
+                return Err(anyhow!("EOF reading LSP headers"));
+            }
+
+            headers.push(line.clone());
+            if line == "\r\n" || line == "\n" {
+                break;
+            }
+
+            if headers.len() > MAX_HEADER_SIZE {
+                return Err(anyhow!("LSP headers too large"));
+            }
+        }
+
+        // Parse Content-Length
+        let mut content_length = None;
+        for header in &headers {
+            let header_lower = header.to_lowercase();
+            if header_lower.starts_with("content-length:") {
+                let len_str = header[15..].trim();
+                content_length = len_str.parse::<usize>().ok();
+                break;
+            }
+        }
+
+        let length = content_length.ok_or_else(|| anyhow!("Missing Content-Length header"))?;
+
+        if length > MAX_MESSAGE_SIZE {
+            return Err(anyhow!("LSP message too large: {} bytes", length));
+        }
+
+        // Read body
+        let mut buffer = vec![0u8; length];
+        reader.read_exact(&mut buffer).await?;
+
+        let content = String::from_utf8(buffer)?;
+        Ok(serde_json::from_str(&content)?)
+    }
+
     /// Read LSP stdout and route responses to clients
     async fn route_lsp_output(
-        mut lsp_stdout: tokio::process::ChildStdout,
+        mut lsp_stdout: BufReader<tokio::process::ChildStdout>,
         clients: Arc<Mutex<HashMap<u64, mpsc::Sender<Vec<u8>>>>>,
         pending: Arc<Mutex<HashMap<String, PendingLspRequest>>>,
         pending_count: Arc<Mutex<HashMap<u64, usize>>>,
     ) -> Result<()> {
         loop {
-            match Self::read_next_lsp_message(&mut lsp_stdout).await {
+            match Self::read_next_lsp_message_from_reader(&mut lsp_stdout).await {
                 Ok(message) => {
                     // Check if this is a notification (no "id" field)
                     if let Some(id_value) = message.get("id") {

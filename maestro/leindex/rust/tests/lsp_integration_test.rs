@@ -219,6 +219,7 @@ async fn test_lsp_state_persistence_roundtrip() {
         pid: Some(12345),
         port: None,
         auto_start: true,  // Requirement: auto_start BOOLEAN DEFAULT TRUE
+        use_proxy: false,
         last_started: Some(chrono::Utc::now().to_rfc3339()),
         last_error: None,
         created_at: chrono::Utc::now().to_rfc3339(),
@@ -378,6 +379,7 @@ async fn test_multiple_lsps_per_session_tracking() {
             pid: Some(10000 + lsp_name.len() as i64), // Unique fake PIDs
             port: None,
             auto_start: true,
+            use_proxy: false,
             last_started: Some(chrono::Utc::now().to_rfc3339()),
             last_error: None,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -420,6 +422,7 @@ async fn test_multiple_lsps_per_session_tracking() {
         pid: None,
         port: None,
         auto_start: false,
+        use_proxy: false,
         last_started: None,
         last_error: Some("Test error".to_string()),
         created_at: chrono::Utc::now().to_rfc3339(),
@@ -469,6 +472,7 @@ async fn test_lsp_status_transitions() {
         pid: None,
         port: None,
         auto_start: true,
+        use_proxy: false,
         last_started: None,
         last_error: None,
         created_at: chrono::Utc::now().to_rfc3339(),
@@ -578,6 +582,7 @@ async fn test_auto_start_flag_persistence() {
         pid: None,
         port: None,
         auto_start: true,  // Requirement: DEFAULT TRUE per FR5.2
+        use_proxy: false,
         last_started: None,
         last_error: None,
         created_at: chrono::Utc::now().to_rfc3339(),
@@ -666,6 +671,7 @@ async fn test_session_lsp_cleanup_on_deletion() {
             pid: Some(12345),
             port: None,
             auto_start: true,
+            use_proxy: false,
             last_started: Some(chrono::Utc::now().to_rfc3339()),
             last_error: None,
             created_at: chrono::Utc::now().to_rfc3339(),

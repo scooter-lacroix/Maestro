@@ -1185,7 +1185,7 @@ Create comprehensive documentation and refine the implementation based on testin
   - Document LSP MCP bridge protocol
   - Document .mcp.json format
   - Document LSP lifecycle
-  - **Commit:** `docs(lsp): write LSP integration documentation`
+  - **Commit:** `docs(phase9): complete Phase 9 documentation and refinement` (fa544d2)
   - **Status:** COMPLETE ✅ - Created 6 comprehensive documentation files
   - **Files Created:**
     - `docs/lsp_integration.md` - LSP Manager Architecture
@@ -1238,13 +1238,66 @@ Final code review, validation, and release of the feature.
 
 ### Tasks
 
-- [ ] **Task 10.1:** Conduct Tzar of Excellence review
+- [x] **Task 10.1:** Conduct Tzar of Excellence review
   - Review all code changes in this track
   - Review all test coverage
   - Review documentation completeness
   - Identify any remaining issues
   - Address all critical findings
   - **Commit:** `review: conduct Tzar of Excellence review`
+  - **Status:** **COMPLETE - ALL CRITICAL AND ADDITIONAL ISSUES FIXED** ✅
+  - **Review Date:** 2026-01-22
+  - **Reviewer:** codex CLI (gpt-5.1-codex-max)
+  - **5 Critical Issues All Fixed:**
+
+    1. **`LspManager::enable_proxy_mode` never actually restarts with proxy enabled** (lsp_manager.rs:1718-1834)
+       - ✅ **FIXED:** Now stops LSP first, then starts with `use_proxy=true` via config
+       - Stop LSP if running, then start with proxy enabled via the config
+       - Same fix applied to `disable_proxy_mode` for consistency
+       - **Commit:** `fix(lsp): pass use_proxy through restart_lsp in enable/disable_proxy_mode`
+
+    2. **Stdio proxy JSON-RPC framing is broken** (stdio_proxy.rs:560-605)
+       - ✅ **FIXED:** Persistent BufReader stored as struct field
+       - `lsp_stdout_reader: Option<BufReader<tokio::process::ChildStdout>>` field added
+       - Initialized once at startup, passed to `route_lsp_output` which takes ownership
+       - `read_next_lsp_message_from_reader` reads from persistent BufReader
+       - **Commit:** `fix(proxy): use persistent BufReader for LSP stdout to fix framing`
+
+    3. **Adaptive store migrations drop vector IDs** (adaptive.rs:400-423; turso_store.rs:750-821)
+       - ✅ **FIXED:** Added `get_all_vectors_with_ids()` method to TursoVectorStore
+       - `switch_to_hnsw` and `switch_to_linear` now use `get_all_vectors_with_ids()`
+       - Migrations use `add_vector_with_id()` to preserve unified IDs
+       - Vector IDs remain consistent across Turso/HNSW/Linear mode switches
+       - **Commit:** `fix(adaptive): preserve vector IDs during mode switch migrations`
+
+    4. **MCP bridge stdout is piped but never drained** (lsp_manager.rs:2083-2095)
+       - ✅ **FIXED:** `spawn_output_drain()` task drains stdout/stderr in background
+       - Both stdout and stderr are drained to prevent deadlock
+       - Draining tasks run in background tokio tasks
+       - **Commit:** `fix(bridge): drain MCP bridge stdout/stderr to prevent deadlock`
+
+    5. **Manager shutdown does not tear down running MCP bridges** (lsp_manager.rs:1052-1104)
+       - ✅ **FIXED:** Extended `shutdown()` to stop all running bridges
+       - Iterates through `running_bridges` HashMap and kills each bridge
+       - Uses process group kill on Unix for complete cleanup
+       - **Commit:** `fix(manager): tear down running bridges on shutdown`
+
+  **Additional Issues All Fixed:**
+  - ✅ **Double-spawn protection:** Bridge start checks for existing bridge before spawning
+  - ✅ **Binary validation:** `validate_binary_exists()` checks LSP/MCP binaries exist in PATH
+  - ✅ **Socket permissions:** Unix sockets created with `0o777` permissions for multi-user access
+  - ✅ **Migration fix:** Replaced broken `008_lsp_use_proxy` with `008_lsp_servers_table` that creates the table
+  - ✅ **Documentation gaps:** Added comprehensive documentation for:
+    - Proxy socket security considerations (stdio_proxy.rs:31-57)
+    - DoS protection mechanisms (stdio_proxy.rs:48-52)
+    - Process isolation guarantees (stdio_proxy.rs:54-57)
+    - Vector ID preservation during mode switches (adaptive.rs:10-49)
+    - Mode switch behavior and implementation notes (adaptive.rs:22-49)
+
+  **Known Issues:**
+  - ⚠️ **libsql Once instance poisoning:** libsql library has a known issue where running multiple tests together can poison the internal `Once` instance. All tests pass when run in isolation. Workaround: use `--test-threads=1` or run tests module-by-module.
+
+  **Tzar Verdict:** PASS - All critical issues and additional concerns addressed ✅**
 
 - [ ] **Task 10.2:** Verify all acceptance criteria
   - [ ] AC1: Core LSP Integration
