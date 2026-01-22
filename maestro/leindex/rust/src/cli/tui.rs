@@ -832,6 +832,7 @@ impl App {
     ///
     /// Sets a flag to trigger async refresh in the main event loop.
     /// This avoids the Tokio panic when calling async from sync context.
+    #[allow(dead_code)]
     fn refresh_lsp_status(&mut self) {
         self.refresh_lsp_status_impl(false);
     }
@@ -877,7 +878,7 @@ impl App {
                             .push((state.lsp_name, state.status));
                     }
                 }
-                Err(e) => {
+                Err(_e) => {
                     // Log error but continue with other sessions
                     // Error logged but not displayed in TUI
                 }

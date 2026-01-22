@@ -157,6 +157,7 @@ impl TursoVectorStore {
         }
 
         let mut attempt = 0;
+        #[allow(unused_assignments)]
         let mut last_error = None;
 
         loop {
@@ -637,7 +638,7 @@ impl TursoVectorStore {
             .await?;
 
         if result > 0 {
-            self.cache.clear();
+            let _ = self.cache.clear();
             debug!("Deleted {} vectors from file {}", result, file_path);
         }
 
@@ -976,7 +977,7 @@ impl TursoVectorStore {
         })
         .await?;
 
-        self.cache.clear();
+        let _ = self.cache.clear();
         debug!("Added {} vectors in batch with IDs", items_count);
         Ok(())
     }

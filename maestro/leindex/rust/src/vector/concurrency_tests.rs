@@ -66,7 +66,7 @@ async fn test_concurrent_add_delete() {
     let query = vec![0.5; 768];
     let results = store.search(&query, 10).unwrap();
     // The store should still be functional even if some operations were deleted
-    assert!(results.len() >= 0); // Should not panic
+    assert!(results.len() > 0); // Should not panic
 }
 
 /// Test concurrent mode switching in adaptive store
@@ -149,7 +149,7 @@ async fn test_concurrent_mode_switch() {
         query[i % 768] = (i % 50) as f32 / 100.0;
     }
     let results = adaptive_store.search(&query, 10).await.unwrap();
-    assert!(results.len() >= 0); // Should not panic
+    assert!(results.len() > 0); // Should have results
 
     // Verify final state is valid
     let _final_mode = adaptive_store.mode();
@@ -254,7 +254,7 @@ async fn test_lock_poisoning_recovery() {
     }
     let results = store.search(&query, 10).unwrap();
     assert!(
-        results.len() >= 0,
+        results.len() > 0,
         "Store should remain functional after concurrent operations"
     );
 

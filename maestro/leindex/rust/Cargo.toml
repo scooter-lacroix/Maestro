@@ -33,11 +33,11 @@ path = "src/cli/vector_benchmark.rs"
 
 [[bin]]
 name = "simple-bench"
-path = "benches/simple_bench.rs"
+path = "src/bench/simple_bench.rs"
 
 [[bin]]
 name = "vector-granular-bench"
-path = "benches/granular_bench.rs"
+path = "src/bench/granular_bench.rs"
 
 [dependencies]
 # CLI

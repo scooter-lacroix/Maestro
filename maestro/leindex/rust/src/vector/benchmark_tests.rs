@@ -1,6 +1,6 @@
 //! Unit tests for vector benchmark infrastructure
 
-use crate::vector::{ChunkType, SearchResult, VectorMetadata, VectorStore};
+use crate::vector::{ChunkType, VectorMetadata, VectorStore};
 
 /// Test that generated embeddings are valid (normalized)
 #[test]

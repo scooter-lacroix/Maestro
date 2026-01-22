@@ -890,7 +890,7 @@ mod tests {
 
         // Test URL encoding by encoding spaces manually
         let path_with_spaces = "/tmp/test path";
-        let uri = McpBridge::path_to_file_uri(path_with_spaces);
+        let _uri = McpBridge::path_to_file_uri(path_with_spaces);
         // Note: canonicalize will fail if the path doesn't exist, so we just check the function works
         // For a path that exists with spaces, it would encode them
     }

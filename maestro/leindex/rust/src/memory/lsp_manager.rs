@@ -2363,10 +2363,10 @@ done
         let storage = TursoStorageBackend::in_memory(None)
             .await
             .expect("Failed to create storage");
-        let mut manager = LspManager::new(storage);
+        let _manager = LspManager::new(storage);
 
         // Try to start the mock LSP with custom config
-        let config = LspConfig {
+        let _config = LspConfig {
             binary_path: Some(mock_binary.clone()),
             auto_start: false,
             ..Default::default()
@@ -2386,7 +2386,7 @@ done
             .expect("Failed to create storage");
         storage.initialize().await.expect("Failed to initialize");
 
-        let manager = LspManager::new(storage);
+        let _manager = LspManager::new(storage);
 
         // Create a mock LSP process (not actually spawned)
         let mut process = LspProcess::new(LspType::Rust, "test-session".to_string(), false);
@@ -2463,7 +2463,7 @@ done
             .expect("Failed to create storage");
         storage.initialize().await.expect("Failed to initialize");
 
-        let manager = LspManager::new(storage);
+        let _manager = LspManager::new(storage);
 
         // Create config with non-existent binary
         let config = LspConfig {

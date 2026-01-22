@@ -7,11 +7,10 @@
 //! - FR6.2: Replace DuckDB (OLAP) with Turso native SQL
 //! - FR6.3: Replace Tantivy with Turso's FTS5 extension
 
-use std::fs;
 use tempfile::TempDir;
 use chrono::Utc;
 
-use leindex_analyzers::memory::models::{Session, SessionStatus, Memory, MemoryCategory, MemoryImportance};
+use leindex_analyzers::memory::models::{Session, SessionStatus, MemoryCategory, MemoryImportance};
 use leindex_analyzers::memory::turso_backend::{TursoStorageBackend, TursoConfig};
 
 /// Migration test for FR6.1: SQLite → Turso OLTP migration
@@ -569,7 +568,7 @@ async fn test_foreign_key_constraints() {
     storage.initialize().await.expect("Failed to initialize");
 
     // Requirement: Create project first
-    let project = storage
+    let _project = storage
         .get_or_create_project("/test", "Test Project")
         .await
         .expect("Failed to create project");

@@ -14,11 +14,8 @@
 //! validate the business logic that drives the UI.
 
 use std::sync::Arc;
-use std::collections::HashMap;
 
-use leindex_analyzers::memory::lsp_manager::{LspManager, LspType, LspProcess};
 use leindex_analyzers::memory::turso_backend::{TursoStorageBackend, LspServerState, LspStatus};
-use leindex_analyzers::memory::models::Session;
 use chrono::Utc;
 
 /// Test LSP status formatting for TUI display

@@ -107,7 +107,7 @@ impl HnswVectorStore {
             .id_to_data
             .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut hnsw = self
+        let _hnsw = self
             .hnsw
             .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
@@ -486,7 +486,7 @@ impl HnswVectorStore {
 
     /// Delete vectors by file path - marks as tombstones instead of rebuilding
     pub fn delete_by_file(&self, file_path: &str) -> Result<usize> {
-        let mut id_map = self
+        let id_map = self
             .id_to_data
             .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
@@ -530,7 +530,7 @@ impl HnswVectorStore {
                 self.rebuild_index()?;
             }
 
-            self.cache.clear();
+            let _ = self.cache.clear();
         }
 
         Ok(deleted)
