@@ -4,7 +4,10 @@ Maestro Pre-Tool-Use Hook: LeIndex Context Injection
 
 Injects LeIndex code analysis context into prompts based on intent analysis.
 Adds relevant code structure context to improve Task execution using
-the consolidated TLDR + LeIndex system for 90%+ token reduction.
+the LeIndex (pure Rust) system for 90%+ token reduction.
+
+Note: /maestro:tldr is a compatibility alias that delegates to LeIndex.
+All analysis uses the Rust LeIndex core; no Python TLDR at runtime.
 """
 
 import json
