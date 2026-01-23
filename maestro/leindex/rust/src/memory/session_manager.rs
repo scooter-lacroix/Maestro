@@ -57,15 +57,37 @@ impl SessionManager {
         })
     }
 
+    /// Inject an existing LspManager into the SessionManager
+    ///
+    /// This method allows pre-initializing the LspManager outside of a tokio runtime context,
+    /// preventing the "Cannot start a runtime from within a runtime" panic when the
+    /// SessionManager is used from within async contexts like the TUI.
+    pub fn with_lsp_manager(self, manager: LspManager) -> Self {
+        if let Ok(mut guard) = self.lsp_manager.lock() {
+            *guard = Some(manager);
+            // Mark as initialized to prevent lazy init from creating a nested runtime
+            self.lsp_manager_init.call_once(|| {});
+        }
+        self
+    }
+
     /// Get or initialize the LSP manager (lazy initialization)
     ///
-    /// This method lazily initializes the LspManager only when first needed,
-    /// using in-memory storage to avoid blocking on SessionManager creation.
+    /// This method lazily initializes the LspManager only when first needed.
+    /// It now checks if we're already in a tokio runtime and avoids creating a nested one.
     fn get_lsp_manager(&self) -> Result<std::sync::MutexGuard<'_, Option<LspManager>>> {
         // Initialize on first access
         self.lsp_manager_init.call_once(|| {
+            // Check if we're already in a tokio runtime
+            if Handle::try_current().is_ok() {
+                // We're inside a runtime - don't create a new one to avoid panic
+                tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
+                tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
+                return;
+            }
+
             // Use blocking runtime for one-time initialization with in-memory storage
-            // This avoids the runtime blocking issue while providing basic functionality
+            // This is safe when we're NOT already inside a tokio runtime
             if let Ok(rt) = tokio::runtime::Runtime::new() {
                 if let Ok(storage) =
                     rt.block_on(crate::memory::turso_backend::TursoStorageBackend::in_memory(None))

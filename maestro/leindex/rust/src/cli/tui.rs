@@ -2796,22 +2796,24 @@ async fn run_app<B: Backend>(
                                         format!("Resuming '{}' (agent + shell)...", s.title);
                                     let _ = terminal.draw(|frame| ui(frame, &mut app));
 
-                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(
-	                                        svc.clone(),
-	                                    ) {
-	                                        Ok(m) => m,
-	                                        Err(e) => {
-	                                            app.status_message =
-	                                                format!("Failed to create session manager: {}", e);
-	                                            app.is_spawning = false;
-	                                            continue;
-	                                        }
-	                                    };
+                                    let s_clone = s.clone();
+                                    let svc_clone = svc.clone();
+                                    let storage_opt = app.storage_backend.clone();
+                                    let res = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
+                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
 
-                                    let res = manager.restore_session(
-	                                        &s,
-	                                        leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
-	                                    );
+                                        if let Some(storage) = storage_opt {
+                                            use leindex_analyzers::memory::lsp_manager::LspManager;
+                                            let lsp_manager = LspManager::new((*storage).clone());
+                                            manager = manager.with_lsp_manager(lsp_manager);
+                                        }
+
+                                        manager.restore_session(
+                                            &s_clone,
+                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+                                        )?;
+                                        Ok(())
+                                    }).await.unwrap_or_else(|e| Err(anyhow::anyhow!("Spawn blocking error: {}", e)));
                                     app.is_spawning = false;
                                     app.refresh_from_service(&service);
 
@@ -3432,14 +3434,24 @@ async fn run_app<B: Backend>(
 	                                                                        ui(frame, &mut app)
 	                                                                    });
 
-	                                                                    if let Ok(manager) = leindex_analyzers::memory::session_manager::SessionManager::new(
-	                                                                        svc.clone(),
-	                                                                    ) {
-	                                                                        let _ = manager.restore_session(
-	                                                                            &s,
+	                                                                    let s_clone = s.clone();
+	                                                                    let svc_clone = svc.clone();
+	                                                                    let storage_opt = app.storage_backend.clone();
+	                                                                    let _ = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
+	                                                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+
+	                                                                        if let Some(storage) = storage_opt {
+	                                                                            use leindex_analyzers::memory::lsp_manager::LspManager;
+	                                                                            let lsp_manager = LspManager::new((*storage).clone());
+	                                                                            manager = manager.with_lsp_manager(lsp_manager);
+	                                                                        }
+
+	                                                                        manager.restore_session(
+	                                                                            &s_clone,
 	                                                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
-	                                                                        );
-	                                                                    }
+	                                                                        )?;
+	                                                                        Ok(())
+	                                                                    }).await;
 	                                                                    app.is_spawning = false;
 	                                                                    app.refresh_from_service(&service);
 
@@ -3558,22 +3570,24 @@ async fn run_app<B: Backend>(
                                         format!("Restarting '{}' (shell + fresh tool)...", s.title);
                                     let _ = terminal.draw(|frame| ui(frame, &mut app));
 
-                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(
-	                                        svc.clone(),
-	                                    ) {
-	                                        Ok(m) => m,
-	                                        Err(e) => {
-	                                            app.status_message =
-	                                                format!("Failed to create session manager: {}", e);
-	                                            app.is_spawning = false;
-	                                            continue;
-	                                        }
-	                                    };
+                                    let s_clone = s.clone();
+                                    let svc_clone = svc.clone();
+                                    let storage_opt = app.storage_backend.clone();
+                                    let res = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
+                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
 
-                                    let res = manager.restore_session(
-	                                        &s,
-	                                        leindex_analyzers::memory::session_manager::SessionRestoreMode::Restart,
-	                                    );
+                                        if let Some(storage) = storage_opt {
+                                            use leindex_analyzers::memory::lsp_manager::LspManager;
+                                            let lsp_manager = LspManager::new((*storage).clone());
+                                            manager = manager.with_lsp_manager(lsp_manager);
+                                        }
+
+                                        manager.restore_session(
+                                            &s_clone,
+                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Restart,
+                                        )?;
+                                        Ok(())
+                                    }).await.unwrap_or_else(|e| Err(anyhow::anyhow!("Spawn blocking error: {}", e)));
                                     app.is_spawning = false;
                                     app.refresh_from_service(&service);
 
