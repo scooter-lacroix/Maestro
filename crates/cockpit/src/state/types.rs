@@ -3,7 +3,11 @@
 //! This module contains all the enums and structs used for Cockpit TUI state.
 //! These are pure data types with no business logic.
 
+<<<<<<< HEAD
 use leindex_analyzers::memory::models::{Session, SessionGroup};
+=======
+use leindex_core::memory::models::{Session, SessionGroup};
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
 /// Input mode for the TUI - determines what input is being captured
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -66,7 +70,10 @@ pub enum SettingsOption {
     Editor,
     InstallPath,
     Theme,
+<<<<<<< HEAD
     Transparent,
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     Save,
 }
 
@@ -78,7 +85,11 @@ pub enum SettingsMenuKind {
 }
 
 /// Dashboard focus areas
+<<<<<<< HEAD
 #[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
+=======
+#[derive(PartialEq, Eq, Clone, Copy, Default)]
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 pub enum DashFocus {
     #[default]
     Sessions,
@@ -123,6 +134,7 @@ pub struct Stats {
     pub memory_count: usize,
     pub track_count: usize,
 }
+<<<<<<< HEAD
 
 /// Analysis mode for LeIndex 5-phase analysis
 #[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
@@ -142,3 +154,5 @@ pub struct AnalysisHistoryEntry {
     pub result_summary: String,
     pub mode: AnalysisMode,
 }
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)

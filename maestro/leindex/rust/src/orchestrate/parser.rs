@@ -68,6 +68,7 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     let path_str = &line[start + 2..start + end];
                     // Join against parent directory of tracks.md, not the file itself
                     let relative_path = path_str.trim_start_matches("./").trim_start_matches(".");
+<<<<<<< HEAD
                     
                     // Intelligent path resolution:
                     // If the path starts with the same directory name as tracks_parent,
@@ -118,6 +119,21 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                             "Track path {} resolves outside project root ({:?}), rejecting",
                             path_str,
                             check_base_owned
+=======
+                    let resolved_path = tracks_parent.join(relative_path);
+
+                    // SECURITY: Canonicalize and validate path to prevent traversal attacks
+                    let canonical_path = resolved_path.canonicalize()
+                        .unwrap_or(resolved_path.clone());
+                    let canonical_base = tracks_parent.canonicalize()
+                        .unwrap_or(tracks_parent.to_path_buf());
+
+                    // Verify the resolved path is within the project root (parent directory)
+                    if !canonical_path.starts_with(&canonical_base) {
+                        tracing::warn!(
+                            "Track path {} resolves outside project root, rejecting",
+                            path_str
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                         );
                         continue;
                     }
@@ -125,8 +141,13 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     link_path = Some(canonical_path);
 
                     // Extract track ID from path
+<<<<<<< HEAD
                     if let Some(folder_name) = path_str.trim_end_matches('/').rsplit('/').next() {
                         track_id = folder_name.to_string();
+=======
+                    if let Some(folder_name) = path_str.rsplit('/').next() {
+                        track_id = folder_name.trim_end_matches('/').to_string();
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                     }
                 }
             }

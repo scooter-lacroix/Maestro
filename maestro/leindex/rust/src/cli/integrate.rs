@@ -271,8 +271,12 @@ impl Integrator {
             let config_obj = if config_path_str.contains('.') {
                 // Build the nested structure from scratch
                 let parts: Vec<&str> = config_path_str.split('.').collect();
+<<<<<<< HEAD
                 #[allow(unused_variables)]
                 let result = json!({});
+=======
+                let mut result = json!({});
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
                 fn insert_new_at_path(mut value: Value, parts: &[&str], key: &str, config: Value) -> Value {
                     if parts.is_empty() {
@@ -850,6 +854,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             report.passed = false;
         }
 
+<<<<<<< HEAD
         // Check 6: Tool-specific config validation
         let check = self.check_tool_specific_config(tool);
         report.checks.push(check);
@@ -878,13 +883,19 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             // Don't fail overall on connectivity issues (may be network-dependent)
         }
 
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         Ok(report)
     }
 
     /// Check if config directory exists
     fn check_config_dir(&self, tool: IntegrationTool) -> CheckResult {
         let config_dir = tool.config_dir();
+<<<<<<< HEAD
         let exists = config_dir.as_ref().map(|d| d.as_std_path().exists()).unwrap_or(false);
+=======
+        let exists = config_dir.as_ref().map(|d| d.exists()).unwrap_or(false);
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         CheckResult {
             name: "Config directory exists".to_string(),
@@ -900,7 +911,11 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     /// Check if commands directory exists
     fn check_commands_dir(&self, tool: IntegrationTool) -> CheckResult {
         let commands_dir = tool.commands_dir();
+<<<<<<< HEAD
         let exists = commands_dir.as_ref().map(|d| d.as_std_path().exists()).unwrap_or(false);
+=======
+        let exists = commands_dir.as_ref().map(|d| d.exists()).unwrap_or(false);
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         CheckResult {
             name: "Commands directory exists".to_string(),
@@ -916,7 +931,11 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     /// Check if MCP config file exists
     fn check_mcp_config(&self, tool: IntegrationTool) -> CheckResult {
         let mcp_config = tool.mcp_config_path();
+<<<<<<< HEAD
         let exists = mcp_config.as_ref().map(|c| c.as_std_path().exists()).unwrap_or(false);
+=======
+        let exists = mcp_config.as_ref().map(|c| c.exists()).unwrap_or(false);
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         CheckResult {
             name: "MCP config file exists".to_string(),
@@ -935,7 +954,11 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         let server_name = tool.mcp_server_name();
 
         let (exists, message) = match mcp_config {
+<<<<<<< HEAD
             Some(path) if path.as_std_path().exists() => {
+=======
+            Some(path) if path.exists() => {
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 if tool.uses_json_config() {
                     match fs::read_to_string(path.as_std_path()) {
                         Ok(content) => {
@@ -1056,6 +1079,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         false
     }
 
+<<<<<<< HEAD
     /// Check tool-specific config validation
     fn check_tool_specific_config(&self, tool: IntegrationTool) -> CheckResult {
         match tool {
@@ -1285,6 +1309,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         }
     }
 
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     /// Print config patch for a tool
     pub fn print(&self, tool: IntegrationTool) -> Result<()> {
         let mcp_config = tool.leindex_mcp_config();

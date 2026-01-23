@@ -257,7 +257,10 @@ impl Default for AgentConfig {
 /// Orchestrate session state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
+<<<<<<< HEAD
     pub session_id: String,
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     pub track_id: String,
     pub mode: LoopMode,
     pub agent_config: AgentConfig,
@@ -266,7 +269,10 @@ pub struct SessionState {
     pub started_at: String,
     pub updated_at: String,
     pub status: SessionStatus,
+<<<<<<< HEAD
     pub rate_limit: Option<crate::rate_limit::RateLimitState>,
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -325,11 +331,14 @@ pub struct OrchestrateConfig {
     pub iteration_timeout_secs: u64,
     pub enable_leindex: bool,
     pub data_dir: PathBuf,
+<<<<<<< HEAD
     // Rate-limit detection and recovery
     pub enable_rate_limit_detection: bool,
     pub rate_limit_max_retries: u32,
     pub rate_limit_backoff_base_secs: u64,
     pub rate_limit_backoff_max_secs: u64,
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
 impl Default for OrchestrateConfig {
@@ -342,10 +351,13 @@ impl Default for OrchestrateConfig {
             iteration_timeout_secs: 300, // 5 minutes
             enable_leindex: true,
             data_dir: PathBuf::from(home).join(".maestro").join("orchestrate"),
+<<<<<<< HEAD
             enable_rate_limit_detection: true,
             rate_limit_max_retries: 5,
             rate_limit_backoff_base_secs: 1,
             rate_limit_backoff_max_secs: 300,
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         }
     }
 }
