@@ -61,7 +61,11 @@ impl SessionManager {
     /// preventing the "Cannot start a runtime from within a runtime" panic when the
     /// SessionManager is used from within async contexts like the TUI.
     pub fn with_lsp_manager(self, manager: LspManager) -> Self {
-        let _ = self.lsp_manager.set(manager);
+        if let Ok(mut guard) = self.lsp_manager.lock() {
+            *guard = Some(manager);
+            // Mark as initialized to prevent lazy init from creating a nested runtime
+            self.lsp_manager_init.call_once(|| {});
+        }
         self
     }
 
