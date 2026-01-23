@@ -41,6 +41,19 @@ pub async fn run() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Create TursoStorageBackend for LSP operations (FIRST, before any other DB access)
+    // This ensures libSQL can configure SQLite threading before it's initialized by rusqlite.
+    let storage_backend = match TursoStorageBackend::new(None, None).await {
+        Ok(backend) => Some(Arc::new(backend)),
+        Err(e) => {
+            eprintln!(
+                "Warning: Failed to create storage backend for LSP operations: {}",
+                e
+            );
+            None
+        }
+    };
+
     // Initialize service for live data + system-wide integration (MCP + Memory)
     let service = MemoryService::new(None).ok();
     let mcp_pool: Option<Arc<McpPool>> = if let Some(ref s) = service {
@@ -57,18 +70,6 @@ pub async fn run() -> Result<()> {
         Some(pool)
     } else {
         None
-    };
-
-    // Create TursoStorageBackend for LSP operations (before entering async loop)
-    let storage_backend = match TursoStorageBackend::new(None, None).await {
-        Ok(backend) => Some(Arc::new(backend)),
-        Err(e) => {
-            eprintln!(
-                "Warning: Failed to create storage backend for LSP operations: {}",
-                e
-            );
-            None
-        }
     };
 
     // Run app
