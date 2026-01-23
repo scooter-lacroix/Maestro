@@ -7,6 +7,7 @@ pub mod app;
 pub mod modals;
 pub mod orchestrate;
 pub mod state;
+pub mod tabs;
 pub mod theme;
 
 pub use app::run;
