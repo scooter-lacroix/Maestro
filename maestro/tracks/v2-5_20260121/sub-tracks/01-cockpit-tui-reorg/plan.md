@@ -34,10 +34,12 @@
 
 ## Phase 2: Move + Modularize Cockpit
 
-### [ ] Task 2.1: Extract Cockpit UI code into the Cockpit crate
-- [ ] Move ratatui UI rendering + event loop into `maestro-cockpit`
-- [ ] Move Cockpit state structs/enums into `maestro-cockpit` (keep core types in `leindex-core`)
+### [~] Task 2.1: Extract Cockpit UI code into the Cockpit crate
+- [x] Move ratatui UI rendering + event loop into `maestro-cockpit` (app.rs created)
+- [x] Move Cockpit state structs/enums into `maestro-cockpit` (keep core types in `leindex-core`)
 - [ ] Ensure `maestro tui` still builds and runs after extraction
+
+**Progress:** Workspace created, crates scaffolded, TUI code moved to `crates/cockpit/src/app.rs` (6000+ lines). Pending: Fix remaining compilation errors from import path changes (`leindex_analyzers` → `leindex_core`) and type mismatches.
 
 ### [ ] Task 2.2: Refactor monolithic UI into modules
 - [ ] Establish module layout (example):
