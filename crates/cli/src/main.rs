@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-// Re-export CLI modules from leindex-analyzers
+// Re-export CLI modules from leindex_core
 use leindex_core::cli::analyze;
 use leindex_core::cli::implement::ImplementSessionTarget;
 use leindex_core::cli::leindex_cmd;
@@ -50,6 +50,7 @@ enum Commands {
         analysis: String,
     },
 
+<<<<<<< HEAD
     /// Configure Maestro integrations
     Configure {
         /// Enable pi-mono configuration wizard

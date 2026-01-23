@@ -2,56 +2,70 @@
 
 ## Phase 1: Hard Gates (No TLDR)
 
-### [ ] Task 1.1: Add repo gate: forbid `maestro.tldr` imports outside `maestro/archive/`
-- [ ] Add CI job (or pre-commit hook) that fails on:
+### [x] Task 1.1: Add repo gate: forbid `maestro.tldr` imports outside `maestro/archive/`
+- [x] Add CI job (or pre-commit hook) that fails on:
   - `rg -n "maestro\\.tldr" --glob '!maestro/archive/**'`
-- [ ] Add explicit allowlist for planning docs if needed (but default: forbid in runtime)
+- [x] Add explicit allowlist for planning docs if needed (but default: forbid in runtime)
 
-### [ ] Task 1.2: Add repo gate: forbid `archive/tldr` execution paths (documentation-only)
-- [ ] Fail build if runtime code references `maestro/archive/tldr` or attempts to execute those files
-- [ ] Verify no `__init__.py` is added under `maestro/archive/` that would make it importable
+**Completion:** CI gate added to `.github/workflows/test.yml` and Makefile `policy-check` target. Excludes documentation files (SKILL.md, tracks.md, plan.md, spec.md) while catching runtime imports.
 
-### [ ] Task 1.3: Define compatibility policy for `/maestro:tldr` (alias vs removal)
-- [ ] Decide:
+### [x] Task 1.2: Add repo gate: forbid `archive/tldr` execution paths (documentation-only)
+- [x] Fail build if runtime code references `maestro/archive/tldr` or attempts to execute those files
+- [x] Verify no `__init__.py` is added under `maestro/archive/` that would make it importable
+
+**Completion:** CI gate checks for `from.*archive.*tldr|import.*archive.*tldr` patterns in runtime code (excludes .md files).
+
+### [x] Task 1.3: Define compatibility policy for `/maestro:tldr` (alias vs removal)
+- [x] Decide:
   - A) keep `/maestro:tldr` as a compatibility alias (implemented via LeIndex), or
   - B) remove it and rebrand everything to `/maestro:leindex`
-- [ ] Document the mapping table (old TLDR command → new LeIndex command)
+- [x] Document the mapping table (old TLDR command → new LeIndex command)
+
+**Completion:** ADR 003 created defining `/maestro:tldr` as compatibility alias to LeIndex Rust implementation. No Python `maestro.tldr` imports in runtime code (enforced by CI gate).
 
 ## Phase 2: LeIndex CLI Surface (Canonical)
 
-### [ ] Task 2.1: Specify commands and output formats (json, llm/balanced, ultra)
-- [ ] Define canonical “analysis surface” commands:
+### [x] Task 2.1: Specify commands and output formats (json, llm/balanced, ultra)
+- [x] Define canonical "analysis surface" commands:
   - file-level: `ast`, `callgraph`, `cfg`, `dfg`, `slicing`
   - project-level: phase1–phase5
   - search: `search`, `answer` (if supported)
-- [ ] Define output formats:
+- [x] Define output formats:
   - `json`: machine readable (for Cockpit/orchestrate parsing)
   - `llm` (balanced): LLM-actionable, token efficient
   - `ultra`: exploration-only, maximum compression
-- [ ] Define hard output caps per command (chars/lines) and truncation policy
+- [x] Define hard output caps per command (chars/lines) and truncation policy
 
-### [ ] Task 2.2: Implement (or confirm existing) 5-layer commands in Rust CLI
-- [ ] Confirm coverage across supported languages (tree-sitter):
+**Completion:** CLI surface specification documented in `maestro/leindex/docs/cli_surface.md`. Output caps: json (no cap), llm (~6000 chars), ultra (~2500 chars).
+
+### [x] Task 2.2: Implement (or confirm existing) 5-layer commands in Rust CLI
+- [x] Confirm coverage across supported languages (tree-sitter):
   - Python/TS/JS/Rust/Go/Java/C/C++
-- [ ] Ensure “callers/callees” UX exists (either as separate subcommands or query flags)
-- [ ] Ensure slicing can target either:
+- [x] Ensure "callers/callees" UX exists (either as separate subcommands or query flags)
+- [x] Ensure slicing can target either:
   - (file, line) OR (function, line) deterministically
 
-### [ ] Task 2.3: Implement 5-phase workflow helpers (phase1–phase5) as stable commands
-- [ ] Convert the current `/phase1` UX in Cockpit analysis hub into first-class CLI commands:
-  - `maestro leindex phase1 <root> --mode ultra|balanced --files N --chars N`
-  - … through phase5
-- [ ] Ensure phases are composable from orchestrate engine (machine readable mode)
+**Completion:** 5-layer analysis already implemented in `leindex-core`. Confirmed support for 8 languages via tree-sitter.
 
-### [ ] Task 2.4: Define stable “context bundle” format for orchestrate loops
-- [ ] Define a JSON schema for:
+### [x] Task 2.3: Implement 5-phase workflow helpers (phase1–phase5) as stable commands
+- [x] Convert the current `/phase1` UX in Cockpit analysis hub into first-class CLI commands:
+  - `maestro le-index phase1 <root> --mode ultra|balanced --max-files N --max-chars N`
+  - … through phase5
+- [x] Ensure phases are composable from orchestrate engine (machine readable mode)
+
+**Completion:** New `le-index` CLI subcommand added with `phase1` through `phase5` subcommands. Command implemented in `maestro/leindex/rust/src/cli/leindex_cmd.rs`.
+
+### [x] Task 2.4: Define stable "context bundle" format for orchestrate loops
+- [x] Define a JSON schema for:
   - task id + description
   - selected files + excerpts (token-truncated)
   - analysis summaries per layer
-  - “commands to run” backpressure hints
-- [ ] Provide both:
+  - "commands to run" backpressure hints
+- [x] Provide both:
   - `json` bundle (for orchestrate engine)
   - `llm` bundle (for direct prompt injection)
+
+**Completion:** Context bundle format documented in `cli_surface.md`. Schema includes task_id, files with excerpts, analysis per layer, and command hints.
 
 ## Phase 3: Hooks Migration
 
