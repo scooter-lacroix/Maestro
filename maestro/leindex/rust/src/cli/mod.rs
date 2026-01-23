@@ -10,5 +10,3 @@ pub mod memory_impl;
 pub mod memory_cmd;
 pub mod orchestrate;
 pub mod prompt;
-pub mod theme;
-pub mod tui;

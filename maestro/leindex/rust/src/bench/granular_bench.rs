@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --bin granular_bench --release
 
-use leindex_analyzers::vector::{HnswVectorStore, VectorMetadata, VectorStore};
+use leindex_core::vector::{HnswVectorStore, VectorMetadata, VectorStore};
 use std::time::Instant;
 use tempfile::tempdir;
 

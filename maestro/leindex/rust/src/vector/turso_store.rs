@@ -74,7 +74,9 @@ impl TursoVectorStore {
         info!("Opening Turso vector database: {}", path.display());
 
         // Create libsql Database instance
-        let db = Builder::new_local(path.clone())
+        // CRITICAL: Use explicit URI with ?threaded=1 for consistent threading
+        let db_uri = format!("file:{}?threaded=1", path.display());
+        let db = Builder::new_local(&db_uri)
             .build()
             .await
             .context("Failed to open libsql database")?;
@@ -114,7 +116,7 @@ impl TursoVectorStore {
     pub async fn in_memory() -> Result<Self> {
         info!("Opening in-memory Turso vector database");
 
-        let db = Builder::new_local("file::memory:?mode=memory&cache=shared")
+        let db = Builder::new_local("file::memory:?mode=memory&cache=shared&threaded=1")
             .build()
             .await
             .context("Failed to open in-memory libsql database")?;

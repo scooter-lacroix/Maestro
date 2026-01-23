@@ -6,10 +6,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-// Import the CLI module from the leindex_analyzers library
+// Import the CLI module from the leindex_core library
 // This avoids the module being compiled twice (once in lib, once in binary)
-use leindex_analyzers::cli::{analyze, implement, mcp, memory_impl as memory, tui};
-use leindex_analyzers::cli::implement::ImplementSessionTarget;
+use leindex_core::cli::{analyze, implement, mcp, memory_impl as memory};
+use leindex_core::cli::implement::ImplementSessionTarget;
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -165,7 +165,14 @@ async fn main() -> Result<()> {
             MemoryCommands::Status { db } => memory::status(db).await,
             MemoryCommands::Scan { paths, depth } => memory::scan(paths, depth).await,
         },
-        Commands::Tui => tui::run().await,
+        Commands::Tui => {
+            // TODO: The Cockpit TUI has been extracted to the maestro-cockpit crate
+            // Use the separate maestro CLI (crates/cli) to access the TUI: `maestro tui`
+            eprintln!("Error: The TUI has been moved to the maestro-cockpit crate.");
+            eprintln!("Please use the maestro CLI binary from crates/cli instead.");
+            eprintln!("Run: cargo run --manifest-path=crates/cli/Cargo.toml --bin maestro -- tui");
+            Err(anyhow::anyhow!("TUI not available from this binary"))
+        }
         Commands::Implement {
             command,
             description,

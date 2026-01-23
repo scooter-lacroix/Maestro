@@ -117,7 +117,7 @@ Each LSP server entry in `lsp.servers` has the following structure:
 |-------|------|----------|-------------|
 | `name` | string | Yes | Unique identifier for this LSP instance (format: `{lsp_name}-{session_id}`) |
 | `language` | string | Yes | Language identifier (rust, python, typescript) |
-| `displayName` | string | Yes | Human-readable LSP name (rust-analyzer, ruff-lsp, typescript-language-server) |
+| `displayName` | string | Yes | Human-readable LSP name (rust-analyzer, ruff server, typescript-language-server) |
 | `command` | string | Yes | LSP binary to execute |
 | `args` | array[string] | Yes | Arguments to pass to LSP binary |
 | `type` | string | Yes | Transport type - always "stdio" for LSPs |
@@ -246,11 +246,11 @@ LSP capabilities indicate which operations are supported:
         "transport": "stdio"
       },
       {
-        "name": "ruff-lsp-session123",
+        "name": "ruff-session123",
         "language": "python",
-        "displayName": "ruff-lsp",
-        "command": "ruff-lsp",
-        "args": [],
+        "displayName": "ruff server",
+        "command": "ruff",
+        "args": ["server"],
         "type": "stdio",
         "session_id": "session123",
         "project_path": "/home/user/projects/polyglot-app",

@@ -23,9 +23,8 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
         println!("   Debug: enabled");
     }
 
-    // Use the api server module from the library crate
-    use crate::api::run_server;
-    use crate::api::ServerConfig;
+    // Use the api server module
+    use crate::api::{run_server, ServerConfig};
 
     let config = ServerConfig {
         host,

@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn test_lsp_type_to_binary_name() {
         assert_eq!(LspType::Rust.binary_name(), "rust-analyzer");
-        assert_eq!(LspType::Python.binary_name(), "ruff-lsp");
+        assert_eq!(LspType::Python.binary_name(), "ruff");
         assert_eq!(
             LspType::TypeScript.binary_name(),
             "typescript-language-server"

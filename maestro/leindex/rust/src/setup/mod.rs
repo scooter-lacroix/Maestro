@@ -523,8 +523,14 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     let _ = tx.send(SetupEvent::Finished);
 
     // Persist configuration using the config module
-    // Note: We save to the config file which will be loaded by the config module
-    if let Err(e) = save_setup_config(&config) {
+    // Convert setup Config to main Config and save
+    let persistent_config = crate::config::Config {
+        editor: config.editor.clone(),
+        install_path: config.install_path.clone(),
+        theme: crate::config::Config::default().theme,
+        selected_tools: config.selected_tools.clone(),
+    };
+    if let Err(e) = persistent_config.save() {
         let _ = tx.send(SetupEvent::Error(format!("Failed to save config: {}", e)));
     }
 }

@@ -3,8 +3,7 @@
 //! Runs vector search benchmarks and generates evaluation reports.
 
 use anyhow::Result;
-use leindex_analyzers::vector::report::generate_markdown_report;
-use leindex_analyzers::vector::report::BenchmarkReport;
+use leindex_core::vector::report::{generate_markdown_report, BenchmarkReport};
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -15,8 +14,8 @@ fn main() -> Result<()> {
     let report = BenchmarkReport {
         timestamp: chrono::Utc::now(),
         results: std::collections::HashMap::new(),
-        summary: leindex_analyzers::vector::report::ReportSummary {
-            current_impl: leindex_analyzers::vector::report::ImplementationSummary {
+        summary: leindex_core::vector::report::ReportSummary {
+            current_impl: leindex_core::vector::report::ImplementationSummary {
                 avg_query_latency_us: 3.0,
                 p95_latency_us: 3.5,
                 p99_latency_us: 4.0,
@@ -26,7 +25,7 @@ fn main() -> Result<()> {
             },
             hnsw_impl: None,
             turso_impl: None,
-            comparison: leindex_analyzers::vector::report::ComparisonMetrics {
+            comparison: leindex_core::vector::report::ComparisonMetrics {
                 latency_improvement_percent: None,
                 memory_overhead_percent: None,
                 accuracy_difference: None,
