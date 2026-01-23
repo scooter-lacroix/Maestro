@@ -160,14 +160,24 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 **Type**: Master Orchestration Track
 
-**Status**: Planning (v2.5 scope definition complete; implementation pending)
+**Status**: In Progress - Sub-Track 01 (Cockpit TUI Re-Org) started
 
 **Sub-Tracks**:
-- [ ] 01-cockpit-tui-reorg
+- [~] 01-cockpit-tui-reorg (In Progress - Task 2.1: TUI code extracted, pending compilation fixes)
 - [ ] 02-leindex-core-rust
 - [ ] 03-orchestrate-pane-ralph
 
-**Execution**: `/maestro:orchestrate v2-5_20260121` (once orchestration wiring is restored)
+**Execution**: `/maestro:implement v2-5_20260121`
+
+**Progress Summary (2026-01-22):**
+- **Sub-Track 01: In Progress**
+  - Phase 1 (Architecture & Layout): COMPLETE ✅
+    - ADRs 001 & 002 created (CLI Ownership, Crate Reorganization)
+    - Binary naming: Rust-only `maestro`, legacy Python CLI archived
+    - Workspace structure created at repo root
+  - Phase 2 (Move + Modularize Cockpit): In Progress
+    - Task 2.1: TUI code moved to `crates/cockpit/src/app.rs` (6000+ lines)
+    - Pending: Fix compilation errors from import path changes
 
 ---
 
