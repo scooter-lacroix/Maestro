@@ -48,6 +48,13 @@ dev-test:
 check:
 	$(CARGO) check --workspace
 
+# Policy checks - enforce architectural rules
+policy-check:
+	@echo "Checking for forbidden maestro.tldr imports outside archive..."
+	@rg -n "maestro\.tldr" --glob '!maestro/archive/**' --glob '!*.txt' --glob '!**/tracks.md' --glob '!**/plan.md' --glob '!Makefile' --glob '!**/SKILL.md' --glob '!**/spec.md' . && echo "❌ ERROR: Found maestro.tldr references outside archive/" && exit 1 || echo "✅ No maestro.tldr imports outside archive/"
+	@echo "Checking for archive/tldr execution paths in runtime code..."
+	@rg -n "from.*archive.*tldr|import.*archive.*tldr" --glob '!*.txt' --glob '!*.md' --glob '!maestro/archive/**' maestro/ && echo "❌ ERROR: Found archive/tldr imports in runtime code" && exit 1 || echo "✅ No archive/tldr execution paths"
+
 # Run clippy for linting
 lint:
 	$(CARGO) clippy --workspace --all-targets

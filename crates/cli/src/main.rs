@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use leindex_core::cli::analyze;
 use leindex_core::cli::implement::ImplementSessionTarget;
 use leindex_core::cli::implement;
+use leindex_core::cli::leindex_cmd;
 use leindex_core::cli::memory_cmd as memory;
 use leindex_core::cli::mcp;
 
@@ -43,6 +44,12 @@ enum Commands {
         /// Analysis type: ast, callgraph, cfg, dfg, slicing, all
         #[arg(short, long, default_value = "all")]
         analysis: String,
+    },
+
+    /// LeIndex project-level operations (index, search, 5-phase analysis)
+    LeIndex {
+        #[command(subcommand)]
+        command: leindex_cmd::LeIndexSubcommand,
     },
 
     /// Maestro Memory System operations
@@ -157,6 +164,7 @@ async fn main() -> Result<()> {
             language,
             analysis,
         } => analyze::run(path, format, language, analysis).await,
+        Commands::LeIndex { command } => leindex_cmd::run(leindex_cmd::LeIndexCommand { command }).await,
         Commands::Memory { command } => match command {
             MemoryCommands::Serve {
                 port,
