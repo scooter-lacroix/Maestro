@@ -22,14 +22,14 @@ use std::{
     time::Instant,
 };
 
-use leindex_analyzers::config::Config;
-use leindex_analyzers::memory::lsp_manager::LspType;
-use leindex_analyzers::memory::models::McpStatus;
-use leindex_analyzers::memory::LspStatus;
-use leindex_analyzers::memory::McpPool;
-use leindex_analyzers::memory::MemoryService;
-use leindex_analyzers::memory::TursoStorageBackend;
-use leindex_analyzers::multiplexer::TmuxMultiplexer;
+use leindex_core::config::Config;
+use leindex_core::memory::lsp_manager::LspType;
+use leindex_core::memory::models::McpStatus;
+use leindex_core::memory::LspStatus;
+use leindex_core::memory::McpPool;
+use leindex_core::memory::MemoryService;
+use leindex_core::memory::TursoStorageBackend;
+use leindex_core::multiplexer::TmuxMultiplexer;
 
 use crate::state::{
     AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption,
@@ -107,11 +107,11 @@ pub struct App {
     pub memories: Vec<MemoryInfo>,
     pub memory_state: ratatui::widgets::ListState,
     pub memory_query: String,
-    pub sessions: Vec<leindex_analyzers::memory::models::Session>,
+    pub sessions: Vec<leindex_core::memory::models::Session>,
     pub session_entries: Vec<SessionEntry>,
     pub session_state: ratatui::widgets::ListState,
-    pub groups: Vec<leindex_analyzers::memory::models::SessionGroup>,
-    pub mcp_servers: Vec<leindex_analyzers::memory::models::McpServer>,
+    pub groups: Vec<leindex_core::memory::models::SessionGroup>,
+    pub mcp_servers: Vec<leindex_core::memory::models::McpServer>,
     pub stats: Stats,
     pub scroll: usize,
     // Session switcher state
@@ -185,7 +185,7 @@ pub struct App {
     // Flag to trigger async LSP refresh
     pub pending_lsp_refresh: bool,
     // Persistent LSP Manager to keep processes alive
-    pub lsp_manager: Option<leindex_analyzers::memory::lsp_manager::LspManager>,
+    pub lsp_manager: Option<leindex_core::memory::lsp_manager::LspManager>,
     // Sessions that already ran LSP auto-detection
     pub lsp_autostarted_sessions: HashSet<String>,
     // Conductor pane state (formerly Orchestrate)
@@ -275,7 +275,7 @@ impl App {
             lsp_availability: HashMap::new(),
             storage_backend: storage_backend.clone(),
             pending_lsp_refresh: false,
-            lsp_manager: storage_backend.map(|s| leindex_analyzers::memory::lsp_manager::LspManager::new((*s).clone())),
+            lsp_manager: storage_backend.map(|s| leindex_core::memory::lsp_manager::LspManager::new((*s).clone())),
             lsp_autostarted_sessions: HashSet::new(),
             conductor: crate::conductor::ConductorPane::auto_discover(),
         };
@@ -362,7 +362,7 @@ impl App {
             })
     }
 
-    fn dash_selected_session(&self) -> Option<&leindex_analyzers::memory::models::Session> {
+    fn dash_selected_session(&self) -> Option<&leindex_core::memory::models::Session> {
         let selected = self.dash_session_state.selected()?;
         match self.dash_session_entries.get(selected) {
             Some(DashSessionEntry::Session(s)) => Some(s),
@@ -578,9 +578,9 @@ impl App {
             for session in &mut self.sessions {
                 let exists = multiplexer.session_exists(&session.session_id);
                 let new_status = if exists {
-                    leindex_analyzers::memory::models::SessionStatus::Running
+                    leindex_core::memory::models::SessionStatus::Running
                 } else {
-                    leindex_analyzers::memory::models::SessionStatus::Terminated
+                    leindex_core::memory::models::SessionStatus::Terminated
                 };
 
                 if session.status != new_status {
@@ -643,7 +643,7 @@ impl App {
         // Add Uncategorized as a selectable Group if sessions exist
         let has_uncategorized = self.sessions.iter().any(|s| s.group_path.is_none());
         if has_uncategorized {
-            let uncategorized_group = leindex_analyzers::memory::models::SessionGroup {
+            let uncategorized_group = leindex_core::memory::models::SessionGroup {
                 id: -1, // Special ID
                 name: "[Uncategorized]".to_string(),
                 path: "uncategorized".to_string(),
@@ -848,8 +848,8 @@ impl App {
 
             if matches!(
                 session.status,
-                leindex_analyzers::memory::models::SessionStatus::Terminated
-                    | leindex_analyzers::memory::models::SessionStatus::Completed
+                leindex_core::memory::models::SessionStatus::Terminated
+                    | leindex_core::memory::models::SessionStatus::Completed
             ) {
                 continue;
             }
@@ -1173,7 +1173,7 @@ async fn run_app<B: Backend>(
                                         // let _ = terminal.draw(|frame| ui(frame, \u0026mut app));
 
                                         if let Some(svc) = service.as_ref() {
-                                            let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                            let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                 Ok(m) => m,
                                                 Err(e) => {
                                                     app.status_message = format!("Failed to create session manager: {}", e);
@@ -1307,7 +1307,7 @@ async fn run_app<B: Backend>(
                                             );
 
                                             let group =
-                                                leindex_analyzers::memory::models::SessionGroup {
+                                                leindex_core::memory::models::SessionGroup {
                                                     id: 0,
                                                     name: clean_name.to_string(),
                                                     path: new_path.clone(),
@@ -1429,7 +1429,7 @@ async fn run_app<B: Backend>(
                                                 if let Some(orig) =
                                                     app.sessions.iter().find(|s| s.session_id == id)
                                                 {
-                                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                         Ok(m) => m,
                                                         Err(e) => {
                                                             app.status_message = format!("Failed to create session manager: {}", e);
@@ -1459,7 +1459,7 @@ async fn run_app<B: Backend>(
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
-                                                let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                     Ok(m) => m,
                                                     Err(e) => {
                                                         app.status_message = format!("Failed to create session manager: {}", e);
@@ -1518,7 +1518,7 @@ async fn run_app<B: Backend>(
 
                                             let parse_phase_opts = || {
                                                 let mut opts =
-                                                    leindex_analyzers::five_phase::PhaseOptions::new(
+                                                    leindex_core::five_phase::PhaseOptions::new(
                                                         std::path::PathBuf::from("."),
                                                     );
 
@@ -1529,7 +1529,7 @@ async fn run_app<B: Backend>(
                                                     match t {
                                                         "--mode" | "-m" => {
                                                             if let Some(v) = tokens.get(i + 1) {
-                                                                opts.mode = leindex_analyzers::token_format::FormatMode::from_str(v);
+                                                                opts.mode = leindex_core::token_format::FormatMode::from_str(v);
                                                                 i += 1;
                                                             }
                                                         }
@@ -1568,7 +1568,7 @@ async fn run_app<B: Backend>(
                                                         t if t.starts_with("--mode=") => {
                                                             if let Some((_, v)) = t.split_once('=') {
                                                                 opts.mode =
-                                                                    leindex_analyzers::token_format::FormatMode::from_str(v);
+                                                                    leindex_core::token_format::FormatMode::from_str(v);
                                                             }
                                                         }
                                                         t if t.starts_with("--files=") => {
@@ -1600,15 +1600,15 @@ async fn run_app<B: Backend>(
                                                             }
                                                         }
                                                         "ultra" | "u" => {
-                                                            opts.mode = leindex_analyzers::token_format::FormatMode::Ultra
+                                                            opts.mode = leindex_core::token_format::FormatMode::Ultra
                                                         }
                                                         "balanced" | "b" => {
                                                             opts.mode =
-                                                                leindex_analyzers::token_format::FormatMode::Balanced
+                                                                leindex_core::token_format::FormatMode::Balanced
                                                         }
                                                         "verbose" | "v" => {
                                                             opts.mode =
-                                                                leindex_analyzers::token_format::FormatMode::Verbose
+                                                                leindex_core::token_format::FormatMode::Verbose
                                                         }
                                                         t if !t.starts_with('-') && !path_set => {
                                                             opts.root = std::path::PathBuf::from(t);
@@ -1625,7 +1625,7 @@ async fn run_app<B: Backend>(
                                             match cmd.as_str() {
                                                 "/phase1" | "/p1" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase1_structural_scan(&opts)
+                                                    match leindex_core::five_phase::phase1_structural_scan(&opts)
                                                     {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
@@ -1636,7 +1636,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase2" | "/p2" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase2_dependency_map(&opts) {
+                                                    match leindex_core::five_phase::phase2_dependency_map(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase2: {}",
@@ -1646,7 +1646,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase3" | "/p3" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase3_logic_flow(&opts) {
+                                                    match leindex_core::five_phase::phase3_logic_flow(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase3: {}",
@@ -1656,7 +1656,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase4" | "/p4" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase4_critical_path(&opts) {
+                                                    match leindex_core::five_phase::phase4_critical_path(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase4: {}",
@@ -1666,7 +1666,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase5" | "/p5" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase5_optimization_report(&opts) {
+                                                    match leindex_core::five_phase::phase5_optimization_report(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase5: {}",
@@ -1898,7 +1898,7 @@ async fn run_app<B: Backend>(
                                                     };
 
                                                 // Ensure group exists
-                                                let group = leindex_analyzers::memory::models::SessionGroup {
+                                                let group = leindex_core::memory::models::SessionGroup {
                                                     id: 0,
                                                     name: clean_name.to_string(),
                                                     path: path.clone(),
@@ -1948,7 +1948,7 @@ async fn run_app<B: Backend>(
                                                 if let Some(svc) = service.as_ref() {
                                                     if let Some(id) = app.target_session_id.clone()
                                                     {
-                                                        let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                        let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                             Ok(m) => m,
                                                             Err(e) => {
                                                                 app.status_message = format!("Failed to create session manager: {}", e);
@@ -2155,7 +2155,7 @@ async fn run_app<B: Backend>(
                                         if c == 'y' || c == 'Y' {
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
-                                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                         Ok(m) => m,
                                                         Err(e) => {
                                                             app.status_message = format!("Failed to create session manager: {}", e);
@@ -2959,7 +2959,7 @@ async fn run_app<B: Backend>(
                                     let svc_clone = svc.clone();
                                     let lsp_manager = app.lsp_manager.clone();
                                     let res = tokio::task::spawn_blocking(move || {
-                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
                                         if let Some(lsp_manager) = lsp_manager {
                                             manager = manager.with_lsp_manager(lsp_manager);
@@ -2967,7 +2967,7 @@ async fn run_app<B: Backend>(
 
                                         manager.restore_session(
                                             &s_clone,
-                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+                                            leindex_core::memory::session_manager::SessionRestoreMode::Resume,
                                         )
                                     }).await.ok().and_then(|r: Result<(), anyhow::Error>| r.ok());
                                     app.is_spawning = false;
@@ -3480,7 +3480,7 @@ async fn run_app<B: Backend>(
                                         let _ = terminal.draw(|frame| ui(frame, &mut app));
 
                                         let _ = suspend_fullscreen_app(terminal);
-                                        let res = leindex_analyzers::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name);
+                                        let res = leindex_core::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name);
                                         let _ = resume_fullscreen_app(terminal);
 
                                         match res {
@@ -3541,7 +3541,7 @@ async fn run_app<B: Backend>(
                                                             // If the session is dead, do the useful thing:
                                                             // recreate the shell and attempt to resume the agent (best-effort).
                                                             if s.status
-	                                                                == leindex_analyzers::memory::models::SessionStatus::Terminated
+	                                                                == leindex_core::memory::models::SessionStatus::Terminated
 	                                                            {
 	                                                                if let Some(svc) = service.as_ref()
 	                                                                {
@@ -3558,7 +3558,7 @@ async fn run_app<B: Backend>(
 	                                                                    let svc_clone = svc.clone();
 	                                                                    let lsp_manager = app.lsp_manager.clone();
 	                                                                    let _ = tokio::task::spawn_blocking(move || {
-	                                                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+	                                                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
 	                                                                        if let Some(lsp_manager) = lsp_manager {
 	                                                                            manager = manager.with_lsp_manager(lsp_manager);
@@ -3566,7 +3566,7 @@ async fn run_app<B: Backend>(
 
 	                                                                        manager.restore_session(
 	                                                                            &s_clone,
-	                                                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+	                                                                            leindex_core::memory::session_manager::SessionRestoreMode::Resume,
 	                                                                        )
 	                                                                    }).await.ok().and_then(|r: Result<(), anyhow::Error>| r.ok());
 	                                                                    app.is_spawning = false;
@@ -3698,7 +3698,7 @@ async fn run_app<B: Backend>(
                                     let svc_clone = svc.clone();
                                     let lsp_manager = app.lsp_manager.clone();
                                     let res = tokio::task::spawn_blocking(move || {
-                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
                                         if let Some(lsp_manager) = lsp_manager {
                                             manager = manager.with_lsp_manager(lsp_manager);
@@ -3706,7 +3706,7 @@ async fn run_app<B: Backend>(
 
                                         manager.restore_session(
                                             &s_clone,
-                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Restart,
+                                            leindex_core::memory::session_manager::SessionRestoreMode::Restart,
                                         )
                                     }).await.ok().and_then(|r: Result<(), anyhow::Error>| r.ok());
                                     app.is_spawning = false;

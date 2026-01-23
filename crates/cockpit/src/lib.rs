@@ -15,7 +15,7 @@ pub mod theme;
 pub use app::run;
 
 /// Re-export commonly used types for convenience
-pub use leindex_analyzers::{
+pub use leindex_core::{
     memory::models::{Session, McpServer},
     config::Config,
 };

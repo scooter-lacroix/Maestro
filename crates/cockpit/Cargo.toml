@@ -11,7 +11,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 # Core library (shared data layer)
-leindex-analyzers = { path = "../../maestro/leindex/rust" }
+leindex-core = { path = "../../maestro/leindex/rust" }
 
 # TUI framework
 ratatui = "0.29"

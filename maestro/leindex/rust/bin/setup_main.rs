@@ -17,7 +17,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use leindex_analyzers::setup::{run_orchestra, Config, SetupEvent};
+use leindex_core::setup::{run_orchestra, Config, SetupEvent};
 
 struct App {
     phase: Phase,

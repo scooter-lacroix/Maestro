@@ -153,7 +153,7 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [ ] Track: Maestro v2.5 - Cockpit v2 + LeIndex Rust Core + Orchestrate Pane
+## [~] Track: Maestro v2.5 - Cockpit v2 + LeIndex Rust Core + Orchestrate Pane
 *Link: [./maestro/tracks/v2-5_20260121/](./maestro/tracks/v2-5_20260121/)*
 
 **Description**: Reorganize Maestro so the Rust Cockpit v2 is the canonical TUI (Go TUI fully retired), LeIndex in pure Rust fully absorbs TLDR (no `maestro.tldr` usage), and add an Orchestrate pane by porting/rebranding `subsy/ralph-tui` with LeIndex-powered token-efficient loop execution.
