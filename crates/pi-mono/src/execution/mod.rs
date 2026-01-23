@@ -131,6 +131,7 @@ impl ExecutionResult {
 #[derive(Debug, Clone)]
 pub struct Executor {
     /// Configuration for the executor
+    #[allow(dead_code)]
     config: ExecutorConfig,
 }
 

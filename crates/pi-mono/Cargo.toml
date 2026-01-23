@@ -17,8 +17,11 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # serde_yaml - Add when implementing YAML configuration support
-# which - Add when implementing executable path resolution
-# dirs - Add when implementing config directory detection
+
+# Executable discovery and configuration
+which = "7.0"
+dirs = "5.0"
+semver = "1.0"
 
 # Error handling
 anyhow = { workspace = true }
@@ -26,3 +29,6 @@ thiserror = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
+
+[dev-dependencies]
+semver = "1.0"

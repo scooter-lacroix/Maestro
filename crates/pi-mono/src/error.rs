@@ -85,6 +85,10 @@ pub enum Error {
     /// Other errors that don't fit into specific categories
     #[error("unknown error: {0}")]
     Other(String),
+
+    /// Errors that occur during CLI detection
+    #[error("detection error: {0}")]
+    Detection(#[from] DetectionError),
 }
 
 impl Error {
@@ -122,6 +126,84 @@ impl Error {
     pub fn is_config(&self) -> bool {
         matches!(self, Error::Config(_))
     }
+
+    /// Returns `true` if this error is a detection error.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::error::{Error, DetectionError};
+    ///
+    /// let error = Error::Detection(DetectionError::NotFound);
+    ///
+    /// assert!(error.is_detection());
+    /// ```
+    pub fn is_detection(&self) -> bool {
+        matches!(self, Error::Detection(_))
+    }
+}
+
+/// Errors that can occur during Pi-Mono CLI detection.
+///
+/// These errors cover failures when discovering the pi-mono executable,
+/// determining its version, and checking available capabilities.
+#[derive(Error, Debug)]
+pub enum DetectionError {
+    /// The pi-mono executable was not found in any of the standard locations.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::error::DetectionError;
+    ///
+    /// let error = DetectionError::NotFound;
+    ///
+    /// assert!(error.to_string().contains("not found"));
+    /// ```
+    #[error("pi-mono executable not found in any standard location")]
+    NotFound,
+
+    /// Failed to parse the version string from pi-mono.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::error::DetectionError;
+    ///
+    /// let error = DetectionError::VersionParseFailed {
+    ///     output: "invalid version".to_string(),
+    /// };
+    ///
+    /// assert!(error.to_string().contains("invalid version"));
+    /// ```
+    #[error("failed to parse version from output: '{output}'")]
+    VersionParseFailed {
+        /// The raw output that could not be parsed
+        output: String,
+    },
+
+    /// Command execution failed during detection.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::error::DetectionError;
+    ///
+    /// let error = DetectionError::ExecutionFailed {
+    ///     command: "pi --version".to_string(),
+    ///     reason: "Permission denied".to_string(),
+    /// };
+    ///
+    /// assert!(error.to_string().contains("pi --version"));
+    /// assert!(error.to_string().contains("Permission denied"));
+    /// ```
+    #[error("command execution failed: '{command}' - {reason}")]
+    ExecutionFailed {
+        /// The command that failed
+        command: String,
+        /// Reason for the failure
+        reason: String,
+    },
 }
 
 /// Errors that can occur during Pi-Mono command execution.
@@ -371,5 +453,59 @@ mod tests {
         };
         let msg = error.to_string();
         assert!(msg.contains("api_key"));
+    }
+
+    // DetectionError tests
+    #[test]
+    fn test_detection_error_not_found_display() {
+        let error = DetectionError::NotFound;
+        let msg = error.to_string();
+        assert!(msg.contains("not found"));
+    }
+
+    #[test]
+    fn test_detection_error_version_parse_failed_display() {
+        let error = DetectionError::VersionParseFailed {
+            output: "invalid version".to_string(),
+        };
+        let msg = error.to_string();
+        assert!(msg.contains("invalid version"));
+    }
+
+    #[test]
+    fn test_detection_error_execution_failed_display() {
+        let error = DetectionError::ExecutionFailed {
+            command: "pi --version".to_string(),
+            reason: "Permission denied".to_string(),
+        };
+        let msg = error.to_string();
+        assert!(msg.contains("pi --version"));
+        assert!(msg.contains("Permission denied"));
+    }
+
+    #[test]
+    fn test_error_is_detection() {
+        let error = Error::Detection(DetectionError::NotFound);
+        assert!(error.is_detection());
+        assert!(!error.is_execution());
+        assert!(!error.is_config());
+    }
+
+    #[test]
+    fn test_error_detection_conversion() {
+        let detection_error = DetectionError::NotFound;
+        let error: Error = detection_error.into();
+        assert!(error.is_detection());
+    }
+
+    #[test]
+    fn test_error_detection_from_execution_failed() {
+        let detection_error = DetectionError::ExecutionFailed {
+            command: "pi --version".to_string(),
+            reason: "Command not found".to_string(),
+        };
+        let error: Error = detection_error.into();
+        assert!(error.is_detection());
+        assert!(error.to_string().contains("pi --version"));
     }
 }
