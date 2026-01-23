@@ -323,6 +323,11 @@ pub struct OrchestrateConfig {
     pub iteration_timeout_secs: u64,
     pub enable_leindex: bool,
     pub data_dir: PathBuf,
+    // Rate-limit detection and recovery
+    pub enable_rate_limit_detection: bool,
+    pub rate_limit_max_retries: u32,
+    pub rate_limit_backoff_base_secs: u64,
+    pub rate_limit_backoff_max_secs: u64,
 }
 
 impl Default for OrchestrateConfig {
@@ -335,6 +340,10 @@ impl Default for OrchestrateConfig {
             iteration_timeout_secs: 300, // 5 minutes
             enable_leindex: true,
             data_dir: PathBuf::from(home).join(".maestro").join("orchestrate"),
+            enable_rate_limit_detection: true,
+            rate_limit_max_retries: 5,
+            rate_limit_backoff_base_secs: 1,
+            rate_limit_backoff_max_secs: 300,
         }
     }
 }

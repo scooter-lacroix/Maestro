@@ -101,11 +101,66 @@ impl OrchestrateEngine {
                 line_number: 0,
             };
 
-            let result = self
-                .run_iteration(track_id, &temp_task, &session, &plan)
-                .await;
+            // Run iteration with rate-limit retry loop
+            let mut rate_limit_retries: u32 = 0;
+            let iteration_result = loop {
+                let result = self
+                    .run_iteration(track_id, &temp_task, &session, &plan)
+                    .await;
 
-            match result {
+                match result {
+                    Ok(iter_res) => {
+                        // Check for rate limiting
+                        if iter_res.rate_limited && self.config.enable_rate_limit_detection {
+                            if rate_limit_retries >= self.config.rate_limit_max_retries {
+                                error!(
+                                    "Rate limit exceeded after {} retries, task {} requires manual intervention",
+                                    rate_limit_retries, task_id
+                                );
+                                // Mark task as failed with rate limit note
+                                let task_ref = self.find_task_mut(&mut plan.tasks, &task_id)?;
+                                task_ref.notes = Some(format!(
+                                    "RATE_LIMITED: Max retries ({}) exceeded. Manual intervention required.",
+                                    self.config.rate_limit_max_retries
+                                ));
+                                break Err(anyhow!(
+                                    "Task {} rate-limited after {} retries",
+                                    task_id, rate_limit_retries
+                                ));
+                            }
+
+                            // Calculate exponential backoff (1s → 10s → 60s → 300s max)
+                            let backoff_secs = std::cmp::min(
+                                self.config.rate_limit_backoff_base_secs * (2_u64.pow(rate_limit_retries as u32)),
+                                self.config.rate_limit_backoff_max_secs,
+                            );
+
+                            warn!(
+                                "Rate limit detected on task {} (retry {}/{}), backing off {}s",
+                                task_id,
+                                rate_limit_retries + 1,
+                                self.config.rate_limit_max_retries,
+                                backoff_secs
+                            );
+
+                            // Sleep for backoff period
+                            tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                            rate_limit_retries += 1;
+                            // Continue loop to retry
+                            continue;
+                        }
+
+                        // No rate limit (or retries exhausted above), exit with result
+                        break Ok(iter_res);
+                    }
+                    Err(e) => {
+                        // Non-rate-limit error, exit with error
+                        break Err(e);
+                    }
+                }
+            };
+
+            match iteration_result {
                 Ok(iteration_result) => {
                     // Only mark task complete if agent explicitly completed the task
                     // (success + completed flag means the agent signaled completion)

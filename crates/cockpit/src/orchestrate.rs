@@ -11,7 +11,32 @@ use std::path::PathBuf;
 use leindex_core::orchestrate::{
     model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode},
     parser::{parse_tracks_md, parse_plan_md},
+    setup::{SetupStatus, detect_setup_status, AgentTool},
 };
+
+/// Setup state for the orchestrate pane
+#[derive(Debug, Clone)]
+pub struct SetupState {
+    /// Setup status (cached)
+    pub status: Option<SetupStatus>,
+    /// Show setup wizard
+    pub show_setup_wizard: bool,
+    /// Setup wizard step (0 = welcome, 1 = tool selection, 2 = confirm)
+    pub wizard_step: usize,
+    /// Selected tool in wizard
+    pub selected_tool: Option<AgentTool>,
+}
+
+impl Default for SetupState {
+    fn default() -> Self {
+        Self {
+            status: None,
+            show_setup_wizard: false,
+            wizard_step: 0,
+            selected_tool: None,
+        }
+    }
+}
 
 /// State for the Orchestrate pane
 pub struct OrchestratePane {
@@ -43,6 +68,8 @@ pub struct OrchestratePane {
     cached_plan: Option<TrackPlan>,
     /// Track index for which the plan is cached
     cached_plan_track_index: Option<usize>,
+    /// Setup state
+    pub setup: SetupState,
 }
 
 impl Default for OrchestratePane {
@@ -62,6 +89,7 @@ impl Default for OrchestratePane {
             error_message: None,
             cached_plan: None,
             cached_plan_track_index: None,
+            setup: Default::default(),
         }
     }
 }
@@ -185,6 +213,106 @@ impl OrchestratePane {
     pub fn clear_output(&mut self) {
         self.iteration_output.clear();
         self.output_scroll = 0;
+    }
+
+    /// Check setup status and cache the result
+    pub fn check_setup_status(&mut self) {
+        if let Ok(status) = detect_setup_status(&self.tracks_dir) {
+            // Check if minimally configured before moving
+            let needs_wizard = !status.is_minimally_configured() && !self.setup.show_setup_wizard;
+            self.setup.status = Some(status);
+
+            // Auto-show setup wizard if not minimally configured
+            if needs_wizard {
+                self.setup.show_setup_wizard = true;
+                self.setup.wizard_step = 0;
+            }
+        }
+    }
+
+    /// Get the cached setup status, checking if not cached
+    pub fn get_setup_status(&mut self) -> Option<&SetupStatus> {
+        if self.setup.status.is_none() {
+            self.check_setup_status();
+        }
+        self.setup.status.as_ref()
+    }
+
+    /// Dismiss the setup wizard
+    pub fn dismiss_setup_wizard(&mut self) {
+        self.setup.show_setup_wizard = false;
+        self.setup.wizard_step = 0;
+    }
+
+    /// Advance the setup wizard
+    pub fn advance_setup_wizard(&mut self) {
+        self.setup.wizard_step += 1;
+    }
+
+    /// Select a tool in the setup wizard
+    pub fn select_setup_tool(&mut self, tool: AgentTool) {
+        self.setup.selected_tool = Some(tool);
+    }
+
+    /// Get the recommended start command for the current track
+    pub fn get_start_command(&self, tool: Option<&str>, dangerous: bool, sandbox: bool) -> String {
+        if self.tracks.is_empty() {
+            return "// No tracks available".to_string();
+        }
+
+        let track_id = &self.tracks[self.selected_track].id;
+        let tool = tool.unwrap_or("claude");
+        let mode_str = match self.loop_mode {
+            LoopMode::Planning => "planning",
+            LoopMode::Building => "building",
+        };
+
+        let mut cmd = format!("maestro orchestrate start {} --mode {} --tool {}", track_id, mode_str, tool);
+
+        if dangerous {
+            cmd.push_str(" --dangerous");
+        }
+
+        if sandbox {
+            cmd.push_str(" --sandbox");
+        }
+
+        cmd
+    }
+
+    /// Get the recommended pause command for the current track
+    pub fn get_pause_command(&self) -> String {
+        if self.tracks.is_empty() {
+            return "// No tracks available".to_string();
+        }
+
+        let track_id = &self.tracks[self.selected_track].id;
+        format!("maestro orchestrate pause {}", track_id)
+    }
+
+    /// Get the recommended resume command for the current track
+    pub fn get_resume_command(&self) -> String {
+        if self.tracks.is_empty() {
+            return "// No tracks available".to_string();
+        }
+
+        let track_id = &self.tracks[self.selected_track].id;
+        format!("maestro orchestrate resume {}", track_id)
+    }
+
+    /// Get the recommended status command for the current track
+    pub fn get_status_command(&self) -> String {
+        if self.tracks.is_empty() {
+            return "maestro orchestrate status".to_string();
+        }
+
+        let track_id = &self.tracks[self.selected_track].id;
+        format!("maestro orchestrate status {}", track_id)
+    }
+
+    /// Get the command to create a new track
+    pub fn get_new_track_command(&self) -> String {
+        "maestro newTrack".to_string()
     }
 }
 
@@ -319,14 +447,14 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
     // Split into details (top) and output (bottom)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(15), Constraint::Min(0)])
+        .constraints([Constraint::Length(20), Constraint::Min(0)])
         .split(area);
 
     // Task details
     let details_block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .title(" Task Details ")
+        .title(" Task Details & Commands ")
         .border_style(if !pane.output_focused {
             Style::default().fg(theme.muted)
         } else {
@@ -338,9 +466,13 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
             Line::from(""),
             Line::from("  No track selected."),
             Line::from(""),
+            Line::from("  Press 'n' to create a new track"),
+            Line::from("  or run: maestro newTrack"),
+            Line::from(""),
         ]
     } else {
         let track = &pane.tracks[pane.selected_track];
+        let start_cmd = pane.get_start_command(Some("claude"), false, false);
         vec![
             Line::from(vec![
                 Span::styled("Track: ", Style::default().fg(theme.accent_alt)),
@@ -366,6 +498,24 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
             Line::from(vec![
                 Span::styled("Iteration: ", Style::default().fg(theme.accent_alt)),
                 Span::styled(format!("{}", pane.current_iteration), Style::default()),
+            ]),
+            Line::from(""),
+            Line::from("Commands:"),
+            Line::from(vec![
+                Span::styled("  [s] Start: ", Style::default().fg(theme.muted)),
+                Span::styled(start_cmd, Style::default().fg(theme.fg)),
+            ]),
+            Line::from(vec![
+                Span::styled("  [p] Pause:  ", Style::default().fg(theme.muted)),
+                Span::styled(pane.get_pause_command(), Style::default().fg(theme.fg)),
+            ]),
+            Line::from(vec![
+                Span::styled("  [r] Resume: ", Style::default().fg(theme.muted)),
+                Span::styled(pane.get_resume_command(), Style::default().fg(theme.fg)),
+            ]),
+            Line::from(vec![
+                Span::styled("  [?] Status:  ", Style::default().fg(theme.muted)),
+                Span::styled(pane.get_status_command(), Style::default().fg(theme.fg)),
             ]),
             Line::from(""),
         ]

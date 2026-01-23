@@ -1,6 +1,7 @@
 //! Agent runner implementations
 //!
 //! Supports running agents via CLI, tmux, or directly.
+//! Includes sandbox mode support using bubblewrap (bwrap) for isolation.
 
 use crate::orchestrate::model::{AgentConfig, Task};
 use anyhow::{anyhow, Context, Result};
@@ -30,6 +31,98 @@ pub struct RunResult {
     pub output: String,
     pub error_message: Option<String>,
     pub exit_code: Option<i32>,
+    /// Rate limit detected (HTTP 429, "rate limit" in message, etc.)
+    pub rate_limited: bool,
+}
+
+/// Detect rate limit patterns in output and error messages
+pub fn detect_rate_limit(output: &str, error_message: &Option<String>) -> bool {
+    // Check for HTTP 429 status codes
+    if output.contains("429") || output.contains("HTTP 429") {
+        return true;
+    }
+
+    // Check for rate limit error messages
+    let rate_limit_patterns = [
+        "rate limit",
+        "rate-limit",
+        "too many requests",
+        "quota exceeded",
+        "throttled",
+        "retry after",
+    ];
+
+    let output_lower = output.to_lowercase();
+    if rate_limit_patterns.iter().any(|p| output_lower.contains(p)) {
+        return true;
+    }
+
+    // Check error messages
+    if let Some(msg) = error_message {
+        let msg_lower = msg.to_lowercase();
+        if rate_limit_patterns.iter().any(|p| msg_lower.contains(p)) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if bubblewrap (bwrap) is available for sandbox mode
+pub fn check_bwrap_available() -> Result<bool> {
+    match Command::new("bwrap").arg("--version").output() {
+        Ok(output) => Ok(output.status.success()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Build a bubblewrap wrapper command for sandbox isolation
+///
+/// This creates a minimal sandbox with:
+/// - Read-only access to the working directory
+/// - Temporary directory for writes
+/// - Network access (required for most AI tools)
+/// - Isolated process namespace
+fn build_bwrap_wrapper(working_dir: &Path) -> Result<Vec<String>> {
+    // Check if bwrap is available
+    if !check_bwrap_available()? {
+        return Err(anyhow!(
+            "Sandbox mode requested but bubblewrap (bwrap) is not available. \
+             Install bubblewrap or run without --sandbox flag."
+        ));
+    }
+
+    let work_dir = working_dir
+        .canonicalize()
+        .context("Failed to canonicalize working directory")?;
+
+    // Build bubblewrap arguments for minimal safe sandbox
+    // Allow network access (required for AI tools)
+    // Bind mount working directory as read-only (safe for analysis)
+    // Provide a tmpfs for writes
+    // CRITICAL: Bind /usr/bin for tool binary access
+    let args = vec![
+        "bwrap".to_string(),
+        "--ro-bind".to_string(),
+        work_dir.to_string_lossy().to_string(),
+        work_dir.to_string_lossy().to_string(),
+        "--bind".to_string(), "/usr".to_string(),  // Bind /usr for tool binaries
+        "--ro-bind".to_string(), "/bin".to_string(),   // Bind /bin for shell
+        "--ro-bind".to_string(), "/lib".to_string(),   // Bind /lib for libraries
+        "--ro-bind".to_string(), "/lib64".to_string(), // Bind /lib64 on some systems
+        "--proc".to_string(), "/proc".to_string(),      // Bind /proc for process info
+        "--dev".to_string(), "/dev".to_string(),        // Bind /dev for device access
+        "--tmpfs".to_string(),
+        "/tmp".to_string(),
+        "--tmpfs".to_string(),
+        "/home".to_string(),  // Isolated home directory
+        "--unshare-all".to_string(),  // Unshare all namespaces (except net implied below)
+        "--share-net".to_string(),   // Re-share network for API access
+        "--die-with-parent".to_string(),  // Exit when parent exits
+        "--new-session".to_string(),  // Create new session
+    ];
+
+    Ok(args)
 }
 
 /// Agent runner trait
@@ -102,6 +195,15 @@ impl CliRunner {
     async fn run_internal(&self, prompt: &str, task: &Task) -> Result<RunResult> {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
+        // Check sandbox availability if sandbox mode is enabled
+        if self.config.sandbox && !check_bwrap_available()? {
+            return Err(anyhow!(
+                "Sandbox mode is enabled but bubblewrap (bwrap) is not available. \
+                 Install bubblewrap: apt install bubblewrap (Debian/Ubuntu) or \
+                 brew install bubblewrap (macOS with brew). Alternatively, run without --sandbox."
+            ));
+        }
+
         // Create a unique secure prompt file using task ID and timestamp
         // This prevents race conditions when multiple orchestrate sessions run concurrently
         let timestamp = std::time::SystemTime::now()
@@ -113,8 +215,8 @@ impl CliRunner {
         tokio::fs::write(&prompt_file, prompt).await
             .with_context(|| format!("Failed to write prompt file: {:?}", prompt_file))?;
 
-        // Build command (returns Result for security check)
-        let mut cmd = self.build_command(&prompt_file)?;
+        // Build command (with optional sandbox wrapper)
+        let mut cmd = self.build_command_with_sandbox(&prompt_file)?;
 
         // Set working directory to track directory (critical for correct tool context)
         cmd.current_dir(&self.working_dir);
@@ -151,18 +253,79 @@ impl CliRunner {
         // Parse result
         let success = output.success();
         let completed = Self::detect_completion(&stdout);
+        let error_message = if !success {
+            Some(format!("Process failed with exit code: {:?}", output.code()))
+        } else {
+            None
+        };
+
+        // Detect rate limiting
+        let rate_limited = detect_rate_limit(&stdout, &error_message);
 
         Ok(RunResult {
             success,
             completed,
             output: stdout,
-            error_message: if !success {
-                Some(format!("Process failed with exit code: {:?}", output.code()))
-            } else {
-                None
-            },
+            error_message,
             exit_code: output.code(),
+            rate_limited,
         })
+    }
+
+    /// Build command for the configured tool with optional sandbox wrapper
+    fn build_command_with_sandbox(&self, prompt_file: &Path) -> Result<TokioCommand> {
+        // CRITICAL: Security check - verify tool is in allowlist unless dangerous_mode is enabled
+        // This check must apply regardless of sandbox mode
+        if !self.config.dangerous_mode && !ALLOWED_TOOLS.contains(&self.config.tool.as_str()) {
+            return Err(anyhow!(
+                "Tool '{}' is not in the allowlist. Allowed tools: {:?}. \
+                 Set dangerous_mode=true to override (not recommended).",
+                self.config.tool, ALLOWED_TOOLS
+            ));
+        }
+
+        // Build the base tool arguments
+        let tool_args = self.build_tool_args(prompt_file)?;
+
+        if self.config.sandbox {
+            // Wrap with bubblewrap for sandbox isolation
+            let bwrap_args = build_bwrap_wrapper(&self.working_dir)?;
+
+            // Create command with bwrap as the executable
+            let mut cmd = TokioCommand::new(&bwrap_args[0]);
+            // Add remaining bwrap arguments
+            for arg in &bwrap_args[1..] {
+                cmd.arg(arg);
+            }
+            // Add tool name and arguments after bwrap args
+            cmd.arg(&self.config.tool);
+            for arg in tool_args {
+                cmd.arg(arg);
+            }
+            Ok(cmd)
+        } else {
+            // No sandbox, direct execution
+            let mut cmd = TokioCommand::new(&self.config.tool);
+            for arg in tool_args {
+                cmd.arg(arg);
+            }
+            Ok(cmd)
+        }
+    }
+
+    /// Build tool-specific arguments (without the tool name itself)
+    fn build_tool_args(&self, prompt_file: &Path) -> Result<Vec<String>> {
+        let prompt_str = prompt_file.to_string_lossy().to_string();
+
+        let args = match self.config.tool.as_str() {
+            "claude" => vec![prompt_str],
+            "gemini" => vec!["chat".to_string(), "--prompt-file".to_string(), prompt_str],
+            "qwen" => vec!["chat".to_string(), "-f".to_string(), prompt_str],
+            "opencode" => vec!["chat".to_string(), "--prompt".to_string(), prompt_str],
+            _ => vec![prompt_str], // Default: just pass the prompt file
+        };
+
+        Ok(args)
     }
 
     fn detect_completion(output: &str) -> bool {

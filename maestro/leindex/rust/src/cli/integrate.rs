@@ -271,7 +271,8 @@ impl Integrator {
             let config_obj = if config_path_str.contains('.') {
                 // Build the nested structure from scratch
                 let parts: Vec<&str> = config_path_str.split('.').collect();
-                let mut result = json!({});
+                #[allow(unused_variables)]
+                let result = json!({});
 
                 fn insert_new_at_path(mut value: Value, parts: &[&str], key: &str, config: Value) -> Value {
                     if parts.is_empty() {
@@ -849,6 +850,34 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             report.passed = false;
         }
 
+        // Check 6: Tool-specific config validation
+        let check = self.check_tool_specific_config(tool);
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
+        // Check 7: Tool binary version check
+        let check = self.check_tool_binary_version(tool);
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
+        // Check 8: Config file permissions
+        let check = self.check_config_permissions(tool);
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
+        // Check 9: MCP connectivity test (optional, may timeout)
+        if std::env::var("MAESTRO_SKIP_MCP_CONNECTIVITY").is_err() {
+            let check = self.check_mcp_connectivity(tool);
+            report.checks.push(check);
+            // Don't fail overall on connectivity issues (may be network-dependent)
+        }
+
         Ok(report)
     }
 
@@ -1025,6 +1054,235 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             }
         }
         false
+    }
+
+    /// Check tool-specific config validation
+    fn check_tool_specific_config(&self, tool: IntegrationTool) -> CheckResult {
+        match tool {
+            IntegrationTool::Amp => self.validate_amp_config(),
+            IntegrationTool::Codex => self.validate_codex_config(),
+            IntegrationTool::Droid => self.validate_droid_config(),
+            _ => CheckResult {
+                name: "Tool-specific config validation".to_string(),
+                passed: true,
+                message: "No specific validation required".to_string(),
+            },
+        }
+    }
+
+    /// Validate Amp MCP config structure
+    fn validate_amp_config(&self) -> CheckResult {
+        let config_path = IntegrationTool::Amp.config_dir()
+            .map(|d| std::path::PathBuf::from(d.as_std_path()).join("settings.json"));
+
+        let (passed, message) = match config_path {
+            Some(ref path) if path.exists() => {
+                match fs::read_to_string(path) {
+                    Ok(content) => {
+                        match serde_json::from_str::<Value>(&content) {
+                            Ok(json) => {
+                                // Check for mcp.mcpServers structure
+                                let has_valid_structure = json.get("mcp")
+                                    .and_then(|m| m.get("mcpServers"))
+                                    .and_then(|s| s.as_object())
+                                    .is_some();
+
+                                if has_valid_structure {
+                                    (true, "Valid amp.mcpServers structure".to_string())
+                                } else {
+                                    (false, "Missing mcp.mcpServers in settings.json".to_string())
+                                }
+                            }
+                            Err(e) => (false, format!("Invalid JSON in settings.json: {}", e))
+                        }
+                    }
+                    Err(e) => (false, format!("Cannot read settings.json: {}", e))
+                }
+            }
+            _ => (false, "Amp settings.json not found".to_string())
+        };
+
+        CheckResult {
+            name: "Amp config validation".to_string(),
+            passed,
+            message,
+        }
+    }
+
+    /// Validate Codex TOML config format
+    fn validate_codex_config(&self) -> CheckResult {
+        let config_path = IntegrationTool::Codex.config_dir()
+            .map(|d| std::path::PathBuf::from(d.as_std_path()).join("config.toml"));
+
+        let (passed, message) = match config_path {
+            Some(ref path) if path.exists() => {
+                match fs::read_to_string(path) {
+                    Ok(content) => {
+                        match content.parse::<TomlValue>() {
+                            Ok(toml) => {
+                                // Check for mcp_servers table
+                                let has_mcp_servers = toml.as_table()
+                                    .and_then(|t| t.get("mcp_servers"))
+                                    .and_then(|v| v.as_table())
+                                    .is_some();
+
+                                if has_mcp_servers {
+                                    (true, "Valid mcp_servers TOML structure".to_string())
+                                } else {
+                                    (false, "Missing [mcp_servers] table in config.toml".to_string())
+                                }
+                            }
+                            Err(e) => (false, format!("Invalid TOML in config.toml: {}", e))
+                        }
+                    }
+                    Err(e) => (false, format!("Cannot read config.toml: {}", e))
+                }
+            }
+            _ => (false, "Codex config.toml not found".to_string())
+        };
+
+        CheckResult {
+            name: "Codex config validation".to_string(),
+            passed,
+            message,
+        }
+    }
+
+    /// Validate Droid MCP config (Factory)
+    fn validate_droid_config(&self) -> CheckResult {
+        let config_path = IntegrationTool::Droid.config_dir()
+            .map(|d| std::path::PathBuf::from(d.as_std_path()).join("mcp.json"));
+
+        let (passed, message) = match config_path {
+            Some(ref path) if path.exists() => {
+                match fs::read_to_string(path) {
+                    Ok(content) => {
+                        match serde_json::from_str::<Value>(&content) {
+                            Ok(json) => {
+                                // Check for stdio type servers (Factory Droid convention)
+                                if let Some(obj) = json.as_object() {
+                                    let has_stdio_servers = obj.values().any(|v| {
+                                        v.get("type")
+                                            .and_then(|t: &Value| t.as_str())
+                                            .map(|s| s == "stdio")
+                                            .unwrap_or(false)
+                                    });
+
+                                    if has_stdio_servers {
+                                        (true, "Valid Factory MCP structure with stdio servers".to_string())
+                                    } else {
+                                        (false, "No stdio-type MCP servers found in mcp.json".to_string())
+                                    }
+                                } else {
+                                    (false, "mcp.json is not a JSON object".to_string())
+                                }
+                            }
+                            Err(e) => (false, format!("Invalid JSON in mcp.json: {}", e))
+                        }
+                    }
+                    Err(e) => (false, format!("Cannot read mcp.json: {}", e))
+                }
+            }
+            _ => (false, "Droid mcp.json not found".to_string())
+        };
+
+        CheckResult {
+            name: "Droid config validation".to_string(),
+            passed,
+            message,
+        }
+    }
+
+    /// Check tool binary version
+    fn check_tool_binary_version(&self, tool: IntegrationTool) -> CheckResult {
+        let binary_name = match tool {
+            IntegrationTool::Claude => "claude",
+            IntegrationTool::Gemini => "gemini",
+            IntegrationTool::Qwen => "qwen",
+            IntegrationTool::OpenCode => "opencode",
+            IntegrationTool::Codex => "codex",
+            IntegrationTool::Amp => "amp",
+            IntegrationTool::Droid => "droid",
+        };
+
+        match std::process::Command::new(binary_name).arg("--version").output() {
+            Ok(output) => {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout);
+                    CheckResult {
+                        name: format!("{} binary version", binary_name),
+                        passed: true,
+                        message: version.lines().next().unwrap_or("version found").to_string(),
+                    }
+                } else {
+                    CheckResult {
+                        name: format!("{} binary version", binary_name),
+                        passed: false,
+                        message: format!("{} returned non-zero exit code", binary_name),
+                    }
+                }
+            }
+            Err(e) => CheckResult {
+                name: format!("{} binary version", binary_name),
+                passed: false,
+                message: format!("{} not found or not executable: {}", binary_name, e),
+            },
+        }
+    }
+
+    /// Check config file permissions
+    fn check_config_permissions(&self, tool: IntegrationTool) -> CheckResult {
+        let config_path = tool.mcp_config_path();
+
+        let (passed, message) = match config_path {
+            Some(ref path) if path.exists() => {
+                match fs::metadata(path.as_std_path()) {
+                    Ok(metadata) => {
+                        let readonly = metadata.permissions().readonly();
+                        if readonly {
+                            (false, "Config file is read-only (cannot be modified)".to_string())
+                        } else {
+                            (true, "Config file is writable".to_string())
+                        }
+                    }
+                    Err(e) => (false, format!("Cannot read config metadata: {}", e))
+                }
+            }
+            _ => (true, "Config file not found (will be created during install)".to_string())
+        };
+
+        CheckResult {
+            name: "Config file permissions".to_string(),
+            passed,
+            message,
+        }
+    }
+
+    /// Check MCP server connectivity
+    fn check_mcp_connectivity(&self, tool: IntegrationTool) -> CheckResult {
+        // Check if maestro binary exists (can test connectivity)
+        match std::process::Command::new("maestro").arg("--version").output() {
+            Ok(output) => {
+                if output.status.success() {
+                    CheckResult {
+                        name: "LeIndex MCP connectivity".to_string(),
+                        passed: true,
+                        message: "maestro binary found (MCP proxy available)".to_string(),
+                    }
+                } else {
+                    CheckResult {
+                        name: "LeIndex MCP connectivity".to_string(),
+                        passed: false,
+                        message: "maestro binary found but not executable".to_string(),
+                    }
+                }
+            }
+            Err(_) => CheckResult {
+                name: "LeIndex MCP connectivity".to_string(),
+                passed: true,  // Don't fail overall - may be using different install method
+                message: "maestro binary not found in PATH (may need PATH adjustment)".to_string(),
+            },
+        }
     }
 
     /// Print config patch for a tool

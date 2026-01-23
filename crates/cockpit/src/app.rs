@@ -2677,27 +2677,29 @@ async fn run_app<B: Backend>(
                                         format!("Resuming '{}' (agent + shell)...", s.title);
                                     let _ = terminal.draw(|frame| ui(frame, &mut app));
 
-                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(
-	                                        svc.clone(),
-	                                    ) {
-	                                        Ok(m) => m,
-	                                        Err(e) => {
-	                                            app.status_message =
-	                                                format!("Failed to create session manager: {}", e);
-	                                            app.is_spawning = false;
-	                                            continue;
-	                                        }
-	                                    };
+                                    let s_clone = s.clone();
+                                    let svc_clone = svc.clone();
+                                    let storage_opt = app.storage_backend.clone();
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)
+                                            .ok_or_else(|| anyhow::anyhow!("Failed to create SessionManager"))?;
 
-                                    let res = manager.restore_session(
-	                                        &s,
-	                                        leindex_core::memory::session_manager::SessionRestoreMode::Resume,
-	                                    );
+                                        if let Some(storage) = storage_opt {
+                                            use leindex_core::memory::lsp_manager::LspManager;
+                                            let lsp_manager = LspManager::new((*storage).clone());
+                                            manager = manager.with_lsp_manager(lsp_manager);
+                                        }
+
+                                        manager.restore_session(
+                                            &s_clone,
+                                            leindex_core::memory::session_manager::SessionRestoreMode::Resume,
+                                        )
+                                    }).await.ok().and_then(|r: Result<(), anyhow::Error>| r.ok());
                                     app.is_spawning = false;
                                     app.refresh_from_service(&service);
 
                                     match res {
-                                        Ok(()) => {
+                                        Some(()) => {
                                             app.status_message = format!(
                                                 "Attaching to '{}'... (Ctrl+B d to detach)",
                                                 s.title
@@ -2712,8 +2714,8 @@ async fn run_app<B: Backend>(
                                                 Err(e) => format!("Attach failed: {}", e),
                                             };
                                         }
-                                        Err(e) => {
-                                            app.status_message = format!("Resume failed: {}", e);
+                                        None => {
+                                            app.status_message = format!("Resume failed");
                                         }
                                     }
                                 }
@@ -3356,14 +3358,24 @@ async fn run_app<B: Backend>(
 	                                                                        ui(frame, &mut app)
 	                                                                    });
 
-	                                                                    if let Ok(manager) = leindex_core::memory::session_manager::SessionManager::new(
-	                                                                        svc.clone(),
-	                                                                    ) {
-	                                                                        let _ = manager.restore_session(
-	                                                                            &s,
+	                                                                    let s_clone = s.clone();
+	                                                                    let svc_clone = svc.clone();
+	                                                                    let storage_opt = app.storage_backend.clone();
+	                                                                    let _ = tokio::task::spawn_blocking(move || {
+	                                                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)
+                                                                            .ok_or_else(|| anyhow::anyhow!("Failed to create SessionManager"))?;
+
+	                                                                        if let Some(storage) = storage_opt {
+	                                                                            use leindex_core::memory::lsp_manager::LspManager;
+	                                                                            let lsp_manager = LspManager::new((*storage).clone());
+	                                                                            manager = manager.with_lsp_manager(lsp_manager);
+	                                                                        }
+
+	                                                                        manager.restore_session(
+	                                                                            &s_clone,
 	                                                                            leindex_core::memory::session_manager::SessionRestoreMode::Resume,
-	                                                                        );
-	                                                                    }
+	                                                                        )
+	                                                                    }).await.ok().and_then(|r: Result<(), anyhow::Error>| r.ok());
 	                                                                    app.is_spawning = false;
 	                                                                    app.refresh_from_service(&service);
 
@@ -3482,27 +3494,29 @@ async fn run_app<B: Backend>(
                                         format!("Restarting '{}' (shell + fresh tool)...", s.title);
                                     let _ = terminal.draw(|frame| ui(frame, &mut app));
 
-                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(
-	                                        svc.clone(),
-	                                    ) {
-	                                        Ok(m) => m,
-	                                        Err(e) => {
-	                                            app.status_message =
-	                                                format!("Failed to create session manager: {}", e);
-	                                            app.is_spawning = false;
-	                                            continue;
-	                                        }
-	                                    };
+                                    let s_clone = s.clone();
+                                    let svc_clone = svc.clone();
+                                    let storage_opt = app.storage_backend.clone();
+                                    let res = tokio::task::spawn_blocking(move || {
+                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)
+                                            .ok_or_else(|| anyhow::anyhow!("Failed to create SessionManager"))?;
 
-                                    let res = manager.restore_session(
-	                                        &s,
-	                                        leindex_core::memory::session_manager::SessionRestoreMode::Restart,
-	                                    );
+                                        if let Some(storage) = storage_opt {
+                                            use leindex_core::memory::lsp_manager::LspManager;
+                                            let lsp_manager = LspManager::new((*storage).clone());
+                                            manager = manager.with_lsp_manager(lsp_manager);
+                                        }
+
+                                        manager.restore_session(
+                                            &s_clone,
+                                            leindex_core::memory::session_manager::SessionRestoreMode::Restart,
+                                        )
+                                    }).await.ok().and_then(|r: Result<(), anyhow::Error>| r.ok());
                                     app.is_spawning = false;
                                     app.refresh_from_service(&service);
 
                                     match res {
-                                        Ok(()) => {
+                                        Some(()) => {
                                             app.status_message = format!(
                                                 "Attaching to '{}'... (Ctrl+B d to detach)",
                                                 s.title
@@ -3517,8 +3531,8 @@ async fn run_app<B: Backend>(
                                                 Err(e) => format!("Attach failed: {}", e),
                                             };
                                         }
-                                        Err(e) => {
-                                            app.status_message = format!("Restart failed: {}", e);
+                                        None => {
+                                            app.status_message = format!("Restart failed");
                                         }
                                     }
                                 } else if app.tab_index == 6 {
