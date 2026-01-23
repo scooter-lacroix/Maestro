@@ -7,6 +7,6 @@ pub mod types;
 
 // Re-export commonly used types
 pub use types::{
-    DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo, ProjectInfo,
-    SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+    AnalysisMode, AnalysisHistoryEntry, DashFocus, DashSessionEntry, HubFocus, InputMode,
+    McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };

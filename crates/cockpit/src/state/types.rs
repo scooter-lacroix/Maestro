@@ -122,3 +122,22 @@ pub struct Stats {
     pub memory_count: usize,
     pub track_count: usize,
 }
+
+/// Analysis mode for LeIndex 5-phase analysis
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
+pub enum AnalysisMode {
+    /// Ultra mode - Fast orientation (98% token savings, exploration only)
+    #[default]
+    Ultra,
+    /// Balanced mode - Implementation-ready (82% token savings, LLM actionable)
+    Balanced,
+}
+
+/// Analysis history entry
+#[derive(Clone, Debug)]
+pub struct AnalysisHistoryEntry {
+    pub timestamp: String,
+    pub command: String,
+    pub result_summary: String,
+    pub mode: AnalysisMode,
+}

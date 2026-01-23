@@ -32,8 +32,8 @@ use leindex_core::memory::TursoStorageBackend;
 use leindex_core::multiplexer::TmuxMultiplexer;
 
 use crate::state::{
-    DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo, ProjectInfo,
-    SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+    AnalysisMode, AnalysisHistoryEntry, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption,
+    MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };
 use crate::tabs::{render_analysis, render_dashboard, render_lsps, render_memory, render_projects, render_sessions, render_settings, session_log_tail};
 use crate::theme::{theme_from_name, Theme, THEMES};
@@ -121,6 +121,7 @@ pub struct App {
     // Analysis Hub state
     pub analysis_input: String,
     pub analysis_history: Vec<String>,
+    pub analysis_mode: AnalysisMode,
     pub frame_count: u64,
     // Help modal state
     pub help_scroll: u16,
@@ -219,6 +220,7 @@ impl App {
             session_preview_content: String::new(),
             analysis_input: String::new(),
             analysis_history: Vec::new(),
+            analysis_mode: AnalysisMode::Ultra,
             frame_count: 0,
             help_scroll: 0,
             last_preview_refresh: Instant::now(),
