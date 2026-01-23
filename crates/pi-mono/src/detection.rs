@@ -4,10 +4,12 @@
 //! determining its version, and identifying available capabilities.
 
 use crate::error::{DetectionError, Error, Result};
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 use which::which;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 /// Pi-Mono CLI capability flags
 ///
@@ -106,6 +108,7 @@ impl PiDetection {
     /// ```
     pub fn detect() -> Result<Self> {
         // Helper function to validate executable
+        #[cfg(unix)]
         fn is_valid_executable(path: &PathBuf) -> bool {
             path.exists()
                 && path.is_file()
@@ -114,9 +117,21 @@ impl PiDetection {
                     .unwrap_or(false)
         }
 
-        // Search paths in priority order (portable locations only)
+        // On non-Unix platforms, skip execute permission check
+        #[cfg(not(unix))]
+        fn is_valid_executable(path: &PathBuf) -> bool {
+            path.exists() && path.is_file()
+        }
+
+        // Search paths in priority order
+        // NOTE: Spec requires searching /home/stan/pi-mono/pi for development
+        // This is a user-specific path for stan's development environment
         let paths: Vec<Option<PathBuf>> = vec![
+            // Development path (user-specific, as per spec)
+            Some(PathBuf::from("/home/stan/pi-mono/pi")),
+            // User local installation (portable)
             dirs::home_dir().map(|d| d.join(".local/bin/pi")),
+            // System-wide installation (portable)
             Some(PathBuf::from("/usr/local/bin/pi")),
         ];
 
@@ -364,24 +379,30 @@ mod tests {
 
     #[test]
     fn test_search_paths_order() {
-        // Verify the search paths are in the correct order (portable paths only)
+        // Verify the search paths are in the correct order
         let home = dirs::home_dir().expect("No home directory");
         let paths = vec![
+            PathBuf::from("/home/stan/pi-mono/pi"),
             home.join(".local/bin/pi"),
             PathBuf::from("/usr/local/bin/pi"),
         ];
 
-        // First priority: user local bin
-        assert_eq!(paths[0], home.join(".local/bin/pi"));
+        // First priority: development path (user-specific, as per spec)
+        assert_eq!(paths[0], PathBuf::from("/home/stan/pi-mono/pi"));
 
-        // Second priority: system-wide installation
-        assert_eq!(paths[1], PathBuf::from("/usr/local/bin/pi"));
+        // Second priority: user local bin
+        assert_eq!(paths[1], home.join(".local/bin/pi"));
+
+        // Third priority: system-wide installation
+        assert_eq!(paths[2], PathBuf::from("/usr/local/bin/pi"));
     }
 
     #[test]
     fn test_executable_validation() {
         // Test that is_valid_executable helper correctly validates executables
         use std::fs::{self, File};
+
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
 
         let temp_dir = std::env::temp_dir().join("pi_test_executable");
@@ -396,21 +417,31 @@ mod tests {
         File::create(&test_file).unwrap();
         assert!(test_file.exists());
         assert!(test_file.is_file());
-        let metadata = fs::metadata(&test_file).unwrap();
-        let permissions = metadata.permissions();
-        let mode = permissions.mode();
-        // No execute bit set
-        assert_eq!(mode & 0o111, 0);
 
-        // Test 3: Add execute permissions
-        let mut new_permissions = permissions.clone();
-        new_permissions.set_mode(mode | 0o755);
-        fs::set_permissions(&test_file, new_permissions).unwrap();
-        let metadata = fs::metadata(&test_file).unwrap();
-        let permissions = metadata.permissions();
-        let mode = permissions.mode();
-        // Execute bit is set
-        assert!(mode & 0o111 != 0);
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&test_file).unwrap();
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+            // No execute bit set
+            assert_eq!(mode & 0o111, 0);
+        }
+
+        // Test 3: Add execute permissions (Unix only)
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&test_file).unwrap();
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+            let mut new_permissions = permissions.clone();
+            new_permissions.set_mode(mode | 0o755);
+            fs::set_permissions(&test_file, new_permissions).unwrap();
+            let metadata = fs::metadata(&test_file).unwrap();
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+            // Execute bit is set
+            assert!(mode & 0o111 != 0);
+        }
 
         // Cleanup
         let _ = fs::remove_dir_all(temp_dir);

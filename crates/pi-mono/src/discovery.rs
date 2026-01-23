@@ -68,16 +68,44 @@ impl ModelDiscovery {
 
     /// Check if cache is expired
     ///
-    /// Returns true if the cache has expired (expires time is in the past or equals now),
-    /// false if the cache is still valid (expires time is in the future).
+    /// # Logic Explanation
+    ///
+    /// The cache expiration logic uses the following rules:
+    ///
+    /// 1. **Valid Cache**: `expires` is in the future relative to `now`
+    ///    - `duration_since(now)` succeeds (returns `Ok(Duration)`)
+    ///    - Duration is positive (non-zero)
+    ///    - Returns `false` (cache is still valid)
+    ///
+    /// 2. **Expired Cache**: `expires` is in the past relative to `now`
+    ///    - `duration_since(now)` fails (returns `Err`)
+    ///    - This happens when `now > expires`
+    ///    - Returns `true` (cache is expired)
+    ///
+    /// 3. **Edge Case - Exactly at expiration**: `expires` equals `now`
+    ///    - `duration_since(now)` succeeds with zero duration
+    ///    - `is_zero()` returns `true`
+    ///    - Returns `true` (cache is expired)
+    ///
+    /// # Returns
+    ///
+    /// * `false` if the cache is still valid (expires time is in the future)
+    /// * `true` if the cache has expired (expires time is in the past or equals now)
     pub fn is_cache_expired(now: SystemTime, expires: SystemTime) -> bool {
-        // If expires is in the past relative to now, cache is expired
+        // Attempt to calculate the duration from now to expires
         match expires.duration_since(now) {
             Ok(time_until_expiry) => {
-                // Cache is expired only when there's NO time remaining (duration is zero)
+                // Success: expires is in the future or equal to now
+                // Cache is expired only when there's NO time remaining (duration is exactly zero)
+                // A positive duration means the cache is still valid
                 time_until_expiry.is_zero()
             }
-            Err(_) => true, // If expires is in the past, cache is expired
+            Err(_) => {
+                // Error: now is after expires (expires is in the past)
+                // This happens when SystemTime arithmetic underflows because now > expires
+                // Cache is definitely expired
+                true
+            }
         }
     }
 

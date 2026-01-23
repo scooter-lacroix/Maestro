@@ -23,7 +23,7 @@
 //! let agent = PiMonoAgent::new(
 //!     "agent-001".to_string(),
 //!     "My Agent".to_string()
-//! ).with_description("An example agent".to_string());
+//! ).unwrap().with_description("An example agent".to_string());
 //!
 //! // Create an executor (default configuration)
 //! let executor = Executor::default();
@@ -47,7 +47,7 @@ pub mod discovery;
 
 // Public re-exports for convenience
 pub use config::PiMonoConfig;
-pub use agents::PiMonoAgent;
+pub use agents::{PiMonoAgent, AgentError};
 pub use execution::{Executor, ExecutorConfig, ExecutionResult};
 pub use detection::{PiDetection, Capabilities};
 pub use discovery::{ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS};
