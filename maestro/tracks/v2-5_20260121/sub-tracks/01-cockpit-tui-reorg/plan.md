@@ -2,29 +2,35 @@
 
 ## Phase 1: Architecture & Layout
 
-### [ ] Task 1.1: Decide crate boundaries (Cockpit vs LeIndex core vs CLI)
-- [ ] Inventory current Rust modules under `maestro/leindex/rust/src/` and classify as: UI / core / adapters
-- [ ] Draft crate map:
+### [x] Task 1.1: Decide crate boundaries (Cockpit vs LeIndex core vs CLI)
+- [x] Inventory current Rust modules under `maestro/leindex/rust/src/` and classify as: UI / core / adapters
+- [x] Draft crate map:
   - `leindex-core`: analyzers + indexing + token formatting + 5-phase analysis
   - `maestro-cockpit`: ratatui UI + UI state + UI actions
   - `maestro-cli`: clap routing + subcommand glue (thin)
   - (optional) `maestro-orchestrate`: orchestration engine (library)
-- [ ] Define allowed dependency directions (one-way):
+- [x] Define allowed dependency directions (one-way):
   - cockpit → core
   - cli → cockpit/core
   - core must not depend on cockpit
 
-### [ ] Task 1.2: Define canonical paths (e.g., `crates/maestro-cockpit/`)
-- [ ] Choose and document final paths for all Rust crates (prefer `crates/`)
-- [ ] Decide what remains under `maestro/` (Python package + plugin assets) vs Rust workspace
-- [ ] Decide where archive/reference code lives and how it is prevented from runtime use
+**Completion Note:** ADRs created at `docs/adr/001-cli-ownership-and-binary-naming.md` and `docs/adr/002-crate-reorganization.md`. Crate structure defined with workspace setup, dependency rules, and migration plan. Binary naming: `maestro-rs` (CLI), `maestro-setup` (wizard), `maestro-lsp-mcp-bridge` (LSP bridge).
 
-### [ ] Task 1.3: Define binary naming (avoid Python/Rust `maestro` split-brain)
-- [ ] Pick a single installed end-user binary name (`maestro`) and define how it is produced
-- [ ] Decide how Python packaging behaves:
+### [x] Task 1.2: Define canonical paths (e.g., `crates/maestro-cockpit/`)
+- [x] Choose and document final paths for all Rust crates (prefer `crates/`)
+- [x] Decide what remains under `maestro/` (Python package + plugin assets) vs Rust workspace
+- [x] Decide where archive/reference code lives and how it is prevented from runtime use
+
+**Completion Note:** Canonical paths documented in ADR 002. Structure: `crates/cli/`, `crates/cockpit/`, `crates/lsp-bridge/`, `leindex/rust/` (core). Archive remains at `maestro/archive/` with CI gate to prevent runtime imports.
+
+### [x] Task 1.3: Define binary naming (avoid Python/Rust `maestro` split-brain)
+- [x] Pick a single installed end-user binary name (`maestro`) and define how it is produced
+- [x] Decide how Python packaging behaves:
   - option A: no `console_scripts` for Python package; Rust installs `maestro`
   - option B: Python `maestro` becomes a thin delegator to Rust `maestro`
-- [ ] Update docs to reflect the decision (no ambiguous “two maestros”)
+- [x] Update docs to reflect the decision (no ambiguous "two maestros")
+
+**Completion Note:** Binary naming strategy defined in ADR 001 (Revised: Rust-only). The `maestro` binary is the sole CLI (all Rust). Legacy `maestro/cli.py` will be archived to `maestro/archive/legacy-python-cli/`. No Python CLI - all functionality in native Rust.
 
 ## Phase 2: Move + Modularize Cockpit
 

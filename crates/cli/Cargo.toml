@@ -1,0 +1,30 @@
+[package]
+name = "maestro-cli"
+version = "2.5.0"
+edition = "2021"
+description = "Maestro CLI - Command-line interface"
+authors = ["Maestro Project"]
+
+[[bin]]
+name = "maestro"
+path = "src/main.rs"
+
+[dependencies]
+# Core library
+leindex-core = { path = "../../maestro/leindex/rust" }
+
+# Cockpit TUI
+maestro-cockpit = { path = "../cockpit" }
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

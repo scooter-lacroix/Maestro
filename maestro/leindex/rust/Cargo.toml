@@ -1,8 +1,8 @@
 [package]
-name = "leindex-analyzers"
-version = "2.0.0"
+name = "leindex-core"
+version = "2.5.0"
 edition = "2021"
-description = "High-performance code analyzers for LeIndex - Pure Rust"
+description = "LeIndex Core - Code analyzers, memory service, and vector search"
 authors = ["Maestro Project"]
 
 [features]
@@ -12,31 +12,23 @@ default = ["rusqlite"]
 rusqlite = ["dep:rusqlite"]
 
 [lib]
-name = "leindex_analyzers"
+name = "leindex_core"
 crate-type = ["rlib"]
 
 [[bin]]
-name = "maestro"
-path = "src/main.rs"
-
-[[bin]]
 name = "maestro-setup"
-path = "src/setup_main.rs"
+path = "bin/setup_main.rs"
 
 [[bin]]
-name = "maestro-lsp-mcp-bridge"
-path = "src/lsp/bin/mcp_bridge.rs"
-
-[[bin]]
-name = "vector-benchmark-report"
+name = "leindex-benchmark-report"
 path = "src/cli/vector_benchmark.rs"
 
 [[bin]]
-name = "simple-bench"
+name = "leindex-simple-bench"
 path = "src/bench/simple_bench.rs"
 
 [[bin]]
-name = "vector-granular-bench"
+name = "leindex-granular-bench"
 path = "src/bench/granular_bench.rs"
 
 [dependencies]
