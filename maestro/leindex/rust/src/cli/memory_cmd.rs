@@ -6,6 +6,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 /// Start the memory dashboard server
+#[cfg(feature = "rusqlite")]
 pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) -> Result<()> {
     println!("🚀 Starting Maestro Memory Dashboard");
     println!("   Host: {}:{}", host, port);
@@ -43,8 +44,9 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
 }
 
 /// Show memory system status
+#[cfg(feature = "rusqlite")]
 pub async fn status(db: Option<PathBuf>) -> Result<()> {
-    use crate::memory::service::MemoryService;
+    use crate::memory::MemoryService;
 
     let db_path = db.clone().unwrap_or_else(|| {
         let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));

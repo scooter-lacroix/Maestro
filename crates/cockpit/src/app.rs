@@ -31,6 +31,10 @@ use leindex_core::memory::MemoryService;
 use leindex_core::memory::TursoStorageBackend;
 use leindex_core::multiplexer::TmuxMultiplexer;
 
+use crate::state::{
+    DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo, ProjectInfo,
+    SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
 pub async fn run() -> Result<()> {
@@ -168,114 +172,13 @@ struct App {
     storage_backend: Option<Arc<TursoStorageBackend>>,
     // Flag to trigger async LSP refresh
     pending_lsp_refresh: bool,
+    // Orchestrate pane state
+    orchestrate: crate::orchestrate::OrchestratePane,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum InputMode {
-    Normal,
-    NewSessionTitle,
-    NewSessionPath,
-    NewSessionTool,
-    SessionSwitcher,
-    RenameGroup,
-    ForkSession,
-    KillConfirm,
-    DeleteConfirm,
-    AnalysisPrompt,
-    MemorySearch,
-    // Phase 11 additions
-    SessionHub,
-    NewGroupTitle,
-    MoveToGroup,
-    McpMenu,
-    McpLogs,
-    // Phase 15 additions
-    NewProjectName,
-    NewProjectPath,
-    NewProjectTool,
-    NewTrackTitle,
-    NewTrackType,
-    NewGroupCategory,
-    RenameGroupCategory,
-    SettingsEditor,
-    SettingsInstallPath,
-    SettingsMenu,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
-enum HubFocus {
-    #[default]
-    Rename,
-    Group,
-    Search,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
-enum McpOption {
-    #[default]
-    StartStop,
-    Pause,
-    Logs,
-    Add,
-    Remove,
-    Install,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
-enum SettingsOption {
-    #[default]
-    Editor,
-    InstallPath,
-    Theme,
-    Save,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum SettingsMenuKind {
-    Editor,
-    Theme,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
-enum DashFocus {
-    #[default]
-    Sessions,
-    Mcp,
-    Tabs,
-}
-
-#[derive(Clone)]
-enum SessionEntry {
-    Group(leindex_core::memory::models::SessionGroup),
-    Session(leindex_core::memory::models::Session),
-}
-
-#[derive(Clone)]
-enum DashSessionEntry {
-    GroupHeader { group_path: String },
-    Session(leindex_core::memory::models::Session),
-}
-
-#[derive(Clone)]
-struct ProjectInfo {
-    name: String,
-    path: String,
-    _track_count: usize,
-}
-
-#[derive(Clone)]
-struct MemoryInfo {
-    _id: i64,
-    content: String,
-    category: String,
-}
-
-#[derive(Clone, Default)]
-struct Stats {
-    project_count: usize,
-    memory_count: usize,
-    track_count: usize,
-}
+// Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
+// DashFocus, SessionEntry, DashSessionEntry, ProjectInfo, MemoryInfo, Stats) are now
+// imported from crate::state module to avoid duplication.
 
 impl App {
     fn new(
@@ -355,6 +258,9 @@ impl App {
             lsp_availability: HashMap::new(),
             storage_backend,
             pending_lsp_refresh: false,
+            orchestrate: crate::orchestrate::OrchestratePane::new(
+                std::path::PathBuf::from(".")
+            ),
         };
         // Check LSP availability on startup
         app.check_lsp_availability();
@@ -2363,7 +2269,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == 7 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -2476,7 +2382,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == 7 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -2711,7 +2617,7 @@ async fn run_app<B: Backend>(
                                         }
                                         app.refresh_from_service(&service);
                                     }
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == 6 {
                                     // LSPs tab
                                     // Use force=true for manual refresh to bypass throttle
                                     if app.refresh_lsp_status_impl(true) {
@@ -2757,7 +2663,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('l')) => {
-                                if app.tab_index == 5 {
+                                if app.tab_index == 6 {
                                     // LSPs tab - view logs
                                     if let Some((session_id, lsp_name, _status)) =
                                         app.get_selected_lsp()
@@ -2894,7 +2800,7 @@ async fn run_app<B: Backend>(
                                         }
                                     };
                                 } else {
-                                    app.tab_index = (app.tab_index + 1) % 7;
+                                    app.tab_index = (app.tab_index + 1) % 8;
                                     app.preview_focused = false;
                                 }
                             }
@@ -2926,7 +2832,7 @@ async fn run_app<B: Backend>(
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 7;
+                                app.tab_index = (app.tab_index + 1) % 8;
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
@@ -3010,7 +2916,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == 6 {
                                     // LSPs
                                     let i = match app.lsp_state.selected() {
                                         Some(i) => {
@@ -3029,7 +2935,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == 7 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -3123,7 +3029,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == 6 {
                                     // LSPs
                                     let i = match app.lsp_state.selected() {
                                         Some(i) => {
@@ -3141,7 +3047,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == 7 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -3159,6 +3065,7 @@ async fn run_app<B: Backend>(
                             (_, KeyCode::Char('5')) => app.tab_index = 4,
                             (_, KeyCode::Char('6')) => app.tab_index = 5,
                             (_, KeyCode::Char('7')) => app.tab_index = 6,
+                            (_, KeyCode::Char('8')) => app.tab_index = 7,
                             (_, KeyCode::Char('G')) => {
                                 if app.tab_index == 1 {
                                     app.input_mode = InputMode::NewGroupTitle;
@@ -3296,6 +3203,48 @@ async fn run_app<B: Backend>(
                             (_, KeyCode::Char('e')) if app.tab_index == 2 => {
                                 app.preview_focused = !app.preview_focused;
                             }
+                            // Orchestrate pane keybindings (only for keys not already handled globally)
+                            (_, KeyCode::Char('o')) if app.tab_index == 4 => {
+                                app.orchestrate.next_track();
+                            }
+                            (_, KeyCode::Char('O')) if app.tab_index == 4 => {
+                                app.orchestrate.prev_track();
+                            }
+                            (_, KeyCode::Char(' ')) if app.tab_index == 4 && !app.orchestrate.output_focused => {
+                                // Toggle task expansion
+                                if let Some(selected_task) = app.orchestrate.selected_task.clone() {
+                                    app.orchestrate.toggle_task_expansion(&selected_task);
+                                }
+                            }
+                            (_, KeyCode::Char('c')) if app.tab_index == 4 => {
+                                // Clear output
+                                app.orchestrate.clear_output();
+                            }
+                            (_, KeyCode::Char('s')) if app.tab_index == 4 => {
+                                // Start orchestrate loop (placeholder - would need async executor)
+                                app.status_message = "Orchestrate start: Use 'maestro orchestrate start' command".to_string();
+                            }
+                            (_, KeyCode::Char('p')) if app.tab_index == 4 => {
+                                // Pause orchestrate loop
+                                if !app.orchestrate.tracks.is_empty() {
+                                    let track_id = &app.orchestrate.tracks[app.orchestrate.selected_track].id;
+                                    app.status_message = format!("Orchestrate pause: Use 'maestro orchestrate pause {}' command", track_id);
+                                }
+                            }
+                            (_, KeyCode::Char('r')) if app.tab_index == 4 => {
+                                // Resume orchestrate loop
+                                if !app.orchestrate.tracks.is_empty() {
+                                    let track_id = &app.orchestrate.tracks[app.orchestrate.selected_track].id;
+                                    app.status_message = format!("Orchestrate resume: Use 'maestro orchestrate resume {}' command", track_id);
+                                }
+                            }
+                            (_, KeyCode::Char('x')) if app.tab_index == 4 => {
+                                // Abort orchestrate loop
+                                if !app.orchestrate.tracks.is_empty() {
+                                    let track_id = &app.orchestrate.tracks[app.orchestrate.selected_track].id;
+                                    app.status_message = format!("Orchestrate abort: Use 'maestro orchestrate abort {}' command", track_id);
+                                }
+                            }
                             (_, KeyCode::Enter) => {
                                 if app.tab_index == 0 {
                                     // Dashboard
@@ -3330,7 +3279,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == 7 {
                                     // Settings
                                     match app.settings_option {
                                         SettingsOption::Editor => {
@@ -3493,7 +3442,7 @@ async fn run_app<B: Backend>(
                                             app.mcp_menu_option = McpOption::StartStop;
                                         }
                                     }
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == 6 {
                                     // LSPs tab
                                     // Toggle LSP start/stop
                                     if let Some((session_id, lsp_name, status)) =
@@ -3596,7 +3545,7 @@ async fn run_app<B: Backend>(
                                             app.status_message = format!("Restart failed: {}", e);
                                         }
                                     }
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == 6 {
                                     // LSPs tab
                                     // Restart LSP
                                     if let Some((session_id, lsp_name, _status)) =
@@ -3663,6 +3612,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         "Sessions",
         "Projects",
         "Analysis",
+        "Orchestrate",
         "Memory",
         "LSPs",
         "Settings",
@@ -3692,9 +3642,13 @@ fn ui(frame: &mut Frame, app: &mut App) {
         1 => render_sessions(frame, chunks[1], app),
         2 => render_projects(frame, chunks[1], app),
         3 => render_analysis(frame, chunks[1], app),
-        4 => render_memory(frame, chunks[1], app),
-        5 => render_lsps(frame, chunks[1], app),
-        6 => render_settings(frame, app),
+        4 => {
+            let theme = app.theme();
+            crate::orchestrate::render_orchestrate(frame, chunks[1], &mut app.orchestrate, &theme);
+        }
+        5 => render_memory(frame, chunks[1], app),
+        6 => render_lsps(frame, chunks[1], app),
+        7 => render_settings(frame, app),
         _ => {}
     }
     // Footer
@@ -3706,7 +3660,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Style::default().bg(Color::Cyan).fg(Color::Black),
         ),
         Span::raw(" Scroll  "),
-        Span::styled(" 1-7 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
+        Span::styled(" 1-8 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
         Span::raw(" Jump  "),
         Span::styled(" n ", Style::default().bg(Color::Green).fg(Color::Black)),
         Span::raw(" New  "),
@@ -4368,7 +4322,7 @@ fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " MEMORY (Tab 5):",
+            " MEMORY (Tab 6):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -4397,12 +4351,45 @@ fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " ANALYSIS (Tab 4):",
+            " ANALYSIS (Tab 3):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
             Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Enter Analysis Command Box"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " ORCHESTRATE (Tab 4):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   o / O         ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Next / Previous Track"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Space         ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Toggle Task Expansion"),
+        ]),
+        Line::from(vec![
+            Span::styled("   s             ", Style::default().fg(Color::Green).bold()),
+            Span::raw(" Start Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled("   p             ", Style::default().fg(Color::Yellow).bold()),
+            Span::raw(" Pause Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled("   r             ", Style::default().fg(Color::Green).bold()),
+            Span::raw(" Resume Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled("   x             ", Style::default().fg(Color::Red).bold()),
+            Span::raw(" Abort Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled("   c             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Clear Output"),
         ]),
         Line::from(""),
         Line::from("  ---------------------------------- "),
@@ -4687,7 +4674,7 @@ fn render_settings(frame: &mut Frame, app: &App) {
         ])
         .split(inner_area);
 
-    let editor_style = if app.tab_index == 6 && app.settings_option == SettingsOption::Editor {
+    let editor_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Editor {
         Style::default().fg(theme.warning).bold()
     } else {
         Style::default()
@@ -4700,7 +4687,7 @@ fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(editor, chunks[0]);
 
-    let theme_style = if app.tab_index == 6 && app.settings_option == SettingsOption::Theme {
+    let theme_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Theme {
         Style::default().fg(theme.warning).bold()
     } else {
         Style::default()
@@ -4718,7 +4705,7 @@ fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(theme_field, chunks[1]);
 
-    let path_style = if app.tab_index == 6 && app.settings_option == SettingsOption::InstallPath {
+    let path_style = if app.tab_index == 7 && app.settings_option == SettingsOption::InstallPath {
         Style::default().fg(theme.warning).bold()
     } else {
         Style::default()
@@ -4731,7 +4718,7 @@ fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(path, chunks[2]);
 
-    let save_style = if app.tab_index == 6 && app.settings_option == SettingsOption::Save {
+    let save_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Save {
         Style::default().bg(theme.success).fg(Color::Black).bold()
     } else {
         Style::default().fg(theme.success)

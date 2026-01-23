@@ -86,12 +86,14 @@ tree-sitter-cpp = "0.23"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
+camino = "1.1"  # UTF-8 path handling
 dirs = "5"
 libc = "0.2"
 walkdir = "2"
 regex = "1"
 tempfile = "3.8"  # Secure temporary file creation for atomic writes
 base64 = "0.22"  # For libsql vector extension encoding
+hostname = "0.4"  # For session lock hostnames
 
 # Full-text search (preserves existing Tantivy capability)
 tantivy = "0.22"

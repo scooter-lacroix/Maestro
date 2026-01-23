@@ -546,6 +546,62 @@ maestro tui
 # - View socket pooling statistics
 ```
 
+### Orchestrate Pane (Ralph-Style Autonomous Execution)
+
+The Cockpit TUI includes an Orchestrate pane (tab 4) for autonomous track execution, inspired by [Ralph TUI](https://github.com/subsy/ralph-tui).
+
+**Key Features:**
+- **Track/Task Tree**: Left panel shows all tracks with expandable task hierarchies
+- **Live Output**: Right panel displays real-time iteration output with scrolling
+- **Session Management**: Start, pause, resume, or abort orchestrate loops
+- **LeIndex Integration**: Token-efficient context injection using 5-phase analysis
+- **Crash-Safe Persistence**: Session state saved to `~/.maestro/orchestrate/` with lock files
+
+**Modes:**
+- **Planning Mode**: Generate/update plans without implementation. Focus on analysis and architecture.
+- **Building Mode**: Execute tasks iteratively with auto-commit and completion detection.
+
+**Keybindings:**
+- `O` / `Shift+O`: Cycle through tracks
+- `Space`: Expand/collapse task nodes
+- `s`: Start orchestrate loop
+- `p`: Pause orchestrate loop
+- `r`: Resume paused loop
+- `x`: Abort orchestrate loop
+- `?`: Show help overlay
+
+**Safety Notes:**
+- **Session Locks**: Each track has a lock file to prevent concurrent execution. Stale locks (>1 hour) are automatically cleaned.
+- **Crash Recovery**: If the orchestrate process crashes, session state is preserved. Resume with `r` key.
+- **Dangerous Mode**: When using auto-approval agents, consider enabling sandbox mode (future enhancement) for file isolation.
+- **Context Budget**: LeIndex context budget is configurable (default: 50K tokens). Ultra mode (<50K) uses minimal context; Balanced mode (>50K) provides full analysis.
+
+**State Directory:**
+```
+~/.maestro/orchestrate/
+├── locks/           # Per-track lock files
+├── sessions/        # Session state JSON
+└── logs/            # Iteration logs (JSONL)
+```
+
+**Example Workflow:**
+
+1. Launch Cockpit: `maestro tui`
+2. Navigate to Orchestrate tab (tab 4)
+3. Select a track using `O` key
+4. Press `s` to start orchestrate loop
+5. Monitor progress in live output panel
+6. Press `p` to pause if needed
+7. Press `r` to resume
+8. Press `x` to abort when complete
+
+**Completion Detection:**
+The orchestrate engine detects task completion through:
+- Plan.md status marker updates (`[~]` → `[x]`)
+- Git commits with descriptive messages
+- `<promise>COMPLETE</promise>` token in agent output
+- Backpressure validation (tests passing)
+
 ## Development Philosophy
 
 Maestro embodies these principles:
@@ -587,6 +643,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Built for Claude Code and OpenCode ecosystems
 - Inspired by test-driven development and spec-first methodologies
 - Integrates Council of Agents framework
+- **Orchestrate Pane**: Inspired by [subsy/ralph-tui](https://github.com/subsy/ralph-tui) (MIT License) - Terminal UI for autonomous task execution
+- **Ralph Methodology**: Inspired by [ghuntley/how-to-ralph-wiggum](https://github.com/ghuntley/how-to-ralph-wiggum) - Autonomous AI development patterns
+
+The Orchestrate pane in Maestro Cockpit implements concepts from Ralph TUI, providing autonomous task execution with track-based planning, LeIndex-powered context injection, and crash-safe session persistence.
 
 ## Support
 

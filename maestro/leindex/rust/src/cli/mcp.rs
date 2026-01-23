@@ -5,11 +5,14 @@
 //! - `maestro mcp proxy`: stdio<->unix-socket bridge for a pooled server
 //! - `maestro mcp tool-search`: meta MCP server exposing tool search + proxy calls
 
+#![cfg(feature = "rusqlite")]
+
 use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use crate::memory::{McpPool, service::MemoryService};
+use crate::memory::{McpPool, MemoryService};
+use crate::memory::models::McpServer;
 
 pub async fn serve() -> Result<()> {
     let service = MemoryService::new(None)?;
@@ -35,7 +38,7 @@ pub async fn proxy(server_name: String) -> Result<()> {
     let socket_path = service
         .list_mcp_servers()
         .ok()
-        .and_then(|list| {
+        .and_then(|list: Vec<McpServer>| {
             list.into_iter()
                 .find(|s| s.name == server_name)
                 .and_then(|s| s.socket_path)
@@ -46,7 +49,7 @@ pub async fn proxy(server_name: String) -> Result<()> {
                 .to_string()
         });
 
-    let stream = UnixStream::connect(&socket_path)
+    let stream: tokio::net::UnixStream = UnixStream::connect(&socket_path)
         .await
         .with_context(|| format!("Failed to connect to MCP pool socket {}", socket_path))?;
 
@@ -60,7 +63,7 @@ pub async fn proxy(server_name: String) -> Result<()> {
             if n == 0 {
                 break;
             }
-            sock_w.write_all(&buf[..n]).await?;
+            <tokio::net::unix::OwnedWriteHalf as tokio::io::AsyncWriteExt>::write_all(&mut sock_w, &buf[..n]).await?;
         }
         Result::<()>::Ok(())
     });
@@ -68,12 +71,12 @@ pub async fn proxy(server_name: String) -> Result<()> {
     let from_socket = tokio::spawn(async move {
         let mut buf = [0u8; 16 * 1024];
         loop {
-            let n = sock_r.read(&mut buf).await?;
+            let n = <tokio::net::unix::OwnedReadHalf as tokio::io::AsyncReadExt>::read(&mut sock_r, &mut buf).await?;
             if n == 0 {
                 break;
             }
-            stdout_w.write_all(&buf[..n]).await?;
-            stdout_w.flush().await?;
+            <tokio::io::Stdout as tokio::io::AsyncWriteExt>::write_all(&mut stdout_w, &buf[..n]).await?;
+            <tokio::io::Stdout as tokio::io::AsyncWriteExt>::flush(&mut stdout_w).await?;
         }
         Result::<()>::Ok(())
     });
@@ -430,13 +433,13 @@ struct UnixMcpClient {
 
 impl UnixMcpClient {
     async fn connect(server_name: &str, service: &MemoryService) -> Result<Self> {
-        let socket_path = service
+        let socket_path: String = service
             .list_mcp_servers()
             .ok()
-            .and_then(|list| {
+            .and_then(|list: Vec<McpServer>| {
                 list.into_iter()
                     .find(|s| s.name == server_name)
-                    .and_then(|s| s.socket_path)
+                    .and_then(|s| s.socket_path.clone())
             })
             .unwrap_or_else(|| {
                 McpPool::socket_path_for(server_name)
@@ -444,7 +447,7 @@ impl UnixMcpClient {
                     .to_string()
             });
 
-        let stream = UnixStream::connect(&socket_path).await.with_context(|| {
+        let stream = tokio::net::UnixStream::connect(&socket_path).await.with_context(|| {
             format!(
                 "Failed to connect to pooled server '{}' at {}",
                 server_name, socket_path

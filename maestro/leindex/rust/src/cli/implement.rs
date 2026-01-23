@@ -5,6 +5,7 @@ use clap::ValueEnum;
 use std::path::PathBuf;
 use std::process::Command;
 
+#[cfg(feature = "rusqlite")]
 use crate::memory::{MemoryService, SessionManager};
 use crate::multiplexer::TmuxMultiplexer;
 use crate::token_format::TokenFormatter;
@@ -88,26 +89,34 @@ pub async fn run(
                 }
             });
 
-            let service = MemoryService::new(None).context("Failed to create memory service")?;
-            let _ = service.initialize();
-            let manager = SessionManager::new(service)?;
-            let session = manager.create_session(&title, &project_path_str, &tool, None, None)?;
+            #[cfg(feature = "rusqlite")]
+            {
+                let service = MemoryService::new(None).context("Failed to create memory service")?;
+                let _ = service.initialize();
+                let manager = SessionManager::new(service)?;
+                let session = manager.create_session(&title, &project_path_str, &tool, None, None)?;
 
-            // Give the tool a moment to start before sending commands.
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                // Give the tool a moment to start before sending commands.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-            let mux = TmuxMultiplexer::default();
-            mux.send_keys(&session.session_id, &command)?;
-            mux.send_enter(&session.session_id)?;
-            if !description.is_empty() {
-                mux.send_keys(&session.session_id, &description)?;
+                let mux = TmuxMultiplexer::default();
+                mux.send_keys(&session.session_id, &command)?;
                 mux.send_enter(&session.session_id)?;
+                if !description.is_empty() {
+                    mux.send_keys(&session.session_id, &description)?;
+                    mux.send_enter(&session.session_id)?;
+                }
+
+                println!(
+                    "Started new session {} (tool={}) and sent track command.",
+                    session.session_id, tool
+                );
             }
 
-            println!(
-                "Started new session {} (tool={}) and sent track command.",
-                session.session_id, tool
-            );
+            #[cfg(not(feature = "rusqlite"))]
+            {
+                anyhow::bail!("Implement::New requires the 'rusqlite' feature to be enabled. Please rebuild with: --features rusqlite");
+            }
         }
         ImplementSessionTarget::Ask => unreachable!("Ask resolved earlier"),
     }

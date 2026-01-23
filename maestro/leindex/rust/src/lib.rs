@@ -24,6 +24,7 @@ pub mod lsp;
 pub mod memory;
 pub mod migrations;
 pub mod multi_lang_ast;
+pub mod orchestrate;
 pub mod setup;
 pub mod multi_lang_callgraph;
 pub mod multi_lang_cfg;
@@ -46,6 +47,7 @@ pub use multi_lang_dfg::{
     FunctionDataFlow as MultiLangFunctionDataFlow, MultiLangDFGAnalyzer, MultiLangDFGResult,
 };
 pub use multi_lang_slicing::*;
+pub use orchestrate::*;
 pub use slicing::*;
 pub use token_format::*;
 

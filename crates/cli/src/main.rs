@@ -13,6 +13,7 @@ use leindex_core::cli::implement;
 use leindex_core::cli::leindex_cmd;
 use leindex_core::cli::memory_cmd as memory;
 use leindex_core::cli::mcp;
+use leindex_core::cli::orchestrate;
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -91,6 +92,12 @@ enum Commands {
         #[command(subcommand)]
         command: McpCommands,
     },
+
+    /// Orchestrate autonomous track execution (Ralph-style loops)
+    Orchestrate {
+        #[command(subcommand)]
+        command: OrchestrateCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -104,6 +111,94 @@ enum McpCommands {
     },
     /// Meta MCP server: tool search + cross-server tool call
     ToolSearch,
+}
+
+#[derive(Subcommand)]
+enum OrchestrateCommands {
+    /// Start orchestrate loop for a track
+    Start {
+        /// Track ID to orchestrate
+        track_id: String,
+
+        /// Mode: planning (analyze only) or building (implement)
+        #[arg(long, default_value = "building")]
+        mode: String,
+
+        /// Agent tool to use
+        #[arg(long, default_value = "claude")]
+        tool: String,
+
+        /// Agent model (optional, tool-dependent)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Enable dangerous mode (auto-approve, no prompts)
+        #[arg(long)]
+        dangerous: bool,
+
+        /// Enable sandbox mode (bubblewrap isolation)
+        #[arg(long)]
+        sandbox: bool,
+
+        /// Tracks directory (defaults to ./maestro/tracks)
+        #[arg(long)]
+        tracks_dir: Option<PathBuf>,
+
+        /// Max retries before failure
+        #[arg(long, default_value = "3")]
+        max_retries: u32,
+
+        /// Error strategy: retry, skip, abort
+        #[arg(long, default_value = "retry")]
+        error_strategy: String,
+    },
+
+    /// Pause orchestrate loop for a track
+    Pause {
+        /// Track ID to pause
+        track_id: String,
+
+        /// Tracks directory
+        #[arg(long)]
+        tracks_dir: Option<PathBuf>,
+    },
+
+    /// Resume orchestrate loop for a track
+    Resume {
+        /// Track ID to resume
+        track_id: String,
+
+        /// Tracks directory
+        #[arg(long)]
+        tracks_dir: Option<PathBuf>,
+    },
+
+    /// Abort orchestrate loop for a track
+    Abort {
+        /// Track ID to abort
+        track_id: String,
+
+        /// Tracks directory
+        #[arg(long)]
+        tracks_dir: Option<PathBuf>,
+    },
+
+    /// Show status of orchestrate sessions
+    Status {
+        /// Track ID to check (optional, shows all if not specified)
+        track_id: Option<String>,
+
+        /// Tracks directory
+        #[arg(long)]
+        tracks_dir: Option<PathBuf>,
+    },
+
+    /// List all available tracks
+    List {
+        /// Tracks directory (defaults to ./maestro/tracks)
+        #[arg(long)]
+        tracks_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -188,6 +283,58 @@ async fn main() -> Result<()> {
             McpCommands::Serve => mcp::serve().await,
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
+        },
+        Commands::Orchestrate { command } => match command {
+            OrchestrateCommands::Start {
+                track_id,
+                mode,
+                tool,
+                model,
+                dangerous,
+                sandbox,
+                tracks_dir,
+                max_retries,
+                error_strategy,
+            } => {
+                orchestrate::run(orchestrate::OrchestrateCommand {
+                    command: orchestrate::OrchestrateSubcommand::Start {
+                        track_id,
+                        mode,
+                        tool,
+                        model,
+                        dangerous,
+                        sandbox,
+                        tracks_dir,
+                        max_retries,
+                        error_strategy,
+                    }
+                }).await
+            }
+            OrchestrateCommands::Pause { track_id, tracks_dir } => {
+                orchestrate::run(orchestrate::OrchestrateCommand {
+                    command: orchestrate::OrchestrateSubcommand::Pause { track_id, tracks_dir },
+                }).await
+            }
+            OrchestrateCommands::Resume { track_id, tracks_dir } => {
+                orchestrate::run(orchestrate::OrchestrateCommand {
+                    command: orchestrate::OrchestrateSubcommand::Resume { track_id, tracks_dir },
+                }).await
+            }
+            OrchestrateCommands::Abort { track_id, tracks_dir } => {
+                orchestrate::run(orchestrate::OrchestrateCommand {
+                    command: orchestrate::OrchestrateSubcommand::Abort { track_id, tracks_dir },
+                }).await
+            }
+            OrchestrateCommands::Status { track_id, tracks_dir } => {
+                orchestrate::run(orchestrate::OrchestrateCommand {
+                    command: orchestrate::OrchestrateSubcommand::Status { track_id, tracks_dir },
+                }).await
+            }
+            OrchestrateCommands::List { tracks_dir } => {
+                orchestrate::run(orchestrate::OrchestrateCommand {
+                    command: orchestrate::OrchestrateSubcommand::List { tracks_dir },
+                }).await
+            }
         },
     }
 }

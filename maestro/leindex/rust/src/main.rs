@@ -6,11 +6,15 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod cli;
+// Import the library to make all modules available
+// The CLI modules are part of the lib, so we use lib's module structure
+pub use leindex_core::*;
 
-use cli::implement::ImplementSessionTarget;
-use cli::mcp;
-use cli::{analyze, implement, memory_cmd as memory};
+// Don't re-declare mod cli - it's already available from the lib
+use leindex_core::cli::implement::ImplementSessionTarget;
+use leindex_core::cli::integrate::{IntegrateAction, IntegrationTool};
+use leindex_core::cli::mcp;
+use leindex_core::cli::{analyze, implement, integrate, memory_cmd as memory};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -82,6 +86,29 @@ enum Commands {
     Mcp {
         #[command(subcommand)]
         command: McpCommands,
+    },
+
+    /// Integrate Maestro with external CLI tools (OpenCode, Codex, Gemini, Qwen, Amp, Droid)
+    Integrate {
+        /// Integration action to perform
+        #[command(subcommand)]
+        action: IntegrateAction,
+
+        /// Tool to integrate (claude, opencode, codex, gemini, qwen, amp, droid)
+        #[arg(short, long)]
+        tool: Option<IntegrationTool>,
+
+        /// Install all integrations
+        #[arg(long, conflicts_with = "tool")]
+        all: bool,
+
+        /// Dry run (show changes without applying)
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -187,5 +214,18 @@ async fn main() -> Result<()> {
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
         },
+        Commands::Integrate {
+            action,
+            mut tool,
+            all,
+            dry_run,
+            verbose,
+        } => {
+            // If --all is specified, set tool to None to indicate install all
+            if all {
+                tool = None;
+            }
+            integrate::run(action, tool, dry_run, verbose).await
+        }
     }
 }
