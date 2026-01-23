@@ -5,10 +5,9 @@ use clap::ValueEnum;
 use std::path::PathBuf;
 use std::process::Command;
 
-use leindex_analyzers::memory::session_manager::SessionManager;
-use leindex_analyzers::memory::MemoryService;
-use leindex_analyzers::multiplexer::TmuxMultiplexer;
-use leindex_analyzers::token_format::TokenFormatter;
+use crate::memory::{MemoryService, SessionManager};
+use crate::multiplexer::TmuxMultiplexer;
+use crate::token_format::TokenFormatter;
 
 use super::prompt;
 

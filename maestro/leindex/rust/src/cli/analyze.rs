@@ -6,7 +6,7 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
-use leindex_analyzers::{
+use crate::{
     MultiLangASTAnalyzer, MultiLangCFGAnalyzer, MultiLangCallGraphAnalyzer, MultiLangDFGAnalyzer,
     MultiLangSlicingAnalyzer, ProgrammingLanguage,
 };

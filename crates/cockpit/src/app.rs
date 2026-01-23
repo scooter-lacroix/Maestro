@@ -383,7 +383,7 @@ impl App {
                 ("zed".to_string(), "Zed (zed)".to_string()),
                 ("custom".to_string(), "Custom...".to_string()),
             ],
-            SettingsMenuKind::Theme => THEMES(),
+            SettingsMenuKind::Theme => THEMES
                 .iter()
                 .map(|(id, label)| (id.to_string(), label.to_string()))
                 .collect(),
@@ -4705,7 +4705,7 @@ fn render_settings(frame: &mut Frame, app: &App) {
     } else {
         Style::default()
     };
-    let theme_name = THEMES(),
+    let theme_name = THEMES
         .iter()
         .find(|(id, _)| id.eq_ignore_ascii_case(app.config.theme.as_str()))
         .map(|(_, label)| *label)

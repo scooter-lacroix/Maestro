@@ -276,7 +276,12 @@ impl TursoStorageBackend {
         );
 
         // Step 2: Create libsql Database instance (thread-safe via Arc)
-        let db = Builder::new_local(path.clone())
+        // CRITICAL: Use explicit URI with ?threaded=1 to ensure consistent threading
+        // configuration across all Database instances in the process.
+        // This prevents libsql panic "left: 21, right: 0" when mixing file-based
+        // and in-memory databases in the same process.
+        let db_uri = format!("file:{}?threaded=1", path.display());
+        let db = Builder::new_local(&db_uri)
             .build()
             .await
             .context("Failed to open libsql database")?;
@@ -331,7 +336,9 @@ impl TursoStorageBackend {
         // Step 2: Create libsql Database instance (in-memory with shared cache)
         // Using shared cache is critical because we create a new connection for each operation.
         // Without shared cache, each connection would see a fresh, empty database.
-        let db = Builder::new_local("file::memory:?mode=memory&cache=shared")
+        // CRITICAL: Use ?threaded=1 to match the threading configuration used by
+        // file-based databases, preventing libsql panic on threading mode mismatch.
+        let db = Builder::new_local("file::memory:?mode=memory&cache=shared&threaded=1")
             .build()
             .await
             .context("Failed to open in-memory libsql database")?;

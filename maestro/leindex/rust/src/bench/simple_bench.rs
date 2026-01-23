@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --bin simple_bench --release
 
-use leindex_analyzers::vector::{HnswVectorStore, TursoVectorStore, VectorMetadata, VectorStore};
+use leindex_core::vector::{HnswVectorStore, TursoVectorStore, VectorMetadata, VectorStore};
 use std::time::Instant;
 use tempfile::tempdir;
 

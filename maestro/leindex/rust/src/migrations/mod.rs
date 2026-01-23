@@ -1537,6 +1537,98 @@ impl Migration for CreateOLAPViews {
     }
 }
 
+/// Migration: Add use_proxy column to lsp_servers table
+///
+/// This migration adds the `use_proxy` column to the lsp_servers table,
+/// which tracks whether stdio proxy mode is enabled for an LSP.
+#[derive(Debug)]
+pub struct AddLspUseProxyColumn;
+
+#[async_trait::async_trait]
+impl Migration for AddLspUseProxyColumn {
+    fn version(&self) -> &str {
+        "2026_01_22_001_add_lsp_use_proxy_column"
+    }
+
+    fn description(&self) -> String {
+        "Add use_proxy column to lsp_servers table".to_string()
+    }
+
+    async fn up(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            r#"
+            ALTER TABLE lsp_servers ADD COLUMN use_proxy INTEGER DEFAULT 0
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn down(&self, conn: &Connection) -> Result<()> {
+        // SQLite doesn't support dropping columns, so we need to recreate the table
+        conn.execute(
+            r#"
+            CREATE TABLE lsp_servers_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                language TEXT NOT NULL,
+                lsp_name TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'stopped',
+                pid INTEGER,
+                port INTEGER,
+                auto_start INTEGER DEFAULT 1,
+                last_started TEXT,
+                last_error TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT,
+                UNIQUE(session_id, lsp_name)
+            )
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            r#"
+            INSERT INTO lsp_servers_new (id, session_id, language, lsp_name, status, pid, port,
+                auto_start, last_started, last_error, created_at, updated_at)
+            SELECT id, session_id, language, lsp_name, status, pid, port,
+                auto_start, last_started, last_error, created_at, updated_at
+            FROM lsp_servers
+            "#,
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "DROP TABLE lsp_servers",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "ALTER TABLE lsp_servers_new RENAME TO lsp_servers",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lsp_session ON lsp_servers(session_id)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lsp_status ON lsp_servers(status)",
+            params_from_iter(std::iter::empty::<&str>()),
+        )
+        .await?;
+
+        Ok(())
+    }
+}
+
 /// Get all migrations for the LSP integration track.
 ///
 /// Returns a vector of migrations that should be applied to migrate
@@ -1546,6 +1638,7 @@ pub fn get_lsp_integration_migrations() -> Vec<std::sync::Arc<dyn Migration + Se
         std::sync::Arc::new(CreateBaseSchema) as std::sync::Arc<dyn Migration + Send + Sync>,
         std::sync::Arc::new(CreateFTS5Indexes) as std::sync::Arc<dyn Migration + Send + Sync>,
         std::sync::Arc::new(CreateOLAPViews) as std::sync::Arc<dyn Migration + Send + Sync>,
+        std::sync::Arc::new(AddLspUseProxyColumn) as std::sync::Arc<dyn Migration + Send + Sync>,
     ]
 }
 
@@ -1559,7 +1652,9 @@ mod tests {
         // across connections in libsql
         let temp_dir = tempfile::TempDir::new()?;
         let db_path = temp_dir.path().join("test.db");
-        let db = libsql::Builder::new_local(db_path).build().await?;
+        // CRITICAL: Use explicit URI with ?threaded=1 for consistent threading
+        let db_uri = format!("file:{}?threaded=1", db_path.display());
+        let db = libsql::Builder::new_local(&db_uri).build().await?;
         // Keep temp_dir alive by leaking it - the OS will clean up on process exit
         std::mem::forget(temp_dir);
         Ok(Arc::new(db))
@@ -1881,15 +1976,16 @@ mod tests {
         let base_schema = CreateBaseSchema;
         let fts5_indexes = CreateFTS5Indexes;
         let olap_views = CreateOLAPViews;
+        let use_proxy = AddLspUseProxyColumn;
 
         // Run all migrations
-        let migrations: Vec<&dyn Migration> = vec![&base_schema, &fts5_indexes, &olap_views];
+        let migrations: Vec<&dyn Migration> = vec![&base_schema, &fts5_indexes, &olap_views, &use_proxy];
         let applied_count = manager.run_migrations(&migrations, false).await?;
-        assert_eq!(applied_count, 3, "Should apply 3 migrations");
+        assert_eq!(applied_count, 4, "Should apply 4 migrations");
 
         // Verify all migrations were applied
         let status = manager.get_status().await?;
-        assert_eq!(status.applied_count, 3);
+        assert_eq!(status.applied_count, 4);
         assert!(status.is_complete());
 
         // Verify migrations can be rolled back

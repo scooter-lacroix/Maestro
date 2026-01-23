@@ -17,8 +17,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-mod setup;
-use setup::{run_orchestra, SetupEvent};
+use leindex_core::setup::{run_orchestra, Config, SetupEvent};
 
 struct App {
     phase: Phase,
@@ -148,7 +147,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         } else if app.phase == Phase::Tuning {
                             let total_options = 3 + app.tool_selections.len() + 1; // Path, Editor, Star, Tools, Confirm
                             if app.config_selection == total_options - 1 {
-                                let config = setup::Config {
+                                let config = Config {
                                     install_path: app.install_path.clone(),
                                     editor: app.editor.clone(),
                                     selected_tools: app

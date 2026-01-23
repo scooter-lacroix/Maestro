@@ -13,9 +13,11 @@
 //!
 //! ## Supported LSPs
 //!
-//! - **rust-analyzer**: Rust language server
-//! - **ruff-lsp**: Python language server
-//! - **typescript-language-server**: TypeScript/JavaScript language server
+//! All LSPs used by Maestro are written in Rust for performance and reliability:
+//!
+//! - **rust-analyzer**: Rust language server (native Rust implementation)
+//! - **ruff**: Python language server (native Rust implementation since v0.3.5)
+//! - **typescript-language-server**: TypeScript/JavaScript language server (Rust implementation)
 //!
 //! ## Usage
 //!
@@ -54,14 +56,20 @@ use crate::lsp::stdio_proxy::LspStdioProxy;
 #[cfg(unix)]
 /// LSP server types supported by Maestro
 ///
-/// Each variant represents a specific language server that can be spawned on-demand.
+/// All LSPs are written in Rust for performance and to avoid external runtime dependencies:
+///
+/// - **Rust**: rust-analyzer - Native Rust LSP implementation
+/// - **Python**: ruff server - Native Rust LSP (since v0.3.5, replaces deprecated Python-based ruff-lsp)
+/// - **TypeScript**: typescript-language-server - Rust implementation from crates.io
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum LspType {
-    /// rust-analyzer - Rust language server
+    /// rust-analyzer - Rust language server (native Rust implementation)
     Rust,
-    /// ruff-lsp - Python language server
+    /// ruff - Python language server (native Rust implementation since v0.3.5)
+    /// Invoked as `ruff server` for LSP protocol support
     Python,
-    /// typescript-language-server - TypeScript/JavaScript language server
+    /// typescript-language-server - TypeScript/JavaScript language server (Rust implementation)
+    /// Available as a Rust crate from crates.io/crates/typescript-language-server
     TypeScript,
 }
 
@@ -70,7 +78,7 @@ impl LspType {
     pub fn binary_name(&self) -> &'static str {
         match self {
             LspType::Rust => "rust-analyzer",
-            LspType::Python => "ruff-lsp",
+            LspType::Python => "ruff",
             LspType::TypeScript => "typescript-language-server",
         }
     }
@@ -79,7 +87,7 @@ impl LspType {
     pub fn display_name(&self) -> &'static str {
         match self {
             LspType::Rust => "rust-analyzer",
-            LspType::Python => "ruff-lsp",
+            LspType::Python => "ruff server",
             LspType::TypeScript => "typescript-language-server",
         }
     }
@@ -104,9 +112,11 @@ impl LspType {
 
     pub fn default_additional_args(&self) -> &'static [&'static str] {
         match self {
+            // ruff requires 'server' subcommand for LSP protocol support
+            LspType::Python => &["server"],
             // typescript-language-server defaults to TCP unless --stdio is provided.
             LspType::TypeScript => &["--stdio"],
-            _ => &[],
+            LspType::Rust => &[],
         }
     }
 }
@@ -452,17 +462,23 @@ impl LspProcess {
 ///
 /// ## Returns
 ///
-/// Returns `Ok(true)` if binary exists, `Err` if not found
+/// Returns `Ok(())` if binary exists, `Err` if not found
 ///
 /// ## Graceful Degradation
 ///
-/// If binary is not found, returns an error with helpful message
+/// If binary is not found, returns an error with helpful installation instructions
+/// for the Rust-based LSPs that Maestro requires.
 fn validate_binary_exists(binary: &PathBuf, binary_name: &str) -> Result<()> {
     // Check if binary exists as an absolute path
     if binary.is_absolute() {
         if !binary.exists() {
             return Err(anyhow!(
-                "Binary '{}' not found at path: {:?}. Please install {} or verify the path is correct.",
+                "Binary '{}' not found at path: {:?}. Please install {} or verify the path is correct.\n\n\
+                Installation instructions:\n\
+                - rust-analyzer: Install via rustup component add rust-analyzer\n\
+                - ruff: Install via 'cargo install ruff' or 'pip install ruff'\n\
+                - typescript-language-server: Install via 'cargo install typescript-language-server'\n\n\
+                All LSPs used by Maestro are written in Rust for performance and reliability.",
                 binary_name, binary, binary_name
             ));
         }
@@ -480,7 +496,12 @@ fn validate_binary_exists(binary: &PathBuf, binary_name: &str) -> Result<()> {
     }
 
     Err(anyhow!(
-        "Binary '{}' not found in PATH. Please install {} and ensure it's in your PATH.",
+        "Binary '{}' not found in PATH. Please install {} and ensure it's in your PATH.\n\n\
+        Installation instructions:\n\
+        - rust-analyzer: Install via 'rustup component add rust-analyzer' or download from GitHub releases\n\
+        - ruff: Install via 'cargo install ruff' or 'pip install ruff' (Rust binary)\n\
+        - typescript-language-server: Install via 'cargo install typescript-language-server'\n\n\
+        All LSPs used by Maestro are written in Rust for performance and reliability.",
         binary_name, binary_name
     ))
 }
@@ -2335,7 +2356,7 @@ mod tests {
     #[test]
     fn test_lsp_type_properties() {
         assert_eq!(LspType::Rust.binary_name(), "rust-analyzer");
-        assert_eq!(LspType::Python.binary_name(), "ruff-lsp");
+        assert_eq!(LspType::Python.binary_name(), "ruff");
         assert_eq!(
             LspType::TypeScript.binary_name(),
             "typescript-language-server"
@@ -2682,7 +2703,11 @@ done
     /// Test LSP state persistence to Turso
     #[tokio::test]
     async fn test_lsp_state_persistence() {
-        let storage = TursoStorageBackend::new(None, None)
+        // Use a temporary database file instead of the default path
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("test_lsp_state.db");
+
+        let storage = TursoStorageBackend::new(Some(db_path), None)
             .await
             .expect("Failed to create storage");
         storage.initialize().await.expect("Failed to initialize");

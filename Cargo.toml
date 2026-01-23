@@ -2,6 +2,7 @@
 members = [
     "maestro/leindex/rust",
     "crates/cockpit",
+    "crates/cli",
 ]
 resolver = "2"
 

@@ -24,7 +24,7 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
     }
 
     // Use the api server module
-    use leindex_analyzers::api::{run_server, ServerConfig};
+    use crate::api::{run_server, ServerConfig};
 
     let config = ServerConfig {
         host,
@@ -44,7 +44,7 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
 
 /// Show memory system status
 pub async fn status(db: Option<PathBuf>) -> Result<()> {
-    use leindex_analyzers::memory::service::MemoryService;
+    use crate::memory::service::MemoryService;
 
     let db_path = db.clone().unwrap_or_else(|| {
         let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));

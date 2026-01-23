@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
         "Starting maestro-lsp-mcp-bridge for {} on project: {}",
         match args.lsp_type {
             LspTypeCli::Rust => "rust-analyzer",
-            LspTypeCli::Python => "ruff-lsp",
+            LspTypeCli::Python => "ruff",
             LspTypeCli::TypeScript => "typescript-language-server",
         },
         args.project_path

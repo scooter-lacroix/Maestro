@@ -10,7 +10,7 @@ mod cli;
 
 use cli::implement::ImplementSessionTarget;
 use cli::mcp;
-use cli::{analyze, implement, memory, tui};
+use cli::{analyze, implement, memory_cmd as memory};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -166,7 +166,14 @@ async fn main() -> Result<()> {
             MemoryCommands::Status { db } => memory::status(db).await,
             MemoryCommands::Scan { paths, depth } => memory::scan(paths, depth).await,
         },
-        Commands::Tui => tui::run().await,
+        Commands::Tui => {
+            // TODO: The Cockpit TUI has been extracted to the maestro-cockpit crate
+            // Use the separate maestro CLI (crates/cli) to access the TUI: `maestro tui`
+            eprintln!("Error: The TUI has been moved to the maestro-cockpit crate.");
+            eprintln!("Please use the maestro CLI binary from crates/cli instead.");
+            eprintln!("Run: cargo run --manifest-path=crates/cli/Cargo.toml --bin maestro -- tui");
+            Err(anyhow::anyhow!("TUI not available from this binary"))
+        }
         Commands::Implement {
             command,
             description,

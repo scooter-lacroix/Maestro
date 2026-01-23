@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use leindex_analyzers::memory::{McpPool, MemoryService};
+use crate::memory::{McpPool, service::MemoryService};
 
 pub async fn serve() -> Result<()> {
     let service = MemoryService::new(None)?;

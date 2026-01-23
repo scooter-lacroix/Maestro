@@ -467,7 +467,7 @@ These commands run in your terminal and require the full installation:
 - **16 Hooks**: Session, tool use, coordination, and event-driven automation
 - **TLDR Analysis**: 5-layer code analysis with semantic indexing
 - **Web Dashboard**: Built with React 18 + TypeScript + Vite
-- **TUI**: Go-based terminal interface
+- **Cockpit TUI**: Rust-based terminal interface (ratatui)
 
 ### Optional Enhancements
 - **tmux**: Required for TUI session management
