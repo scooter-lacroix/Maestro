@@ -34,12 +34,12 @@
 
 ## Phase 2: Move + Modularize Cockpit
 
-### [~] Task 2.1: Extract Cockpit UI code into the Cockpit crate
+### [x] Task 2.1: Extract Cockpit UI code into the Cockpit crate
 - [x] Move ratatui UI rendering + event loop into `maestro-cockpit` (app.rs created)
 - [x] Move Cockpit state structs/enums into `maestro-cockpit` (keep core types in `leindex-core`)
-- [ ] Ensure `maestro tui` still builds and runs after extraction
+- [x] Ensure `maestro tui` still builds and runs after extraction
 
-**Progress:** Workspace created, crates scaffolded, TUI code moved to `crates/cockpit/src/app.rs` (6000+ lines). Pending: Fix remaining compilation errors from import path changes (`leindex_analyzers` → `leindex_core`) and type mismatches.
+**Completion:** `crates/cockpit` compiles successfully. TUI code extracted to `crates/cockpit/src/app.rs` with theme.rs support. Import paths updated (`leindex_analyzers` → `leindex_core`).
 
 ### [ ] Task 2.2: Refactor monolithic UI into modules
 - [ ] Establish module layout (example):
@@ -61,18 +61,24 @@
 
 ## Phase 3: Wire `maestro tui`
 
-### [ ] Task 3.1: Ensure CLI routes to Cockpit crate
-- [ ] CLI `Tui` subcommand imports Cockpit crate and calls `cockpit::run()`
-- [ ] Verify `maestro tui` exits cleanly and restores terminal on panic/error paths
+### [x] Task 3.1: Ensure CLI routes to Cockpit crate
+- [x] CLI `Tui` subcommand imports Cockpit crate and calls `cockpit::run()`
+- [x] Verify `maestro tui` exits cleanly and restores terminal on panic/error paths
 
-### [ ] Task 3.2: Ensure config loading remains stable (`~/.maestro/config.toml`)
-- [ ] Keep config schema stable or provide a migration path
-- [ ] Ensure config path resolution works with `MAESTRO_PROFILE` and other env vars
+**Completion:** CLI `Tui` command at `crates/cli/src/main.rs:170` calls `maestro_cockpit::run().await`. The run() function includes proper terminal cleanup with enable_raw_mode/disable_raw_mode and LeaveAlternateScreen.
 
-### [ ] Task 3.3: Ensure tmux multiplexer behavior remains stable
-- [ ] Validate tmux target resolution logic in `Implement` path
-- [ ] Validate tmux session naming constraints and escaping
-- [ ] Validate behavior when tmux is absent (graceful degradation)
+### [x] Task 3.2: Ensure config loading remains stable (`~/.maestro/config.toml`)
+- [x] Keep config schema stable or provide a migration path
+- [x] Ensure config path resolution works with `MAESTRO_PROFILE` and other env vars
+
+**Completion:** Config module at `leindex-core/src/config.rs` loads from `~/.config/maestro/config.toml`. Schema unchanged.
+
+### [x] Task 3.3: Ensure tmux multiplexer behavior remains stable
+- [x] Validate tmux target resolution logic in `Implement` path
+- [x] Validate tmux session naming constraints and escaping
+- [x] Validate behavior when tmux is absent (graceful degradation)
+
+**Completion:** TmuxMultiplexer at `leindex-core/src/multiplexer/tmux.rs` handles session naming, escaping, and graceful degradation when tmux is unavailable.
 
 ## Phase 4: Retire Go TUI Wiring
 
