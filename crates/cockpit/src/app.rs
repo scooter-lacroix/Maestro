@@ -2681,8 +2681,7 @@ async fn run_app<B: Backend>(
                                     let svc_clone = svc.clone();
                                     let storage_opt = app.storage_backend.clone();
                                     let res = tokio::task::spawn_blocking(move || {
-                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)
-                                            .ok_or_else(|| anyhow::anyhow!("Failed to create SessionManager"))?;
+                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
                                         if let Some(storage) = storage_opt {
                                             use leindex_core::memory::lsp_manager::LspManager;
@@ -3362,8 +3361,7 @@ async fn run_app<B: Backend>(
 	                                                                    let svc_clone = svc.clone();
 	                                                                    let storage_opt = app.storage_backend.clone();
 	                                                                    let _ = tokio::task::spawn_blocking(move || {
-	                                                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)
-                                                                            .ok_or_else(|| anyhow::anyhow!("Failed to create SessionManager"))?;
+	                                                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
 	                                                                        if let Some(storage) = storage_opt {
 	                                                                            use leindex_core::memory::lsp_manager::LspManager;
@@ -3498,8 +3496,7 @@ async fn run_app<B: Backend>(
                                     let svc_clone = svc.clone();
                                     let storage_opt = app.storage_backend.clone();
                                     let res = tokio::task::spawn_blocking(move || {
-                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)
-                                            .ok_or_else(|| anyhow::anyhow!("Failed to create SessionManager"))?;
+                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
                                         if let Some(storage) = storage_opt {
                                             use leindex_core::memory::lsp_manager::LspManager;

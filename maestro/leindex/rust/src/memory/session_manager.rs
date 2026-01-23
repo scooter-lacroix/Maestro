@@ -62,7 +62,7 @@ impl SessionManager {
     /// This method allows pre-initializing the LspManager outside of a tokio runtime context,
     /// preventing the "Cannot start a runtime from within a runtime" panic when the
     /// SessionManager is used from within async contexts like the TUI.
-    pub fn with_lsp_manager(mut self, manager: LspManager) -> Self {
+    pub fn with_lsp_manager(self, manager: LspManager) -> Self {
         if let Ok(mut guard) = self.lsp_manager.lock() {
             *guard = Some(manager);
             // Mark as initialized to prevent lazy init from creating a nested runtime
