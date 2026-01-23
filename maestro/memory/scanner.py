@@ -96,7 +96,7 @@ class MaestroScanner:
                         # Parse and import tracks
                         tracks = self._parse_tracks(project_path)
                         for track in tracks:
-                            db_track = await self._import_track(db_project.id, track)
+                            db_track = await self._import_track(db_project.id, track)  # type: ignore[arg-type]
                             discovered_tracks.append({
                                 "track_id": track["track_id"],
                                 "title": track["title"],
@@ -127,14 +127,14 @@ class MaestroScanner:
                     # Find all potential project directories
                     for project_path in self._find_maestro_projects(base_path, max_depth):
                         try:
-                            project_info = self._parse_project(project_path)
-                            if project_info:
+                            project_info_filesystem = self._parse_project(project_path)
+                            if project_info_filesystem:
                                 # Import to database
-                                db_project = await self._import_project(project_info)
+                                db_project = await self._import_project(project_info_filesystem)
                                 discovered_projects.append({
                                     "path": str(project_path),
-                                    "name": project_info.get("name", project_path.name),
-                                    "type": project_info.get("type", "unknown"),
+                                    "name": project_info_filesystem.get("name", project_path.name),
+                                    "type": project_info_filesystem.get("type", "unknown"),
                                     "id": db_project.id,
                                     "scan_method": "filesystem"
                                 })
@@ -142,7 +142,7 @@ class MaestroScanner:
                                 # Parse and import tracks
                                 tracks = self._parse_tracks(project_path)
                                 for track in tracks:
-                                    db_track = await self._import_track(db_project.id, track)
+                                    db_track = await self._import_track(db_project.id, track)  # type: ignore[arg-type]
                                     discovered_tracks.append({
                                         "track_id": track["track_id"],
                                         "title": track["title"],
@@ -235,7 +235,7 @@ class MaestroScanner:
         Returns:
             List of project paths
         """
-        projects = []
+        projects: List[Path] = []
 
         def is_real_maestro_project(path: Path) -> bool:
             """
@@ -281,7 +281,7 @@ class MaestroScanner:
 
             return False
 
-        def search(path: Path, depth: int):
+        def search(path: Path, depth: int) -> None:
             if depth > max_depth:
                 return
 
@@ -329,7 +329,7 @@ class MaestroScanner:
         maestro_dir = project_path / "maestro"
         dotmaestro_dir = project_path / ".maestro"
 
-        info = {
+        info: Dict[str, Any] = {
             "path": str(project_path),
             "name": project_path.name,
             "type": None,
@@ -387,7 +387,7 @@ class MaestroScanner:
         Returns:
             List of track dictionaries
         """
-        tracks = []
+        tracks: List[Dict[str, Any]] = []
 
         # Try both maestro/tracks.md and tracks.md at root
         tracks_file = project_path / "maestro" / "tracks.md"

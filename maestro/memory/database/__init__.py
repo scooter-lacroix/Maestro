@@ -1,21 +1,56 @@
 """
 Maestro Memory Database
 
-Maestro-specific database models and extensions to Nexus memory schema.
+This module exports all database models and utility functions
+for the unified memory system.
 """
 
 from maestro.memory.database.models import (
+    # Enums
+    MemoryCategory,
+    MemoryImportance,
+    ClaimStatus,
+    HandoffStatus,
+    SessionStatus,
+    # Models
+    Base,
+    Memory,
+    AgentNamespace,
+    NamespaceMemory,
+    FileClaim,
+    Handoff,
+    ContinuityLedger,
+    TaskSpecification,
+    Session,
     MaestroProject,
     MaestroTrack,
-    Base,
-    create_maestro_extension_tables,
-    add_maestro_columns_to_memories
+    # Utility functions
+    get_engine_url,
+    create_tables,
+    get_session,
 )
 
 __all__ = [
+    # Enums
+    "MemoryCategory",
+    "MemoryImportance",
+    "ClaimStatus",
+    "HandoffStatus",
+    "SessionStatus",
+    # Models
+    "Base",
+    "Memory",
+    "AgentNamespace",
+    "NamespaceMemory",
+    "FileClaim",
+    "Handoff",
+    "ContinuityLedger",
+    "TaskSpecification",
+    "Session",
     "MaestroProject",
     "MaestroTrack",
-    "Base",
-    "create_maestro_extension_tables",
-    "add_maestro_columns_to_memories",
+    # Utility functions
+    "get_engine_url",
+    "create_tables",
+    "get_session",
 ]

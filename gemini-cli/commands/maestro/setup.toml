@@ -1,0 +1,12 @@
+description = "Maestro: initialize project (setup)"
+prompt = """
+You are executing the Maestro framework command **setup** in Gemini CLI.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:setup.md}
+
+Tooling differences:
+- If the protocol references tool-specific UI primitives (e.g., Claude Code’s AskUserQuestion), ask the equivalent questions using Gemini CLI chat.
+"""
+

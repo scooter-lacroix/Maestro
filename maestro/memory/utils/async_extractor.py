@@ -6,7 +6,7 @@ Async memory extraction to avoid blocking command execution.
 
 import asyncio
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 class AsyncMemoryExtractor:
     """
@@ -15,7 +15,7 @@ class AsyncMemoryExtractor:
 
     def __init__(self, max_workers: int = 4):
         self.max_workers = max_workers
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self.queue: asyncio.Queue[Tuple[str, str, Dict[str, Any]]] = asyncio.Queue(maxsize=100)
 
     async def extract_async(
         self,
@@ -39,7 +39,7 @@ class AsyncMemoryExtractor:
 
         return memory_id
 
-    async def _background_worker(self):
+    async def _background_worker(self) -> None:
         """Background worker for processing extraction queue"""
         while True:
             memory_id, command, context = await self.queue.get()

@@ -1,0 +1,11 @@
+description = "Maestro: create a new track (newTrack)"
+prompt = """
+You are executing the Maestro framework command **newTrack** in Gemini CLI.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:newTrack.md}
+
+The user’s arguments ({{args}}) are the initial track intent.
+"""
+

@@ -1,0 +1,9 @@
+description = "Maestro: show project status (status)"
+prompt = """
+You are executing the Maestro framework command **status** in Qwen Code.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:status.md}
+"""
+

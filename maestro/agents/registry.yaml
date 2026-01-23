@@ -1,0 +1,481 @@
+# Maestro v2 Agent Registry
+# Defines all available agents, their capabilities, and selection criteria
+
+# ============================================================================
+# AGENT CATEGORIES
+# ============================================================================
+categories:
+  # Orchestrators coordinate multiple agents and manage complex workflows
+  orchestrators:
+    description: "Multi-agent coordination for complex patterns"
+    agents:
+      - name: maestro
+        file: orchestrators/maestro.md
+        model: opus
+        description: "Multi-agent coordination for complex patterns"
+        tools: [Read, Bash, Grep, Glob, Task]
+        complexity_threshold: large  # Use for 5+ subtasks
+        best_for:
+          - Multi-phase development
+          - Complex refactoring
+          - Large feature implementation
+        output_path: ".maestro/cache/agents/maestro/latest-output.md"
+
+      - name: orchestrate-large
+        file: orchestrators/orchestrate-large.json
+        model: opus
+        description: "Multi-agent coordination for large-scale patterns"
+        tools: []
+        complexity_threshold: very_large
+        best_for:
+          - Enterprise-scale projects
+          - Multi-team coordination
+          - Complex system migrations
+
+  # Planners create implementation plans and design documentation
+  planners:
+    description: "Feature planning, design documentation, and integration planning"
+    agents:
+      - name: architect
+        file: planners/architect.md
+        model: opus
+        description: "Feature planning, design documentation, AND integration planning"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - New feature design
+          - API integration planning
+          - Architecture documentation
+        output_path: "thoughts/shared/plans/[feature-name]-plan.md"
+
+      - name: phoenix
+        file: planners/phoenix.md
+        model: opus
+        description: "Refactoring planning AND migration planning"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - Technical debt reduction
+          - Code transformation planning
+          - Framework migration planning
+
+      - name: plan
+        file: planners/plan.md
+        model: opus
+        description: "Create implementation plans using research, best practices, and codebase analysis"
+        tools: []
+        complexity_threshold: small
+        best_for:
+          - Quick implementation plans
+          - Task breakdown
+          - Research-based planning
+
+      - name: validate
+        file: planners/validate.md
+        model: haiku
+        description: "Validate plan tech choices against current best practices"
+        tools: []
+        complexity_threshold: trivial
+        best_for:
+          - Pre-implementation validation
+          - Tech stack verification
+          - Best practices check
+
+  # Explorers analyze codebases and research external information
+  explorers:
+    description: "Codebase exploration, pattern finding, and external research"
+    agents:
+      - name: scout
+        file: explorers/scout.md
+        model: sonnet
+        description: "Codebase exploration and pattern finding"
+        tools: [Read, Grep, Glob, Bash]
+        complexity_threshold: small
+        best_for:
+          - Finding code patterns
+          - Understanding architecture
+          - Locating implementations
+        output_path: ".maestro/cache/agents/scout/latest-output.md"
+
+      - name: oracle
+        file: explorers/oracle.md
+        model: opus
+        description: "External research - web, docs, APIs with optional LLM"
+        tools: [Read, Bash, WebSearch]
+        complexity_threshold: small
+        best_for:
+          - Library documentation research
+          - Best practices investigation
+          - External API research
+
+      - name: pathfinder
+        file: explorers/pathfinder.md
+        model: opus
+        description: "External repository research and analysis"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Third-party codebase analysis
+          - Open source project research
+          - Repository pattern discovery
+
+  # Implementers write code following TDD and best practices
+  implementers:
+    description: "Implementation and refactoring using test-driven development"
+    agents:
+      - name: kraken
+        file: implementers/kraken.md
+        model: opus
+        description: "Implementation and refactoring agent using TDD workflow"
+        tools: [Read, Edit, Write, Bash, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - Feature implementation
+          - Test-driven development
+          - Refactoring with tests
+        supports_checkpointing: true
+        output_path: ".maestro/cache/agents/kraken/latest-output.md"
+
+      - name: spark
+        file: implementers/spark.md
+        model: sonnet
+        description: "Lightweight fixes and quick tweaks"
+        tools: [Read, Edit, Write, Bash, Grep, Glob]
+        complexity_threshold: trivial
+        best_for:
+          - Quick fixes
+          - Small tweaks
+          - Fast changes
+
+  # Debuggers investigate issues and analyze performance
+  debuggers:
+    description: "Bug investigation, root cause analysis, and performance profiling"
+    agents:
+      - name: sleuth
+        file: debuggers/sleuth.md
+        model: opus
+        description: "General bug investigation and root cause analysis"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Bug investigation
+          - Root cause analysis
+          - Error tracing
+        output_path: ".maestro/cache/agents/sleuth/latest-output.md"
+
+      - name: debug
+        file: debuggers/debug.md
+        model: opus
+        description: "Investigate issues using codebase exploration, logs, and code search"
+        tools: []
+        complexity_threshold: small
+        best_for:
+          - Debug investigation with methodology
+          - Structured problem solving
+          - Evidence-based debugging
+
+      - name: profiler
+        file: debuggers/profiler.md
+        model: opus
+        description: "Performance profiling, race conditions, memory issues"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - Performance analysis
+          - Memory leak detection
+          - Concurrency issues
+        output_path: ".maestro/cache/agents/profiler/latest-output.md"
+
+  # Validators run tests and verify implementations
+  validators:
+    description: "Unit, integration, and end-to-end test execution"
+    agents:
+      - name: arbiter
+        file: validators/arbiter.md
+        model: opus
+        description: "Unit and integration test execution and validation"
+        tools: [Bash, Read, Write, Glob, Grep]
+        complexity_threshold: small
+        best_for:
+          - Unit test execution
+          - Integration test validation
+          - Test failure analysis
+        output_path: ".maestro/cache/agents/arbiter/latest-output.md"
+
+      - name: atlas
+        file: validators/atlas.md
+        model: opus
+        description: "End-to-end and acceptance test execution"
+        tools: [Bash, Read, Write, Glob, Grep]
+        complexity_threshold: medium
+        best_for:
+          - E2E test execution
+          - User journey validation
+          - Full-stack testing
+        output_path: ".maestro/cache/agents/atlas/latest-output.md"
+
+  # Reviewers analyze code quality and provide feedback
+  reviewers:
+    description: "Code review, refactoring review, and integration review"
+    agents:
+      - name: critic
+        file: reviewers/critic.md
+        model: sonnet
+        description: "Feature and implementation code review"
+        tools: [Read, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Feature code review
+          - Implementation quality assessment
+          - Code quality feedback
+        output_path: ".maestro/cache/agents/critic/latest-output.md"
+
+      - name: judge
+        file: reviewers/judge.md
+        model: sonnet
+        description: "Refactoring and code transformation review"
+        tools: [Read, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Refactoring verification
+          - Behavior preservation check
+          - Transformation quality assessment
+        output_path: ".maestro/cache/agents/judge/latest-output.md"
+
+      - name: surveyor
+        file: reviewers/surveyor.md
+        model: sonnet
+        description: "Migration and upgrade review"
+        tools: [Read, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - Migration completeness check
+          - Upgrade verification
+          - Deployment readiness assessment
+        output_path: ".maestro/cache/agents/surveyor/latest-output.md"
+
+      - name: liaison
+        file: reviewers/liaison.md
+        model: sonnet
+        description: "Integration and API review"
+        tools: [Read, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - API integration review
+          - Security assessment
+          - Resilience verification
+        output_path: ".maestro/cache/agents/liaison/latest-output.md"
+
+  # Specialized agents handle specific tasks
+  specialized:
+    description: "Documentation, release management, security, and analysis"
+    agents:
+      - name: scribe
+        file: specialized/scribe.md
+        model: sonnet
+        description: "Documentation, handoffs, session summaries, and ledger management"
+        tools: [Read, Write, Glob, Grep]
+        complexity_threshold: trivial
+        best_for:
+          - Handoff creation
+          - Session documentation
+          - Continuity ledger updates
+
+      - name: herald
+        file: specialized/herald.md
+        model: sonnet
+        description: "Release prep, version bumps, changelog generation"
+        tools: [Read, Write, Edit, Bash, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Release preparation
+          - Version management
+          - Changelog generation
+        output_path: ".maestro/cache/agents/herald/latest-output.md"
+
+      - name: chronicler
+        file: specialized/chronicler.md
+        model: opus
+        description: "Session analysis, precedent lookup, and learning extraction"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Historical session analysis
+          - Precedent lookup
+          - Learning extraction
+
+      - name: aegis
+        file: specialized/aegis.md
+        model: opus
+        description: "Security vulnerability analysis and testing"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: medium
+        best_for:
+          - Security audit
+          - Vulnerability scanning
+          - Dependency check
+        output_path: ".maestro/cache/agents/aegis/latest-output.md"
+
+      - name: onboard
+        file: specialized/onboard.md
+        model: sonnet
+        description: "Analyze brownfield codebase and create initial continuity ledger"
+        tools: []
+        complexity_threshold: small
+        best_for:
+          - Project onboarding
+          - Initial ledger creation
+          - Codebase orientation
+
+      - name: session-analyst
+        file: specialized/session-analyst.md
+        model: opus
+        description: "Analyze Maestro sessions using Braintrust logs"
+        tools: []
+        complexity_threshold: trivial
+        best_for:
+          - Session data analysis
+          - Usage statistics
+          - Behavior insights
+
+      - name: braintrust-analyst
+        file: specialized/braintrust-analyst.md
+        model: opus
+        description: "Analyze Maestro sessions using Braintrust logs"
+        tools: []
+        complexity_threshold: trivial
+        best_for:
+          - Deep session analysis
+          - Pattern detection
+          - Loop identification
+
+      - name: memory-extractor
+        file: specialized/memory-extractor.md
+        model: sonnet
+        description: "Extract perception changes from session thinking blocks"
+        tools: [Bash, Read]
+        complexity_threshold: trivial
+        best_for:
+          - Perception change extraction
+          - Learning capture
+          - Mental model analysis
+
+# ============================================================================
+# COMPLEXITY THRESHOLDS
+# ============================================================================
+# Defines when to use different agent tiers based on task complexity
+complexity:
+  trivial:
+    description: "Single-file changes, simple fixes, quick lookups"
+    max_files: 1
+    max_phases: 1
+    suggested_agents: [spark, validate, scribe, session-analyst, braintrust-analyst, memory-extractor]
+
+  small:
+    description: "Feature changes, multi-file edits, basic refactoring"
+    max_files: 5
+    max_phases: 2
+    suggested_agents: [scout, architect, plan, sleuth, debug, critic, judge, arbiter, oracle, pathfinder, herald, chronicler, onboard]
+
+  medium:
+    description: "Complex features, cross-cutting changes, significant refactoring"
+    max_files: 15
+    max_phases: 4
+    suggested_agents: [kraken, phoenix, profiler, atlas, liaison, surveyor, aegis]
+
+  large:
+    description: "Multi-component work, system-level changes"
+    max_files: 30
+    max_phases: 6
+    suggested_agents: [maestro]
+
+  very_large:
+    description: "Enterprise-scale projects, major migrations"
+    max_files: null  # No limit
+    max_phases: null
+    suggested_agents: [orchestrate-large]
+
+# ============================================================================
+# AGENT SELECTION RULES
+# ============================================================================
+selection:
+  # Auto-selection based on task keywords
+  keyword_mapping:
+    implement:
+      - kraken
+      - spark
+    refactor:
+      - phoenix
+      - judge
+    plan:
+      - architect
+      - plan
+    debug:
+      - sleuth
+      - debug
+    test:
+      - arbiter
+      - atlas
+    review:
+      - critic
+      - judge
+      - liaison
+      - surveyor
+    explore:
+      - scout
+      - pathfinder
+    research:
+      - oracle
+    migrate:
+      - phoenix
+      - surveyor
+    release:
+      - herald
+    security:
+      - aegis
+    performance:
+      - profiler
+    document:
+      - scribe
+    onboard:
+      - onboard
+
+  # Model preference by task type
+  model_preference:
+    quick_fixes: sonnet
+    exploration: sonnet
+    planning: opus
+    implementation: opus
+    debugging: opus
+    validation: opus
+    review: sonnet
+    analysis: opus
+
+# ============================================================================
+# VALIDATION
+# ============================================================================
+validation:
+  # Required fields for each agent definition
+  required_fields:
+    - name
+    - file
+    - model
+    - description
+    - tools
+
+  # Valid models
+  valid_models:
+    - haiku
+    - sonnet
+    - opus
+
+  # Valid tools
+  valid_tools:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Grep
+    - Glob
+    - Task
+    - WebSearch

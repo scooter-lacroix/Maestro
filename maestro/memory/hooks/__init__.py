@@ -1,9 +1,35 @@
 """
-Maestro Memory Hooks
+Unified Hook System for Maestro Memory
 
-Native hooks for extracting memory from Maestro command execution.
+Provides a multi-layer hook system for capturing context throughout
+the development workflow.
 """
+
+from maestro.memory.hooks.unified import (
+    Hook,
+    HookLayer,
+    NativeHookLayer,
+    ProcessMonitorLayer,
+    InactivityDetectorLayer,
+    PersistentBufferLayer,
+    UnifiedHookManager,
+    get_hook_manager,
+    shutdown_hook_manager,
+)
 
 from maestro.memory.hooks.maestro_hooks import MaestroCommandHook
 
-__all__ = ["MaestroCommandHook"]
+__all__ = [
+    # Unified hooks
+    "Hook",
+    "HookLayer",
+    "NativeHookLayer",
+    "ProcessMonitorLayer",
+    "InactivityDetectorLayer",
+    "PersistentBufferLayer",
+    "UnifiedHookManager",
+    "get_hook_manager",
+    "shutdown_hook_manager",
+    # Legacy hooks
+    "MaestroCommandHook",
+]

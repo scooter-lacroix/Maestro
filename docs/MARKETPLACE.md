@@ -38,8 +38,7 @@ This repository contains:
 To submit a plugin to the Maestro Marketplace:
 
 1. **plugin.json**: Complete metadata file in repository root
-2. **Installation**: One-line installer for Claude Code (`install-claude-code.sh`)
-3. **OpenCode Support** (Optional): One-line installer for OpenCode (`install-opencode.sh`)
+2. **Installation**: One-line installer (`install.sh`) that can configure supported tools
 4. **Documentation**: Comprehensive README with usage examples
 5. **License**: Open-source license (MIT, Apache-2.0, GPL-3.0, etc.)
 6. **Tests**: Test suite demonstrating functionality
@@ -64,14 +63,7 @@ To submit a plugin to the Maestro Marketplace:
   "description": "Brief description of your plugin",
   "author": "your-username",
   "license": "MIT",
-  "claude_code": {
-    "supported": true,
-    "min_version": "1.0.0",
-    "install_command": "curl -sSL https://raw.githubusercontent.com/yourusername/your-plugin/master/install-claude-code.sh | bash"
-  },
-  "opencode": {
-    "supported": false
-  },
+  "install_command": "curl -sSL https://raw.githubusercontent.com/yourusername/your-plugin/master/install.sh | bash",
   "categories": ["Development", "Tools"],
   "keywords": ["development", "tools"]
 }
@@ -103,11 +95,7 @@ maestro marketplace remove <plugin-name>
 For plugins not yet in the marketplace:
 
 ```bash
-# Claude Code
-curl -sSL https://raw.githubusercontent.com/author/plugin/master/install-claude-code.sh | bash
-
-# OpenCode
-curl -sSL https://raw.githubusercontent.com/author/plugin/master/install-opencode.sh | bash
+curl -sSL https://raw.githubusercontent.com/author/plugin/master/install.sh | bash
 ```
 
 ## Marketplace CLI Commands
@@ -220,7 +208,7 @@ marketplace:
    }
    ```
 
-3. **Create Installer** (`install-claude-code.sh`):
+3. **Create Installer** (`install.sh`):
    ```bash
    #!/bin/bash
    PLUGIN_DIR="$HOME/.claude/plugins/my-plugin"
@@ -242,7 +230,7 @@ marketplace:
 
 5. **Test Locally**:
    ```bash
-   ./install-claude-code.sh
+   ./install.sh
    ```
 
 6. **Submit to Marketplace**:
@@ -285,10 +273,10 @@ Plugins in the official marketplace are verified for:
 
 ```bash
 # Check installer permissions
-chmod +x install-claude-code.sh
+chmod +x install.sh
 
 # Run with debug output
-bash -x install-claude-code.sh
+bash -x install.sh
 ```
 
 ### Plugin Not Found

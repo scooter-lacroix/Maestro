@@ -4,6 +4,11 @@
 recursive-include maestro/templates *
 graft maestro/templates
 
+# Include CLI skill packs
+recursive-include claude-code/skills *
+recursive-include gemini-cli/skills *
+recursive-include amp-cli/skills *
+
 # Include Memory Dashboard frontend dist files (built assets)
 recursive-include maestro/memory/frontend/dist *
 graft maestro/memory/frontend/dist

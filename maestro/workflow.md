@@ -206,7 +206,40 @@ All tasks follow a strict lifecycle:
      - Complex tasks (multiple files, >50 lines): Automatically launch oracle or librarian for design + explore for implementation
    - **Do NOT ask user permission** - this is automatic
 
-4. **Write Failing Tests (Red Phase):**
+4. **Use LeIndex for Code Exploration (MANDATORY):**
+   - **CRITICAL:** Before writing any code, use `maestro:leindex` to understand the codebase
+   - **For implementation tasks:** Extract context for relevant files using balanced mode (82% savings, LLM actionable)
+   - **For exploration tasks:** Use ultra mode only (98% savings, exploration only)
+   - **Required:** Run LeIndex analysis on files you'll be modifying:
+
+   ```python
+   from maestro.leindex import ContextExtractor
+
+   # For code generation (default balanced mode)
+   extractor = ContextExtractor(mode='balanced')
+   result = extractor.extract_for_file('path/to/file.py')
+   context = result.context.to_llm_string() if result else ""
+
+   # For exploration/cross-file analysis
+   from maestro.leindex import get_relevant_context
+   context = get_relevant_context('/path/to/project', 'entry_point')
+
+   # For call graph analysis
+   from maestro.leindex import CallGraphAnalyzer
+   cg_analyzer = CallGraphAnalyzer()
+   graph = cg_analyzer.build_project_graph('/path/to/project')
+   ```
+
+   - **Purpose:** This step provides:
+     - Understanding of existing code structure (what functions exist, their signatures)
+     - Call chain analysis (what calls what, impact of changes)
+     - Line numbers for navigation
+     - 82% token savings vs raw file reads while preserving semantic completeness
+     - Full function signatures (params, return types) needed for LLM to use the code
+
+   - **NOT for:** Looking up documentation or external references - use appropriate tools for those
+
+5. **Write Failing Tests (Red Phase):**
    - Create a new test file for the feature or bug fix.
    - Write one or more unit tests that clearly define the expected behavior and acceptance criteria for the task.
    - **CRITICAL:** Run the tests and confirm that they fail as expected. This is the "Red" phase of TDD. Do not proceed until you have failing tests.
@@ -281,7 +314,7 @@ All tasks follow a strict lifecycle:
       **Note:** Set the `OBSIDIAN_VAULT_PATH` environment variable to your Obsidian vault location.
 
 12. **Get and Record Task Commit SHA:**
-    - **Step 12.1: Update Plan:** Read `plan.md`, find the line for the completed task, update its status from `[~]` to `[x]`, and append the first 7 characters of the *just-completed commit's* commit hash.
+    - **Step 12.1: Update Plan:** Read `plan.md`, find the line for the completed task, update its status from `[~]` to `[x]`, and append the first 7 characters of the *just-completed commits commit hash.
     - **Step 12.2: Write Plan:** Write the updated content back to `plan.md`.
 
 13. **Commit Plan Update:**
@@ -390,7 +423,7 @@ Be brutal. Be thorough. Be excellent.
 2. **Collect Phase Commits:** List all commit hashes for the phase
 3. **Invoke codex-reviewer:** Use the directive template above
 4. **Review Findings:** Address ALL critical issues
-5. **Re-test:** Ensure fixes don't break anything
+5. **Re-test:** Ensure fixes do not break anything
 6. **Document Review:** Create summary of review findings
 7. **Update Phase Status:** Mark phase as "Reviewed & Approved"
 8. **Only Then Proceed:** Move to next phase

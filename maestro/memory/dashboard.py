@@ -17,7 +17,7 @@ import re
 import html
 from datetime import datetime, UTC
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Request, status
@@ -26,7 +26,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field  # type: ignore[import]
 from loguru import logger
 
 from .service import MaestroMemoryService
@@ -130,7 +130,7 @@ def sanitize_dict_for_json(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return data
 
-    sanitized = {}
+    sanitized: Dict[str, Any] = {}
     for key, value in data.items():
         if isinstance(value, str):
             # Escape HTML special characters
@@ -215,7 +215,7 @@ class ErrorResponse(BaseModel):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Lifespan context manager for startup and shutdown events.
 
@@ -232,12 +232,14 @@ async def lifespan(app: FastAPI):
 
     # Startup
     logger.info("Starting Maestro Memory Dashboard")
-    memory_service = MaestroMemoryService(database_path=database_path)
-    await memory_service.initialize()
+    memory_service: Optional[MaestroMemoryService] = MaestroMemoryService(database_path=database_path)
+    if memory_service:
+        await memory_service.initialize()
 
     # Store service in app state for access in routes
     app.state.memory_service = memory_service
-    logger.info(f"Maestro Memory Dashboard started with database: {memory_service.database_path}")
+    if memory_service:
+        logger.info(f"Maestro Memory Dashboard started with database: {memory_service.database_path}")
 
     yield
 
@@ -291,18 +293,25 @@ def create_dashboard_app(
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Define exception handler functions
-    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Handle HTTP exceptions with consistent error response"""
+        status_code = 500
+        detail = "Internal server error"
+
+        if isinstance(exc, StarletteHTTPException):
+            status_code = exc.status_code
+            detail = exc.detail
+
         return JSONResponse(
-            status_code=exc.status_code,
+            status_code=status_code,
             content={
                 "success": False,
-                "error": exc.detail,
-                "status_code": exc.status_code
+                "error": detail,
+                "status_code": status_code
             }
         )
 
-    async def general_exception_handler(request: Request, exc: Exception):
+    async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Handle uncaught exceptions"""
         logger.error(f"Unhandled exception: {exc}")
         return JSONResponse(
@@ -346,7 +355,7 @@ def create_dashboard_app(
     # =============================================================================
 
     @app.get("/", response_class=HTMLResponse)
-    async def root():
+    async def root() -> HTMLResponse:
         """Serve the dashboard HTML"""
         # Try the new built frontend first
         frontend_dist = Path(__file__).parent / "frontend" / "dist"
@@ -356,25 +365,25 @@ def create_dashboard_app(
         # Priority 1: New built frontend
         index_path = frontend_dist / "index.html"
         if index_path.exists():
-            with open(index_path, "r") as f:
+            with open(index_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read())
 
         # Priority 2: Old dashboard.html
         dashboard_path = old_static_dir / "dashboard.html"
         if dashboard_path.exists():
-            with open(dashboard_path, "r") as f:
+            with open(dashboard_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read())
 
         # Priority 3: Old index.html
         old_index_path = old_static_dir / "index.html"
         if old_index_path.exists():
-            with open(old_index_path, "r") as f:
+            with open(old_index_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read())
 
         # Priority 4: Local static
         local_index_path = local_static_dir / "index.html"
         if local_index_path.exists():
-            with open(local_index_path, "r") as f:
+            with open(local_index_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read())
 
         # Fallback: Error page
@@ -420,13 +429,13 @@ npm run build
         )
 
     @app.get("/health", tags=["health"])
-    async def health_check():
+    async def health_check() -> JSONResponse:
         """
         Health check endpoint.
 
         Issue 19: Verify database connectivity in health check
         """
-        health_status = {
+        health_status: Dict[str, Any] = {
             "status": "healthy",
             "timestamp": datetime.now(UTC).isoformat(),
             "version": "2.0.0",
@@ -505,7 +514,7 @@ npm run build
     async def get_project_context(
         project_path: str = Query(..., description="Project path to retrieve memories for"),
         limit: int = Query(10, ge=1, le=100, description="Maximum number of memories to retrieve")
-    ):
+    ) -> MemoryListResponse:
         """Retrieve all context for a specific project"""
         service: MaestroMemoryService = app.state.memory_service
 
@@ -540,7 +549,7 @@ npm run build
     async def get_track_context(
         track_id: str = Query(..., description="Track ID to retrieve memories for"),
         limit: int = Query(20, ge=1, le=100, description="Maximum number of memories to retrieve")
-    ):
+    ) -> TrackContextResponse:
         """Retrieve all context for a specific track"""
         service: MaestroMemoryService = app.state.memory_service
 
@@ -566,7 +575,7 @@ npm run build
             raise HTTPException(status_code=500, detail="Failed to retrieve track context")
 
     @app.get("/api/v1/projects", response_model=ProjectListResponse)
-    async def list_projects():
+    async def list_projects() -> ProjectListResponse:
         """List all projects in memory"""
         service: MaestroMemoryService = app.state.memory_service
 
@@ -594,7 +603,7 @@ npm run build
     @app.get("/api/v1/tracks", response_model=TrackListResponse)
     async def list_tracks(
         project_id: Optional[int] = Query(None, description="Filter by project ID")
-    ):
+    ) -> TrackListResponse:
         """
         List all tracks in memory.
 
@@ -644,7 +653,7 @@ npm run build
         query: str = Query(..., description="Search query"),
         project_path: Optional[str] = Query(None, description="Filter by project path"),
         limit: int = Query(5, ge=1, le=50, description="Maximum results")
-    ):
+    ) -> SearchResponse:
         """Search for similar command executions"""
         service: MaestroMemoryService = app.state.memory_service
 
@@ -668,7 +677,7 @@ npm run build
             raise HTTPException(status_code=500, detail="Failed to search memories")
 
     @app.get("/api/v1/stats", response_model=StatsResponse)
-    async def get_statistics():
+    async def get_statistics() -> StatsResponse:
         """Get memory statistics"""
         service: MaestroMemoryService = app.state.memory_service
 
@@ -740,7 +749,7 @@ npm run build
         track_id: Optional[int] = Query(None, description="Filter by track ID"),
         limit: int = Query(50, ge=1, le=200, description="Maximum results"),
         offset: int = Query(0, ge=0, description="Offset for pagination")
-    ):
+    ) -> Dict[str, Any]:
         """
         List memories with optional filters.
 
@@ -806,7 +815,7 @@ npm run build
             raise HTTPException(status_code=500, detail="Failed to list memories")
 
     @app.post("/api/v1/store")
-    async def store_memory(request: Request):
+    async def store_memory(request: Request) -> Dict[str, Any]:
         """Store a new memory via the API"""
         service: MaestroMemoryService = app.state.memory_service
 
@@ -850,7 +859,7 @@ npm run build
             raise HTTPException(status_code=500, detail="Failed to store memory")
 
     @app.post("/api/v1/scan")
-    async def scan_projects_endpoint(request: Request):
+    async def scan_projects_endpoint(request: Request) -> Dict[str, Any]:
         """
         Scan filesystem for Maestro projects and import to database.
 
@@ -892,7 +901,7 @@ npm run build
             raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
 
     @app.post("/api/v1/search/code")
-    async def search_code(request: Request):
+    async def search_code(request: Request) -> Dict[str, Any]:
         """
         Search code using Zoekt for fast indexed code search.
 
@@ -981,7 +990,7 @@ npm run build
             raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
     @app.get("/api/v1/search/zoekt/health")
-    async def zoekt_health_check():
+    async def zoekt_health_check() -> Dict[str, Any]:
         """
         Check if Zoekt search engine is available.
 
@@ -1010,9 +1019,194 @@ npm run build
                 "error": str(e)
             }
 
+    @app.get("/api/v1/coordination/file-claims")
+    async def list_file_claims(
+        project_id: Optional[int] = Query(None, description="Filter by project ID"),
+        track_id: Optional[int] = Query(None, description="Filter by track ID"),
+        status: Optional[str] = Query(None, description="Filter by status"),
+        limit: int = Query(50, ge=1, le=200, description="Maximum results")
+    ) -> Dict[str, Any]:
+        """
+        List file claims for coordination visualization.
+
+        Returns active and recent file claims with their patterns and agents.
+        """
+        service: MaestroMemoryService = app.state.memory_service
+
+        try:
+            from .database.models import FileClaim
+            from sqlalchemy import select, desc
+
+            async with service.db_manager.get_async_session() as session:
+                stmt = select(FileClaim)
+
+                # Apply filters
+                if project_id:
+                    stmt = stmt.filter_by(project_id=project_id)
+                if track_id:
+                    stmt = stmt.filter_by(track_id=track_id)
+                if status:
+                    stmt = stmt.filter_by(status=status)
+
+                stmt = stmt.order_by(desc(FileClaim.created_at)).limit(limit)
+
+                result = await session.execute(stmt)
+                claims = result.scalars().all()
+
+                claim_list = [c.to_dict() for c in claims]
+
+                return {
+                    "success": True,
+                    "claims": claim_list,
+                    "total": len(claim_list)
+                }
+        except Exception as e:
+            logger.error(f"Error listing file claims: {e}")
+            raise HTTPException(status_code=500, detail="Failed to list file claims")
+
+    @app.get("/api/v1/coordination/handoffs")
+    async def list_handoffs(
+        project_id: Optional[int] = Query(None, description="Filter by project ID"),
+        track_id: Optional[int] = Query(None, description="Filter by track ID"),
+        status: Optional[str] = Query(None, description="Filter by status"),
+        limit: int = Query(50, ge=1, le=200, description="Maximum results")
+    ) -> Dict[str, Any]:
+        """
+        List handoffs for coordination visualization.
+
+        Returns session handoffs with their status and context.
+        """
+        service: MaestroMemoryService = app.state.memory_service
+
+        try:
+            from .database.models import Handoff
+            from sqlalchemy import select, desc
+
+            async with service.db_manager.get_async_session() as session:
+                stmt = select(Handoff)
+
+                # Apply filters
+                if project_id:
+                    stmt = stmt.filter_by(project_id=project_id)
+                if track_id:
+                    stmt = stmt.filter_by(track_id=track_id)
+                if status:
+                    stmt = stmt.filter_by(status=status)
+
+                stmt = stmt.order_by(desc(Handoff.created_at)).limit(limit)
+
+                result = await session.execute(stmt)
+                handoffs = result.scalars().all()
+
+                handoff_list = [h.to_dict() for h in handoffs]
+
+                return {
+                    "success": True,
+                    "handoffs": handoff_list,
+                    "total": len(handoff_list)
+                }
+        except Exception as e:
+            logger.error(f"Error listing handoffs: {e}")
+            raise HTTPException(status_code=500, detail="Failed to list handoffs")
+
+    @app.get("/api/v1/coordination/ledgers")
+    async def list_continuity_ledgers(
+        project_id: Optional[int] = Query(None, description="Filter by project ID"),
+        track_id: Optional[int] = Query(None, description="Filter by track ID"),
+        session_id: Optional[str] = Query(None, description="Filter by session ID"),
+        limit: int = Query(100, ge=1, le=500, description="Maximum results")
+    ) -> Dict[str, Any]:
+        """
+        List continuity ledger entries for coordination visualization.
+
+        Returns chronological entries tracking session activities.
+        """
+        service: MaestroMemoryService = app.state.memory_service
+
+        try:
+            from .database.models import ContinuityLedger
+            from sqlalchemy import select, desc
+
+            async with service.db_manager.get_async_session() as session:
+                stmt = select(ContinuityLedger)
+
+                # Apply filters
+                if project_id:
+                    stmt = stmt.filter_by(project_id=project_id)
+                if track_id:
+                    stmt = stmt.filter_by(track_id=track_id)
+                if session_id:
+                    stmt = stmt.filter_by(session_id=session_id)
+
+                stmt = stmt.order_by(desc(ContinuityLedger.created_at)).limit(limit)
+
+                result = await session.execute(stmt)
+                ledgers = result.scalars().all()
+
+                ledger_list = [l.to_dict() for l in ledgers]
+
+                return {
+                    "success": True,
+                    "ledgers": ledger_list,
+                    "total": len(ledger_list)
+                }
+        except Exception as e:
+            logger.error(f"Error listing ledgers: {e}")
+            raise HTTPException(status_code=500, detail="Failed to list ledgers")
+
+    @app.get("/api/v1/coordination/summary")
+    async def get_coordination_summary() -> Dict[str, Any]:
+        """
+        Get coordination system summary for dashboard overview.
+
+        Returns counts and status of all coordination components.
+        """
+        service: MaestroMemoryService = app.state.memory_service
+
+        try:
+            from .database.models import FileClaim, Handoff, ContinuityLedger
+            from sqlalchemy import select, func, text
+
+            async with service.db_manager.get_async_session() as session:
+                # Count active file claims
+                claims_result = await session.execute(
+                    select(func.count()).select_from(FileClaim).filter_by(status="active")
+                )
+                active_claims = claims_result.scalar() or 0
+
+                # Count pending handoffs
+                handoffs_result = await session.execute(
+                    select(func.count()).select_from(Handoff).filter(
+                        Handoff.status.in_(["pending", "in_progress"])
+                    )
+                )
+                pending_handoffs = handoffs_result.scalar() or 0
+
+                # Count recent ledger entries (last 24 hours)
+                from datetime import datetime, timedelta, UTC
+                yesterday = datetime.now(UTC) - timedelta(days=1)
+                ledgers_result = await session.execute(
+                    select(func.count()).select_from(ContinuityLedger).filter(
+                        ContinuityLedger.created_at >= yesterday
+                    )
+                )
+                recent_ledgers = ledgers_result.scalar() or 0
+
+                return {
+                    "success": True,
+                    "summary": {
+                        "active_file_claims": active_claims,
+                        "pending_handoffs": pending_handoffs,
+                        "recent_ledger_entries": recent_ledgers
+                    }
+                }
+        except Exception as e:
+            logger.error(f"Error getting coordination summary: {e}")
+            raise HTTPException(status_code=500, detail="Failed to get coordination summary")
+
     # WebSocket endpoint for real-time updates (optional, placeholder)
     @app.websocket("/ws/events")
-    async def websocket_events(websocket: WebSocket):
+    async def websocket_events(websocket: WebSocket) -> None:
         """WebSocket endpoint for real-time event streaming"""
         await websocket.accept()
         try:

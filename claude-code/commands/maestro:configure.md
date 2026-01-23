@@ -15,6 +15,49 @@ You are an AI agent. Your primary function is to configure Maestro settings incl
 
 CRITICAL: You must validate the success of every tool call. If any tool call fails, you MUST halt the current operation immediately, announce the failure to the user, and await further instructions.
 
+**CRITICAL - ASKUSERQUESTION TOOL REQUIREMENT:**
+You MUST use the `AskUserQuestion` tool for ALL user interactions including:
+- Presenting configuration options for user selection
+- Asking about model preferences (haiku/sonnet/opus)
+- Asking about analysis frequency settings
+- Asking about claude-hud integration
+- Asking about agent setup preferences
+- Any confirmation or approval requests
+
+DO NOT use plain text output to present options. Always use the `AskUserQuestion` tool with properly structured options.
+
+Example usage for configuration options:
+```
+AskUserQuestion:
+  question: "Which model should be used for implementation commands?"
+  header: "Impl Model"
+  options:
+    - label: "sonnet (recommended)"
+      description: "Balanced speed and quality for implementation work"
+    - label: "opus"
+      description: "Highest quality, best for complex implementations"
+    - label: "haiku"
+      description: "Fast, good for simple changes"
+    - label: "Use command default"
+      description: "Use the model specified in command frontmatter"
+  multiSelect: false
+```
+
+Example for multi-select options:
+```
+AskUserQuestion:
+  question: "Which agents should Maestro create?"
+  header: "Agents"
+  options:
+    - label: "codex-reviewer"
+      description: "High-rigor production review with GPT-5 reasoning"
+    - label: "gemini-analyzer"
+      description: "Large codebase analysis with Gemini 2.5 Pro"
+    - label: "qwen-coder"
+      description: "Fast exploration and refactoring"
+  multiSelect: true
+```
+
 ---
 
 ## 2.0 CONFIGURATION PROTOCOL
@@ -29,6 +72,7 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > 2. **Analysis Frequency**: Configure when Critical Think analysis runs (before/during/after stages)
    > 3. **claude-hud Integration**: Enable native token/cost tracking in your statusline
    > 4. **Agent Setup**: Automatically create specialized agents for CLI tools (gemini, qwen, codex)
+   > 5. **TLDR & LeIndex**: Configure code analysis and search features
    >
    > These settings will be saved to a global configuration file for use across all Maestro projects.
    > - **Linux/macOS**: `~/.claude/maestro.local.md`
@@ -53,31 +97,64 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > - **opus**: Highest quality, slower. Best for complex architectural decisions and deep analysis."
 
 2. **Configure by Command Type:**
-   Ask the user to select a model for each command type:
+   Ask the user to select a model for each command type using `AskUserQuestion`:
 
    **A) Setup/Status Commands** (maestro:setup, maestro:status, maestro:configure)
    - Recommended: **haiku** (fast, lightweight)
-   - Ask: "Which model for setup/status commands?"
-     - A) haiku (recommended - fast)
-     - B) sonnet (balanced)
-     - C) opus (high quality)
-     - D) Use command frontmatter default
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Which model for setup/status commands?"
+       header: "Setup Model"
+       options:
+         - label: "haiku (recommended)"
+           description: "Fast and cost-effective for simple tasks"
+         - label: "sonnet"
+           description: "Balanced speed and quality"
+         - label: "opus"
+           description: "Highest quality, slower"
+         - label: "Use command default"
+           description: "Use the model specified in command frontmatter"
+       multiSelect: false
+     ```
 
    **B) Implementation Commands** (maestro:implement)
    - Recommended: **sonnet** (balanced for implementation)
-   - Ask: "Which model for implementation commands?"
-     - A) sonnet (recommended - balanced)
-     - B) opus (high quality)
-     - C) haiku (fast)
-     - D) Use command frontmatter default
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Which model for implementation commands?"
+       header: "Impl Model"
+       options:
+         - label: "sonnet (recommended)"
+           description: "Balanced speed and quality for implementation"
+         - label: "opus"
+           description: "Highest quality, best for complex implementations"
+         - label: "haiku"
+           description: "Fast, good for simple changes"
+         - label: "Use command default"
+           description: "Use the model specified in command frontmatter"
+       multiSelect: false
+     ```
 
    **C) Analysis Commands** (Critical Think analysis, oracle reviews)
    - Recommended: **sonnet** or **opus** (quality for metacognitive analysis)
-   - Ask: "Which model for analysis commands?"
-     - A) sonnet (recommended - balanced)
-     - B) opus (high quality)
-     - C) haiku (fast)
-     - D) Use current session model
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Which model for analysis commands?"
+       header: "Analysis Model"
+       options:
+         - label: "sonnet (recommended)"
+           description: "Balanced speed and quality for analysis"
+         - label: "opus"
+           description: "Highest quality for complex reasoning"
+         - label: "haiku"
+           description: "Fast, basic analysis"
+         - label: "Use current session"
+           description: "Use the same model as the current session"
+       multiSelect: false
+     ```
 
 3. **Record Selection:**
    Store the user's choices for later use in configuration file.
@@ -98,35 +175,79 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > More frequent analysis provides better quality but uses more tokens."
 
 2. **Configure Integration Points:**
-   For each integration point, ask when to enable analysis:
+   For each integration point, ask when to enable analysis using `AskUserQuestion`:
 
    **A) Before Question** (maestro:newTrack Q&A phase)
-   - Ask: "When should Critical Think analyze during Q&A?"
-     - A) Before asking questions (prevent over-questioning)
-     - B) After receiving answers (validate understanding)
-     - C) Both before and after
-     - D) Disabled (no analysis during Q&A)
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze during Q&A?"
+       header: "Q&A Analysis"
+       options:
+         - label: "Before asking questions"
+           description: "Analyze to prevent over-questioning"
+         - label: "After receiving answers"
+           description: "Analyze to validate understanding"
+         - label: "Both before and after"
+           description: "Full analysis during Q&A"
+         - label: "Disabled"
+           description: "No analysis during Q&A"
+       multiSelect: false
+     ```
 
    **B) Documentation Generation**
-   - Ask: "When should Critical Think analyze during documentation?"
-     - A) Before generating docs (check approach)
-     - B) After generating docs (validate quality)
-     - C) Both before and after
-     - D) Disabled
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze during documentation?"
+       header: "Doc Analysis"
+       options:
+         - label: "Before generating docs"
+           description: "Check approach before writing"
+         - label: "After generating docs"
+           description: "Validate quality after writing"
+         - label: "Both before and after"
+           description: "Full documentation analysis"
+         - label: "Disabled"
+           description: "No analysis for documentation"
+       multiSelect: false
+     ```
 
    **C) Code Implementation**
-   - Ask: "When should Critical Think analyze during implementation?"
-     - A) Before implementing (plan analysis)
-     - B) After implementing (quality validation)
-     - C) Both before and after (recommended)
-     - D) Disabled
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze during implementation?"
+       header: "Impl Analysis"
+       options:
+         - label: "Before implementing"
+           description: "Analyze plan before coding"
+         - label: "After implementing"
+           description: "Validate quality after coding"
+         - label: "Both before and after (recommended)"
+           description: "Full implementation analysis"
+         - label: "Disabled"
+           description: "No analysis for implementation"
+       multiSelect: false
+     ```
 
    **D) Agent Delegation**
-   - Ask: "When should Critical Think analyze agent delegation?"
-     - A) Before delegating (prevent over-delegation)
-     - B) After agent returns (validate results)
-     - C) Both before and after
-     - D) Disabled
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "When should Critical Think analyze agent delegation?"
+       header: "Agent Analysis"
+       options:
+         - label: "Before delegating"
+           description: "Prevent over-delegation"
+         - label: "After agent returns"
+           description: "Validate agent results"
+         - label: "Both before and after"
+           description: "Full agent delegation analysis"
+         - label: "Disabled"
+           description: "No analysis for agent delegation"
+       multiSelect: false
+     ```
 
 3. **Record Selection:**
    Store the user's choices for each integration point.
@@ -147,23 +268,50 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > This replaces the need for custom cost tracking in Critical Think."
 
 2. **Ask to Enable:**
-   - Ask: "Enable claude-hud integration?"
-     - A) Yes, enable claude-hud (recommended)
-     - B) No, skip claude-hud setup
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Enable claude-hud integration?"
+       header: "claude-hud"
+       options:
+         - label: "Yes, enable claude-hud"
+           description: "Enable native token/cost tracking (recommended)"
+         - label: "No, skip claude-hud setup"
+           description: "Can enable later"
+       multiSelect: false
+     ```
 
 3. **If Yes:**
    - Check if claude-hud is installed
    - If not installed, offer to install:
-     - Ask: "claude-hud is not installed. Install now?"
-       - A) Yes, install claude-hud
-       - B) Skip for now
-   - If user selects A, run: `/claude-hud:setup`
+     - Ask using `AskUserQuestion`:
+       ```
+       AskUserQuestion:
+         question: "claude-hud is not installed. Install now?"
+         header: "Install claude-hud"
+         options:
+           - label: "Yes, install claude-hud"
+             description: "Install claude-hud now"
+           - label: "Skip for now"
+             description: "Can install later"
+         multiSelect: false
+       ```
+   - If user selects to install, run: `/claude-hud:setup`
    - Verify installation and report status
 
 4. **Configure Statusline:**
-   - Ask: "Configure statusline to show Maestro sessions?"
-     - A) Yes, show token/cost info for Maestro commands
-     - B) No, use default claude-hud settings
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Configure statusline to show Maestro sessions?"
+       header: "Statusline"
+       options:
+         - label: "Yes, show Maestro info"
+           description: "Show token/cost info for Maestro commands"
+         - label: "No, use default settings"
+           description: "Use standard claude-hud configuration"
+       multiSelect: false
+     ```
 
 ---
 
@@ -198,14 +346,24 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    ```
 
 4. **Ask About Agent Setup:**
-   - Ask: "Would you like Maestro to create specialized agents?"
-     - A) Yes, create all available agents
-     - B) Yes, but let me choose which agents
-     - C) No, skip agent setup
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Would you like Maestro to create specialized agents?"
+       header: "Agent Setup"
+       options:
+         - label: "Create all available agents"
+           description: "Automatically create all agents for available CLI tools"
+         - label: "Let me choose which agents"
+           description: "Select specific agents to create"
+         - label: "Skip agent setup"
+           description: "Can configure agents later"
+       multiSelect: false
+     ```
 
 5. **If Yes (Option A or B):**
    - For Option A: Create all agents for available CLI tools
-   - For Option B: Present each available agent and ask for confirmation
+   - For Option B: Present each available agent and ask for confirmation using `AskUserQuestion` for each
 
 6. **Agent Creation Protocol:**
 
@@ -221,9 +379,18 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
        If CLI tool is available:
        - Check if agent already exists in `~/.claude/agents/`
-       - If exists, ask: "Agent {name} already exists. Overwrite?"
-         - A) Yes, overwrite
-         - B) No, keep existing
+       - If exists, ask using `AskUserQuestion`:
+         ```
+         AskUserQuestion:
+           question: "Agent {name} already exists. Overwrite?"
+           header: "Overwrite Agent"
+           options:
+             - label: "Yes, overwrite"
+               description: "Replace existing agent with new configuration"
+             - label: "No, keep existing"
+               description: "Preserve current agent configuration"
+           multiSelect: false
+         ```
        - If creating/overwriting:
          - Attempt to use Task tool with agent-creator skill if available
          - If skill unavailable, create agent file manually
@@ -233,11 +400,21 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
        - Track in configuration: `{agent-name}: created`
 
        If CLI tool is NOT available:
-       - Ask: "CLI tool {tool} not found. Create agent anyway (without CLI integration)?"
-         - A) Yes, create basic agent
-         - B) No, skip this agent
-         - C) Help me install {tool} CLI
-       - If C:
+       - Ask using `AskUserQuestion`:
+         ```
+         AskUserQuestion:
+           question: "CLI tool {tool} not found. Create agent anyway (without CLI integration)?"
+           header: "CLI Missing"
+           options:
+             - label: "Yes, create basic agent"
+               description: "Create agent without CLI integration"
+             - label: "No, skip this agent"
+               description: "Skip creating this agent"
+             - label: "Help me install {tool} CLI"
+               description: "Provide installation instructions"
+           multiSelect: false
+         ```
+       - If user selects to get help:
          - Provide installation instructions for the CLI tool
          - After installation, re-check availability
          - Proceed with agent creation
@@ -359,26 +536,142 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 ---
 
-### 2.6 Global Enable/Disable Flags
+### 2.6 TLDR & LeIndex Configuration
+
+**PROTOCOL: Configure TLDR code analysis and LeIndex search integration.**
+
+1. **Explain TLDR & LeIndex:**
+   > "Maestro includes powerful code analysis and search capabilities:
+   >
+   > **TLDR (Too Long; Didn't Read)** - 5-layer code analysis system:
+   > - Layer 1 (AST): Extract functions, classes, imports
+   > - Layer 2 (Call Graph): Who calls what
+   > - Layer 3 (Control Flow): Code complexity and decision points
+   > - Layer 4 (Data Flow): Where data goes
+   > - Layer 5 (Program Slicing): What affects a line
+   >
+   > **LeIndex** - Fast code indexing and search:
+   > - Full-text search (Tantivy BM25)
+   > - Semantic search (vector embeddings)
+   > - 5-layer code analysis
+   > - File change tracking
+   >
+   > These features run **automatically via hooks** during your sessions:
+   > - TLDR context is injected before editing code
+   > - Smart search uses semantic understanding
+   > - File reads provide optimized context"
+
+2. **Check MCP Integration:**
+   - Ask if user wants to enable LeIndex MCP server:
+   ```
+   AskUserQuestion:
+     question: "Enable LeIndex MCP server for deep integration?"
+     header: "LeIndex MCP"
+     options:
+       - label: "Yes, enable LeIndex MCP"
+         description: "Enable MCP server for code search and analysis"
+       - label: "No, skip MCP setup"
+         description: "LeIndex hooks work automatically, MCP is optional"
+     multiSelect: false
+   ```
+
+3. **If Yes - Configure LeIndex MCP:**
+   - Check if LeIndex MCP is configured in `.mcp.json`
+   - Add LeIndex to MCP configuration if not present
+   - Provide MCP configuration example
+
+4. **Display Feature Status:**
+   > "LeIndex Status:
+   >
+   > **Automatic Features (always active):**
+   > - ✅ LeIndex context injection (pre-edit hooks)
+   > - ✅ Smart search (semantic understanding)
+   > - ✅ File read optimization
+   >
+   > **Manual Access (via slash commands):**
+   > - `/maestro:tldr <command>` - Access 5-layer analysis (compat alias → LeIndex)
+   > - `/maestro:leindex <command>` - Code search and indexing
+   >
+   > **CLI Tools (outside Claude Code):**
+   > - `leindex-search "<query>"` - Search code
+   > - `leindex stats` - Index statistics
+   >
+   > **Python API:**
+   > ```python
+   > from maestro.leindex import ContextExtractor, get_relevant_context
+   > ```"
+
+5. **Provide Quick Examples:**
+   > "Quick Start Examples:
+   >
+   > **Search for code by behavior:**
+   > ```bash
+   > /maestro:leindex search "authentication"
+   > ```
+   >
+   > **Understand who calls a function:**
+   > ```bash
+   > /maestro:tldr callers authenticate_user  # compat alias → LeIndex
+   > ```
+   >
+   > **Get LLM-ready context:**
+   > ```bash
+   > /maestro:tldr context main.py  # compat alias → LeIndex
+   > ```
+   >
+   > **Analyze code complexity:**
+   > ```bash
+   > /maestro:tldr cfg src/auth.py  # compat alias → LeIndex
+   > ```"
+
+---
+
+### 2.7 Global Enable/Disable Flags
 
 **PROTOCOL: Configure global enable/disable flags.**
 
 1. **Critical Think Global:**
-   - Ask: "Enable Critical Think integration globally?"
-     - A) Yes, enabled (recommended)
-     - B) No, disabled (can be enabled per-command)
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Enable Critical Think integration globally?"
+       header: "Critical Think"
+       options:
+         - label: "Yes, enable globally"
+           description: "Enable Critical Think for all commands (recommended)"
+         - label: "No, disable globally"
+           description: "Can be enabled per-command"
+       multiSelect: false
+     ```
 
 2. **Native Integration:**
-   - Ask: "Use native Claude Code session for analysis (recommended)?"
-     - A) Yes, use native session (no separate API calls)
-     - B) No, use separate API calls (requires API key)
-
-   **Note**: Explain that native integration is the default and recommended approach.
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Use native Claude Code session for analysis (recommended)?"
+       header: "Native Mode"
+       options:
+         - label: "Yes, use native session"
+           description: "No separate API calls needed (recommended)"
+         - label: "No, use separate API calls"
+           description: "Requires API key configuration"
+       multiSelect: false
+     ```
+   - **Note**: Explain that native integration is the default and recommended approach.
 
 3. **Auto-Proceed:**
-   - Ask: "Auto-proceed when confidence meets threshold?"
-     - A) Yes, auto-proceed (faster workflow)
-     - B) No, require confirmation (more control)
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Auto-proceed when confidence meets threshold?"
+       header: "Auto-Proceed"
+       options:
+         - label: "Yes, auto-proceed"
+           description: "Faster workflow when confidence is high"
+         - label: "No, require confirmation"
+           description: "Maintain manual control over decisions"
+       multiSelect: false
+     ```
 
 ---
 
@@ -492,9 +785,18 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 **PROTOCOL: Offer to update project-specific configuration.**
 
 1. **Ask User:**
-   - Ask: "Configuration saved globally. Would you like to override any settings for the current project?"
-     - A) Yes, configure project-specific settings
-     - B) No, global settings are sufficient
+   - Ask using `AskUserQuestion`:
+     ```
+     AskUserQuestion:
+       question: "Configuration saved globally. Would you like to override any settings for the current project?"
+       header: "Project Config"
+       options:
+         - label: "Yes, configure project-specific settings"
+           description: "Override global settings for this project"
+         - label: "No, global settings are sufficient"
+           description: "Use global configuration for this project"
+       multiSelect: false
+     ```
 
 2. **If Yes:**
    - Create `maestro/.maestro.local.md` in the current project
@@ -529,6 +831,10 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > - Agents Created: <count> of <total>
    > - CLI Tools Available: <list>
    >
+   > **TLDR & LeIndex:**
+   > - Automatic Hooks: <enabled>
+   > - LeIndex MCP: <enabled/disabled>
+   >
    > Configuration saved to the global Maestro configuration file."
 
 2. **Provide Next Steps:**
@@ -537,7 +843,9 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    > - Run `/maestro:status` to check current progress
    > - Run `/maestro:implement` to start implementing tracks
    > - Run `/maestro:configure` again to change settings at any time
-   > - Use specialized agents directly or let Maestro delegate automatically"
+   > - Use specialized agents directly or let Maestro delegate automatically
+   > - Try `/maestro:tldr` for 5-layer code analysis
+   > - Try `/maestro:leindex` for code search and indexing"
 
 3. **Explain Override Behavior:**
    > "Settings are applied in this order (later overrides earlier):
@@ -721,6 +1029,11 @@ agent_setup:
     rovo-dev: created
     opus-specialist: created
 
+tldr_leindex:
+  automatic_hooks: true
+  leindex_mcp_enabled: true
+  indexing_enabled: true
+
 global_flags:
   critical_think_enabled: true
   native_integration: true
@@ -747,11 +1060,11 @@ This file contains global Maestro settings...
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2026-01-05
-**Status**: Enhanced with Agent Setup
+**Document Version**: 2.1
+**Last Updated**: 2026-01-13
+**Status**: Enhanced with TLDR & LeIndex Configuration
 
 **Version History:**
+- v2.1 (2026-01-13): Added TLDR & LeIndex configuration with automatic hooks and MCP integration
 - v2.0 (2026-01-05): Added automated agent creation for CLI tools (gemini, qwen, codex) with environment detection for both Claude Code and OpenCode
 - v1.0 (2026-01-04): Initial configuration protocol with model selection, analysis frequency, and claude-hud integration
-

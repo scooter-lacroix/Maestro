@@ -49,7 +49,7 @@ I have created a comprehensive implementation plan for making the OpenCode varia
 3. **Templates symlinked incorrectly** - Point to `conductor-templates` instead of `maestro-templates`
 4. **No independent workflow** - References Claude Code agents (oracle, librarian, explore)
 5. **No OpenCode configuration** - Missing opencode.jsonc example
-6. **No installer script** - install-opencode.sh doesn't exist
+6. **Legacy installer references** - OpenCode is installed via `install.sh` (Conductor Wizard); `install-opencode.sh` is deprecated
 7. **Agent mappings incomplete** - OpenCode agents not integrated into command logic
 
 ## Implementation Overview
@@ -65,7 +65,7 @@ Create independent file structure
 #### Phase 2: Configuration (2-3 hours)
 Integrate with OpenCode system
 - Create opencode.jsonc.example with command and agent mappings
-- Create install-opencode.sh installer script
+- Wire OpenCode integration into `install.sh` / `maestro-setup`
 
 #### Phase 3: Command Modifications (4-5 hours)
 Adapt all commands for OpenCode
@@ -167,7 +167,7 @@ UI/UX Implementation         | frontend-ui-ux-engineer| opencode-scaffolder
 
 /opencode/
   ├── opencode.jsonc.example
-  └── install-opencode.sh
+  └── (installed via ../install.sh)
 
 /docs/
   └── MIGRATION_CLAUDE_TO_OPENCODE.md

@@ -2,17 +2,21 @@
 
 ## Overview
 
-Maestro is a documentation and command framework rather than a traditional compiled application. Its "code" consists primarily of markdown files that define commands, skills, and templates, along with shell scripts for installation.
+Maestro is a multilayer system:
+
+- A **Rust core** (LeIndex analyzers + MCP plumbing + TUI) built with Cargo
+- A **workflow layer** expressed as Markdown command protocols, templates, and skill definitions
+- A **single installer** (`install.sh`) that launches the Rust Conductor Wizard to configure integrations
 
 ## Core Technologies
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Shell Scripting** | Bash | Installation scripts and utilities |
-| **Commands** | Markdown | Claude Code slash command definitions |
-| **Skills** | Markdown + Shell | OpenCode skill definitions and integration |
-| **Documentation** | Markdown | All project documentation |
-| **Templates** | Markdown | Reusable project scaffolding templates |
+| **Core CLI/TUI/MCP** | Rust (Cargo) | High-performance core runtime and terminal UI |
+| **Installer wrapper** | Bash | Bootstrap + launch the Conductor Wizard |
+| **Command protocols** | Markdown | Tool-agnostic workflow protocols (installed to `~/.maestro/integrations/commands/`) |
+| **Skills & templates** | Markdown + Shell | Reusable workflow and styleguide templates; OpenCode skill packaging |
+| **Configuration** | JSON + TOML | First-class config integration for external tools |
 
 ## Platform Integration
 
@@ -20,13 +24,13 @@ Maestro is a documentation and command framework rather than a traditional compi
 - **Command Location**: `~/.claude/commands/`
 - **Template Location**: `~/.claude/maestro-templates/`
 - **Command Prefix**: `/maestro:`
-- **Installation Method**: `install-claude-code.sh`
+- **Installation Method**: `install.sh` (enable Claude Code in the Conductor Wizard)
 
 ### OpenCode
-- **Skill Location**: `~/.opencode/skill/maestro/`
-- **Template Location**: `~/.claude/maestro-templates/`
+- **Skill Location**: `~/.config/opencode/skill/maestro/`
+- **Command Location**: `~/.config/opencode/commands/`
 - **Command Prefix**: `/maestro`
-- **Installation Method**: `install-opencode.sh`
+- **Installation Method**: `install.sh` (enable OpenCode in the Conductor Wizard)
 
 ## Dependencies
 
@@ -55,8 +59,7 @@ Both variants share:
 maestro/
 ├── README.md                    # Main repository documentation
 ├── VERSION                      # Semantic version (1.1.0)
-├── install-claude-code.sh      # Claude Code installer
-├── install-opencode.sh         # OpenCode installer
+├── install.sh                  # Single installer entrypoint (Conductor Wizard)
 │
 ├── docs/                       # User documentation
 │   ├── CLAUDE-CODE.md          # Claude Code guide
@@ -71,8 +74,7 @@ maestro/
 └── opencode/                   # OpenCode variant
     └── skill/maestro/          # Skill definition
         ├── SKILL.md            # Main skill file
-        ├── commands/           # Command references
-        ├── templates/          # Template symlinks
+        ├── templates/          # Templates (bundled)
         └── scripts/            # Utility scripts
 ```
 

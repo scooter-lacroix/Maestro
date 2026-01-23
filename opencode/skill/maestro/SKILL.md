@@ -157,11 +157,11 @@ Maestro enforces Test-Driven Development:
 This skill integrates Maestro's workflow with OpenCode's agent system:
 
 ### Command Mappings
-- `/maestro setup` → Loads `~/.claude/commands/maestro:setup.md`
-- `/maestro newTrack` → Loads `~/.claude/commands/maestro:newTrack.md`
-- `/maestro implement` → Loads `~/.claude/commands/maestro:implement.md`
-- `/maestro status` → Loads `~/.claude/commands/maestro:status.md`
-- `/maestro revert` → Loads `~/.claude/commands/maestro:revert.md`
+- `/maestro setup` → Loads `~/.config/opencode/commands/maestro:setup.md`
+- `/maestro newTrack` → Loads `~/.config/opencode/commands/maestro:newTrack.md`
+- `/maestro implement` → Loads `~/.config/opencode/commands/maestro:implement.md`
+- `/maestro status` → Loads `~/.config/opencode/commands/maestro:status.md`
+- `/maestro revert` → Loads `~/.config/opencode/commands/maestro:revert.md`
 
 ### Agent Delegation
 Maestro commands automatically delegate to specialized agents:
@@ -226,10 +226,10 @@ Each project directory maintains its own Maestro state.
 Maestro uses templates for consistent project setup:
 - `workflow.md` - Development workflow rules
 - `code_styleguides/*` - Language-specific style guides
-- Located in `~/.claude/maestro-templates/`
+- Located in the installed OpenCode skill directory: `~/.config/opencode/skill/maestro/templates/`
 
 ## See Also
 
-- [Maestro Plugin](~/.claude/plugins/maestro/plugin.json) - Plugin metadata
-- [Workflow Template](~/.claude/maestro-templates/workflow.md) - Default workflow
-- [Command Files](~/.claude/commands/) - Individual command implementations
+- [OpenCode Config](~/.config/opencode/opencode.json) - Command templates and MCP servers
+- [OpenCode Skill](~/.config/opencode/skill/maestro/SKILL.md) - This skill definition (installed)
+- [Maestro Command Files](~/.config/opencode/commands/) - Installed Maestro command implementations

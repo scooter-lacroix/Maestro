@@ -1,0 +1,9 @@
+description = "Maestro: configure (agents, tools, integrations)"
+prompt = """
+You are executing the Maestro framework command **configure** in Qwen Code.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:configure.md}
+"""
+

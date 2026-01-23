@@ -1,0 +1,11 @@
+description = "Maestro: revert track/phase/task (revert)"
+prompt = """
+You are executing the Maestro framework command **revert** in Gemini CLI.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:revert.md}
+
+The user’s arguments ({{args}}) scope the revert.
+"""
+

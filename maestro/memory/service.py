@@ -18,6 +18,7 @@ import asyncio
 import re
 import uuid
 from collections import deque  # IMPORTANT-6: Use deque for O(1) rate limiting operations
+from types import ModuleType
 
 # IMPORTANT-4: Import constants
 from maestro.memory.constants import (
@@ -140,7 +141,7 @@ def _discover_nexus_path() -> str:
         # Use os.walk for controlled depth iteration
         for root, dirs, files in os.walk(home_dir):
             # Calculate current depth
-            current_depth = root.relative_to(home_dir).parts.__len__()
+            current_depth = len(Path(root).relative_to(home_dir).parts)
 
             # Skip if we've exceeded max depth
             if current_depth > max_depth:
@@ -188,6 +189,8 @@ def _discover_nexus_path() -> str:
     raise ImportError(error_msg)
 
 
+NEXUS_PATH: str | None
+
 # Discover and add Nexus to path
 try:
     NEXUS_PATH = _discover_nexus_path()
@@ -202,9 +205,11 @@ except ImportError as e:
 # Import only specific Nexus modules directly to avoid triggering server imports
 import importlib.util
 
-def import_nexus_module(module_name, file_path):
+def import_nexus_module(module_name: str, file_path: str) -> ModuleType:
     """Import a module directly from file path to avoid __init__.py side effects"""
     spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Failed to import module spec for {module_name} from {file_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
@@ -227,12 +232,12 @@ from maestro.memory.exceptions import (
 )
 
 # Import Nexus modules using direct imports to avoid MCP server
-_nexus_managers = None
-_nexus_models = None
-_nexus_config = None
+_nexus_managers: Any = None
+_nexus_models: Any = None
+_nexus_config: Any = None
 
 
-def _get_nexus_modules():
+def _get_nexus_modules() -> tuple[Any, Any, Any]:
     """Lazy load Nexus modules to avoid import issues"""
     global _nexus_managers, _nexus_models, _nexus_config
     if _nexus_managers is None:
@@ -247,17 +252,17 @@ def _get_nexus_modules():
             nexus_module = types.ModuleType('nexus')
             sys.modules['nexus'] = nexus_module
 
-            from nexus.database import managers as db_managers
-            from nexus.database import models as db_models
-            from nexus.config import settings as db_settings
+            from nexus.database import managers as db_managers  # type: ignore[import-not-found]
+            from nexus.database import models as db_models  # type: ignore[import-not-found]
+            from nexus.config import settings as db_settings  # type: ignore[import-not-found]
 
             _nexus_managers = db_managers
             _nexus_models = db_models
             _nexus_config = db_settings
         else:
-            from nexus.database import managers as db_managers
-            from nexus.database import models as db_models
-            from nexus.config import settings as db_settings
+            from nexus.database import managers as db_managers  # type: ignore[import-not-found]
+            from nexus.database import models as db_models  # type: ignore[import-not-found]
+            from nexus.config import settings as db_settings  # type: ignore[import-not-found]
 
             _nexus_managers = db_managers
             _nexus_models = db_models
@@ -279,7 +284,7 @@ class MaestroMemoryService:
     _rate_limit_cache: Dict[str, deque] = {}
     _rate_limit_lock = asyncio.Lock()
 
-    def __init__(self, database_path: Optional[Path] = None):
+    def __init__(self, database_path: Optional[Path] = None) -> None:
         """
         Initialize memory service with database path.
 
@@ -292,13 +297,13 @@ class MaestroMemoryService:
         # Ensure parent directory exists
         database_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self.database_path = database_path
-        self.db_manager = None
-        self.memory_manager = None
-        self._initialized = False
+        self.database_path: Path = database_path
+        self.db_manager: Any = None
+        self.memory_manager: Any = None
+        self._initialized: bool = False
 
         # Issue 7: Track sync engine for cleanup on errors
-        self._sync_engine = None
+        self._sync_engine: Any = None
         self._init_lock = asyncio.Lock()  # Issue 4: Add lock for initialization
 
         # Lazy load Nexus modules
@@ -317,7 +322,7 @@ class MaestroMemoryService:
         }
         self._metrics_lock = asyncio.Lock()
 
-    async def _record_db_metric(self, metric_name: str, value: Any = 1):
+    async def _record_db_metric(self, metric_name: str, value: Any = 1) -> None:
         """
         Record database operation metric (Issue 13: Pool Monitoring).
 
@@ -342,7 +347,7 @@ class MaestroMemoryService:
         async with self._metrics_lock:
             return self._db_metrics.copy()
 
-    async def reset_db_metrics(self):
+    async def reset_db_metrics(self) -> None:
         """Reset database operation metrics (Issue 13: Pool Monitoring)."""
         async with self._metrics_lock:
             for key in self._db_metrics:
@@ -366,8 +371,8 @@ class MaestroMemoryService:
         self,
         level: str,
         message: str,
-        **kwargs
-    ):
+        **kwargs: Any
+    ) -> None:
         """
         Log structured message with context (IMPORTANT-8: Structured Logging).
 
@@ -388,14 +393,14 @@ class MaestroMemoryService:
         # Pass message as positional argument and context as keyword arguments
         log_fn(message, **{k: v for k, v in log_data.items() if k != "message"})
 
-    def _create_tables_sync(self):
+    def _create_tables_sync(self) -> None:
         """
         Create database tables synchronously to avoid async lock issues.
 
         Uses SQLAlchemy's metadata.create_all() for proper table creation.
         """
         from maestro.memory.database.models import Base as MaestroBase
-        from nexus.database.models import Base as NexusBase
+        from nexus.database.models import Base as NexusBase  # type: ignore[import-not-found]
         from sqlalchemy import create_engine
         from sqlalchemy import text
 
@@ -441,10 +446,22 @@ class MaestroMemoryService:
 
             # Create default namespace for maestro
             from maestro.memory.database.models import MaestroProject
-            conn.execute(text("""
-                INSERT OR IGNORE INTO agent_namespaces (name, description, agent_type)
-                VALUES ('maestro', 'Maestro unified development framework', 'maestro')
-            """))
+            
+            # Check if agent_type column exists before using it
+            result = conn.execute(text("PRAGMA table_info(agent_namespaces)"))
+            columns = [row[1] for row in result.fetchall()]
+            
+            if 'agent_type' in columns:
+                conn.execute(text("""
+                    INSERT OR IGNORE INTO agent_namespaces (name, description, agent_type)
+                    VALUES ('maestro', 'Maestro unified development framework', 'maestro')
+                """))
+            else:
+                # Fallback for older databases without agent_type column
+                conn.execute(text("""
+                    INSERT OR IGNORE INTO agent_namespaces (name, description)
+                    VALUES ('maestro', 'Maestro unified development framework')
+                """))
             conn.commit()
 
             # Check if we need to add Maestro columns to memories table
@@ -493,7 +510,7 @@ class MaestroMemoryService:
             DATABASE_LOCK_RELEASE_DELAY = 0.05  # 50ms delay (Issue 17: extracted magic number)
             time.sleep(DATABASE_LOCK_RELEASE_DELAY)
 
-    async def initialize(self):
+    async def initialize(self) -> None:
         """
         Initialize the memory service.
 
@@ -535,7 +552,7 @@ class MaestroMemoryService:
                             test_fd = None
                             try:
                                 # Open in read-only mode to test locks
-                                test_fd = open(self.database_path, 'r')
+                                test_fd = open(self.database_path, 'r', encoding="utf-8")
                                 # Try to acquire shared lock (non-blocking)
                                 fcntl.flock(test_fd.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
                                 # Lock acquired, database is available
@@ -616,7 +633,7 @@ class MaestroMemoryService:
                 # Issue 16: Use custom exception
                 raise MaestroInitializationError(f"Failed to initialize memory service: {e}")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close database connections and cleanup resources."""
         if self.db_manager:
             await self.db_manager.close()
@@ -625,7 +642,7 @@ class MaestroMemoryService:
         self._initialized = False
         logger.debug("MaestroMemoryService closed")
 
-    async def _ensure_initialized(self):
+    async def _ensure_initialized(self) -> None:
         """Ensure service is initialized."""
         if not self._initialized:
             await self.initialize()
@@ -801,7 +818,7 @@ class MaestroMemoryService:
         except (OSError, ValueError) as e:
             raise MaestroValidationError(f"Invalid project path: {e}")
 
-    def _validate_memory_id(self, memory_id: Any) -> int:
+    def _validate_memory_id(self, memory_id: int | str) -> int:
         """Validate memory_id is a positive integer"""
         if not isinstance(memory_id, int):
             try:
@@ -1002,8 +1019,8 @@ Context:
                 from sqlalchemy import desc, text
 
                 # Get project first
-                stmt = select(MaestroProject).filter_by(project_path=project_path)
-                result = await session.execute(stmt)
+                project_stmt = select(MaestroProject).filter_by(project_path=project_path)
+                result = await session.execute(project_stmt)
                 project = result.scalars().first()
 
                 if not project:
@@ -1012,7 +1029,7 @@ Context:
                 # Issue 1: Use text() with parameterized query for Maestro columns
                 # These columns are added via ALTER TABLE and may not be in the model
                 # Note: column name is 'metadata' (mapped to 'extra_metadata' in Python)
-                stmt = text("""
+                memories_stmt = text("""
                     SELECT id, content, created_at, category, labels, metadata,
                            maestro_command, maestro_command_context
                     FROM memories
@@ -1021,7 +1038,7 @@ Context:
                     ORDER BY created_at DESC
                     LIMIT :limit
                 """)
-                result = await session.execute(stmt, {
+                result = await session.execute(memories_stmt, {
                     "project_id": project.id,
                     "limit": limit
                 })
@@ -1086,8 +1103,8 @@ Context:
                 from sqlalchemy import desc, text
 
                 # Get track first
-                stmt = select(MaestroTrack).filter_by(track_id=track_id)
-                result = await session.execute(stmt)
+                track_stmt = select(MaestroTrack).filter_by(track_id=track_id)
+                result = await session.execute(track_stmt)
                 track = result.scalars().first()
 
                 if not track:
@@ -1095,7 +1112,7 @@ Context:
 
                 # Issue 1: Use text() with parameterized query for Maestro columns
                 # Note: column name is 'metadata' (mapped to 'extra_metadata' in Python)
-                stmt = text("""
+                memories_stmt = text("""
                     SELECT id, content, created_at, category, labels, metadata,
                            maestro_command, maestro_command_context
                     FROM memories
@@ -1104,7 +1121,7 @@ Context:
                     ORDER BY created_at DESC
                     LIMIT :limit
                 """)
-                result = await session.execute(stmt, {
+                result = await session.execute(memories_stmt, {
                     "track_id": track.id,
                     "limit": limit
                 })
@@ -1313,8 +1330,8 @@ Context:
                 return context
 
             # Format memories as bullet points
-            memory_lines = []
-            total_length = 0
+            memory_lines: list[str] = []
+            total_length: float = 0.0
 
             for memory in results:
                 content = memory.get("content", "")

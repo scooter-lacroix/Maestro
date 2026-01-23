@@ -1,0 +1,156 @@
+maestro/hooks/pre-tool-use/smart-search.py:105: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/smart-search.py:105: note: Use "-> None" if function does not return a value
+maestro/hooks/post-tool-use/edit-notify.py:97: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/post-tool-use/edit-notify.py:97: note: Use "-> None" if function does not return a value
+maestro/hooks/user-prompt-submit/skill-activation.py:21: error: Module "maestro.skills.registry" has no attribute "get_skill_registry"; maybe "get_registry"?  [attr-defined]
+maestro/hooks/user-prompt-submit/skill-activation.py:23: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/user-prompt-submit/skill-activation.py:23: note: Use "-> None" if function does not return a value
+maestro/hooks/user-prompt-submit/skill-activation.py:150: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/user-prompt-submit/skill-activation.py:150: note: Use "-> None" if function does not return a value
+maestro/hooks/user-prompt-submit/memory-recall.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/user-prompt-submit/memory-recall.py:24: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/user-prompt-submit/memory-recall.py:24: note: Original:
+maestro/hooks/user-prompt-submit/memory-recall.py:24: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/user-prompt-submit/memory-recall.py:24: note: Redefinition:
+maestro/hooks/user-prompt-submit/memory-recall.py:24: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/user-prompt-submit/memory-recall.py:146: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/user-prompt-submit/memory-recall.py:146: note: Use "-> None" if function does not return a value
+maestro/hooks/subagent-stop/agent-report.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/subagent-stop/agent-report.py:24: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/subagent-stop/agent-report.py:24: note: Original:
+maestro/hooks/subagent-stop/agent-report.py:24: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/subagent-stop/agent-report.py:24: note: Redefinition:
+maestro/hooks/subagent-stop/agent-report.py:24: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/subagent-stop/agent-report.py:66: error: Need type annotation for "tool_counts" (hint: "tool_counts: dict[<type>, <type>] = ...")  [var-annotated]
+maestro/hooks/subagent-stop/agent-report.py:112: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/subagent-stop/agent-report.py:112: note: Use "-> None" if function does not return a value
+maestro/hooks/session-start/trace-start.py:23: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/session-start/trace-start.py:23: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/session-start/trace-start.py:23: note: Original:
+maestro/hooks/session-start/trace-start.py:23: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/session-start/trace-start.py:23: note: Redefinition:
+maestro/hooks/session-start/trace-start.py:23: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/session-start/trace-start.py:79: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/session-start/trace-start.py:79: note: Use "-> None" if function does not return a value
+maestro/hooks/session-start/session-register.py:23: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/session-start/session-register.py:23: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/session-start/session-register.py:23: note: Original:
+maestro/hooks/session-start/session-register.py:23: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/session-start/session-register.py:23: note: Redefinition:
+maestro/hooks/session-start/session-register.py:23: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/session-start/session-register.py:68: error: Argument "project_id" to "create_session" of "SessionManager" has incompatible type "Column[int] | None"; expected "int | None"  [arg-type]
+maestro/hooks/session-start/session-register.py:99: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/session-start/session-register.py:99: note: Use "-> None" if function does not return a value
+maestro/hooks/session-start/session-load.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/session-start/session-load.py:24: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/session-start/session-load.py:24: note: Original:
+maestro/hooks/session-start/session-load.py:24: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/session-start/session-load.py:24: note: Redefinition:
+maestro/hooks/session-start/session-load.py:24: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/session-start/session-load.py:88: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/session-start/session-load.py:88: note: Use "-> None" if function does not return a value
+maestro/hooks/session-end/session-outcome.py:25: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/session-end/session-outcome.py:25: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/session-end/session-outcome.py:25: note: Original:
+maestro/hooks/session-end/session-outcome.py:25: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/session-end/session-outcome.py:25: note: Redefinition:
+maestro/hooks/session-end/session-outcome.py:25: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/session-end/session-outcome.py:27: error: Cannot assign to a type  [misc]
+maestro/hooks/session-end/session-outcome.py:27: error: Incompatible types in assignment (expression has type "None", variable has type "type[SessionStatus]")  [assignment]
+maestro/hooks/session-end/session-outcome.py:64: error: "SessionManager" has no attribute "get_session"; maybe "end_session", "create_session", or "get_session_by_id"?  [attr-defined]
+maestro/hooks/session-end/session-outcome.py:131: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/session-end/session-outcome.py:131: note: Use "-> None" if function does not return a value
+maestro/hooks/session-end/session-cleanup.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/session-end/session-cleanup.py:24: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/session-end/session-cleanup.py:24: note: Original:
+maestro/hooks/session-end/session-cleanup.py:24: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/session-end/session-cleanup.py:24: note: Redefinition:
+maestro/hooks/session-end/session-cleanup.py:24: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/session-end/session-cleanup.py:26: error: Cannot assign to a type  [misc]
+maestro/hooks/session-end/session-cleanup.py:26: error: Incompatible types in assignment (expression has type "None", variable has type "type[FileClaimsHandler]")  [assignment]
+maestro/hooks/session-end/session-cleanup.py:72: error: Argument 1 to "release_claim" of "FileClaimsHandler" has incompatible type "Column[int]"; expected "str"  [arg-type]
+maestro/hooks/session-end/session-cleanup.py:81: error: "SessionManager" has no attribute "get_session"; maybe "end_session", "create_session", or "get_session_by_id"?  [attr-defined]
+maestro/hooks/session-end/session-cleanup.py:96: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/session-end/session-cleanup.py:96: note: Use "-> None" if function does not return a value
+maestro/hooks/pre-tool-use/file-claims.py:22: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/file-claims.py:22: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/pre-tool-use/file-claims.py:22: note: Original:
+maestro/hooks/pre-tool-use/file-claims.py:22: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/pre-tool-use/file-claims.py:22: note: Redefinition:
+maestro/hooks/pre-tool-use/file-claims.py:22: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/pre-tool-use/file-claims.py:77: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/file-claims.py:77: note: Use "-> None" if function does not return a value
+maestro/hooks/pre-compact/continuity.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/pre-compact/continuity.py:24: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/pre-compact/continuity.py:24: note: Original:
+maestro/hooks/pre-compact/continuity.py:24: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/pre-compact/continuity.py:24: note: Redefinition:
+maestro/hooks/pre-compact/continuity.py:24: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/pre-compact/continuity.py:26: error: Cannot assign to a type  [misc]
+maestro/hooks/pre-compact/continuity.py:26: error: Incompatible types in assignment (expression has type "None", variable has type "type[MemoryImportance]")  [assignment]
+maestro/hooks/pre-compact/continuity.py:59: error: Function "MemoryImportance" could always be true in boolean context  [truthy-function]
+maestro/hooks/pre-compact/continuity.py:61: error: "type[MemoryImportance]" has no attribute "URGENT"  [attr-defined]
+maestro/hooks/pre-compact/continuity.py:86: error: Value of type "object" is not indexable  [index]
+maestro/hooks/pre-compact/continuity.py:97: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/pre-compact/continuity.py:97: note: Use "-> None" if function does not return a value
+maestro/hooks/post-tool-use/post-edit.py:23: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/post-tool-use/post-edit.py:23: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/post-tool-use/post-edit.py:23: note: Original:
+maestro/hooks/post-tool-use/post-edit.py:23: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/post-tool-use/post-edit.py:23: note: Redefinition:
+maestro/hooks/post-tool-use/post-edit.py:23: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/post-tool-use/post-edit.py:110: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/post-tool-use/post-edit.py:110: note: Use "-> None" if function does not return a value
+maestro/hooks/post-tool-use/handoff-index.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/post-tool-use/handoff-index.py:24: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/post-tool-use/handoff-index.py:24: note: Original:
+maestro/hooks/post-tool-use/handoff-index.py:24: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/post-tool-use/handoff-index.py:24: note: Redefinition:
+maestro/hooks/post-tool-use/handoff-index.py:24: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/post-tool-use/handoff-index.py:103: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/post-tool-use/handoff-index.py:103: note: Use "-> None" if function does not return a value
+maestro/hooks/tests/test_executor.py:24: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:58: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:58: note: Use "-> None" if function does not return a value
+maestro/hooks/tests/test_executor.py:63: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:70: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:78: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:93: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:100: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:111: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:121: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:131: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:151: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:151: note: Use "-> None" if function does not return a value
+maestro/hooks/tests/test_executor.py:159: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:171: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:182: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:193: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:204: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:215: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/tests/test_executor.py:226: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/tldr-read.py:22: error: Module "maestro.tldr.analyzer" has no attribute "TLDRAnalyzer"; maybe "TLRDAnalyzer", "ASTAnalyzer", or "DFGAnalyzer"?  [attr-defined]
+maestro/hooks/pre-tool-use/tldr-read.py:95: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/tldr-read.py:95: note: Use "-> None" if function does not return a value
+maestro/hooks/pre-tool-use/tldr-context.py:27: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/tldr-context.py:27: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/pre-tool-use/tldr-context.py:27: note: Original:
+maestro/hooks/pre-tool-use/tldr-context.py:27: note:     def get_context_for_prompt(project_path: str, prompt: str, max_files: int = ...) -> str
+maestro/hooks/pre-tool-use/tldr-context.py:27: note: Redefinition:
+maestro/hooks/pre-tool-use/tldr-context.py:27: note:     def get_context_for_prompt(*args: Any, **kwargs: Any) -> Any
+maestro/hooks/pre-tool-use/tldr-context.py:29: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/tldr-context.py:29: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/pre-tool-use/tldr-context.py:29: note: Original:
+maestro/hooks/pre-tool-use/tldr-context.py:29: note:     def get_tldr_memory_bridge(db_path: str | None = ...) -> TLDRMemoryBridge
+maestro/hooks/pre-tool-use/tldr-context.py:29: note: Redefinition:
+maestro/hooks/pre-tool-use/tldr-context.py:29: note:     def get_tldr_memory_bridge(*args: Any, **kwargs: Any) -> Any
+maestro/hooks/pre-tool-use/tldr-context.py:31: error: Function is missing a type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/tldr-context.py:31: error: All conditional function variants must have identical signatures  [misc]
+maestro/hooks/pre-tool-use/tldr-context.py:31: note: Original:
+maestro/hooks/pre-tool-use/tldr-context.py:31: note:     def get_hook_manager(db_path: str | None = ..., config: dict[str, Any] | None = ...) -> UnifiedHookManager
+maestro/hooks/pre-tool-use/tldr-context.py:31: note: Redefinition:
+maestro/hooks/pre-tool-use/tldr-context.py:31: note:     def get_hook_manager(**kwargs: Any) -> Any
+maestro/hooks/pre-tool-use/tldr-context.py:33: error: Cannot assign to a type  [misc]
+maestro/hooks/pre-tool-use/tldr-context.py:33: error: Incompatible types in assignment (expression has type "None", variable has type "type[TLRDAnalyzer]")  [assignment]
+maestro/hooks/pre-tool-use/tldr-context.py:269: error: Function is missing a return type annotation  [no-untyped-def]
+maestro/hooks/pre-tool-use/tldr-context.py:269: note: Use "-> None" if function does not return a value

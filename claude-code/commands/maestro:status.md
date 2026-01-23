@@ -64,3 +64,82 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
     -   **Tasks (total):** The total number of tasks.
     -   **Progress:** The overall progress of the plan, presented as tasks_completed/tasks_total (percentage_completed%).
     -   **Memory Context:** Last stored memory timestamp and summary
+
+    **Memory Context Retrieval Protocol:**
+
+    a. Import the memory management modules:
+       ```python
+       from maestro.memory.database.models import get_session, Memory, MaestroProject
+       from maestro.core.tracks.models import TrackManager
+       from maestro.core.tracks.repository import TrackRepository
+       import os
+       ```
+
+    b. Initialize the memory system:
+       ```python
+       db_session = get_session()
+       project_path = os.getcwd()
+       track_manager = TrackManager(db_session, project_path)
+       track_repository = TrackRepository("maestro/tracks")
+       ```
+
+    c. Get recent memories for the project:
+       ```python
+       # Get recent memories across all tracks
+       project_id = track_manager.get_or_create_project()
+       recent_memories = db_session.query(Memory).filter(
+           Memory.project_id == project_id
+       ).order_by(Memory.created_at.desc()).limit(10).all()
+
+       # Format memory context
+       memory_context = []
+       for memory in recent_memories:
+           memory_context.append({
+               "content": memory.content[:200] + "..." if len(memory.content) > 200 else memory.content,
+               "category": memory.category,
+               "importance": memory.importance,
+               "created_at": memory.created_at.isoformat() if memory.created_at else None,
+               "track_id": memory.track_id,
+           })
+       ```
+
+    d. Get track-specific summaries:
+       ```python
+       tracks = track_repository.list_tracks()
+       track_summaries = []
+       for track in tracks:
+           if track.get("maestro_track_id"):
+               summary = track_manager.get_track_summary(track["track_id"])
+               if summary.get("found"):
+                   track_summaries.append({
+                       "track_id": track["track_id"],
+                       "title": summary.get("title"),
+                       "status": summary.get("status"),
+                       "progress": summary.get("progress", 0),
+                   })
+       ```
+
+    e. Include memory context in status report:
+       ```
+       **Memory Context:**
+       - Total memories stored: {len(memory_context)}
+       - Most recent: {most_recent_memory['created_at']} - {most_recent_memory['summary']}
+
+       **Track Status from Memory:**
+       {for track in track_summaries}
+       - {track['track_id']}: {track['status']} ({track['progress']:.0f}% complete)
+       {endfor}
+       ```
+
+    f. Check for pending handoffs:
+       ```python
+       from maestro.memory.coordination.handoffs import HandoffHandler
+       handler = HandoffHandler(db_session)
+       pending_handoffs = handler.get_pickable_handoffs(project_id=project_id, limit=5)
+
+       # Include in status if any exist
+       if pending_handoffs:
+           print("**Pending Handoffs:**")
+           for handoff in pending_handoffs:
+               print(f"- {handoff.handoff_id}: {handoff.title} ({handoff.status})")
+       ```

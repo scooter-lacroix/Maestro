@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Memory, Project, Track, StatsResponse } from '../types';
+import { useFileClaims, useHandoffs, useContinuityLedgers } from '../hooks/useMaestroData';
 import './DetailedTabs.css';
 
 interface DetailedTabsProps {
@@ -58,6 +59,7 @@ export const DetailedTabs: React.FC<DetailedTabsProps> = ({
     { id: 'memories', label: 'Total Memories', icon: 'fa-database' },
     { id: 'projects', label: 'Projects', icon: 'fa-folder' },
     { id: 'tracks', label: 'Tracks', icon: 'fa-road' },
+    { id: 'coordination', label: 'Coordination', icon: 'fa-project-diagram' },
     { id: 'commands', label: 'Commands', icon: 'fa-terminal' },
     { id: 'activity', label: 'Recent Activity', icon: 'fa-clock' },
     { id: 'settings', label: 'Settings', icon: 'fa-cog' },
@@ -98,6 +100,9 @@ export const DetailedTabs: React.FC<DetailedTabsProps> = ({
           )}
           {activeTab === 'tracks' && (
             <TracksTabContent tracks={tracks} />
+          )}
+          {activeTab === 'coordination' && (
+            <CoordinationTabContent />
           )}
           {activeTab === 'commands' && (
             <CommandsTabContent stats={stats} />
@@ -476,6 +481,122 @@ const ActivityTabContent: React.FC<{ memories: Memory[] }> = ({ memories }) => {
             </div>
           ))
         )}
+      </div>
+    </div>
+  );
+};
+
+// Coordination Tab Content - Show file claims, handoffs, and ledgers
+const CoordinationTabContent: React.FC = () => {
+  const { claims: fileClaims, loading: claimsLoading } = useFileClaims({ limit: 50 });
+  const { handoffs, loading: handoffsLoading } = useHandoffs({ limit: 50 });
+  const { ledgers, loading: ledgersLoading } = useContinuityLedgers({ limit: 100 });
+
+  return (
+    <div className="tab-content-inner">
+      <div className="coordination-grid">
+        {/* File Claims Section */}
+        <div className="coordination-section">
+          <h3 className="tab-section-title">
+            <i className="fas fa-lock"></i> File Claims ({fileClaims.length})
+          </h3>
+          {claimsLoading ? (
+            <div className="loading-state">Loading file claims...</div>
+          ) : fileClaims.length === 0 ? (
+            <div className="empty-state">No active file claims</div>
+          ) : (
+            <div className="coordination-list">
+              {fileClaims.map((claim) => (
+                <div key={claim.id} className={`coordination-item status-${claim.status}`}>
+                  <div className="coordination-header">
+                    <span className="coordination-id">{claim.claim_id.substring(0, 8)}</span>
+                    <span className={`coordination-status status-${claim.status}`}>
+                      {claim.status}
+                    </span>
+                  </div>
+                  <div className="coordination-agent">Agent: {claim.agent_id}</div>
+                  <div className="coordination-patterns">
+                    {claim.file_patterns.map((pattern, i) => (
+                      <code key={i} className="pattern-code">{pattern}</code>
+                    ))}
+                  </div>
+                  {claim.reason && (
+                    <div className="coordination-reason">{claim.reason}</div>
+                  )}
+                  <div className="coordination-meta">
+                    <span>Created: {new Date(claim.created_at).toLocaleString()}</span>
+                    <span>Expires: {new Date(claim.expires_at).toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Handoffs Section */}
+        <div className="coordination-section">
+          <h3 className="tab-section-title">
+            <i className="fas fa-exchange-alt"></i> Handoffs ({handoffs.length})
+          </h3>
+          {handoffsLoading ? (
+            <div className="loading-state">Loading handoffs...</div>
+          ) : handoffs.length === 0 ? (
+            <div className="empty-state">No handoffs found</div>
+          ) : (
+            <div className="coordination-list">
+              {handoffs.map((handoff) => (
+                <div key={handoff.id} className={`coordination-item status-${handoff.status}`}>
+                  <div className="coordination-header">
+                    <span className="coordination-title">{handoff.title}</span>
+                    <span className={`coordination-status status-${handoff.status}`}>
+                      {handoff.status}
+                    </span>
+                  </div>
+                  <div className="coordination-agents">
+                    <span>From: {handoff.from_agent_id}</span>
+                    {handoff.to_agent_id && <span>To: {handoff.to_agent_id}</span>}
+                  </div>
+                  {handoff.summary && (
+                    <div className="coordination-summary">{handoff.summary}</div>
+                  )}
+                  <div className="coordination-meta">
+                    <span>Created: {new Date(handoff.created_at).toLocaleString()}</span>
+                    {handoff.resumed_at && <span>Resumed: {new Date(handoff.resumed_at).toLocaleString()}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Continuity Ledgers Section */}
+        <div className="coordination-section">
+          <h3 className="tab-section-title">
+            <i className="fas fa-list-alt"></i> Continuity Ledgers ({ledgers.length})
+          </h3>
+          {ledgersLoading ? (
+            <div className="loading-state">Loading ledgers...</div>
+          ) : ledgers.length === 0 ? (
+            <div className="empty-state">No ledger entries found</div>
+          ) : (
+            <div className="coordination-list">
+              {ledgers.map((ledger) => (
+                <div key={ledger.id} className="coordination-item ledger-entry">
+                  <div className="coordination-header">
+                    <span className="ledger-type">{ledger.entry_type}</span>
+                    <span className="ledger-seq">#{ledger.sequence_number}</span>
+                  </div>
+                  <div className="ledger-title">{ledger.title}</div>
+                  <div className="ledger-content">{ledger.content.substring(0, 200)}...</div>
+                  <div className="coordination-meta">
+                    <span>Agent: {ledger.agent_id}</span>
+                    <span>{new Date(ledger.created_at).toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,34 @@
+thread 'rustc' panicked at /rustc-dev/2f1bd3f3781c90a8447e37d65a898442b8618895/compiler/rustc_query_system/src/dep_graph/graph.rs:1375:32:
+index out of bounds: the len is 193781 but the index is 2278952
+stack backtrace:
+   0:     0x7f9b9462862b - <std[a5f416d2deaea592]::backtrace::Backtrace>::create
+   1:     0x7f9b94628575 - <std[a5f416d2deaea592]::backtrace::Backtrace>::force_capture
+   2:     0x7f9b9361d4c7 - std[a5f416d2deaea592]::panicking::update_hook::<alloc[7a7c0300d30d45e0]::boxed::Box<rustc_driver_impl[f8fab2a3e91bbc72]::install_ice_hook::{closure#1}>>::{closure#0}
+   3:     0x7f9b9463af12 - std[a5f416d2deaea592]::panicking::panic_with_hook
+   4:     0x7f9b9461d638 - std[a5f416d2deaea592]::panicking::panic_handler::{closure#0}
+   5:     0x7f9b946142f9 - std[a5f416d2deaea592]::sys::backtrace::__rust_end_short_backtrace::<std[a5f416d2deaea592]::panicking::panic_handler::{closure#0}, !>
+   6:     0x7f9b9461f10d - __rustc[f5b9bebfc43bf6e1]::rust_begin_unwind
+   7:     0x7f9b91aa4a8c - core[c945c22d053963e8]::panicking::panic_fmt
+   8:     0x7f9b91608113 - core[c945c22d053963e8]::panicking::panic_bounds_check
+   9:     0x7f9b94c2e6a8 - <rustc_query_system[745b7c3eb8a83b39]::dep_graph::graph::DepGraphData<rustc_middle[dc8205edb3ac2d51]::dep_graph::DepsType>>::try_mark_previous_green::<rustc_query_impl[1c3887c9021dbf26]::plumbing::QueryCtxt>
+  10:     0x7f9b95a15819 - <rustc_query_system[745b7c3eb8a83b39]::dep_graph::graph::DepGraphData<rustc_middle[dc8205edb3ac2d51]::dep_graph::DepsType>>::try_mark_green::<rustc_query_impl[1c3887c9021dbf26]::plumbing::QueryCtxt>
+  11:     0x7f9b96025978 - rustc_query_impl[1c3887c9021dbf26]::plumbing::try_mark_green
+  12:     0x7f9b960256bf - rustc_codegen_ssa[37547738d8512c65]::base::determine_cgu_reuse
+  13:     0x7f9b9601fea9 - rustc_codegen_ssa[37547738d8512c65]::base::codegen_crate::<rustc_codegen_llvm[e3f410d34a32b910]::LlvmCodegenBackend>
+  14:     0x7f9b9601e67d - <rustc_codegen_llvm[e3f410d34a32b910]::LlvmCodegenBackend as rustc_codegen_ssa[37547738d8512c65]::traits::backend::CodegenBackend>::codegen_crate
+  15:     0x7f9b95fe484c - <rustc_interface[3871beb558f2da7e]::queries::Linker>::codegen_and_build_linker
+  16:     0x7f9b95fe1e5c - <rustc_interface[3871beb558f2da7e]::passes::create_and_enter_global_ctxt<core[c945c22d053963e8]::option::Option<rustc_interface[3871beb558f2da7e]::queries::Linker>, rustc_driver_impl[f8fab2a3e91bbc72]::run_compiler::{closure#0}::{closure#2}>::{closure#2} as core[c945c22d053963e8]::ops::function::FnOnce<(&rustc_session[e46a25957daea355]::session::Session, rustc_middle[dc8205edb3ac2d51]::ty::context::CurrentGcx, alloc[7a7c0300d30d45e0]::sync::Arc<rustc_data_structures[34c6d144dc575c71]::jobserver::Proxy>, &std[a5f416d2deaea592]::sync::once_lock::OnceLock<rustc_middle[dc8205edb3ac2d51]::ty::context::GlobalCtxt>, &rustc_data_structures[34c6d144dc575c71]::sync::worker_local::WorkerLocal<rustc_middle[dc8205edb3ac2d51]::arena::Arena>, &rustc_data_structures[34c6d144dc575c71]::sync::worker_local::WorkerLocal<rustc_hir[79327aa2168b85fb]::Arena>, rustc_driver_impl[f8fab2a3e91bbc72]::run_compiler::{closure#0}::{closure#2})>>::call_once::{shim:vtable#0}
+  17:     0x7f9b95e4cb18 - rustc_interface[3871beb558f2da7e]::interface::run_compiler::<(), rustc_driver_impl[f8fab2a3e91bbc72]::run_compiler::{closure#0}>::{closure#1}
+  18:     0x7f9b95d9bc4e - std[a5f416d2deaea592]::sys::backtrace::__rust_begin_short_backtrace::<rustc_interface[3871beb558f2da7e]::util::run_in_thread_with_globals<rustc_interface[3871beb558f2da7e]::util::run_in_thread_pool_with_globals<rustc_interface[3871beb558f2da7e]::interface::run_compiler<(), rustc_driver_impl[f8fab2a3e91bbc72]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()>
+  19:     0x7f9b95d9ba20 - <std[a5f416d2deaea592]::thread::lifecycle::spawn_unchecked<rustc_interface[3871beb558f2da7e]::util::run_in_thread_with_globals<rustc_interface[3871beb558f2da7e]::util::run_in_thread_pool_with_globals<rustc_interface[3871beb558f2da7e]::interface::run_compiler<(), rustc_driver_impl[f8fab2a3e91bbc72]::run_compiler::{closure#0}>::{closure#1}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()>::{closure#1} as core[c945c22d053963e8]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+  20:     0x7f9b95d99df8 - <std[a5f416d2deaea592]::sys::thread::unix::Thread>::new::thread_start
+  21:     0x7f9b8f862b7b - <unknown>
+  22:     0x7f9b8f8e07b8 - <unknown>
+  23:                0x0 - <unknown>
+
+
+rustc version: 1.94.0-nightly (2f1bd3f37 2026-01-12)
+platform: x86_64-unknown-linux-gnu
+
+query stack during panic:
+end of query stack

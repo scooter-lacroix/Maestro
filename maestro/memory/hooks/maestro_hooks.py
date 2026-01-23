@@ -17,7 +17,7 @@ from loguru import logger
 class HookResult:
     """Placeholder for Nexus HookResult"""
     def __init__(self, success: bool, agent_type: str, source: str,
-                 context: Optional[dict] = None, error: Optional[str] = None):
+                 context: Optional[dict] = None, error: Optional[str] = None) -> None:
         self.success = success
         self.agent_type = agent_type
         self.source = source
@@ -32,7 +32,7 @@ class MaestroCommandHook:
     extract context when commands complete.
     """
 
-    def __init__(self, memory_service=None):
+    def __init__(self, memory_service: Optional[Any] = None) -> None:
         self.agent_type = "maestro"
         self.memory_service = memory_service
 
@@ -120,7 +120,7 @@ class MaestroCommandHook:
         - setup_status: Success/failure of setup
         - files_created: List of files created during setup
         """
-        context = {
+        context: Dict[str, Any] = {
             "setup_status": "unknown",
             "project_type": "unknown",
             "files_created": []
@@ -192,7 +192,7 @@ class MaestroCommandHook:
         - tasks: List of tasks in the track
         - status: Track status ("new", "in_progress", etc.)
         """
-        context = {
+        context: Dict[str, Any] = {
             "status": "new",
             "tasks": []
         }
@@ -203,7 +203,9 @@ class MaestroCommandHook:
                 context["track_id"] = result.get("track_id", "")
                 context["track_title"] = result.get("track_title", "")
                 context["track_description"] = result.get("track_description", "")
-                context["tasks"] = result.get("tasks", [])
+                raw_tasks = result.get("tasks", [])
+                # Convert task dictionaries to task titles if expecting Sequence[str]
+                context["tasks"] = [task.get("title", "") if isinstance(task, dict) else task for task in raw_tasks]
                 context["status"] = result.get("status", "new")
 
                 # If result contains track directory, read plan file
@@ -218,7 +220,9 @@ class MaestroCommandHook:
                             context["plan_content"] = self._extract_markdown_summary(content)
                             # Extract tasks from plan if not provided
                             if not context["tasks"]:
-                                context["tasks"] = self._extract_tasks_from_plan(content)
+                                extracted_tasks = self._extract_tasks_from_plan(content)
+                                # Convert task dictionaries to task titles if expecting Sequence[str]
+                                context["tasks"] = [task.get("title", "") if isinstance(task, dict) else task for task in extracted_tasks]
                         except Exception as e:
                             logger.warning(f"Failed to read plan.md: {e}")
 
@@ -246,7 +250,7 @@ class MaestroCommandHook:
         - coverage: Test coverage percentage
         - implementation_status: Overall status
         """
-        context = {
+        context: Dict[str, Any] = {
             "tasks_completed": [],
             "tasks_remaining": [],
             "commits_made": [],
@@ -268,7 +272,7 @@ class MaestroCommandHook:
             track_id = context.get("track_id")
             if track_id:
                 project_path_obj = Path(project_path)
-                track_dir = project_path_obj / "maestro" / "tracks" / track_id
+                track_dir = project_path_obj / "maestro" / "tracks" / str(track_id)
                 plan_file = track_dir / "plan.md"
 
                 if plan_file.exists():
@@ -277,6 +281,8 @@ class MaestroCommandHook:
                         # Parse tasks from plan
                         all_tasks = self._extract_tasks_from_plan(content)
                         completed_tasks = context.get("tasks_completed", [])
+                        if not isinstance(completed_tasks, (list, tuple, set)):
+                            completed_tasks = []
 
                         # Determine remaining tasks
                         if all_tasks and not context.get("tasks_remaining"):
@@ -310,7 +316,7 @@ class MaestroCommandHook:
         - blockers: List of blockers
         - next_actions: Recommended next actions
         """
-        context = {
+        context: Dict[str, Any] = {
             "active_track": None,
             "current_phase": None,
             "progress": "0/0",
@@ -338,10 +344,10 @@ class MaestroCommandHook:
                         # Find active track (first incomplete track)
                         track_match = re.search(r'\[~\]\s+Track:.*?\(([^)]+)\)', content)
                         if track_match:
-                            context["active_track"] = track_match.group(1)
+                            track_id = str(track_match.group(1))
+                            context["active_track"] = track_id
 
                             # Try to read track plan for progress
-                            track_id = track_match.group(1)
                             track_dir = project_path_obj / "maestro" / "tracks" / track_id
                             plan_file = track_dir / "plan.md"
 

@@ -12,7 +12,7 @@ from loguru import logger
 import uvicorn
 
 
-def serve_command(args):
+def serve_command(args: argparse.Namespace) -> int:
     """
     Start the Maestro Memory Dashboard web server.
 
@@ -42,17 +42,23 @@ def serve_command(args):
     logger.info(f"API Documentation: http://{args.host}:{args.port}/api/docs")
 
     # Run the server
-    uvicorn.run(
-        app,
-        host=args.host,
-        port=args.port,
-        log_level="debug" if args.debug else "info",
-        access_log=not args.quiet,
-        reload=args.debug  # Auto-reload in debug mode
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            log_level="debug" if args.debug else "info",
+            access_log=not args.quiet,
+            reload=args.debug  # Auto-reload in debug mode
+        )
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        return 1
+
+    return 0
 
 
-def status_command(args):
+def status_command(args: argparse.Namespace) -> int:
     """
     Show Maestro memory system status.
 
@@ -76,7 +82,7 @@ def status_command(args):
     # Initialize service and get stats
     import asyncio
 
-    async def get_stats():
+    async def get_stats() -> int:
         service = MaestroMemoryService(database_path=database_path)
         await service.initialize()
 
@@ -87,19 +93,19 @@ def status_command(args):
             async with service.db_manager.get_async_session() as session:
                 # Count projects
                 project_result = await session.execute(
-                    select(func.count(MaestroProject.id))
+                    select(func.count()).select_from(MaestroProject)  # pylint: disable=not-callable
                 )
                 total_projects = project_result.scalar() or 0
 
                 # Count tracks
                 track_result = await session.execute(
-                    select(func.count(MaestroTrack.id))
+                    select(func.count()).select_from(MaestroTrack)  # pylint: disable=not-callable
                 )
                 total_tracks = track_result.scalar() or 0
 
                 # Count memories
                 memory_result = await session.execute(
-                    select(func.count()).select_from(text("memories")).where(text("is_active = 1"))
+                    select(func.count()).select_from(text("memories")).where(text("is_active = 1"))  # pylint: disable=not-callable
                 )
                 total_memories = memory_result.scalar() or 0
 
@@ -114,12 +120,13 @@ def status_command(args):
 
         finally:
             await service.close()
+        
+        return 0
 
-    asyncio.run(get_stats())
-    return 0
+    return asyncio.run(get_stats())
 
 
-def scan_command(args):
+def scan_command(args: argparse.Namespace) -> int:
     """
     Scan filesystem for Maestro projects and populate the database.
 
@@ -132,7 +139,7 @@ def scan_command(args):
     # Get directories to scan
     base_dirs = [args.dir] if args.dir else None
 
-    async def run_scan():
+    async def run_scan() -> int:
         logger.info(f"Scanning for Maestro projects...")
         results = await scan_projects(base_dirs=base_dirs)
 
@@ -163,7 +170,7 @@ def scan_command(args):
     return asyncio.run(run_scan())
 
 
-def migrate_command(args):
+def migrate_command(args: argparse.Namespace) -> int:
     """
     Migrate memories from Memori database to Nexus.
 
@@ -196,9 +203,9 @@ def migrate_command(args):
     target_db.parent.mkdir(parents=True, exist_ok=True)
 
     # Run migration
-    async def run_migration():
+    async def run_migration() -> int:
         # Progress callback
-        async def progress_callback(stage, progress, message):
+        async def progress_callback(stage: str, progress: float, message: str) -> None:
             logger.info(f"[{stage}] {progress*100:.1f}%: {message}")
 
         # Initialize Nexus service
@@ -225,7 +232,7 @@ def migrate_command(args):
     return asyncio.run(run_migration())
 
 
-def main():
+def main() -> None:
     """
     Main CLI entry point.
 

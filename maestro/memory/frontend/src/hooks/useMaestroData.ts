@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../utils/api';
-import { Memory, Project, Track, StatsResponse, CodeSearchResult } from '../types';
+import { Memory, Project, Track, StatsResponse, CodeSearchResult, FileClaim, Handoff, ContinuityLedger, CoordinationSummary } from '../types';
 
 export const useMemories = (params?: { project_id?: number; track_id?: number; limit?: number }) => {
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -219,4 +219,150 @@ export const useCodeSearch = () => {
   };
 
   return { results, loading, error, searchCode };
+};
+
+// Coordination hooks for Maestro v2
+export const useCoordinationSummary = () => {
+  const [summary, setSummary] = useState<CoordinationSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSummary = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('/api/v1/coordination/summary');
+        const data = await response.json();
+        setSummary(data);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching coordination summary:', err);
+        setError('Failed to fetch coordination summary');
+        setSummary(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSummary();
+  }, []);
+
+  return { summary, loading, error };
+};
+
+export const useFileClaims = (params?: {
+  project_id?: number;
+  track_id?: number;
+  status?: string;
+  limit?: number;
+}) => {
+  const [claims, setClaims] = useState<FileClaim[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchClaims = async () => {
+      try {
+        setLoading(true);
+        const queryParams = new URLSearchParams();
+        if (params?.project_id) queryParams.append('project_id', params.project_id.toString());
+        if (params?.track_id) queryParams.append('track_id', params.track_id.toString());
+        if (params?.status) queryParams.append('status', params.status);
+        if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+        const response = await fetch(`/api/v1/coordination/file-claims?${queryParams}`);
+        const data = await response.json();
+        setClaims(data.claims || []);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching file claims:', err);
+        setError('Failed to fetch file claims');
+        setClaims([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchClaims();
+  }, [JSON.stringify(params)]);
+
+  return { claims, loading, error };
+};
+
+export const useHandoffs = (params?: {
+  project_id?: number;
+  track_id?: number;
+  status?: string;
+  limit?: number;
+}) => {
+  const [handoffs, setHandoffs] = useState<Handoff[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchHandoffs = async () => {
+      try {
+        setLoading(true);
+        const queryParams = new URLSearchParams();
+        if (params?.project_id) queryParams.append('project_id', params.project_id.toString());
+        if (params?.track_id) queryParams.append('track_id', params.track_id.toString());
+        if (params?.status) queryParams.append('status', params.status);
+        if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+        const response = await fetch(`/api/v1/coordination/handoffs?${queryParams}`);
+        const data = await response.json();
+        setHandoffs(data.handoffs || []);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching handoffs:', err);
+        setError('Failed to fetch handoffs');
+        setHandoffs([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchHandoffs();
+  }, [JSON.stringify(params)]);
+
+  return { handoffs, loading, error };
+};
+
+export const useContinuityLedgers = (params?: {
+  project_id?: number;
+  track_id?: number;
+  session_id?: string;
+  limit?: number;
+}) => {
+  const [ledgers, setLedgers] = useState<ContinuityLedger[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchLedgers = async () => {
+      try {
+        setLoading(true);
+        const queryParams = new URLSearchParams();
+        if (params?.project_id) queryParams.append('project_id', params.project_id.toString());
+        if (params?.track_id) queryParams.append('track_id', params.track_id.toString());
+        if (params?.session_id) queryParams.append('session_id', params.session_id);
+        if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+        const response = await fetch(`/api/v1/coordination/ledgers?${queryParams}`);
+        const data = await response.json();
+        setLedgers(data.ledgers || []);
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching ledgers:', err);
+        setError('Failed to fetch ledgers');
+        setLedgers([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLedgers();
+  }, [JSON.stringify(params)]);
+
+  return { ledgers, loading, error };
 };

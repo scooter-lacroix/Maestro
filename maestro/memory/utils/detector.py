@@ -6,10 +6,16 @@ It identifies Maestro projects and provides memory isolation between projects.
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
-from loguru import logger
+
+# Dependency hygiene: allow this module to import even when loguru isn't installed.
+try:
+    from loguru import logger  # type: ignore
+except ImportError:  # pragma: no cover
+    logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -46,8 +52,8 @@ class ProjectDetector:
         "maestro/workflow.md",          # Workflow config
     ]
 
-    def __init__(self):
-        self._cache: Dict[str, ProjectInfo] = {}
+    def __init__(self) -> None:
+        self._cache: Dict[str, Optional[ProjectInfo]] = {}
 
     def detect_project(self, start_path: Optional[str] = None) -> Optional[ProjectInfo]:
         """
@@ -166,7 +172,7 @@ class ProjectDetector:
             # Format: "## [ ] Track: Description (track-id)"
             import re
             pattern = r'\[[ ~x]\]\s+Track:.*?\(([^)]+)\)'
-            matches = re.findall(pattern, content)
+            matches: list[str] = re.findall(pattern, content)
 
             for track_id in matches:
                 # Return the first track ID found

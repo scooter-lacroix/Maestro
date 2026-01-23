@@ -4,7 +4,7 @@
 
 ## Overview
 
-Enhanced Maestro installer scripts to automatically detect and install Go and Zoekt dependencies with user-friendly messaging and optional installation prompts.
+Maestro’s installer is consolidated into a **single entrypoint**: `install.sh`, which launches the Rust **Conductor Wizard** (`maestro-setup`). This wizard can optionally install Go/Zoekt and configure first-class integrations for multiple AI coding tools.
 
 ## Changes Made
 
@@ -38,10 +38,9 @@ cd /home/stan/Prod/maestro/maestro/memory/frontend && npm run build
 ### Issue 2: Installer Enhancement - COMPLETED ✅
 
 **Files Created/Updated:**
-- `/home/stan/Prod/maestro/scripts/install-claude-code.sh` (v1.5.0)
-- `/home/stan/Prod/maestro/scripts/install-opencode.sh` (v1.5.0)
-- `/home/stan/Prod/maestro/install-claude-code.sh` (updated)
-- `/home/stan/Prod/maestro/install-opencode.sh` (updated)
+- `/home/stan/Prod/maestro/install.sh` (single installer entrypoint)
+- `/home/stan/Prod/maestro/maestro/leindex/rust/src/setup_main.rs` (wizard UI)
+- `/home/stan/Prod/maestro/maestro/leindex/rust/src/setup/mod.rs` (wizard actions)
 
 **New Features:**
 
@@ -134,9 +133,8 @@ cd /home/stan/Prod/maestro/maestro/memory/frontend && npm run build
 
 ### Syntax Verification
 ```bash
-bash -n install-claude-code.sh
-bash -n install-opencode.sh
-✅ Both installers have valid syntax
+bash -n install.sh
+✅ Installer has valid syntax
 ```
 
 ### Frontend Build
@@ -152,11 +150,7 @@ cd maestro/memory/frontend && npm run build
 
 **New Installation:**
 ```bash
-# Claude Code
-curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-claude-code.sh | bash
-
-# OpenCode
-curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install-opencode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
 ```
 
 **Manual Go Installation (if needed):**

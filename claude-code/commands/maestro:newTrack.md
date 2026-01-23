@@ -17,6 +17,46 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
 
 NOTE: When the track is implemented via `/maestro:implement`, agents will be used AUTOMATICALLY based on task complexity. No user instruction is required for agent usage during implementation.
 
+**CRITICAL - ASKUSERQUESTION TOOL REQUIREMENT:**
+You MUST use the `AskUserQuestion` tool for ALL user interactions including:
+- Asking clarifying questions about the track/feature
+- Presenting options for user selection (A/B/C choices)
+- Gathering specification details (requirements, acceptance criteria)
+- Requesting confirmations and approvals for spec.md and plan.md
+- Any question that requires user input
+
+DO NOT use plain text output to ask questions. Always use the `AskUserQuestion` tool with properly structured options.
+
+Example usage for specification questions:
+```
+AskUserQuestion:
+  question: "What type of authentication should this feature use?"
+  header: "Auth Type"
+  options:
+    - label: "JWT tokens (recommended)"
+      description: "Stateless authentication with JSON Web Tokens"
+    - label: "Session-based"
+      description: "Server-side session storage"
+    - label: "OAuth 2.0"
+      description: "Third-party authentication integration"
+  multiSelect: false
+```
+
+Example for multi-select questions (additive):
+```
+AskUserQuestion:
+  question: "Which user types should have access to this feature? (Select all that apply)"
+  header: "User Types"
+  options:
+    - label: "Admin users"
+      description: "Full administrative access"
+    - label: "Regular users"
+      description: "Standard authenticated users"
+    - label: "Guest users"
+      description: "Unauthenticated visitors"
+  multiSelect: true
+```
+
 ## 1.1 SETUP CHECK
 **PROTOCOL: Verify that the Maestro environment is properly set up.**
 
@@ -51,7 +91,7 @@ NOTE: When the track is implemented via `/maestro:implement`, agents will be use
     > "I'll now guide you through a series of questions to build a comprehensive specification (`spec.md`) for this track."
 
 2.  **Questioning Phase:** Ask a series of questions to gather details for the `spec.md`. Tailor questions based on the track type (Feature or Other).
-    *   **CRITICAL:** You MUST ask these questions sequentially (one by one). Do not ask multiple questions in a single turn. Wait for the user's response after each question.
+    *   **CRITICAL:** You MUST ask these questions sequentially (one by one) using the `AskUserQuestion` tool. Do not ask multiple questions in a single turn. Wait for the user's response after each question.
 
     *   **CRITICAL THINK INTEGRATION - BEFORE EACH QUESTION:**
         Before formulating each clarifying question, you MUST apply the Critical Think framework:
@@ -80,22 +120,34 @@ NOTE: When the track is implemented via `/maestro:implement`, agents will be use
     *   **General Guidelines:**
         *   Refer to information in `product.md`, `tech-stack.md`, etc., to ask context-aware questions.
         *   Provide a brief explanation and clear examples for each question.
-        *   **Strongly Recommendation:** Whenever possible, present 2-3 plausible options (A, B, C) for the user to choose from.
+        *   **Strongly Recommendation:** Whenever possible, present 2-3 plausible options for the user to choose from.
         *   **Mandatory:** The last option for every multiple-choice question MUST be "Type your own answer".
 
         *   **1. Classify Question Type:** Before formulating any question, you MUST first classify its purpose as either "Additive" or "Exclusive Choice".
             *   Use **Additive** for brainstorming and defining scope (e.g., users, goals, features, project guidelines). These questions allow for multiple answers.
             *   Use **Exclusive Choice** for foundational, singular commitments (e.g., selecting a primary technology, a specific workflow rule). These questions require a single answer.
 
-        *   **2. Formulate the Question:** Based on the classification, you MUST adhere to the following:
-            *   **Strongly Recommended:** Whenever possible, present 2-3 plausible options (A, B, C) for the user to choose from.
-            *   **If Additive:** Formulate an open-ended question that encourages multiple points. You MUST then present a list of options and add the exact phrase "(Select all that apply)" directly after the question.
-            *   **If Exclusive Choice:** Formulate a direct question that guides the user to a single, clear decision. You MUST NOT add "(Select all that apply)".
+        *   **2. Formulate the Question:** Based on the classification, you MUST use the `AskUserQuestion` tool with proper structure:
+            ```
+            AskUserQuestion:
+              question: "Your question here?"
+              header: "Short Header"
+              options:
+                - label: "Option A"
+                  description: "Brief description of option A"
+                - label: "Option B"
+                  description: "Brief description of option B"
+                - label: "Option C"
+                  description: "Brief description of option C"
+                - label: "Type your own answer"
+                  description: "Provide a custom response"
+              multiSelect: false  # or true for additive questions
+            ```
 
         *   **3. Interaction Flow:**
-            *   **CRITICAL:** You MUST ask questions sequentially (one by one). Do not ask multiple questions in a single turn. Wait for the user's response after each question.
+            *   **CRITICAL:** You MUST ask questions sequentially (one by one) using `AskUserQuestion`. Do not ask multiple questions in a single turn. Wait for the user's response after each question.
             *   The last option for every multiple-choice question MUST be "Type your own answer".
-            *   Confirm your understanding by summarizing before moving on to the next question or section..
+            *   Confirm your understanding by summarizing before moving on to the next question or section.
 
     *   **If FEATURE:**
         *   **Ask 3-5 relevant questions** to clarify the feature request.
@@ -133,14 +185,18 @@ NOTE: When the track is implemented via `/maestro:implement`, agents will be use
        - **Step 5:** What risks or issues were found?
        - **Step 6:** Is the spec ready for user review? Any revisions needed?
 
-7.  **User Confirmation:** Present the drafted `spec.md` content to the user for review and approval.
-    > "I've drafted the specification for this track. Please review the following:"
-    >
-    > ```markdown
-    > [Drafted spec.md content here]
-    > ```
-    >
-    > "Does this accurately capture the requirements? Please suggest any changes or confirm."
+7.  **User Confirmation:** Present the drafted `spec.md` content to the user for review and approval using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "I've drafted the specification for this track. Please review and decide:"
+      header: "Review Spec"
+      options:
+        - label: "Approve"
+          description: "The specification is accurate and we can proceed"
+        - label: "Suggest Changes"
+          description: "Tell me what to modify"
+      multiSelect: false
+    ```
     Await user feedback and revise the `spec.md` content until confirmed.
 
 ### 2.3 Interactive Plan Generation (`plan.md`)
@@ -180,14 +236,18 @@ NOTE: When the track is implemented via `/maestro:implement`, agents will be use
        - **Step 5:** What issues were found in the plan structure?
        - **Step 6:** Is the plan ready for user review? Any refinements needed?
 
-6.  **User Confirmation:** Present the drafted `plan.md` to the user for review and approval.
-    > "I've drafted the implementation plan. Please review the following:"
-    >
-    > ```markdown
-    > [Drafted plan.md content here]
-    > ```
-    >
-    > "Does this plan look correct and cover all the necessary steps based on the spec and our workflow? Please suggest any changes or confirm."
+6.  **User Confirmation:** Present the drafted `plan.md` to the user for review and approval using `AskUserQuestion`:
+    ```
+    AskUserQuestion:
+      question: "I've drafted the implementation plan. Please review and decide:"
+      header: "Review Plan"
+      options:
+        - label: "Approve"
+          description: "The plan is correct and covers all necessary steps"
+        - label: "Suggest Changes"
+          description: "Tell me what to modify"
+      multiSelect: false
+    ```
     Await user feedback and revise the `plan.md` content until confirmed.
 
 ### 2.4 Create Track Artifacts and Update Main Plan
@@ -223,8 +283,60 @@ NOTE: When the track is implemented via `/maestro:implement`, agents will be use
         (Replace placeholders with actual values)
 7.  **Announce Completion:** Inform the user:
     > "New track '<track_id>' has been created and added to the tracks file. You can now start implementation by running `/maestro:implement`."
-8.  **Store Track Creation Memory:** Store the new track in Nexus memory:
+8.  **Store Track Creation Memory:** Store the new track in Maestro memory:
     - Track ID and description
     - Track type (feature/bug/chore)
     - Track status (new)
     - Creation timestamp
+    - Associate with project and track IDs in memory system
+
+    **Memory Integration Protocol:**
+    a. Import the memory management modules:
+       ```python
+       from maestro.memory.database.models import create_tables, get_session, MaestroProject
+       from maestro.memory.database.managers import MemoryManager
+       from maestro.core.tracks.models import TrackManager
+       ```
+
+    b. Initialize the memory system:
+       ```python
+       import os
+       db_session = get_session()
+       project_path = os.getcwd()
+       track_manager = TrackManager(db_session, project_path)
+       ```
+
+    c. Create or get project and track records:
+       ```python
+       project_id = track_manager.get_or_create_project()
+       track_db_id = track_manager.get_or_create_track(track_id, title)
+       ```
+
+    d. Store the track creation memory:
+       ```python
+       track_manager.store_track_memory(
+           track_id,
+           f"Created new track: {title}. Type: {track_type}. Description: {description}",
+           category="context",
+           importance="normal",
+           summary=f"Track {track_id} created",
+       )
+       ```
+
+    e. Update metadata.json with memory references:
+       ```python
+       # Update the metadata.json file to include maestro_project_id and maestro_track_id
+       import json
+       metadata_path = f"maestro/tracks/{track_id}/metadata.json"
+       with open(metadata_path, "r") as f:
+           metadata = json.load(f)
+       metadata["maestro_project_id"] = project_id
+       metadata["maestro_track_id"] = track_db_id
+       with open(metadata_path, "w") as f:
+           json.dump(metadata, f, indent=2)
+       ```
+
+    f. Commit the database changes:
+       ```python
+       db_session.commit()
+       ```

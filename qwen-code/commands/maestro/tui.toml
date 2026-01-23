@@ -1,0 +1,9 @@
+description = "Maestro: open the cockpit TUI (tui)"
+prompt = """
+You are executing the Maestro framework command **tui** in Qwen Code.
+
+Load the canonical protocol and follow it precisely:
+
+@{__MAESTRO_HOME__/integrations/commands/maestro:tui.md}
+"""
+

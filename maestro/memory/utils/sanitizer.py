@@ -74,7 +74,6 @@ class MemorySanitizer:
 
         # Issue 11: Database connection strings
         (r'mongodb://[^\s"\'<>]+:[^\s"\'<>]+@', 'mongodb://***:***@'),
-        (r'postgres://[^\s"\'<>]+:[^\s"\'<>]+@', 'postgres://***:***@'),
         (r'mysql://[^\s"\'<>]+:[^\s"\'<>]+@', 'mysql://***:***@'),
         (r'redis://:[^\s"\'<>]+@', 'redis://:***@'),
     ]

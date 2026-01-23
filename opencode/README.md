@@ -10,23 +10,23 @@ opencode/
 │   └── maestro/
 │       ├── SKILL.md              # Main skill definition
 │       ├── README.md             # This file
-│       ├── commands/             # Command file references
-│       ├── templates/            # Template symlinks
+│       ├── templates/            # Workflow + code styleguides (bundled)
 │       └── scripts/              # Utility scripts
-└── opencode-config.patch         # Config snippet for opencode.json
 ```
 
 ## Installation
 
 Run the installer script:
 ```bash
-./install-opencode.sh
+./install.sh
 ```
 
+In the Conductor Wizard, ensure **OpenCode (Independent)** is enabled.
+
 This will:
-1. Copy skill files to `~/.opencode/skill/maestro/`
-2. Copy templates to `~/.claude/maestro-templates/`
-3. Update `~/.config/opencode/opencode.json` with command entries
+1. Copy skill files to `~/.config/opencode/skill/maestro/`
+2. Copy Maestro command files to `~/.config/opencode/commands/`
+3. Update `~/.config/opencode/opencode.json` with command templates + MCP entries
 
 ## Usage
 
