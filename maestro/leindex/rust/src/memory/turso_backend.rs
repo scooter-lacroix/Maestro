@@ -222,6 +222,9 @@ pub struct TursoStorageBackend {
     database: Arc<Database>,
     config: TursoConfig,
     is_shutdown: Arc<AtomicBool>,
+    /// Cached connection to avoid multiple sqlite3_open calls
+    /// and potential threading configuration conflicts in libsql 0.9.
+    connection: Arc<tokio::sync::Mutex<Option<libsql::Connection>>>,
 }
 
 // Implement Clone for TursoStorageBackend
@@ -232,6 +235,7 @@ impl Clone for TursoStorageBackend {
             database: Arc::clone(&self.database),
             config: self.config.clone(),
             is_shutdown: Arc::clone(&self.is_shutdown),
+            connection: Arc::clone(&self.connection),
         }
     }
 }
@@ -304,11 +308,13 @@ impl TursoStorageBackend {
 
         // Step 3: Wrap in Arc for thread-safe sharing
         // Step 4: Create shutdown guard
+        // Step 5: Initialize connection cache
         Ok(Self {
             db_path: path,
             database: Arc::new(db),
             config,
             is_shutdown: Arc::new(AtomicBool::new(false)),
+            connection: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -347,11 +353,13 @@ impl TursoStorageBackend {
 
         // Step 3: Wrap in Arc for thread-safe sharing
         // Step 4: Create shutdown guard
+        // Step 5: Initialize connection cache
         Ok(Self {
             db_path: PathBuf::from(":memory:"),
             database: Arc::new(db),
             config,
             is_shutdown: Arc::new(AtomicBool::new(false)),
+            connection: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -516,28 +524,41 @@ impl TursoStorageBackend {
             return Err(anyhow::anyhow!("Turso backend is shut down"));
         }
 
-        let conn = self
-            .database
-            .connect()
-            .context("Failed to get connection")?;
+        // Use cached connection if available, otherwise create a new one.
+        // This prevents multiple sqlite3_open calls which can trigger threading
+        // configuration panics in libsql 0.9 when mixed with rusqlite.
+        let mut conn_guard = self.connection.lock().await;
+        if conn_guard.is_none() {
+            let conn = self
+                .database
+                .connect()
+                .context("Failed to get connection")?;
 
-        // Enforce foreign keys for every connection
-        conn.execute(
-            "PRAGMA foreign_keys = ON;",
-            libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
-        )
-        .await
-        .context("Failed to enable foreign keys")?;
-
-        // Enforce read-only mode if configured
-        if self.config.read_only {
+            // Enforce foreign keys for every connection
             conn.execute(
-                "PRAGMA query_only = ON;",
+                "PRAGMA foreign_keys = ON;",
                 libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
             )
             .await
-            .context("Failed to enable query_only mode")?;
+            .context("Failed to enable foreign keys")?;
+
+            // Enforce read-only mode if configured
+            if self.config.read_only {
+                conn.execute(
+                    "PRAGMA query_only = ON;",
+                    libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+                )
+                .await
+                .context("Failed to enable query_only mode")?;
+            }
+
+            *conn_guard = Some(conn);
         }
+
+        let conn = conn_guard.as_ref().unwrap().clone();
+        // Drop guard before executing closure to allow nested calls if necessary
+        // (though libsql::Connection is cloneable and thread-safe)
+        drop(conn_guard);
 
         f(conn).await
     }
