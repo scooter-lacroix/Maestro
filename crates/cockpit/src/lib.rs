@@ -4,6 +4,7 @@
 //! separating UI state, rendering, and actions.
 
 pub mod app;
+pub mod modals;
 pub mod orchestrate;
 pub mod state;
 pub mod theme;
