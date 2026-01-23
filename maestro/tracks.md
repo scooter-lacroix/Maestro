@@ -160,11 +160,11 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 **Type**: Master Orchestration Track
 
-**Status**: In Progress - Sub-Track 01 COMPLETE ✅
+**Status**: In Progress - Sub-Tracks 01-02 COMPLETE ✅
 
 **Sub-Tracks**:
 - [x] 01-cockpit-tui-reorg (COMPLETE - All 5 phases finished)
-- [ ] 02-leindex-core-rust
+- [x] 02-leindex-core-rust (COMPLETE - Phases 1-4, 5 deferred to 03, 6 verified)
 - [ ] 03-orchestrate-pane-ralph
 
 **Execution**: `/maestro:implement v2-5_20260121`
@@ -191,4 +191,27 @@ This file tracks all major tracks for the project. Each track has its own detail
     - install.sh builds Rust via cargo
     - Workspace builds successfully
     - README.md updated for Rust-first architecture
-- Next: Sub-Track 02 (LeIndex Canonical)
+
+- **Sub-Track 02: COMPLETE ✅**
+  - Phase 1 (Hard Gates - No TLDR): COMPLETE ✅
+    - CI gate to forbid maestro.tldr imports outside archive/
+    - CI gate to forbid archive/tldr execution paths
+    - ADR 003: TLDR to LeIndex Migration and Compatibility Policy
+  - Phase 2 (LeIndex CLI Surface): COMPLETE ✅
+    - CLI surface specification documented (cli_surface.md)
+    - New `maestro le-index` subcommand with init, status, search, analyze, phase1-5, context
+    - 5-layer analysis commands (ast, callgraph, cfg, dfg, slicing)
+    - Context bundle format defined for orchestrate loops
+  - Phase 3 (Hooks Migration): COMPLETE ✅
+    - Hooks already use LeIndex (no maestro.tldr imports)
+    - Updated docstrings to clarify /maestro:tldr is compatibility alias
+  - Phase 4 (Skills + Docs Migration): COMPLETE ✅
+    - Documentation already references LeIndex as primary implementation
+    - README and plugin.json already Rust-first
+  - Phase 5 (Cockpit Analysis UX): DEFERRED to Sub-Track 03
+  - Phase 6 (Verification): COMPLETE ✅
+    - Tested maestro analyze (all 5 layers working)
+    - Tested maestro le-index phase1/phase2 on Maestro repo
+    - Confirmed ultra/balanced mode token efficiency
+
+- Next: Sub-Track 03 (Orchestrate Pane - Ralph Port)
