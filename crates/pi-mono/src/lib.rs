@@ -43,12 +43,14 @@ pub mod agents;
 pub mod execution;
 pub mod error;
 pub mod detection;
+pub mod discovery;
 
 // Public re-exports for convenience
 pub use config::PiMonoConfig;
 pub use agents::PiMonoAgent;
 pub use execution::{Executor, ExecutorConfig, ExecutionResult};
 pub use detection::{PiDetection, Capabilities};
+pub use discovery::{ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS};
 
 /// Returns the version of the maestro-pi-mono crate.
 ///
