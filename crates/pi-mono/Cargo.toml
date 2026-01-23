@@ -1,0 +1,28 @@
+[package]
+name = "maestro-pi-mono"
+version = "2.5.0"
+edition = "2021"
+description = "Pi-Mono Integration for Maestro"
+authors = ["Maestro Project"]
+
+[lib]
+name = "maestro_pi_mono"
+crate-type = ["rlib"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+# serde_yaml - Add when implementing YAML configuration support
+# which - Add when implementing executable path resolution
+# dirs - Add when implementing config directory detection
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }

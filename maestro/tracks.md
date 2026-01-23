@@ -243,3 +243,27 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 **Total Implementation**: All 3 sub-tracks complete (16 phases total). Maestro v2.5 is ready for use.
 
+---
+
+## [~] Track: Pi-Mono Integration for Maestro
+*Link: [./maestro/tracks/pi-mono_20260123/](./maestro/tracks/pi-mono_20260123/)*
+
+**Description**: Integrate pi-mono as a first-class CLI agent in Maestro's ecosystem - Full 7-phase implementation including Detection, Model Configuration, Agent Mapping, Execution Engine, Config Workflow, Command Integration, and Testing
+
+**Type**: Feature
+
+**Status**: IN PROGRESS
+
+**Phases**:
+- Phase 1: Detection & Discovery System (3 tasks)
+- Phase 2: Adaptive Model Configuration (4 tasks)
+- Phase 3: Agent Role Mapping System (3 tasks)
+- Phase 4: Subagent Execution Engine (4 tasks)
+- Phase 5: Interactive Configuration Workflow (2 tasks)
+- Phase 6: Maestro Command Integration (4 tasks)
+- Phase 7: Testing & Validation (3 tasks)
+
+**Total Tasks**: 23
+
+**Execution**: `/maestro:implement pi-mono_20260123`
+
