@@ -160,29 +160,38 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 **Type**: Master Orchestration Track
 
-**Status**: In Progress - Sub-Track 01 (Cockpit TUI Re-Org) started
+**Status**: In Progress - Sub-Track 01 COMPLETE ✅
 
 **Sub-Tracks**:
-- [~] 01-cockpit-tui-reorg (In Progress - Task 2.1: TUI code extracted, pending compilation fixes)
+- [x] 01-cockpit-tui-reorg (COMPLETE - All 5 phases finished)
 - [ ] 02-leindex-core-rust
 - [ ] 03-orchestrate-pane-ralph
 
 **Execution**: `/maestro:implement v2-5_20260121`
 
 **Progress Summary (2026-01-22):**
-- **Sub-Track 01: In Progress**
+- **Sub-Track 01: COMPLETE ✅**
   - Phase 1 (Architecture & Layout): COMPLETE ✅
     - ADRs 001 & 002 created (CLI Ownership, Crate Reorganization)
     - Binary naming: Rust-only `maestro`, legacy Python CLI archived
     - Workspace structure created at repo root
-  - Phase 2 (Move + Modularize Cockpit): In Progress
-    - Task 2.1: TUI code moved to `crates/cockpit/src/app.rs` (6000+ lines)
-    - Pending: Fix compilation errors from import path changes
-
----
-
-## [~] Track: TUI Themes, Transparency & Tool Integration
-*Link: [./maestro/tracks/tui-themes-integration_20260206/](./maestro/tracks/tui-themes-integration_20260206/)*
+  - Phase 2 (Move + Modularize Cockpit): COMPLETE ✅
+    - TUI code extracted to `crates/cockpit/src/app.rs`
+    - Theme module with SerdeColor wrapper
+  - Phase 3 (Wire maestro tui): COMPLETE ✅
+    - CLI routes to Cockpit crate (maestro_cockpit::run())
+    - Config loading stable (~/.config/maestro/config.toml)
+    - Tmux multiplexer stable with graceful degradation
+  - Phase 4 (Retire Go TUI): COMPLETE ✅
+    - Makefile updated with Rust targets
+    - maestro:tui.md updated for Rust Cockpit
+    - plugin.json updated (Rust required, Go removed)
+    - No runtime references to archive/tui-go
+  - Phase 5 (Installer / Build Pipeline): COMPLETE ✅
+    - install.sh builds Rust via cargo
+    - Workspace builds successfully
+    - README.md updated for Rust-first architecture
+- Next: Sub-Track 02 (LeIndex Canonical)
 
 **Description**: Fix missing transparency effects in Settings, integrate additional themes from rat-theme4 crate, and integrate memory/LSP systems into CLI tools when running in Maestro TUI (tool search access, on-demand LSPs, memory banking, terminal panes)
 
@@ -219,3 +228,22 @@ This file tracks all major tracks for the project. Each track has its own detail
 **Estimated Time**: 11-16 days (Approximately 6-9 days remaining)
 
 **Execution**: `/maestro:implement tui-themes-integration_20260206`
+=======
+  - Phase 2 (Move + Modularize Cockpit): COMPLETE ✅
+    - TUI code extracted to `crates/cockpit/src/app.rs`
+    - Theme module with SerdeColor wrapper
+  - Phase 3 (Wire maestro tui): COMPLETE ✅
+    - CLI routes to Cockpit crate (maestro_cockpit::run())
+    - Config loading stable (~/.config/maestro/config.toml)
+    - Tmux multiplexer stable with graceful degradation
+  - Phase 4 (Retire Go TUI): COMPLETE ✅
+    - Makefile updated with Rust targets
+    - maestro:tui.md updated for Rust Cockpit
+    - plugin.json updated (Rust required, Go removed)
+    - No runtime references to archive/tui-go
+  - Phase 5 (Installer / Build Pipeline): COMPLETE ✅
+    - install.sh builds Rust via cargo
+    - Workspace builds successfully
+    - README.md updated for Rust-first architecture
+- Next: Sub-Track 02 (LeIndex Canonical)
+>>>>>>> eae91075 (docs(v2.5): Mark Sub-Track 01 as COMPLETE)
