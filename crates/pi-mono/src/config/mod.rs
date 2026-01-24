@@ -20,6 +20,7 @@
 pub mod models;
 pub mod io;
 pub mod selection;
+pub mod wizard;
 
 use serde::{Deserialize, Serialize};
 
@@ -97,3 +98,6 @@ pub use models::{
 
 // Re-exports from selection module
 pub use selection::ModelSelector;
+
+// Re-exports from wizard module
+pub use wizard::{WizardStep, WizardState, ConfigWizard};

@@ -48,7 +48,8 @@ pub mod discovery;
 // Public re-exports for convenience
 pub use config::{
     PiMonoConfig, ModelTier, ModelPreference, ProviderConfig, RoleAssignment, ExecutionSettings, ModelConfig, ModelSelector,
-    io::{config_dir, config_path, ensure_config_dir, load_config, load_config_from_path, save_config, save_config_to_path, default_config, validate_config}
+    io::{config_dir, config_path, ensure_config_dir, load_config, load_config_from_path, save_config, save_config_to_path, default_config, validate_config},
+    wizard::{WizardStep, WizardState, ConfigWizard},
 };
 pub use agents::{PiMonoAgent, AgentError};
 pub use execution::{Executor, ExecutorConfig, ExecutionResult};
