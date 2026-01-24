@@ -165,3 +165,7 @@ nanobanana-output/
 # Rust build artifacts
 maestro/leindex/rust/target/
 target/
+.leindex_data/
+
+# Vibe CLI session logs
+.vibe/logs/

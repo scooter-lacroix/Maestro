@@ -45,9 +45,10 @@ ALLOWED_ORIGINS = os.environ.get(
 ).split(",")
 
 # Issue 6: Define allowed base directories for project_path validation
+DEFAULT_HOME = os.path.expanduser("~")
 ALLOWED_BASE_DIRS = os.environ.get(
     "MAESTRO_ALLOWED_BASE_DIRS",
-    "/home/stan/Prod"
+    DEFAULT_HOME
 ).split(",")
 
 # Issue 6: Regex pattern for project_path validation
@@ -410,7 +411,7 @@ def create_dashboard_app(
                     <p>The new frontend has not been built yet.</p>
                     <p><strong>To build the frontend:</strong></p>
                     <pre style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 4px; overflow-x: auto;">
-cd /home/stan/Prod/maestro/maestro/memory/frontend
+cd frontend/
 npm install
 npm run build
                     </pre>

@@ -38,9 +38,8 @@ impl ZellijMultiplexer {
         let user_zide_str = user_zide_path.to_string_lossy();
 
         let possible_paths = [
-            "/home/stan/Prod/maestro/maestro/leindex/rust/resources/zide",
-            "/home/stan/Prod/maestro/leindex/rust/resources/zide",
             &user_zide_str,
+            "/usr/local/share/maestro/zide",
         ];
 
         let zide_dir = possible_paths
@@ -146,9 +145,8 @@ impl ZellijMultiplexer {
         let user_zide_str = user_zide_path.to_string_lossy();
 
         let possible_paths = [
-            "/home/stan/Prod/maestro/maestro/leindex/rust/resources/zide",
-            "/home/stan/Prod/maestro/leindex/rust/resources/zide",
             &user_zide_str,
+            "/usr/local/share/maestro/zide",
         ];
 
         let zide_dir = possible_paths
