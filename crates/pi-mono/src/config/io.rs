@@ -32,6 +32,19 @@ const CONFIG_SUBDIR: &str = "config";
 /// Default configuration file name
 const CONFIG_FILE_NAME: &str = "pi-mono.yaml";
 
+/// Standard provider definitions for Pi-Mono
+///
+/// This constant defines the standard set of providers that are available
+/// in Pi-Mono. Each provider has a display name and the environment variable
+/// used for its API key.
+const STANDARD_PROVIDERS: &[(&str, &str, &str)] = &[
+    ("anthropic", "Anthropic", "ANTHROPIC_API_KEY"),
+    ("openai", "OpenAI", "OPENAI_API_KEY"),
+    ("google", "Google", "GEMINI_API_KEY"),
+    ("groq", "Groq", "GROQ_API_KEY"),
+    ("openrouter", "OpenRouter", "OPENROUTER_API_KEY"),
+];
+
 /// Get the default config directory path
 ///
 /// Returns `~/.maestro/config/` or an error if the home directory cannot be determined.
@@ -200,22 +213,35 @@ pub fn save_config_to_path(config: &PiMonoConfig, path: &Path) -> Result<()> {
             reason: format!("failed to serialize YAML: {}", e),
         }))?;
 
-    let mut file = std::fs::File::create(path).map_err(|e| Error::Config(ConfigError::LoadFailed {
+    // Use atomic write pattern: write to temp file, then rename
+    // This prevents race conditions where multiple processes might read
+    // partially written config files
+    let temp_path = path.with_extension("tmp");
+
+    {
+        let mut file = std::fs::File::create(&temp_path).map_err(|e| Error::Config(ConfigError::LoadFailed {
+            location: temp_path.to_string_lossy().to_string(),
+            reason: format!("failed to create temp file: {}", e),
+        }))?;
+
+        file.write_all(yaml.as_bytes())
+            .map_err(|e| Error::Config(ConfigError::LoadFailed {
+                location: temp_path.to_string_lossy().to_string(),
+                reason: format!("failed to write file: {}", e),
+            }))?;
+
+        file.flush()
+            .map_err(|e| Error::Config(ConfigError::LoadFailed {
+                location: temp_path.to_string_lossy().to_string(),
+                reason: format!("failed to flush file: {}", e),
+            }))?;
+    }
+
+    // Atomic rename from temp file to actual path
+    std::fs::rename(&temp_path, path).map_err(|e| Error::Config(ConfigError::LoadFailed {
         location: path.to_string_lossy().to_string(),
-        reason: format!("failed to create file: {}", e),
+        reason: format!("failed to rename temp file: {}", e),
     }))?;
-
-    file.write_all(yaml.as_bytes())
-        .map_err(|e| Error::Config(ConfigError::LoadFailed {
-            location: path.to_string_lossy().to_string(),
-            reason: format!("failed to write file: {}", e),
-        }))?;
-
-    file.flush()
-        .map_err(|e| Error::Config(ConfigError::LoadFailed {
-            location: path.to_string_lossy().to_string(),
-            reason: format!("failed to flush file: {}", e),
-        }))?;
 
     Ok(())
 }
@@ -233,40 +259,22 @@ pub fn save_config_to_path(config: &PiMonoConfig, path: &Path) -> Result<()> {
 /// let config = io::default_config();
 /// assert!(config.enabled);
 /// assert_eq!(config.version, "1.0");
-/// assert_eq!(config.providers.len(), 5);
+/// assert_eq!(config.providers.len(), 5); // STANDARD_PROVIDERS.len()
 /// ```
 pub fn default_config() -> PiMonoConfig {
-    let mut providers = HashMap::new();
-
-    providers.insert("anthropic".to_string(), ProviderConfig {
-        display_name: "Anthropic".to_string(),
-        is_configured: false,
-        env_var: "ANTHROPIC_API_KEY".to_string(),
-    });
-
-    providers.insert("openai".to_string(), ProviderConfig {
-        display_name: "OpenAI".to_string(),
-        is_configured: false,
-        env_var: "OPENAI_API_KEY".to_string(),
-    });
-
-    providers.insert("google".to_string(), ProviderConfig {
-        display_name: "Google".to_string(),
-        is_configured: false,
-        env_var: "GEMINI_API_KEY".to_string(),
-    });
-
-    providers.insert("groq".to_string(), ProviderConfig {
-        display_name: "Groq".to_string(),
-        is_configured: false,
-        env_var: "GROQ_API_KEY".to_string(),
-    });
-
-    providers.insert("openrouter".to_string(), ProviderConfig {
-        display_name: "OpenRouter".to_string(),
-        is_configured: false,
-        env_var: "OPENROUTER_API_KEY".to_string(),
-    });
+    let providers = STANDARD_PROVIDERS
+        .iter()
+        .map(|(id, display_name, env_var)| {
+            (
+                id.to_string(),
+                ProviderConfig {
+                    display_name: display_name.to_string(),
+                    is_configured: false,
+                    env_var: env_var.to_string(),
+                },
+            )
+        })
+        .collect();
 
     PiMonoConfig {
         version: "1.0".to_string(),
@@ -357,6 +365,32 @@ pub fn validate_config(config: &PiMonoConfig) -> Result<()> {
             return Err(Error::Config(ConfigError::MissingField {
                 field: format!("role_assignments.{}.provider", role),
             }));
+        }
+
+        // Validate fallback models exist in model_preferences
+        if let Some(fallback_models) = &assignment.fallback_models {
+            // Build a set of valid model IDs from model_preferences
+            let valid_models: std::collections::HashSet<&str> = config
+                .model_preferences
+                .iter()
+                .map(|pref| pref.model_id.as_str())
+                .collect();
+
+            for (fallback_idx, fallback_model) in fallback_models.iter().enumerate() {
+                if !valid_models.contains(fallback_model.as_str()) {
+                    return Err(Error::Config(ConfigError::LoadFailed {
+                        location: format!("role_assignments.{}.fallback_models[{}]", role, fallback_idx),
+                        reason: format!(
+                            "fallback model '{}' is not defined in model_preferences. Valid models are: {}",
+                            fallback_model,
+                            config.model_preferences.iter()
+                                .map(|p| p.model_id.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    }));
+                }
+            }
         }
     }
 
@@ -463,12 +497,10 @@ mod tests {
         fn test_default_config_has_all_providers() {
             let config = default_config();
 
-            assert_eq!(config.providers.len(), 5);
-            assert!(config.providers.contains_key("anthropic"));
-            assert!(config.providers.contains_key("openai"));
-            assert!(config.providers.contains_key("google"));
-            assert!(config.providers.contains_key("groq"));
-            assert!(config.providers.contains_key("openrouter"));
+            assert_eq!(config.providers.len(), STANDARD_PROVIDERS.len());
+            for (id, _display_name, _env_var) in STANDARD_PROVIDERS {
+                assert!(config.providers.contains_key(*id));
+            }
         }
 
         #[test]
@@ -484,11 +516,9 @@ mod tests {
         fn test_default_config_provider_env_vars() {
             let config = default_config();
 
-            assert_eq!(config.providers["anthropic"].env_var, "ANTHROPIC_API_KEY");
-            assert_eq!(config.providers["openai"].env_var, "OPENAI_API_KEY");
-            assert_eq!(config.providers["google"].env_var, "GEMINI_API_KEY");
-            assert_eq!(config.providers["groq"].env_var, "GROQ_API_KEY");
-            assert_eq!(config.providers["openrouter"].env_var, "OPENROUTER_API_KEY");
+            for (id, _display_name, env_var) in STANDARD_PROVIDERS {
+                assert_eq!(config.providers[*id].env_var, *env_var);
+            }
         }
 
         #[test]
@@ -661,6 +691,61 @@ mod tests {
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("provider"));
         }
+
+        #[test]
+        fn test_validate_config_rejects_fallback_model_not_in_preferences() {
+            let mut config = default_config();
+            // Add a model preference
+            config.model_preferences.push(crate::config::models::ModelPreference {
+                model_id: "claude-sonnet-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                tier: crate::config::models::ModelTier::Balanced,
+                is_default: true,
+            });
+            // Add role assignment with fallback model not in preferences
+            config.role_assignments.insert(
+                "test_role".to_string(),
+                crate::config::models::RoleAssignment {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    fallback_models: Some(vec!["gpt-4o-mini".to_string()]),
+                    use_reasoning: None,
+                },
+            );
+            let result = validate_config(&config);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("fallback model"));
+        }
+
+        #[test]
+        fn test_validate_config_accepts_fallback_models_in_preferences() {
+            let mut config = default_config();
+            // Add model preferences
+            config.model_preferences.push(crate::config::models::ModelPreference {
+                model_id: "claude-sonnet-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                tier: crate::config::models::ModelTier::Balanced,
+                is_default: true,
+            });
+            config.model_preferences.push(crate::config::models::ModelPreference {
+                model_id: "gpt-4o-mini".to_string(),
+                provider: "openai".to_string(),
+                tier: crate::config::models::ModelTier::Fast,
+                is_default: false,
+            });
+            // Add role assignment with valid fallback models
+            config.role_assignments.insert(
+                "test_role".to_string(),
+                crate::config::models::RoleAssignment {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    fallback_models: Some(vec!["gpt-4o-mini".to_string()]),
+                    use_reasoning: None,
+                },
+            );
+            let result = validate_config(&config);
+            assert!(result.is_ok());
+        }
     }
 
     mod load_config_from_path_tests {
@@ -776,10 +861,10 @@ model_preferences:
 
 role_assignments:
   scout:
-    model_id: "claude-haiku-4-5"
+    model_id: "claude-sonnet-4-5"
     provider: "anthropic"
     fallback_models:
-      - "gpt-4o-mini"
+      - "gpt-4o"
     use_reasoning: null
   architect:
     model_id: "claude-sonnet-4-5"
@@ -938,7 +1023,7 @@ settings:
 
             // 1. Create default config
             let config = default_config();
-            assert_eq!(config.providers.len(), 5);
+            assert_eq!(config.providers.len(), STANDARD_PROVIDERS.len());
 
             // 2. Modify it
             let mut modified_config = config;
@@ -989,7 +1074,7 @@ settings:
 
             assert_eq!(loaded.path.unwrap(), "/usr/bin/pi");
             assert_eq!(loaded.version_info.unwrap(), "1.0.0");
-            assert_eq!(loaded.providers.len(), 5);
+            assert_eq!(loaded.providers.len(), STANDARD_PROVIDERS.len());
             assert!(loaded.providers.values().all(|p| p.is_configured));
             assert_eq!(loaded.model_preferences.len(), 1);
         }
