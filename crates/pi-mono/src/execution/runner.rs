@@ -45,6 +45,10 @@ const MAX_PREVIOUS_OUTPUT_SIZE: usize = 102_400;
 const DEFAULT_MAX_CONCURRENT_LIMIT: usize = 100;
 
 /// Validate task content for dangerous patterns that could lead to command injection
+///
+/// Note: Since we use tokio::process::Command with direct argument passing (no shell),
+/// the primary concern is null bytes which can corrupt argument strings.
+/// The `--` separator in command construction prevents any flag injection.
 #[instrument(skip(task))]
 fn validate_task_content(task: &str) -> Result<()> {
     // Check for empty task
@@ -63,29 +67,18 @@ fn validate_task_content(task: &str) -> Result<()> {
         }));
     }
 
-    // Check for double dash which could be used to inject flags
-    if task.contains("--") {
-        return Err(Error::Execution(crate::error::ExecutionError::Validation {
-            field: "task".to_string(),
-            message: "Task cannot contain '--' to prevent command injection".to_string(),
-        }));
-    }
-
-    // Check for newline which could be used to inject multiple commands
-    if task.contains('\n') {
-        return Err(Error::Execution(crate::error::ExecutionError::Validation {
-            field: "task".to_string(),
-            message: "Task cannot contain newlines to prevent command injection".to_string(),
-        }));
-    }
-
-    // Check for null byte
+    // Check for null byte (can corrupt argument strings)
     if task.contains('\x00') {
         return Err(Error::Execution(crate::error::ExecutionError::Validation {
             field: "task".to_string(),
             message: "Task cannot contain null bytes to prevent command injection".to_string(),
         }));
     }
+
+    // Note: We allow `--` in task content because users may legitimately want to ask
+    // agents about CLI flags (e.g., "Explain the --help flag" or "Refactor the --verbose option").
+    // The command construction uses `--` as an argument separator, which prevents the task
+    // content from being interpreted as flags regardless of its content.
 
     debug!("Task content validation passed");
     Ok(())
@@ -514,8 +507,9 @@ impl SubagentRunner {
                 .await
             {
                 Ok((out, exit_code)) => {
-                    // Success if exit code is 0 or None (signal termination)
-                    if exit_code.map_or(true, |code| code == 0) {
+                    // Success only if exit code is Some(0)
+                    // Signal termination (None) is treated as failure
+                    if exit_code.map_or(false, |code| code == 0) {
                         let duration = start_time.elapsed();
                         let result = SubagentResult::success(
                             task.clone(),
@@ -560,6 +554,12 @@ impl SubagentRunner {
     }
 
     /// Build pi-mono command for execution
+    ///
+    /// The command structure is:
+    /// `pi --provider X --model Y subagent scout --prompt "..." -- <task>`
+    ///
+    /// The `--` separator ensures that the task content can never be
+    /// interpreted as a flag, regardless of what it contains.
     fn build_command(
         &self,
         agent_type: PiAgentType,
@@ -596,6 +596,10 @@ impl SubagentRunner {
             cmd.arg("--prompt");
             cmd.arg(prompt_text);
         }
+
+        // Add argument separator to prevent task content from being interpreted as flags
+        // This allows users to include "--" in their task content (e.g., "Explain --help flag")
+        cmd.arg("--");
 
         cmd
     }
@@ -696,7 +700,7 @@ impl SubagentRunner {
         let mut join_set = tokio::task::JoinSet::new();
 
         for task in tasks {
-            // Capture task_id before spawning to avoid JoinSet panic issues
+            // Capture task_id before spawning
             let task_id = task.id.clone();
             let permit = semaphore.clone();
             let config_arc = Arc::clone(&self.config);
@@ -712,6 +716,7 @@ impl SubagentRunner {
                 // Create a temporary runner for this task
                 let temp_runner = SubagentRunner { config: config_arc };
 
+                // Execute the task and return result with task_id
                 match temp_runner
                     .run(agent_type, &task_desc, prompt.as_deref())
                     .await
@@ -739,16 +744,12 @@ impl SubagentRunner {
                     parallel_result.errors.insert(task_id, error_msg);
                 }
                 Err(e) => {
-                    // Task panicked or was cancelled
-                    // Use timestamp-based ID since we can't access the task_id
-                    use std::time::SystemTime;
-                    let timestamp = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_micros();
+                    // Task join failed (should be rare with catch_unwind)
+                    // This only happens if the task itself is cancelled or the runtime shuts down
                     let error_msg = format!("Task join error: {}", e);
                     error!("{}", error_msg);
-                    parallel_result.errors.insert(format!("task-failed-{}", timestamp), error_msg);
+                    // Use generic ID since we can't access task_id from JoinError
+                    parallel_result.errors.insert("unknown-task".to_string(), error_msg);
                 }
             }
         }
