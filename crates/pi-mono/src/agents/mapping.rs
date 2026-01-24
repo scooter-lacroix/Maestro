@@ -300,6 +300,11 @@ impl AgentRegistry {
 
     /// Validate tool access for a role
     pub fn validate_tool_access(&self, role: AgentRole, tool: &str) -> Result<bool> {
+        // Early return for empty tool names
+        if tool.is_empty() {
+            return Ok(false);
+        }
+
         let agent = self.get_agent(role)?;
 
         // Check if tool is in allowed_tools list
@@ -1002,6 +1007,18 @@ mod tests {
 
             // Tool not in allowed_tools list
             assert!(!registry.validate_tool_access(AgentRole::Scout, "custom-tool").unwrap());
+        }
+
+        #[test]
+        fn test_validate_tool_access_empty_string() {
+            let config = create_test_config();
+            let registry = AgentRegistry::new(config);
+
+            // Empty tool name should return false
+            assert!(!registry.validate_tool_access(AgentRole::Scout, "").unwrap());
+            assert!(!registry.validate_tool_access(AgentRole::Kraken, "").unwrap());
+            assert!(!registry.validate_tool_access(AgentRole::Architect, "").unwrap());
+            assert!(!registry.validate_tool_access(AgentRole::Critic, "").unwrap());
         }
 
         #[test]

@@ -175,8 +175,8 @@ pub fn get_preset(name: &str) -> Option<WorkflowPreset> {
 }
 
 /// Available preset names
-pub fn preset_names() -> Vec<&'static str> {
-    vec!["implement", "implement-and-review", "parallel-review"]
+pub fn preset_names() -> &'static [&'static str] {
+    &["implement", "implement-and-review", "parallel-review"]
 }
 
 #[cfg(test)]
