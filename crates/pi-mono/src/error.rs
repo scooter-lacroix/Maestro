@@ -298,6 +298,29 @@ pub enum ExecutionError {
         /// Standard error output, if available
         stderr: Option<String>,
     },
+
+    /// Input validation failed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::error::ExecutionError;
+    ///
+    /// let error = ExecutionError::Validation {
+    ///     field: "task".to_string(),
+    ///     message: "Task contains invalid characters".to_string(),
+    /// };
+    ///
+    /// assert!(error.to_string().contains("task"));
+    /// assert!(error.to_string().contains("invalid characters"));
+    /// ```
+    #[error("validation failed for field '{field}': {message}")]
+    Validation {
+        /// The field that failed validation
+        field: String,
+        /// Validation error message
+        message: String,
+    },
 }
 
 /// Errors that can occur during configuration management.

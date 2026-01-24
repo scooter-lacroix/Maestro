@@ -35,6 +35,38 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::process::Stdio;
 
+/// Maximum size for previous output substitution (100KB)
+const MAX_PREVIOUS_OUTPUT_SIZE: usize = 102_400;
+
+/// Validate task content for dangerous patterns that could lead to command injection
+fn validate_task_content(task: &str) -> Result<()> {
+    // Check for double dash which could be used to inject flags
+    if task.contains("--") {
+        return Err(Error::Execution(crate::error::ExecutionError::Validation {
+            field: "task".to_string(),
+            message: "Task cannot contain '--' to prevent command injection".to_string(),
+        }));
+    }
+
+    // Check for newline which could be used to inject multiple commands
+    if task.contains('\n') {
+        return Err(Error::Execution(crate::error::ExecutionError::Validation {
+            field: "task".to_string(),
+            message: "Task cannot contain newlines to prevent command injection".to_string(),
+        }));
+    }
+
+    // Check for null byte
+    if task.contains('\x00') {
+        return Err(Error::Execution(crate::error::ExecutionError::Validation {
+            field: "task".to_string(),
+            message: "Task cannot contain null bytes to prevent command injection".to_string(),
+        }));
+    }
+
+    Ok(())
+}
+
 /// Chain execution step
 #[derive(Debug, Clone)]
 pub struct ChainStep {
@@ -201,7 +233,7 @@ impl SubagentRunner {
         task: &str,
         prompt: Option<&str>,
     ) -> Result<SubagentResult> {
-        self.run_with_stream(agent_type, task, prompt, |_| {}).await
+        self.run_with_stream_internal(agent_type, task, prompt, |_| {}, true).await
     }
 
     /// Run with streaming callback
@@ -210,7 +242,22 @@ impl SubagentRunner {
         agent_type: PiAgentType,
         task: &str,
         prompt: Option<&str>,
+        stream_callback: F,
+    ) -> Result<SubagentResult>
+    where
+        F: FnMut(StreamEvent),
+    {
+        self.run_with_stream_internal(agent_type, task, prompt, stream_callback, true).await
+    }
+
+    /// Internal run method with validation control
+    async fn run_with_stream_internal<F>(
+        &self,
+        agent_type: PiAgentType,
+        task: &str,
+        prompt: Option<&str>,
         mut stream_callback: F,
+        validate_input: bool,
     ) -> Result<SubagentResult>
     where
         F: FnMut(StreamEvent),
@@ -219,6 +266,12 @@ impl SubagentRunner {
         let agent_name = format!("{:?}", agent_type);
         let agent_type_str = format!("{:?}", agent_type);
         let task = task.to_string();
+
+        // Validate task content to prevent command injection
+        // Only validate if this is original user input (validate_input=true)
+        if validate_input {
+            validate_task_content(&task)?;
+        }
 
         // Emit start event
         stream_callback(StreamEvent::start(format!("Starting {} task", agent_name)));
@@ -233,8 +286,11 @@ impl SubagentRunner {
                     Some(attempt.to_string()),
                 ));
 
-                // Exponential backoff
-                let backoff = Duration::from_millis(100 * 2_u64.pow(attempt as u32 - 1));
+                // Exponential backoff with overflow protection
+                // Cap at 30 seconds (30000ms) to prevent overflow and excessive waits
+                let backoff_ms = 100u64.saturating_mul(2u64.saturating_pow((attempt - 1) as u32));
+                let backoff_ms = backoff_ms.min(30000);
+                let backoff = Duration::from_millis(backoff_ms);
                 tokio::time::sleep(backoff).await;
             }
 
@@ -454,16 +510,24 @@ impl SubagentRunner {
         let mut failed_at_step = None;
 
         for (idx, step) in steps.iter().enumerate() {
+            // Validate the original task template (before substitution)
+            validate_task_content(&step.task)?;
+            if let Some(ref prompt) = step.prompt {
+                validate_task_content(prompt)?;
+            }
+
             // Substitute {previous} placeholder in task and prompt
             let task = self.substitute_previous(&step.task, &previous_output);
             let prompt = step.prompt.as_ref()
                 .map(|p| self.substitute_previous(p, &previous_output));
 
-            // Execute the step
-            let result = self.run(
+            // Execute the step without re-validating (since we already validated the template)
+            let result = self.run_with_stream_internal(
                 step.agent_type,
                 &task,
                 prompt.as_deref(),
+                |_| {},
+                false, // Skip validation since we already validated the template
             ).await?;
 
             // Check if step failed
@@ -490,12 +554,24 @@ impl SubagentRunner {
     }
 
     /// Substitute {previous} placeholder in task/prompt
+    ///
+    /// Limits the size of previous output to prevent data loss from excessive substitutions.
+    /// Uses MAX_PREVIOUS_OUTPUT_SIZE (100KB) as the limit.
     fn substitute_previous(
         &self,
         text: &str,
         previous_output: &str,
     ) -> String {
-        text.replace("{previous}", previous_output)
+        // Truncate previous_output if it exceeds the maximum size
+        let truncated_output = if previous_output.len() > MAX_PREVIOUS_OUTPUT_SIZE {
+            let mut truncated = previous_output.chars().take(MAX_PREVIOUS_OUTPUT_SIZE).collect::<String>();
+            truncated.push_str("...[truncated]");
+            truncated
+        } else {
+            previous_output.to_string()
+        };
+
+        text.replace("{previous}", &truncated_output)
     }
 }
 
@@ -510,8 +586,12 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+    use std::fs;
 
     /// Create a mock pi executable for testing
+    ///
+    /// Returns a PathBuf to the temporary executable. The caller is responsible
+    /// for cleaning up the file using `cleanup_mock_pi` when done.
     fn create_mock_pi(success: bool) -> PathBuf {
         let mut temp_file = NamedTempFile::new().unwrap();
 
@@ -596,10 +676,39 @@ exit 1
             temp_file.as_file().set_permissions(perms).unwrap();
         }
 
-        // Close the file and persist it so we can execute it
+        // Persist the file and return the path
         let path = temp_file.path().to_path_buf();
-        let _ = temp_file.keep(); // Keep the file after NamedTempFile is dropped
+        let _ = temp_file.keep();
         path
+    }
+
+    /// Clean up a mock pi executable created by create_mock_pi
+    fn cleanup_mock_pi(path: &PathBuf) {
+        // Best effort cleanup - ignore errors if file doesn't exist
+        let _ = fs::remove_file(path);
+    }
+
+    /// RAII wrapper for mock pi executable that automatically cleans up on drop
+    struct MockPi {
+        path: PathBuf,
+    }
+
+    impl MockPi {
+        fn new(success: bool) -> Self {
+            Self {
+                path: create_mock_pi(success),
+            }
+        }
+
+        fn path(&self) -> &PathBuf {
+            &self.path
+        }
+    }
+
+    impl Drop for MockPi {
+        fn drop(&mut self) {
+            cleanup_mock_pi(&self.path);
+        }
     }
 
     #[test]
@@ -736,9 +845,10 @@ exit 1
 
     #[tokio::test]
     async fn test_run_success() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
-            pi_path: mock_pi_path,
+            pi_path: mock_pi_path.clone(),
             timeout: Duration::from_secs(5),
             ..Default::default()
         };
@@ -753,11 +863,13 @@ exit 1
         assert_eq!(result.task, "test task");
         assert!(result.output.contains("Scout analysis complete"));
         assert!(result.error.is_none());
+        // mock_pi automatically cleaned up when dropped
     }
 
     #[tokio::test]
     async fn test_run_failure() {
-        let mock_pi_path = create_mock_pi(false);
+        let mock_pi = MockPi::new(false);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 1, // Only try once for this test
@@ -777,7 +889,8 @@ exit 1
 
     #[tokio::test]
     async fn test_run_with_stream_callback() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -808,7 +921,8 @@ exit 1
 
     #[tokio::test]
     async fn test_run_all_agent_types() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -852,7 +966,8 @@ exit 1
 
     #[tokio::test]
     async fn test_run_with_prompt() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -874,7 +989,8 @@ exit 1
 
     #[tokio::test]
     async fn test_retry_logic() {
-        let mock_pi_path = create_mock_pi(false);
+        let mock_pi = MockPi::new(false);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 3,
@@ -895,7 +1011,7 @@ exit 1
 
     #[tokio::test]
     async fn test_timeout_handling() {
-        // Create a mock pi that sleeps longer than the timeout
+        // Create a custom mock pi that sleeps longer than the timeout
         let mut temp_file = NamedTempFile::new().unwrap();
 
         writeln!(temp_file, "#!/bin/bash").unwrap();
@@ -914,7 +1030,7 @@ exit 1
         let _ = temp_file.keep();
 
         let config = RunnerConfig {
-            pi_path: mock_path,
+            pi_path: mock_path.clone(),
             timeout: Duration::from_millis(100), // Very short timeout
             max_retries: 1,
             ..Default::default()
@@ -928,6 +1044,9 @@ exit 1
 
         assert!(result.is_failure());
         assert!(result.error.unwrap().contains("timed out"));
+
+        // Clean up the timeout test mock
+        cleanup_mock_pi(&mock_path);
     }
 
     #[test]
@@ -950,7 +1069,8 @@ exit 1
 
     #[tokio::test]
     async fn test_result_duration_is_measured() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -969,7 +1089,8 @@ exit 1
 
     #[tokio::test]
     async fn test_stream_events_in_result() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -995,7 +1116,8 @@ exit 1
 
     #[tokio::test]
     async fn test_error_output_in_stream() {
-        let mock_pi_path = create_mock_pi(false);
+        let mock_pi = MockPi::new(false);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 1,
@@ -1085,7 +1207,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_with_two_tasks() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1120,7 +1243,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_with_concurrent_limit() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1145,7 +1269,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_default_uses_limit_of_4() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1168,19 +1293,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_continues_on_individual_failures() {
-        let mock_pi_success = create_mock_pi(true);
-        let _mock_pi_failure = create_mock_pi(false);
-
-        // Create a mixed config - we need to test with different mock executables
-        // For this test, we'll use the success mock and override in individual tasks
-        let config = RunnerConfig {
-            pi_path: mock_pi_success,
-            timeout: Duration::from_secs(5),
-            ..Default::default()
-        };
-
-        // Create runners with different configs for different tasks
-        let runner_success = SubagentRunner::with_config(config.clone());
+        let _mock_pi_success = MockPi::new(true);
+        let _mock_pi_failure = MockPi::new(false);
 
         // For this test, we'll verify the logic by checking all succeed
         // The failure handling is tested separately with custom mock
@@ -1189,7 +1303,17 @@ exit 1
             ParallelTask::new("task-2".to_string(), PiAgentType::Worker, "Task 2".to_string()),
         ];
 
-        let result = runner_success.execute_parallel(tasks, Some(2)).await.unwrap();
+        // Note: This test uses a mock executable that is kept alive for the duration
+        // of the test and automatically cleaned up when dropped
+        let mock_pi = MockPi::new(true);
+        let config = RunnerConfig {
+            pi_path: mock_pi.path().clone(),
+            timeout: Duration::from_secs(5),
+            ..Default::default()
+        };
+
+        let runner = SubagentRunner::with_config(config);
+        let result = runner.execute_parallel(tasks, Some(2)).await.unwrap();
 
         assert_eq!(result.success_count(), 2);
         assert!(result.all_success());
@@ -1198,7 +1322,8 @@ exit 1
     #[tokio::test]
     async fn test_execute_parallel_returns_all_results_and_errors() {
         // Create a config that will cause all tasks to succeed
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1228,7 +1353,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_with_empty_task_list() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1249,7 +1375,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_total_duration_is_tracked() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1309,7 +1436,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_with_different_agent_types() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1339,7 +1467,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_with_prompts() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1371,7 +1500,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_parallel_none_concurrent_limit_uses_default() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1491,7 +1621,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_with_two_steps() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1524,7 +1655,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_passes_output_between_steps() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1555,37 +1687,27 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_stops_on_first_failure() {
-        let mock_pi_success = create_mock_pi(true);
-        let mock_pi_failure = create_mock_pi(false);
+        let _mock_pi_success = MockPi::new(true);
+        let _mock_pi_failure = MockPi::new(false);
 
-        // First step succeeds, second fails
-        let config_success = RunnerConfig {
-            pi_path: mock_pi_success.clone(),
-            timeout: Duration::from_secs(5),
-            max_retries: 1,
-            ..Default::default()
-        };
-
-        let config_failure = RunnerConfig {
-            pi_path: mock_pi_failure,
-            timeout: Duration::from_secs(5),
-            max_retries: 1,
-            ..Default::default()
-        };
-
-        // We need to test with different runners for different steps
-        // For this test, we'll use a custom approach
-        let runner = SubagentRunner::with_config(config_success);
-
-        // Create steps where the second one will fail
-        // Since we can't change config mid-chain, we'll test the logic
-        // by checking the behavior when a step fails
+        // For this test, we'll verify the logic by checking single step success
+        // The failure handling is tested in test_execute_chain_tracks_failed_at_step
         let steps = vec![
             ChainStep::new(
                 PiAgentType::Scout,
                 "First task".to_string(),
             ),
         ];
+
+        // Note: This test uses a mock executable that is kept alive for the duration
+        // of the test and automatically cleaned up when dropped
+        let mock_pi = MockPi::new(true);
+        let runner = SubagentRunner::with_config(RunnerConfig {
+            pi_path: mock_pi.path().clone(),
+            timeout: Duration::from_secs(5),
+            max_retries: 1,
+            ..Default::default()
+        });
 
         let result = runner.execute_chain(steps).await.unwrap();
 
@@ -1597,7 +1719,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_tracks_failed_at_step() {
-        let mock_pi_path = create_mock_pi(false);
+        let mock_pi = MockPi::new(false);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1631,7 +1754,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_with_empty_step_list() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1650,7 +1774,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_with_multiple_steps() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1681,7 +1806,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_with_prompts() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1711,7 +1837,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_total_duration_is_tracked() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1738,7 +1865,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_preserves_step_results() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
@@ -1762,7 +1890,8 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_placeholder_in_prompt() {
-        let mock_pi_path = create_mock_pi(true);
+        let mock_pi = MockPi::new(true);
+        let mock_pi_path = mock_pi.path().clone();
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
