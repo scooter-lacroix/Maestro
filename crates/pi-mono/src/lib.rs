@@ -52,6 +52,10 @@ pub use config::{
     wizard::{WizardStep, WizardState, ConfigWizard},
 };
 pub use agents::{PiMonoAgent, AgentError};
+pub use agents::mapping::{
+    AgentRole, PiAgentType, ToolAccess, TaskComplexity, AgentMapping,
+    default_mappings, role_to_pi_agent_type,
+};
 pub use execution::{Executor, ExecutorConfig, ExecutionResult};
 pub use detection::{PiDetection, Capabilities};
 pub use discovery::{ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS};

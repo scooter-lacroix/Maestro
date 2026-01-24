@@ -17,6 +17,8 @@
 //! let agent = agent.with_description("An example agent".to_string());
 //! ```
 
+pub mod mapping;
+
 use serde::{Deserialize, Serialize};
 
 /// Error type for agent validation
