@@ -6,16 +6,21 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-// Import the CLI module from the leindex_core library
-// This avoids the module being compiled twice (once in lib, once in binary)
-use leindex_core::cli::{analyze, implement, mcp, memory_impl as memory};
+// Import the library to make all modules available
+// The CLI modules are part of the lib, so we use lib's module structure
+pub use leindex_core::*;
+
+// Don't re-declare mod cli - it's already available from the lib
 use leindex_core::cli::implement::ImplementSessionTarget;
+use leindex_core::cli::integrate::{IntegrateAction, IntegrationTool};
+use leindex_core::cli::mcp;
+use leindex_core::cli::{analyze, implement, integrate, memory_impl as memory};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
 #[command(name = "maestro")]
 #[command(author = "Maestro Team")]
-#[command(version = "2.0.0")]
+#[command(version = "2.5.0")]
 #[command(about = "Spec-driven development framework for AI-assisted software engineering")]
 #[command(long_about = None)]
 struct Cli {
@@ -81,6 +86,29 @@ enum Commands {
     Mcp {
         #[command(subcommand)]
         command: McpCommands,
+    },
+
+    /// Integrate Maestro with external CLI tools (OpenCode, Codex, Gemini, Qwen, Amp, Droid)
+    Integrate {
+        /// Integration action to perform
+        #[command(subcommand)]
+        action: IntegrateAction,
+
+        /// Tool to integrate (claude, opencode, codex, gemini, qwen, amp, droid)
+        #[arg(short, long)]
+        tool: Option<IntegrationTool>,
+
+        /// Install all integrations
+        #[arg(long, conflicts_with = "tool")]
+        all: bool,
+
+        /// Dry run (show changes without applying)
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -161,9 +189,9 @@ async fn main() -> Result<()> {
                 host,
                 db,
                 debug,
-            } => memory::serve(port, host, db, debug).await,
-            MemoryCommands::Status { db } => memory::status(db).await,
-            MemoryCommands::Scan { paths, depth } => memory::scan(paths, depth).await,
+            } => mem_cmd::serve(port, host, db, debug).await,
+            MemoryCommands::Status { db } => mem_cmd::status(db).await,
+            MemoryCommands::Scan { paths, depth } => mem_cmd::scan(paths, depth).await,
         },
         Commands::Tui => {
             // TODO: The Cockpit TUI has been extracted to the maestro-cockpit crate
@@ -186,5 +214,18 @@ async fn main() -> Result<()> {
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
         },
+        Commands::Integrate {
+            action,
+            mut tool,
+            all,
+            dry_run,
+            verbose,
+        } => {
+            // If --all is specified, set tool to None to indicate install all
+            if all {
+                tool = None;
+            }
+            integrate::run(action, tool, dry_run, verbose).await
+        }
     }
 }

@@ -1,10 +1,7 @@
 //! Agent runner implementations
 //!
 //! Supports running agents via CLI, tmux, or directly.
-<<<<<<< HEAD
 //! Includes sandbox mode support using bubblewrap (bwrap) for isolation.
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
 use crate::orchestrate::model::{AgentConfig, Task};
 use anyhow::{anyhow, Context, Result};
@@ -21,10 +18,7 @@ const ALLOWED_TOOLS: &[&str] = &[
     "qwen",
     "opencode",
     "maestro",
-<<<<<<< HEAD
     "pi",        // Pi-Mono CLI
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     "amp",       // Amp CLI - first-class integration
     "codex",     // Codex CLI - first-class integration
     "droid",     // Droid CLI - first-class integration
@@ -38,7 +32,6 @@ pub struct RunResult {
     pub output: String,
     pub error_message: Option<String>,
     pub exit_code: Option<i32>,
-<<<<<<< HEAD
     /// Rate limit detected (HTTP 429, "rate limit" in message, etc.)
     pub rate_limited: bool,
 }
@@ -131,8 +124,6 @@ fn build_bwrap_wrapper(working_dir: &Path) -> Result<Vec<String>> {
     ];
 
     Ok(args)
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
 /// Agent runner trait
@@ -154,7 +145,6 @@ impl CliRunner {
         Self { config, working_dir, iteration_timeout_secs }
     }
 
-<<<<<<< HEAD
     async fn run_internal(&self, prompt: &str, task: &Task) -> Result<RunResult> {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -167,59 +157,6 @@ impl CliRunner {
             ));
         }
 
-=======
-    /// Build command for the configured tool
-    fn build_command(&self, prompt_file: &Path) -> Result<TokioCommand> {
-        // Security check: verify tool is in allowlist unless dangerous_mode is enabled
-        if !self.config.dangerous_mode && !ALLOWED_TOOLS.contains(&self.config.tool.as_str()) {
-            return Err(anyhow!(
-                "Tool '{}' is not in the allowlist. Allowed tools: {:?}. \
-                 Set dangerous_mode=true to override (not recommended).",
-                self.config.tool, ALLOWED_TOOLS
-            ));
-        }
-
-        let cmd = match self.config.tool.as_str() {
-            "claude" => {
-                let mut c = TokioCommand::new("claude");
-                c.arg(prompt_file);
-                c
-            }
-            "gemini" => {
-                let mut c = TokioCommand::new("gemini");
-                c.arg("chat");
-                c.arg("--prompt-file");
-                c.arg(prompt_file);
-                c
-            }
-            "qwen" => {
-                let mut c = TokioCommand::new("qwen");
-                c.arg("chat");
-                c.arg("-f");
-                c.arg(prompt_file);
-                c
-            }
-            "opencode" => {
-                let mut c = TokioCommand::new("opencode");
-                c.arg("chat");
-                c.arg("--prompt");
-                c.arg(prompt_file);
-                c
-            }
-            tool => {
-                let mut c = TokioCommand::new(tool);
-                c.arg(prompt_file);
-                c
-            }
-        };
-
-        Ok(cmd)
-    }
-
-    async fn run_internal(&self, prompt: &str, task: &Task) -> Result<RunResult> {
-        use tokio::io::{AsyncBufReadExt, BufReader};
-
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         // Create a unique secure prompt file using task ID and timestamp
         // This prevents race conditions when multiple orchestrate sessions run concurrently
         let timestamp = std::time::SystemTime::now()
@@ -231,13 +168,8 @@ impl CliRunner {
         tokio::fs::write(&prompt_file, prompt).await
             .with_context(|| format!("Failed to write prompt file: {:?}", prompt_file))?;
 
-<<<<<<< HEAD
         // Build command (with optional sandbox wrapper)
         let mut cmd = self.build_command_with_sandbox(&prompt_file)?;
-=======
-        // Build command (returns Result for security check)
-        let mut cmd = self.build_command(&prompt_file)?;
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         // Set working directory to track directory (critical for correct tool context)
         cmd.current_dir(&self.working_dir);
@@ -274,7 +206,6 @@ impl CliRunner {
         // Parse result
         let success = output.success();
         let completed = Self::detect_completion(&stdout);
-<<<<<<< HEAD
         let error_message = if !success {
             Some(format!("Process failed with exit code: {:?}", output.code()))
         } else {
@@ -283,14 +214,11 @@ impl CliRunner {
 
         // Detect rate limiting
         let rate_limited = detect_rate_limit(&stdout, &error_message);
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         Ok(RunResult {
             success,
             completed,
             output: stdout,
-<<<<<<< HEAD
             error_message,
             exit_code: output.code(),
             rate_limited,
@@ -354,17 +282,6 @@ impl CliRunner {
         Ok(args)
     }
 
-=======
-            error_message: if !success {
-                Some(format!("Process failed with exit code: {:?}", output.code()))
-            } else {
-                None
-            },
-            exit_code: output.code(),
-        })
-    }
-
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     fn detect_completion(output: &str) -> bool {
         // Check for completion promise
         if output.contains("<promise>COMPLETE</promise>") {

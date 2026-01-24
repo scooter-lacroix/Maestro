@@ -19,11 +19,8 @@ pub struct OrchestrateEngine {
     config: OrchestrateConfig,
     state_manager: StateManager,
     tracks_dir: PathBuf,
-<<<<<<< HEAD
     memory_service: Option<crate::memory::MemoryService>,
     rate_limit_detector: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitDetector>>,
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
 impl OrchestrateEngine {
@@ -31,7 +28,6 @@ impl OrchestrateEngine {
     pub fn new(config: OrchestrateConfig, tracks_dir: PathBuf) -> Result<Self> {
         let state_manager = StateManager::new(config.data_dir.clone())
             .context("Failed to initialize state manager")?;
-<<<<<<< HEAD
         
         let memory_service = crate::memory::MemoryService::new(None).ok();
 
@@ -41,17 +37,12 @@ impl OrchestrateEngine {
                 config.rate_limit_backoff_base_secs,
             )
         ));
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         Ok(Self {
             config,
             state_manager,
             tracks_dir,
-<<<<<<< HEAD
             memory_service,
             rate_limit_detector,
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         })
     }
 
@@ -97,7 +88,6 @@ impl OrchestrateEngine {
             let (task_id, task_title, task_description) = match self.select_next_task(&plan, &session)? {
                 Some(t) => (t.id.clone(), t.title.clone(), t.description.clone()),
                 None => {
-<<<<<<< HEAD
                     // All tasks marked complete. Perform final Track Verification.
                     info!("All tasks in track {} marked as complete. Verifying integrity...", track_id);
                     if let Err(e) = self.verify_track_integrity(track_id, &plan, &session).await {
@@ -119,9 +109,6 @@ impl OrchestrateEngine {
                         let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
                     }
 
-=======
-                    info!("No more actionable tasks. Track complete!");
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                     session.status = SessionStatus::Completed;
                     self.state_manager.save_session(&session)?;
                     break;
@@ -147,7 +134,6 @@ impl OrchestrateEngine {
                 line_number: 0,
             };
 
-<<<<<<< HEAD
             // Run iteration with rate-limit retry loop
             let iteration_result = loop {
                 let result = self
@@ -230,13 +216,6 @@ impl OrchestrateEngine {
             };
 
             match iteration_result {
-=======
-            let result = self
-                .run_iteration(track_id, &temp_task, &session, &plan)
-                .await;
-
-            match result {
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 Ok(iteration_result) => {
                     // Only mark task complete if agent explicitly completed the task
                     // (success + completed flag means the agent signaled completion)
@@ -332,24 +311,17 @@ impl OrchestrateEngine {
             Some(mut session) => {
                 // Resume existing session
                 session.status = SessionStatus::Running;
-<<<<<<< HEAD
                 session.mode = mode;
                 session.agent_config = agent_config; // Allow updating tool/model on resume
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 session.updated_at = Utc::now().to_rfc3339();
                 Ok(session)
             }
             None => {
                 // Create new session
                 let now = Utc::now().to_rfc3339();
-<<<<<<< HEAD
                 let session_id = format!("{}-{}", track_id, Utc::now().timestamp());
                 Ok(SessionState {
                     session_id,
-=======
-                Ok(SessionState {
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                     track_id: track_id.to_string(),
                     mode,
                     agent_config,
@@ -358,10 +330,7 @@ impl OrchestrateEngine {
                     started_at: now.clone(),
                     updated_at: now,
                     status: SessionStatus::Running,
-<<<<<<< HEAD
                     rate_limit: None,
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 })
             }
         }
@@ -392,7 +361,6 @@ impl OrchestrateEngine {
     }
 
     fn mark_task_complete(&self, plan: &mut TrackPlan, task_id: &str) -> Result<()> {
-<<<<<<< HEAD
         self.update_task_status_recursive(&mut plan.tasks, task_id, TrackStatus::Completed)?;
 
         // Bank a task completion memory with details
@@ -412,9 +380,6 @@ impl OrchestrateEngine {
         }
 
         Ok(())
-=======
-        self.update_task_status_recursive(&mut plan.tasks, task_id, TrackStatus::Completed)
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     }
 
     fn update_task_status_recursive(
@@ -494,17 +459,12 @@ impl OrchestrateEngine {
 
         // Get LeIndex context if enabled
         let leindex_context = if self.config.enable_leindex {
-<<<<<<< HEAD
             let engine = crate::orchestrate::context::ContextEngine::new(self.config.context_budget);
             Some(engine.build_context(&self.tracks_dir, plan)?)
-=======
-            Some(self.get_leindex_context(plan)?)
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         } else {
             None
         };
 
-<<<<<<< HEAD
         let memory_context = self
             .memory_service
             .as_ref()
@@ -546,73 +506,6 @@ impl OrchestrateEngine {
             }
         }
         tracks_dir.to_string_lossy().to_string()
-=======
-        builder.build_prompt(task, session, plan, &recent, leindex_context.as_deref())
-    }
-
-    fn get_leindex_context(&self, plan: &TrackPlan) -> Result<String> {
-        use crate::five_phase::{phase1_structural_scan, phase2_dependency_map, PhaseOptions};
-        use crate::token_format::FormatMode;
-
-        // Skip LeIndex if context budget is too low (< 10K tokens)
-        // This prevents expensive scans that would be truncated anyway
-        const MIN_BUDGET_FOR_LEINDEX: usize = 10000;
-        if self.config.context_budget < MIN_BUDGET_FOR_LEINDEX {
-            return Ok("// LeIndex disabled: context budget too low".to_string());
-        }
-
-        // Use the track's canonical root directory for LeIndex analysis
-        // This ensures we scan the actual project code, not the tracks directory
-        let track_path = self.tracks_dir.join(&plan.track_id);
-        let project_root = if track_path.exists() {
-            // Track directory exists - use it as the project root
-            track_path.clone()
-        } else {
-            // Fallback to parent directory (workspace root)
-            self.tracks_dir.clone()
-        };
-
-        // Determine the analysis mode based on context budget
-        let mode = if self.config.context_budget > 50000 {
-            FormatMode::Balanced
-        } else {
-            FormatMode::Ultra
-        };
-
-        // Run 5-phase analysis with appropriate token limits
-        // Cap max_files based on budget to prevent excessive scans
-        let max_files = std::cmp::min(15, self.config.context_budget / 3000);
-
-        let options = PhaseOptions {
-            root: project_root,
-            mode,
-            max_files,
-            max_focus_files: std::cmp::min(3, max_files / 5),
-            top_n: 10,
-            max_output_chars: self.config.context_budget / 2, // Use half budget for LeIndex
-        };
-
-        // Run Phase 1 and Phase 2 analysis
-        let phase1_result = phase1_structural_scan(&options);
-        let phase2_result = phase2_dependency_map(&options);
-
-        match (phase1_result, phase2_result) {
-            (Ok(p1), Ok(p2)) => {
-                let mut context = String::new();
-
-                // Add phase summaries
-                context.push_str(&format!("### Phase 1: Structural Scan\n\n{}\n\n", p1));
-                context.push_str(&format!("### Phase 2: Dependency Map\n\n{}\n\n", p2));
-
-                Ok(context)
-            }
-            (Err(e), _) | (_, Err(e)) => {
-                // If LeIndex analysis fails, log but don't fail the iteration
-                warn!("LeIndex analysis failed for track {}: {}", plan.track_id, e);
-                Ok(format!("// LeIndex analysis failed: {}\n// Continuing with task...\n", e))
-            }
-        }
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     }
 
     fn handle_task_failure(
@@ -683,7 +576,6 @@ impl OrchestrateEngine {
         Err(anyhow!("Task not found: {}", task_id))
     }
 
-<<<<<<< HEAD
     // Helper to find an immutable task reference by ID
     fn find_task<'a>(&'a self, tasks: &'a [Task], task_id: &str) -> Result<&'a Task> {
         for task in tasks {
@@ -709,8 +601,6 @@ impl OrchestrateEngine {
         Ok(None)
     }
 
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     fn find_subtask_mut<'a>(&'a self, subtasks: &'a mut [Task], task_id: &str) -> Result<Option<&'a mut Task>> {
         for subtask in subtasks {
             if subtask.id == task_id {
@@ -722,7 +612,6 @@ impl OrchestrateEngine {
         }
         Ok(None)
     }
-<<<<<<< HEAD
 
     async fn verify_track_integrity(&self, track_id: &str, plan: &TrackPlan, session: &SessionState) -> Result<()> {
         info!("Running final autonomous verification for track: {}", track_id);
@@ -747,7 +636,5 @@ impl OrchestrateEngine {
             Err(anyhow!("Verification failed: {}", result.error_message.unwrap_or_default()))
         }
     }
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
