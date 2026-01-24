@@ -18,6 +18,7 @@
 //! ```
 
 pub mod mapping;
+pub mod workflows;
 
 use serde::{Deserialize, Serialize};
 
