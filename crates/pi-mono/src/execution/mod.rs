@@ -19,6 +19,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// Result of a Pi-Mono execution.
 ///
@@ -253,5 +254,630 @@ impl Default for ExecutorConfig {
             timeout_secs: 300,
             max_retries: 3,
         }
+    }
+}
+
+/// Usage metrics from subagent execution.
+///
+/// # Examples
+///
+/// Creating usage metrics:
+///
+/// ```rust
+/// use maestro_pi_mono::execution::UsageMetrics;
+/// use std::time::Duration;
+///
+/// let metrics = UsageMetrics {
+///     tokens_input: 1000,
+///     tokens_output: 500,
+///     tokens_total: 1500,
+///     cost_estimate_usd: Some(0.003),
+///     duration: Duration::from_secs(10),
+/// };
+/// assert_eq!(metrics.tokens_input, 1000);
+/// assert_eq!(metrics.tokens_total, 1500);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageMetrics {
+    /// Number of input tokens consumed
+    pub tokens_input: u64,
+
+    /// Number of output tokens generated
+    pub tokens_output: u64,
+
+    /// Total tokens used (input + output)
+    pub tokens_total: u64,
+
+    /// Estimated cost in USD (if available)
+    pub cost_estimate_usd: Option<f64>,
+
+    /// Duration of the execution
+    pub duration: Duration,
+}
+
+impl UsageMetrics {
+    /// Create new usage metrics.
+    ///
+    /// # Arguments
+    ///
+    /// * `tokens_input` - Number of input tokens
+    /// * `tokens_output` - Number of output tokens
+    /// * `cost_estimate_usd` - Optional cost estimate in USD
+    /// * `duration` - Execution duration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::UsageMetrics;
+    /// use std::time::Duration;
+    ///
+    /// let metrics = UsageMetrics::new(
+    ///     1000,
+    ///     500,
+    ///     Some(0.003),
+    ///     Duration::from_secs(10)
+    /// );
+    /// assert_eq!(metrics.tokens_total, 1500);
+    /// ```
+    pub fn new(
+        tokens_input: u64,
+        tokens_output: u64,
+        cost_estimate_usd: Option<f64>,
+        duration: Duration,
+    ) -> Self {
+        let tokens_total = tokens_input + tokens_output;
+        Self {
+            tokens_input,
+            tokens_output,
+            tokens_total,
+            cost_estimate_usd,
+            duration,
+        }
+    }
+
+    /// Calculate cost per million tokens.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::UsageMetrics;
+    /// use std::time::Duration;
+    ///
+    /// let metrics = UsageMetrics::new(
+    ///     1000,
+    ///     500,
+    ///     Some(0.003),
+    ///     Duration::from_secs(10)
+    /// );
+    /// let cost_per_million = metrics.cost_per_million_tokens();
+    /// assert_eq!(cost_per_million, Some(2.0));
+    /// ```
+    pub fn cost_per_million_tokens(&self) -> Option<f64> {
+        self.cost_estimate_usd.map(|cost| {
+            (cost / self.tokens_total as f64) * 1_000_000.0
+        })
+    }
+
+    /// Calculate tokens per second.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::UsageMetrics;
+    /// use std::time::Duration;
+    ///
+    /// let metrics = UsageMetrics::new(
+    ///     1000,
+    ///     500,
+    ///     Some(0.003),
+    ///     Duration::from_secs(10)
+    /// );
+    /// let tps = metrics.tokens_per_second();
+    /// assert_eq!(tps, 150.0);
+    /// ```
+    pub fn tokens_per_second(&self) -> f64 {
+        let secs = self.duration.as_secs_f64();
+        if secs > 0.0 {
+            self.tokens_total as f64 / secs
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Stream event types.
+///
+/// # Examples
+///
+/// Creating stream event types:
+///
+/// ```rust
+/// use maestro_pi_mono::execution::StreamEventType;
+///
+/// let start = StreamEventType::Start;
+/// let progress = StreamEventType::Progress;
+/// let complete = StreamEventType::Complete;
+/// assert_eq!(start, StreamEventType::Start);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StreamEventType {
+    /// Execution started
+    Start,
+
+    /// Progress update
+    Progress,
+
+    /// Data chunk received
+    Data,
+
+    /// Error occurred
+    Error,
+
+    /// Execution completed
+    Complete,
+}
+
+/// Real-time stream event.
+///
+/// # Examples
+///
+/// Creating a stream event:
+///
+/// ```rust
+/// use maestro_pi_mono::execution::{StreamEvent, StreamEventType};
+/// use std::time::SystemTime;
+///
+/// let event = StreamEvent {
+///     timestamp: SystemTime::now(),
+///     event_type: StreamEventType::Progress,
+///     content: "Processing...".to_string(),
+///     metadata: Some("50%".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEvent {
+    /// When the event occurred
+    pub timestamp: std::time::SystemTime,
+
+    /// Type of event
+    pub event_type: StreamEventType,
+
+    /// Event content
+    pub content: String,
+
+    /// Optional metadata
+    pub metadata: Option<String>,
+}
+
+impl StreamEvent {
+    /// Create a new stream event.
+    ///
+    /// # Arguments
+    ///
+    /// * `event_type` - Type of the event
+    /// * `content` - Event content
+    /// * `metadata` - Optional metadata
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::{StreamEvent, StreamEventType};
+    ///
+    /// let event = StreamEvent::new(
+    ///     StreamEventType::Progress,
+    ///     "Processing...".to_string(),
+    ///     Some("50%".to_string())
+    /// );
+    /// assert_eq!(event.content, "Processing...");
+    /// ```
+    pub fn new(event_type: StreamEventType, content: String, metadata: Option<String>) -> Self {
+        Self {
+            timestamp: std::time::SystemTime::now(),
+            event_type,
+            content,
+            metadata,
+        }
+    }
+
+    /// Create a start event.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::StreamEvent;
+    ///
+    /// let event = StreamEvent::start("Starting task...".to_string());
+    /// ```
+    pub fn start(content: String) -> Self {
+        Self::new(StreamEventType::Start, content, None)
+    }
+
+    /// Create a progress event.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::StreamEvent;
+    ///
+    /// let event = StreamEvent::progress("50% complete".to_string(), Some("50".to_string()));
+    /// ```
+    pub fn progress(content: String, metadata: Option<String>) -> Self {
+        Self::new(StreamEventType::Progress, content, metadata)
+    }
+
+    /// Create a data event.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::StreamEvent;
+    ///
+    /// let event = StreamEvent::data("Received data chunk".to_string());
+    /// ```
+    pub fn data(content: String) -> Self {
+        Self::new(StreamEventType::Data, content, None)
+    }
+
+    /// Create an error event.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::StreamEvent;
+    ///
+    /// let event = StreamEvent::error("Connection failed".to_string());
+    /// ```
+    pub fn error(content: String) -> Self {
+        Self::new(StreamEventType::Error, content, None)
+    }
+
+    /// Create a complete event.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::StreamEvent;
+    ///
+    /// let event = StreamEvent::complete("Task finished".to_string());
+    /// ```
+    pub fn complete(content: String) -> Self {
+        Self::new(StreamEventType::Complete, content, None)
+    }
+}
+
+/// Detailed subagent execution result.
+///
+/// # Examples
+///
+/// Creating a successful subagent result:
+///
+/// ```rust
+/// use maestro_pi_mono::execution::SubagentResult;
+/// use std::time::Duration;
+///
+/// let result = SubagentResult::success(
+///     "Analyze code".to_string(),
+///     "agent-001".to_string(),
+///     "analyzer".to_string(),
+///     "Analysis complete".to_string(),
+///     Duration::from_secs(5)
+/// );
+/// assert!(result.is_success());
+/// assert_eq!(result.task, "Analyze code");
+/// ```
+///
+/// Creating a failed subagent result:
+///
+/// ```rust
+/// use maestro_pi_mono::execution::SubagentResult;
+/// use std::time::Duration;
+///
+/// let result = SubagentResult::failure(
+///     "Analyze code".to_string(),
+///     "agent-001".to_string(),
+///     "analyzer".to_string(),
+///     "Timeout error".to_string(),
+///     Duration::from_secs(10)
+/// );
+/// assert!(!result.is_success());
+/// assert_eq!(result.error, Some("Timeout error".to_string()));
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentResult {
+    /// Whether execution succeeded
+    pub success: bool,
+
+    /// Task description
+    pub task: String,
+
+    /// Agent identifier
+    pub agent: String,
+
+    /// Agent type (e.g., "analyzer", "coder", "reviewer")
+    pub agent_type: String,
+
+    /// Output from execution
+    pub output: String,
+
+    /// Error message if failed
+    pub error: Option<String>,
+
+    /// Exit code if available
+    pub exit_code: Option<i32>,
+
+    /// Execution duration
+    pub duration: Duration,
+
+    /// Usage metrics if available
+    pub usage: Option<UsageMetrics>,
+
+    /// Stream events captured during execution
+    pub events: Vec<StreamEvent>,
+}
+
+impl SubagentResult {
+    /// Create a successful subagent result.
+    ///
+    /// # Arguments
+    ///
+    /// * `task` - Task description
+    /// * `agent` - Agent identifier
+    /// * `agent_type` - Type of agent
+    /// * `output` - Execution output
+    /// * `duration` - Execution duration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::SubagentResult;
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Fix bug".to_string(),
+    ///     "agent-002".to_string(),
+    ///     "coder".to_string(),
+    ///     "Bug fixed".to_string(),
+    ///     Duration::from_secs(8)
+    /// );
+    /// assert!(result.is_success());
+    /// assert!(result.error.is_none());
+    /// ```
+    pub fn success(
+        task: String,
+        agent: String,
+        agent_type: String,
+        output: String,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            success: true,
+            task,
+            agent,
+            agent_type,
+            output,
+            error: None,
+            exit_code: Some(0),
+            duration,
+            usage: None,
+            events: Vec::new(),
+        }
+    }
+
+    /// Create a failed subagent result.
+    ///
+    /// # Arguments
+    ///
+    /// * `task` - Task description
+    /// * `agent` - Agent identifier
+    /// * `agent_type` - Type of agent
+    /// * `error` - Error message
+    /// * `duration` - Execution duration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::SubagentResult;
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::failure(
+    ///     "Fix bug".to_string(),
+    ///     "agent-002".to_string(),
+    ///     "coder".to_string(),
+    ///     "Compilation failed".to_string(),
+    ///     Duration::from_secs(3)
+    /// );
+    /// assert!(!result.is_success());
+    /// assert_eq!(result.error, Some("Compilation failed".to_string()));
+    /// ```
+    pub fn failure(
+        task: String,
+        agent: String,
+        agent_type: String,
+        error: String,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            success: false,
+            task,
+            agent,
+            agent_type,
+            output: String::new(),
+            error: Some(error),
+            exit_code: None,
+            duration,
+            usage: None,
+            events: Vec::new(),
+        }
+    }
+
+    /// Add usage metrics to the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `usage` - Usage metrics to add
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::{SubagentResult, UsageMetrics};
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Done".to_string(),
+    ///     Duration::from_secs(5)
+    /// ).with_usage(UsageMetrics::new(
+    ///     1000, 500, Some(0.003), Duration::from_secs(5)
+    /// ));
+    /// assert!(result.usage.is_some());
+    /// ```
+    pub fn with_usage(mut self, usage: UsageMetrics) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// Add a stream event to the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `event` - Stream event to add
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::{SubagentResult, StreamEvent};
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Done".to_string(),
+    ///     Duration::from_secs(5)
+    /// ).with_event(StreamEvent::start("Starting".to_string()));
+    /// assert_eq!(result.events.len(), 1);
+    /// ```
+    pub fn with_event(mut self, event: StreamEvent) -> Self {
+        self.events.push(event);
+        self
+    }
+
+    /// Check if execution succeeded.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::SubagentResult;
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Done".to_string(),
+    ///     Duration::from_secs(5)
+    /// );
+    /// assert!(result.is_success());
+    /// ```
+    pub fn is_success(&self) -> bool {
+        self.success
+    }
+
+    /// Check if execution failed.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::SubagentResult;
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::failure(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Error".to_string(),
+    ///     Duration::from_secs(5)
+    /// );
+    /// assert!(result.is_failure());
+    /// ```
+    pub fn is_failure(&self) -> bool {
+        !self.success
+    }
+
+    /// Get the number of events.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::SubagentResult;
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Done".to_string(),
+    ///     Duration::from_secs(5)
+    /// );
+    /// assert_eq!(result.event_count(), 0);
+    /// ```
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Get all error events.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::{SubagentResult, StreamEvent};
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Done".to_string(),
+    ///     Duration::from_secs(5)
+    /// )
+    /// .with_event(StreamEvent::error("Warning".to_string()))
+    /// .with_event(StreamEvent::data("Data".to_string()));
+    ///
+    /// let errors = result.error_events();
+    /// assert_eq!(errors.len(), 1);
+    /// ```
+    pub fn error_events(&self) -> Vec<&StreamEvent> {
+        self.events
+            .iter()
+            .filter(|e| e.event_type == StreamEventType::Error)
+            .collect()
+    }
+
+    /// Get formatted summary of the result.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use maestro_pi_mono::execution::SubagentResult;
+    /// use std::time::Duration;
+    ///
+    /// let result = SubagentResult::success(
+    ///     "Task".to_string(),
+    ///     "agent-001".to_string(),
+    ///     "analyzer".to_string(),
+    ///     "Done".to_string(),
+    ///     Duration::from_secs(5)
+    /// );
+    /// let summary = result.summary();
+    /// assert!(summary.contains("SUCCESS"));
+    /// ```
+    pub fn summary(&self) -> String {
+        let status = if self.success { "SUCCESS" } else { "FAILURE" };
+        format!(
+            "[{}] {} - {} ({}) in {:?}",
+            status, self.task, self.agent, self.agent_type, self.duration
+        )
     }
 }

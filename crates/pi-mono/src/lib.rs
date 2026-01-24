@@ -63,7 +63,10 @@ pub use agents::workflows::{
     WorkflowMode, WorkflowStep, WorkflowPreset,
     default_presets, get_preset, preset_names,
 };
-pub use execution::{Executor, ExecutorConfig, ExecutionResult};
+pub use execution::{
+    Executor, ExecutorConfig, ExecutionResult,
+    UsageMetrics, StreamEvent, StreamEventType, SubagentResult,
+};
 pub use detection::{PiDetection, Capabilities};
 pub use discovery::{ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS};
 
