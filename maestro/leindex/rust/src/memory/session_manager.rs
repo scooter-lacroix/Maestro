@@ -76,16 +76,21 @@ impl SessionManager {
     /// This method lazily initializes the LspManager only when first needed.
     /// It now checks if we're already in a tokio runtime and avoids creating a nested one.
     fn get_lsp_manager(&self) -> Result<std::sync::MutexGuard<'_, Option<LspManager>>> {
+        let mut guard = self.lsp_manager.lock().unwrap();
+        if guard.is_some() {
+            return Ok(guard);
+        }
+
+        // Check if we're already in a tokio runtime
+        if Handle::try_current().is_ok() {
+            // We're inside a runtime - don't create a new one to avoid panic
+            tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
+            tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
+            return Ok(guard);
+        }
+
         // Initialize on first access
         self.lsp_manager_init.call_once(|| {
-            // Check if we're already in a tokio runtime
-            if Handle::try_current().is_ok() {
-                // We're inside a runtime - don't create a new one to avoid panic
-                tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
-                tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
-                return;
-            }
-
             // Use blocking runtime for one-time initialization with in-memory storage
             // This is safe when we're NOT already inside a tokio runtime
             if let Ok(rt) = tokio::runtime::Runtime::new() {
@@ -97,12 +102,12 @@ impl SessionManager {
                     if let Err(e) = rt.block_on(manager.restore_lsps_on_startup()) {
                         tracing::warn!("Failed to restore LSPs on startup: {}", e);
                     }
-                    *self.lsp_manager.lock().unwrap() = Some(manager);
+                    *guard = Some(manager);
                 }
             }
         });
 
-        Ok(self.lsp_manager.lock().unwrap())
+        Ok(guard)
     }
 
     /// Create and start a new session
@@ -784,6 +789,14 @@ impl SessionManager {
     ///
     /// Returns the path to the regenerated MCP config file
     pub fn regenerate_mcp_config_blocking(&self, session_id: &str) -> Result<std::path::PathBuf> {
+        // Check if we're already in a tokio runtime to avoid panic
+        if Handle::try_current().is_ok() {
+            // We're inside a runtime. Synchronous block_on is dangerous here.
+            // Ideally callers should use regenerate_mcp_config_async.
+            // For now, return error to avoid panic.
+            return Err(anyhow::anyhow!("regenerate_mcp_config_blocking called from within a runtime"));
+        }
+
         // Create a new runtime for blocking execution
         let rt = tokio::runtime::Runtime::new()
             .context("Failed to create tokio runtime for MCP config regeneration")?;
