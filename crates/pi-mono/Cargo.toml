@@ -16,7 +16,7 @@ tokio = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-# serde_yaml - Add when implementing YAML configuration support
+serde_yaml = "0.9"
 
 # Executable discovery and configuration
 which = "7.0"
@@ -32,3 +32,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 semver = "1.0"
+tempfile = "3.13"

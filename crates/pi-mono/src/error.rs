@@ -78,9 +78,13 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Serialization/deserialization errors
-    #[error("serialization error: {0}")]
+    /// JSON serialization/deserialization errors
+    #[error("JSON serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    /// YAML serialization/deserialization errors
+    #[error("YAML serialization error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
 
     /// Other errors that don't fit into specific categories
     #[error("unknown error: {0}")]

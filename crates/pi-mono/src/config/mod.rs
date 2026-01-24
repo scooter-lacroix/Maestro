@@ -18,6 +18,7 @@
 //! ```
 
 pub mod models;
+pub mod io;
 
 use serde::{Deserialize, Serialize};
 
