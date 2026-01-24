@@ -19,6 +19,7 @@
 
 pub mod models;
 pub mod io;
+pub mod selection;
 
 use serde::{Deserialize, Serialize};
 
@@ -93,3 +94,6 @@ pub use models::{
     ExecutionSettings,
     PiMonoConfig as ModelConfig,
 };
+
+// Re-exports from selection module
+pub use selection::ModelSelector;
