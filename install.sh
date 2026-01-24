@@ -8,13 +8,13 @@
 #    ▒███ ▒▒▒  ▒███  ▒███▒▒▒▒▒███  ▒███▒▒█    ▒▒▒▒▒▒▒▒███    ▒███     ▒███▒▒▒▒▒███ ▒███      ▒███
 #    ▒███      ▒███  ▒███    ▒███  ▒███ ▒   █ ███    ▒███    ▒███     ▒███    ▒███ ▒▒███     ███
 #    █████     █████ █████   █████ ██████████▒▒█████████     █████    █████   █████ ▒▒▒███████▒
-#   ▒▒▒▒▒     ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒     ▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒    ▒▒▒▒▒▒▒
+#   ▒▒▒▒▒     ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒     ▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒    ▒▒▒▒▒▒▒
 #
 #
 #                                      ✨ Maestro v2 ✨
 #                                    THE CONDUCTOR WIZARD
 #
-# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 set -e
 
@@ -28,8 +28,49 @@ NC='\033[0m'
 clear
 echo -e "${C}    Preparing the Overture...${NC}"
 
+# Default branch (can be overridden with MAESTRO_BRANCH env var)
+MAESTRO_BRANCH="${MAESTRO_BRANCH:-v2.5}"
+REPO_URL="${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}"
+
+# Determine if we're running from a cloned repo or a remote install
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+INSTALL_DIR=""
+
+# Check if we're in a valid Maestro repo
+if [[ -f "$SCRIPT_DIR/install.sh" && -d "$SCRIPT_DIR/maestro/leindex/rust" ]]; then
+    # Running from a cloned repo
+    INSTALL_DIR="$SCRIPT_DIR"
+    echo -e "${G}    [Local Install]${NC} Installing from: $INSTALL_DIR"
+else
+    # Running from remote or invalid location - need to clone
+    INSTALL_DIR="$HOME/.maestro/install-temp"
+    echo -e "${G}    [Remote Install]${NC} Cloning from: $REPO_URL (branch: $MAESTRO_BRANCH)"
+
+    # Remove temp dir if it exists from a previous failed install
+    if [[ -d "$INSTALL_DIR" ]]; then
+        rm -rf "$INSTALL_DIR"
+    fi
+
+    mkdir -p "$HOME/.maestro"
+    git clone --depth 1 --branch "$MAESTRO_BRANCH" "$REPO_URL" "$INSTALL_DIR"
+fi
+
+# Change to the Rust directory
+cd "$INSTALL_DIR"
+
+# Verify we're on the correct branch (for local installs)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+if [[ "$CURRENT_BRANCH" != "$MAESTRO_BRANCH" && "$CURRENT_BRANCH" != "HEAD" ]]; then
+    echo -e "${Y}    [Warning] Current branch is '$CURRENT_BRANCH', but installing from branch '$MAESTRO_BRANCH'${NC}"
+    echo -e "${Y}    Switching to branch: $MAESTRO_BRANCH${NC}"
+    git fetch origin "$MAESTRO_BRANCH" || git fetch origin
+    git checkout "$MAESTRO_BRANCH"
+fi
+
+cd "$INSTALL_DIR/maestro/leindex/rust"
+
 # Check for basic build tools and dependencies
-echo -e "${C}    Revisiting system requirements...${NC}"
+echo -e "${C}    Revising system requirements...${NC}"
 
 # Detect Package Manager
 PKM=""
@@ -69,19 +110,17 @@ if ! command -v cargo &> /dev/null; then
     source $HOME/.cargo/env
 fi
 
-# Determine the repo root directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
-if [ -z "$SCRIPT_DIR" ] || [ ! -d "$SCRIPT_DIR/maestro/leindex/rust" ]; then
-    echo -e "${Y}  [!] Running from pipe — cloning Maestro repository...${NC}"
-    TMPDIR="$(mktemp -d)"
-    git clone --depth 1 https://github.com/scooter-lacroix/Maestro.git "$TMPDIR/Maestro"
-    SCRIPT_DIR="$TMPDIR/Maestro"
-fi
-
-cd "$SCRIPT_DIR/maestro/leindex/rust"
-
 # Build and Run the Conductor Wizard
 echo -e "${G}    Launching Maestro Conductor Wizard...${NC}"
 echo -e "    ${C}Please wait while the orchestra tunes (compiling setup tool)${NC}"
 
 cargo run --release --bin maestro-setup
+
+# Clean up temp install directory if we cloned
+if [[ "$INSTALL_DIR" == "$HOME/.maestro/install-temp" ]]; then
+    echo -e "${C}    Cleaning up temporary install directory...${NC}"
+    rm -rf "$INSTALL_DIR"
+fi
+
+echo -e "${G}    Installation complete!${NC}"
+echo -e "    Run 'maestro' to get started."
