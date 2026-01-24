@@ -46,7 +46,7 @@ pub mod detection;
 pub mod discovery;
 
 // Public re-exports for convenience
-pub use config::PiMonoConfig;
+pub use config::{PiMonoConfig, ModelTier, ModelPreference, ProviderConfig, RoleAssignment, ExecutionSettings, ModelConfig};
 pub use agents::{PiMonoAgent, AgentError};
 pub use execution::{Executor, ExecutorConfig, ExecutionResult};
 pub use detection::{PiDetection, Capabilities};

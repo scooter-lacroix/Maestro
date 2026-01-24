@@ -17,6 +17,8 @@
 //! config.work_dir = Some("/workspace".to_string());
 //! ```
 
+pub mod models;
+
 use serde::{Deserialize, Serialize};
 
 /// Pi-Mono configuration structure.
@@ -80,3 +82,13 @@ impl Default for PiMonoConfig {
         }
     }
 }
+
+// Re-exports from models module
+pub use models::{
+    ModelTier,
+    ModelPreference,
+    ProviderConfig,
+    RoleAssignment,
+    ExecutionSettings,
+    PiMonoConfig as ModelConfig,
+};
