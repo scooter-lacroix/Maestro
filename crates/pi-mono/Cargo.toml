@@ -13,6 +13,9 @@ crate-type = ["rlib"]
 # Async runtime
 tokio = { workspace = true }
 
+# Tokio utilities for CancellationToken
+tokio-util = "0.7"
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
