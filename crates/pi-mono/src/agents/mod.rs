@@ -20,6 +20,13 @@
 pub mod mapping;
 pub mod workflows;
 
+// Re-export mapping types for convenience
+pub use mapping::{
+    AgentRole, PiAgentType, ToolAccess, TaskComplexity, AgentMapping,
+    RegisteredAgent, AgentRegistry,
+    default_mappings, role_to_pi_agent_type,
+};
+
 use serde::{Deserialize, Serialize};
 
 /// Error type for agent validation

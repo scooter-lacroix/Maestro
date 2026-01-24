@@ -47,13 +47,16 @@ pub mod discovery;
 
 // Public re-exports for convenience
 pub use config::{
-    PiMonoConfig, ModelTier, ModelPreference, ProviderConfig, RoleAssignment, ExecutionSettings, ModelConfig, ModelSelector,
+    PiMonoConfig, ModelTier, ModelPreference, ProviderConfig, RoleAssignment, ExecutionSettings, ModelSelector,
     io::{config_dir, config_path, ensure_config_dir, load_config, load_config_from_path, save_config, save_config_to_path, default_config, validate_config},
     wizard::{WizardStep, WizardState, ConfigWizard},
 };
+// ModelConfig is the PiMonoConfig from the models module (with role_assignments)
+pub use config::models::PiMonoConfig as ModelConfig;
 pub use agents::{PiMonoAgent, AgentError};
 pub use agents::mapping::{
     AgentRole, PiAgentType, ToolAccess, TaskComplexity, AgentMapping,
+    RegisteredAgent, AgentRegistry,
     default_mappings, role_to_pi_agent_type,
 };
 pub use agents::workflows::{
