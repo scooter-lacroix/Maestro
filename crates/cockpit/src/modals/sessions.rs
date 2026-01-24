@@ -5,11 +5,9 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use leindex_core::memory::models::McpStatus;
 use leindex_core::memory::SessionStatus;
 
 use crate::state::HubFocus;
-use crate::theme::Theme;
 use crate::app::App;
 
 /// Renders the session hub modal.

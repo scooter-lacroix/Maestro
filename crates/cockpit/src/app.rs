@@ -32,7 +32,7 @@ use leindex_core::memory::TursoStorageBackend;
 use leindex_core::multiplexer::TmuxMultiplexer;
 
 use crate::state::{
-    AnalysisMode, AnalysisHistoryEntry, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption,
+    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption,
     MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };
 use crate::tabs::{render_analysis, render_dashboard, render_lsps, render_memory, render_projects, render_sessions, render_settings, session_log_tail};
@@ -176,8 +176,8 @@ pub struct App {
     pub storage_backend: Option<Arc<TursoStorageBackend>>,
     // Flag to trigger async LSP refresh
     pub pending_lsp_refresh: bool,
-    // Orchestrate pane state
-    pub orchestrate: crate::orchestrate::OrchestratePane,
+    // Conductor pane state (formerly Orchestrate)
+    pub conductor: crate::conductor::ConductorPane,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -263,9 +263,7 @@ impl App {
             lsp_availability: HashMap::new(),
             storage_backend,
             pending_lsp_refresh: false,
-            orchestrate: crate::orchestrate::OrchestratePane::new(
-                std::path::PathBuf::from(".")
-            ),
+            conductor: crate::conductor::ConductorPane::auto_discover(),
         };
         // Check LSP availability on startup
         app.check_lsp_availability();
@@ -563,6 +561,9 @@ impl App {
 
             self.refresh_session_entries();
             self.refresh_dash_session_entries();
+
+            // Poll Conductor engine state
+            self.conductor.poll_engine_state();
         }
     }
 
@@ -2881,7 +2882,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 4 {
+                                } else if app.tab_index == 5 {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -2994,7 +2995,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 4 {
+                                } else if app.tab_index == 5 {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -3181,46 +3182,16 @@ async fn run_app<B: Backend>(
                             (_, KeyCode::Char('e')) if app.tab_index == 2 => {
                                 app.preview_focused = !app.preview_focused;
                             }
-                            // Orchestrate pane keybindings (only for keys not already handled globally)
-                            (_, KeyCode::Char('o')) if app.tab_index == 4 => {
-                                app.orchestrate.next_track();
-                            }
-                            (_, KeyCode::Char('O')) if app.tab_index == 4 => {
-                                app.orchestrate.prev_track();
-                            }
-                            (_, KeyCode::Char(' ')) if app.tab_index == 4 && !app.orchestrate.output_focused => {
-                                // Toggle task expansion
-                                if let Some(selected_task) = app.orchestrate.selected_task.clone() {
-                                    app.orchestrate.toggle_task_expansion(&selected_task);
-                                }
-                            }
-                            (_, KeyCode::Char('c')) if app.tab_index == 4 => {
-                                // Clear output
-                                app.orchestrate.clear_output();
-                            }
-                            (_, KeyCode::Char('s')) if app.tab_index == 4 => {
-                                // Start orchestrate loop (placeholder - would need async executor)
-                                app.status_message = "Orchestrate start: Use 'maestro orchestrate start' command".to_string();
-                            }
-                            (_, KeyCode::Char('p')) if app.tab_index == 4 => {
-                                // Pause orchestrate loop
-                                if !app.orchestrate.tracks.is_empty() {
-                                    let track_id = &app.orchestrate.tracks[app.orchestrate.selected_track].id;
-                                    app.status_message = format!("Orchestrate pause: Use 'maestro orchestrate pause {}' command", track_id);
-                                }
-                            }
-                            (_, KeyCode::Char('r')) if app.tab_index == 4 => {
-                                // Resume orchestrate loop
-                                if !app.orchestrate.tracks.is_empty() {
-                                    let track_id = &app.orchestrate.tracks[app.orchestrate.selected_track].id;
-                                    app.status_message = format!("Orchestrate resume: Use 'maestro orchestrate resume {}' command", track_id);
-                                }
-                            }
-                            (_, KeyCode::Char('x')) if app.tab_index == 4 => {
-                                // Abort orchestrate loop
-                                if !app.orchestrate.tracks.is_empty() {
-                                    let track_id = &app.orchestrate.tracks[app.orchestrate.selected_track].id;
-                                    app.status_message = format!("Orchestrate abort: Use 'maestro orchestrate abort {}' command", track_id);
+                            // Conductor pane keybindings
+                            _ if app.tab_index == 4 => {
+                                use crate::conductor::keybindings::{handle_key_event, ConductorAction};
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
                                 }
                             }
                             (_, KeyCode::Enter) => {
@@ -3600,7 +3571,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         "Sessions",
         "Projects",
         "Analysis",
-        "Orchestrate",
+        "Conductor",
         "Memory",
         "LSPs",
         "Settings",
@@ -3632,7 +3603,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         3 => render_analysis(frame, chunks[1], app),
         4 => {
             let theme = app.theme();
-            crate::orchestrate::render_orchestrate(frame, chunks[1], &mut app.orchestrate, &theme);
+            crate::conductor::render_conductor(frame, chunks[1], &mut app.conductor, &theme);
         }
         5 => render_memory(frame, chunks[1], app),
         6 => render_lsps(frame, chunks[1], app),

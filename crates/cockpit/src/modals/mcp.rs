@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui::text::Line;
 
 use crate::state::McpOption;
-use crate::theme::{theme_from_name, Theme};
+use crate::theme::theme_from_name;
 use crate::app::App;
 
 /// Renders the MCP menu modal.

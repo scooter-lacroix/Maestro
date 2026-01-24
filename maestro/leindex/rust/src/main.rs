@@ -14,13 +14,13 @@ pub use leindex_core::*;
 use leindex_core::cli::implement::ImplementSessionTarget;
 use leindex_core::cli::integrate::{IntegrateAction, IntegrationTool};
 use leindex_core::cli::mcp;
-use leindex_core::cli::{analyze, implement, integrate, memory_cmd as memory};
+use leindex_core::cli::{analyze, implement, integrate, memory_cmd as mem_cmd};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
 #[command(name = "maestro")]
 #[command(author = "Maestro Team")]
-#[command(version = "2.0.0")]
+#[command(version = "2.5.0")]
 #[command(about = "Spec-driven development framework for AI-assisted software engineering")]
 #[command(long_about = None)]
 struct Cli {
@@ -189,9 +189,9 @@ async fn main() -> Result<()> {
                 host,
                 db,
                 debug,
-            } => memory::serve(port, host, db, debug).await,
-            MemoryCommands::Status { db } => memory::status(db).await,
-            MemoryCommands::Scan { paths, depth } => memory::scan(paths, depth).await,
+            } => mem_cmd::serve(port, host, db, debug).await,
+            MemoryCommands::Status { db } => mem_cmd::status(db).await,
+            MemoryCommands::Scan { paths, depth } => mem_cmd::scan(paths, depth).await,
         },
         Commands::Tui => {
             // TODO: The Cockpit TUI has been extracted to the maestro-cockpit crate

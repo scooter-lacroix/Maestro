@@ -120,10 +120,3 @@ harness = false
 # Benchmarking
 criterion = "0.5"
 tempfile = "3.8"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"

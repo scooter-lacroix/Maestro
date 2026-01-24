@@ -747,6 +747,32 @@ impl TmuxMultiplexer {
             .map(|r| r.key().clone())
             .collect()
     }
+
+    /// Get all current pane paths from all windows across all sessions
+    pub fn get_all_pane_paths(&self) -> Result<Vec<String>> {
+        let output = Command::new("tmux")
+            .args(["list-panes", "-a", "-F", "#{pane_current_path}"])
+            .output()
+            .context("Failed to list tmux panes")?;
+
+        if !output.status.success() {
+            // It might fail if tmux server is not running
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut paths: Vec<String> = stdout
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        // Deduplicate and sort
+        paths.sort();
+        paths.dedup();
+
+        Ok(paths)
+    }
 }
 
 /// Sanitize a display name to a valid tmux session name

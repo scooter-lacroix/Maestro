@@ -3,7 +3,7 @@
 //! Enhanced with LeIndex 5-phase analysis integration
 
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, BorderType, Paragraph, Wrap},

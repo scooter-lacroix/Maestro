@@ -7,7 +7,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::text::Line;
 
-use crate::theme::{theme_from_name, Theme};
+use crate::theme::theme_from_name;
 use crate::app::App;
 
 /// Renders the help modal.

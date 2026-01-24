@@ -9,7 +9,9 @@ pub mod engine;
 pub mod runner;
 pub mod state;
 pub mod prompts;
+pub mod context;
 pub mod setup;
+pub mod rate_limit;
 
 pub use model::*;
 pub use parser::*;
@@ -17,4 +19,6 @@ pub use engine::*;
 pub use runner::*;
 pub use state::*;
 pub use prompts::*;
+pub use context::*;
 pub use setup::*;
+pub use rate_limit::*;

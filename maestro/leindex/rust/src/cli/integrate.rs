@@ -1259,7 +1259,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     }
 
     /// Check MCP server connectivity
-    fn check_mcp_connectivity(&self, tool: IntegrationTool) -> CheckResult {
+    fn check_mcp_connectivity(&self, _tool: IntegrationTool) -> CheckResult {
         // Check if maestro binary exists (can test connectivity)
         match std::process::Command::new("maestro").arg("--version").output() {
             Ok(output) => {

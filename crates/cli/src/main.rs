@@ -17,7 +17,7 @@ use leindex_core::cli::orchestrate;
 
 // Local CLI commands
 mod commands;
-use commands::configure;
+use commands::{configure, pi_status, pi_test, pi_agents};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -96,6 +96,18 @@ enum Commands {
         /// Title for the new tmux session (defaults to derived from description)
         #[arg(long)]
         title: Option<String>,
+
+        /// Pi-Mono: Execute with single agent (scout, planner, reviewer, worker)
+        #[arg(long, conflicts_with_all = ["pi_chain", "pi_parallel"])]
+        pi_agent: Option<String>,
+
+        /// Pi-Mono: Execute with chain of agents (comma-separated: scout,planner,worker)
+        #[arg(long, value_delimiter = ',', conflicts_with_all = ["pi_agent", "pi_parallel"])]
+        pi_chain: Option<Vec<String>>,
+
+        /// Pi-Mono: Execute with parallel agents (comma-separated: worker,worker,worker)
+        #[arg(long, value_delimiter = ',', conflicts_with_all = ["pi_agent", "pi_chain"])]
+        pi_parallel: Option<Vec<String>>,
     },
 
     /// MCP pooling, proxying, and tool search
@@ -108,6 +120,54 @@ enum Commands {
     Orchestrate {
         #[command(subcommand)]
         command: OrchestrateCommands,
+    },
+
+    /// Show Pi-Mono integration status
+    PiStatus {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+
+        /// Enable verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Test Pi-Mono subagent execution
+    PiTest {
+        /// Task description to execute
+        task: String,
+
+        /// Agent type to use (scout, planner, reviewer, worker)
+        #[arg(short, long)]
+        agent: Option<String>,
+
+        /// Timeout in seconds
+        #[arg(short, long)]
+        timeout: Option<u64>,
+
+        /// Enable verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// List Pi-Mono agent mappings
+    PiAgents {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+
+        /// Enable verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -290,7 +350,10 @@ async fn main() -> Result<()> {
             tool,
             path,
             title,
-        } => implement::run(command, description, session, tool, path, title).await,
+            pi_agent,
+            pi_chain,
+            pi_parallel,
+        } => commands::implement::run(command, description, session, tool, path, title, pi_agent, pi_chain, pi_parallel).await,
         Commands::Mcp { command } => match command {
             McpCommands::Serve => mcp::serve().await,
             McpCommands::Proxy { name } => mcp::proxy(name).await,
@@ -348,5 +411,14 @@ async fn main() -> Result<()> {
                 }).await
             }
         },
+        Commands::PiStatus { config, verbose, json } => {
+            pi_status::run(config, verbose, json).await
+        }
+        Commands::PiTest { task, agent, timeout, verbose } => {
+            pi_test::run(task, agent, timeout, verbose).await
+        }
+        Commands::PiAgents { config, verbose, json } => {
+            pi_agents::run(config, verbose, json).await
+        }
     }
 }

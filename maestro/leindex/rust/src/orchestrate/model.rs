@@ -257,6 +257,7 @@ impl Default for AgentConfig {
 /// Orchestrate session state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
+    pub session_id: String,
     pub track_id: String,
     pub mode: LoopMode,
     pub agent_config: AgentConfig,
@@ -265,6 +266,7 @@ pub struct SessionState {
     pub started_at: String,
     pub updated_at: String,
     pub status: SessionStatus,
+    pub rate_limit: Option<crate::rate_limit::RateLimitState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

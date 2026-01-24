@@ -144,54 +144,6 @@ impl CliRunner {
         Self { config, working_dir, iteration_timeout_secs }
     }
 
-    /// Build command for the configured tool
-    fn build_command(&self, prompt_file: &Path) -> Result<TokioCommand> {
-        // Security check: verify tool is in allowlist unless dangerous_mode is enabled
-        if !self.config.dangerous_mode && !ALLOWED_TOOLS.contains(&self.config.tool.as_str()) {
-            return Err(anyhow!(
-                "Tool '{}' is not in the allowlist. Allowed tools: {:?}. \
-                 Set dangerous_mode=true to override (not recommended).",
-                self.config.tool, ALLOWED_TOOLS
-            ));
-        }
-
-        let cmd = match self.config.tool.as_str() {
-            "claude" => {
-                let mut c = TokioCommand::new("claude");
-                c.arg(prompt_file);
-                c
-            }
-            "gemini" => {
-                let mut c = TokioCommand::new("gemini");
-                c.arg("chat");
-                c.arg("--prompt-file");
-                c.arg(prompt_file);
-                c
-            }
-            "qwen" => {
-                let mut c = TokioCommand::new("qwen");
-                c.arg("chat");
-                c.arg("-f");
-                c.arg(prompt_file);
-                c
-            }
-            "opencode" => {
-                let mut c = TokioCommand::new("opencode");
-                c.arg("chat");
-                c.arg("--prompt");
-                c.arg(prompt_file);
-                c
-            }
-            tool => {
-                let mut c = TokioCommand::new(tool);
-                c.arg(prompt_file);
-                c
-            }
-        };
-
-        Ok(cmd)
-    }
-
     async fn run_internal(&self, prompt: &str, task: &Task) -> Result<RunResult> {
         use tokio::io::{AsyncBufReadExt, BufReader};
 

@@ -59,7 +59,7 @@ fn main() -> Result<(), io::Error> {
         should_quit: false,
         install_progress: 0.0,
         current_action: "Arranging the orchestra...".to_string(),
-        logs: vec!["Welcome to Maestro Setup v2.0".to_string()],
+        logs: vec!["Welcome to Maestro Setup v2.5".to_string()],
         receiver: None,
         error: None,
         install_path: "~/.maestro".to_string(),
@@ -292,7 +292,7 @@ fn render_overture(f: &mut Frame, app: &mut App, area: Rect) {
             ),
         ]),
         Line::from(vec![Span::styled(
-            "v2.0 Unified Installer",
+            "v2.5 Unified Installer",
             Style::default().fg(Color::DarkGray),
         )]),
     ])

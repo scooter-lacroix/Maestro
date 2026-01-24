@@ -19,6 +19,7 @@ pub struct OrchestrateEngine {
     config: OrchestrateConfig,
     state_manager: StateManager,
     tracks_dir: PathBuf,
+    rate_limit_detector: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitDetector>>,
 }
 
 impl OrchestrateEngine {
@@ -26,10 +27,17 @@ impl OrchestrateEngine {
     pub fn new(config: OrchestrateConfig, tracks_dir: PathBuf) -> Result<Self> {
         let state_manager = StateManager::new(config.data_dir.clone())
             .context("Failed to initialize state manager")?;
+        let rate_limit_detector = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::rate_limit::RateLimitDetector::new(
+                config.rate_limit_max_retries,
+                config.rate_limit_backoff_base_secs,
+            )
+        ));
         Ok(Self {
             config,
             state_manager,
             tracks_dir,
+            rate_limit_detector,
         })
     }
 
@@ -102,7 +110,6 @@ impl OrchestrateEngine {
             };
 
             // Run iteration with rate-limit retry loop
-            let mut rate_limit_retries: u32 = 0;
             let iteration_result = loop {
                 let result = self
                     .run_iteration(track_id, &temp_task, &session, &plan)
@@ -112,10 +119,20 @@ impl OrchestrateEngine {
                     Ok(iter_res) => {
                         // Check for rate limiting
                         if iter_res.rate_limited && self.config.enable_rate_limit_detection {
-                            if rate_limit_retries >= self.config.rate_limit_max_retries {
+                            let mut detector = self.rate_limit_detector.lock().await;
+                            detector.record_hit();
+                            let detector_state = detector.state.clone();
+                            drop(detector);
+
+                            // Update session with rate limit state for TUI polling
+                            session.rate_limit = Some(detector_state.clone());
+                            session.updated_at = Utc::now().to_rfc3339();
+                            self.state_manager.save_session(&session)?;
+
+                            if detector_state.consecutive_hits > self.config.rate_limit_max_retries {
                                 error!(
-                                    "Rate limit exceeded after {} retries, task {} requires manual intervention",
-                                    rate_limit_retries, task_id
+                                    "Rate limit exceeded after {} hits, task {} requires manual intervention",
+                                    detector_state.consecutive_hits, task_id
                                 );
                                 // Mark task as failed with rate limit note
                                 let task_ref = self.find_task_mut(&mut plan.tasks, &task_id)?;
@@ -124,33 +141,46 @@ impl OrchestrateEngine {
                                     self.config.rate_limit_max_retries
                                 ));
                                 break Err(anyhow!(
-                                    "Task {} rate-limited after {} retries",
-                                    task_id, rate_limit_retries
+                                    "Task {} rate-limited after {} hits",
+                                    task_id, detector_state.consecutive_hits
                                 ));
                             }
 
-                            // Calculate exponential backoff (1s → 10s → 60s → 300s max)
-                            let backoff_secs = std::cmp::min(
-                                self.config.rate_limit_backoff_base_secs * (2_u64.pow(rate_limit_retries as u32)),
-                                self.config.rate_limit_backoff_max_secs,
-                            );
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            
+                            let backoff_secs = detector_state.backoff_until.unwrap_or(now) - now;
 
                             warn!(
-                                "Rate limit detected on task {} (retry {}/{}), backing off {}s",
+                                "Rate limit detected on task {} (hit {}/{}), backing off {}s",
                                 task_id,
-                                rate_limit_retries + 1,
+                                detector_state.consecutive_hits,
                                 self.config.rate_limit_max_retries,
                                 backoff_secs
                             );
 
                             // Sleep for backoff period
                             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                            rate_limit_retries += 1;
+                            
+                            // Re-load session in case it was modified (e.g. paused)
+                            if let Some(s) = self.state_manager.load_session(track_id)? {
+                                session = s;
+                            }
+                            
                             // Continue loop to retry
                             continue;
                         }
 
-                        // No rate limit (or retries exhausted above), exit with result
+                        // No rate limit, reset detector and clear rate limit state in session
+                        let mut detector = self.rate_limit_detector.lock().await;
+                        detector.reset();
+                        drop(detector);
+                        
+                        session.rate_limit = None;
+                        
+                        // Exit with result
                         break Ok(iter_res);
                     }
                     Err(e) => {
@@ -262,7 +292,9 @@ impl OrchestrateEngine {
             None => {
                 // Create new session
                 let now = Utc::now().to_rfc3339();
+                let session_id = format!("{}-{}", track_id, Utc::now().timestamp());
                 Ok(SessionState {
+                    session_id,
                     track_id: track_id.to_string(),
                     mode,
                     agent_config,
@@ -271,6 +303,7 @@ impl OrchestrateEngine {
                     started_at: now.clone(),
                     updated_at: now,
                     status: SessionStatus::Running,
+                    rate_limit: None,
                 })
             }
         }
@@ -381,76 +414,13 @@ impl OrchestrateEngine {
 
         // Get LeIndex context if enabled
         let leindex_context = if self.config.enable_leindex {
-            Some(self.get_leindex_context(plan)?)
+            let engine = crate::orchestrate::context::ContextEngine::new(self.config.context_budget);
+            Some(engine.build_context(&self.tracks_dir, plan)?)
         } else {
             None
         };
 
         builder.build_prompt(task, session, plan, &recent, leindex_context.as_deref())
-    }
-
-    fn get_leindex_context(&self, plan: &TrackPlan) -> Result<String> {
-        use crate::five_phase::{phase1_structural_scan, phase2_dependency_map, PhaseOptions};
-        use crate::token_format::FormatMode;
-
-        // Skip LeIndex if context budget is too low (< 10K tokens)
-        // This prevents expensive scans that would be truncated anyway
-        const MIN_BUDGET_FOR_LEINDEX: usize = 10000;
-        if self.config.context_budget < MIN_BUDGET_FOR_LEINDEX {
-            return Ok("// LeIndex disabled: context budget too low".to_string());
-        }
-
-        // Use the track's canonical root directory for LeIndex analysis
-        // This ensures we scan the actual project code, not the tracks directory
-        let track_path = self.tracks_dir.join(&plan.track_id);
-        let project_root = if track_path.exists() {
-            // Track directory exists - use it as the project root
-            track_path.clone()
-        } else {
-            // Fallback to parent directory (workspace root)
-            self.tracks_dir.clone()
-        };
-
-        // Determine the analysis mode based on context budget
-        let mode = if self.config.context_budget > 50000 {
-            FormatMode::Balanced
-        } else {
-            FormatMode::Ultra
-        };
-
-        // Run 5-phase analysis with appropriate token limits
-        // Cap max_files based on budget to prevent excessive scans
-        let max_files = std::cmp::min(15, self.config.context_budget / 3000);
-
-        let options = PhaseOptions {
-            root: project_root,
-            mode,
-            max_files,
-            max_focus_files: std::cmp::min(3, max_files / 5),
-            top_n: 10,
-            max_output_chars: self.config.context_budget / 2, // Use half budget for LeIndex
-        };
-
-        // Run Phase 1 and Phase 2 analysis
-        let phase1_result = phase1_structural_scan(&options);
-        let phase2_result = phase2_dependency_map(&options);
-
-        match (phase1_result, phase2_result) {
-            (Ok(p1), Ok(p2)) => {
-                let mut context = String::new();
-
-                // Add phase summaries
-                context.push_str(&format!("### Phase 1: Structural Scan\n\n{}\n\n", p1));
-                context.push_str(&format!("### Phase 2: Dependency Map\n\n{}\n\n", p2));
-
-                Ok(context)
-            }
-            (Err(e), _) | (_, Err(e)) => {
-                // If LeIndex analysis fails, log but don't fail the iteration
-                warn!("LeIndex analysis failed for track {}: {}", plan.track_id, e);
-                Ok(format!("// LeIndex analysis failed: {}\n// Continuing with task...\n", e))
-            }
-        }
     }
 
     fn handle_task_failure(

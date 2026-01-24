@@ -95,19 +95,20 @@ impl PromptBuilder {
         budget_used += prompt.len() - budget_used;
 
         // Calculate remaining budget for LeIndex context
-        // Reserve ~25% of budget for the task instructions we just added
-        let remaining_budget = self.context_budget.saturating_sub(budget_used * 2);
+        // Ensure core instructions are never truncated by reserving 8KB
+        let reserved = 8192;
+        let remaining_budget = self.context_budget.saturating_sub(budget_used + reserved);
 
         // Add LeIndex context if provided (truncate if necessary)
         if let Some(context) = leindex_context {
-            if !context.is_empty() {
+            if !context.is_empty() && remaining_budget > 1000 {
                 prompt.push_str("\n## Codebase Context (LeIndex)\n\n");
 
                 // Truncate context if it would exceed our budget
                 let context_to_add = if context.len() > remaining_budget {
                     // Truncate from the end, keeping the beginning (usually has file list)
                     let mut truncated = String::from(&context[..remaining_budget]);
-                    truncated.push_str("\n\n... (Context truncated to fit token budget)");
+                    truncated.push_str("\n\n... (Context truncated to fit budget)");
                     truncated
                 } else {
                     context.to_string()
