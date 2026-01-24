@@ -34,3 +34,9 @@ anyhow = "1.0"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# Testing utilities
+tempfile = "3.13"
+# Serialization for tests
+serde_yaml = "0.9"

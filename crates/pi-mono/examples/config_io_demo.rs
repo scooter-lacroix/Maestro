@@ -1,7 +1,7 @@
 // Example demonstrating the config I/O API
 use maestro_pi_mono::{
-    config_dir, config_path, ensure_config_dir, load_config, save_config,
-    default_config, validate_config
+    config_dir, config_path, ensure_config_dir,
+    default_config, validate_config_basic
 };
 
 fn main() {
@@ -28,7 +28,7 @@ fn main() {
     println!("  Timeout: {}s", config.settings.timeout);
 
     // Validate config
-    match validate_config(&config) {
+    match validate_config_basic(&config) {
         Ok(_) => println!("\nConfig validation: PASSED"),
         Err(e) => println!("\nConfig validation: FAILED - {}", e),
     }
