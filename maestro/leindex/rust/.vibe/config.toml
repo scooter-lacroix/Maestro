@@ -70,7 +70,7 @@ max_dirs_per_level = 20
 timeout_seconds = 2.0
 
 [session_logging]
-save_dir = "/home/stan/Prod/maestro/maestro/leindex/rust/.vibe/logs/session"
+save_dir = ".vibe/logs/session"
 session_prefix = "session"
 enabled = true
 

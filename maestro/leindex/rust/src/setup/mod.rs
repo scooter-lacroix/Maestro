@@ -440,6 +440,43 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         ),
     });
 
+    // Install bundled resources (zide, layouts, etc.)
+    {
+        let install_path = config.install_path.clone();
+        steps.push(Step {
+            name: "The Crescendo - Resources".to_string(),
+            description: "Installing Maestro bundled resources (zide, layouts)...".to_string(),
+            action: StepAction::Internal(Box::new(move || {
+                let repo_root = find_repo_root()?;
+                let maestro_home = expand_user_path(&install_path)?;
+                let src_resources = repo_root.join("maestro").join("leindex").join("rust").join("resources");
+                let dst_resources = maestro_home.join("resources");
+
+                let mut logs = Vec::new();
+
+                if src_resources.exists() {
+                    std::fs::create_dir_all(&dst_resources)?;
+                    copy_dir_recursive(&src_resources, &dst_resources)?;
+                    logs.push(format!(
+                        "Installed bundled resources to {}",
+                        dst_resources.display()
+                    ));
+
+                    // List what was installed
+                    for entry in std::fs::read_dir(&dst_resources)?.flatten() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            logs.push(format!("  - {}", name));
+                        }
+                    }
+                } else {
+                    logs.push("  [WARN] No resources directory found in repo (development build?)".to_string());
+                }
+
+                Ok(logs)
+            })),
+        });
+    }
+
     steps.push(Step {
         name: "The Crescendo - Frontend".to_string(),
         description: "Building Maestro Memory Dashboard...".to_string(),

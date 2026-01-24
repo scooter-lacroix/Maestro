@@ -5,7 +5,9 @@
 
 set -e
 
-FRONTEND_DIR="/home/stan/Prod/maestro/maestro/memory/frontend"
+# Use the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FRONTEND_DIR="$SCRIPT_DIR"
 DIST_DIR="$FRONTEND_DIR/dist"
 
 echo "================================"
@@ -71,7 +73,7 @@ if [ -d "$DIST_DIR" ]; then
     echo "  maestro memory serve"
     echo ""
     echo "Or directly with uvicorn:"
-    echo "  cd /home/stan/Prod/maestro"
+    echo "  cd $SCRIPT_DIR/../.."
     echo "  python -m maestro.memory.cli serve"
     echo ""
 else
