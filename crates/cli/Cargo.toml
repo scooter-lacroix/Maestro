@@ -16,8 +16,14 @@ leindex-core = { path = "../../maestro/leindex/rust" }
 # Cockpit TUI
 maestro-cockpit = { path = "../cockpit" }
 
+# Pi-mono integration
+maestro-pi-mono = { path = "../pi-mono" }
+
 # CLI argument parsing
 clap = { version = "4.5", features = ["derive"] }
+
+# Interactive prompts
+dialoguer = "0.11"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

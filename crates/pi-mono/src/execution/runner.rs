@@ -41,9 +41,6 @@ use tracing::{debug, error, info, instrument, warn};
 /// Maximum size for previous output substitution (100KB)
 const MAX_PREVIOUS_OUTPUT_SIZE: usize = 102_400;
 
-/// Default minimum concurrent limit
-const DEFAULT_MIN_CONCURRENT_LIMIT: usize = 1;
-
 /// Default maximum concurrent limit
 const DEFAULT_MAX_CONCURRENT_LIMIT: usize = 100;
 

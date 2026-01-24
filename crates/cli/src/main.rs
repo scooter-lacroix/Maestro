@@ -15,6 +15,10 @@ use leindex_core::cli::memory_cmd as memory;
 use leindex_core::cli::mcp;
 use leindex_core::cli::orchestrate;
 
+// Local CLI commands
+mod commands;
+use commands::configure;
+
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
 #[command(name = "maestro")]
@@ -45,6 +49,13 @@ enum Commands {
         /// Analysis type: ast, callgraph, cfg, dfg, slicing, all
         #[arg(short, long, default_value = "all")]
         analysis: String,
+    },
+
+    /// Configure Maestro integrations
+    Configure {
+        /// Enable pi-mono configuration wizard
+        #[arg(long)]
+        pi_mono: bool,
     },
 
     /// LeIndex project-level operations (index, search, 5-phase analysis)
@@ -259,6 +270,7 @@ async fn main() -> Result<()> {
             language,
             analysis,
         } => analyze::run(path, format, language, analysis).await,
+        Commands::Configure { pi_mono } => configure::run(pi_mono).await,
         Commands::LeIndex { command } => leindex_cmd::run(leindex_cmd::LeIndexCommand { command }).await,
         Commands::Memory { command } => match command {
             MemoryCommands::Serve {
