@@ -66,6 +66,7 @@ pub use agents::workflows::{
 pub use execution::{
     Executor, ExecutorConfig, ExecutionResult,
     UsageMetrics, StreamEvent, StreamEventType, SubagentResult,
+    runner::{SubagentRunner, RunnerConfig},
 };
 pub use detection::{PiDetection, Capabilities};
 pub use discovery::{ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS};

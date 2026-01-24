@@ -18,6 +18,8 @@
 //! let executor = Executor::new(config);
 //! ```
 
+pub mod runner;
+
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

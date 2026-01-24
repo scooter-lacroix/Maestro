@@ -22,7 +22,7 @@ pub enum AgentRole {
 }
 
 /// Pi-mono agent types
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PiAgentType {
     Scout,
     Planner,
