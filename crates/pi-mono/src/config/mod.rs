@@ -21,6 +21,7 @@ pub mod models;
 pub mod io;
 pub mod selection;
 pub mod wizard;
+pub mod validation;
 
 use serde::{Deserialize, Serialize};
 
@@ -101,3 +102,12 @@ pub use selection::ModelSelector;
 
 // Re-exports from wizard module
 pub use wizard::{WizardStep, WizardState, ConfigWizard};
+
+// Re-exports from validation module
+pub use validation::{
+    validate_pi_path,
+    validate_model_assignments,
+    validate_config_ext,
+    ValidationWarning,
+    ValidationSeverity,
+};

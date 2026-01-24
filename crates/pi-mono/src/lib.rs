@@ -48,8 +48,9 @@ pub mod discovery;
 // Public re-exports for convenience
 pub use config::{
     PiMonoConfig, ModelTier, ModelPreference, ProviderConfig, RoleAssignment, ExecutionSettings, ModelSelector,
-    io::{config_dir, config_path, ensure_config_dir, load_config, load_config_from_path, save_config, save_config_to_path, default_config, validate_config},
+    io::{config_dir, config_path, ensure_config_dir, load_config, load_config_from_path, save_config, save_config_to_path, default_config, validate_config as validate_config_basic},
     wizard::{WizardStep, WizardState, ConfigWizard},
+    validation::{validate_pi_path, validate_model_assignments, validate_config_ext, ValidationWarning, ValidationSeverity},
 };
 // ModelConfig is the PiMonoConfig from the models module (with role_assignments)
 pub use config::models::PiMonoConfig as ModelConfig;
