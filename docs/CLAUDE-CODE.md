@@ -1,4 +1,4 @@
-# Maestro for Claude Code
+# Maestro for Claude Code (v2.5)
 
 Complete guide to using Maestro with Claude Code.
 
@@ -149,6 +149,13 @@ Execute a track's implementation plan.
    - Updates plan.md
 4. Stores progress to memory
 
+**Pi-Mono Flags** (v2.5):
+```
+--pi-agent       Run with Pi-Mono agent orchestration
+--pi-chain       Execute tasks in chain mode (sequential dependencies)
+--pi-parallel    Execute independent tasks in parallel
+```
+
 **Automatic Agent Selection**:
 ```
 Trivial (1-5 lines)      → Direct implementation
@@ -161,6 +168,7 @@ Spec-driven              → oracle for specification
 **Example**:
 ```
 /maestro:implement password-reset
+/maestro:implement password-reset --pi-parallel
 ```
 
 ### `/maestro:status`
@@ -187,6 +195,40 @@ Progress: 3/12 tasks (25%)
 Next Action: Implement password reset token validation
 Blockers: None
 ```
+
+### `/maestro:pi-status`
+
+View Pi-Mono agent orchestration status.
+
+**When to use**: Checking Pi-Mono pipeline state
+
+**Output includes**:
+- Active Pi agents
+- Chain/parallel execution state
+- Agent task assignments
+- Pipeline progress
+
+### `/maestro:pi-test`
+
+Run Pi-Mono integration tests.
+
+**When to use**: Validating Pi-Mono setup and agent connectivity
+
+### `/maestro:pi-agents`
+
+List available Pi-Mono agents and their capabilities.
+
+**When to use**: Discovering Pi agent ecosystem
+
+### `/maestro:configure --pi-mono`
+
+Configure Pi-Mono integration settings.
+
+**What it configures**:
+- Pi agent discovery
+- Chain execution policies
+- Parallel task limits
+- Agent capability mapping
 
 ### `/maestro:revert [track|phase|task]`
 
@@ -248,6 +290,7 @@ Access LeIndex - Maestro's powerful code indexing and search system.
 - Full-text search (Tantivy BM25)
 - Semantic search (vector embeddings)
 - 5-layer code analysis
+- **Turso database backend** (v2.5) for distributed persistence
 - File change tracking
 
 **Commands**:
@@ -482,6 +525,21 @@ Each directory has independent Maestro state.
 
 ### Resume Capability
 Setup can resume from any step using `setup_state.json`.
+
+### LSP Integration (v2.5)
+Maestro auto-starts language servers for enhanced code intelligence:
+- **rust-analyzer** for Rust projects
+- **ruff-lsp** for Python projects
+- **typescript-language-server** for TypeScript/JavaScript projects
+
+LSP provides real-time diagnostics, hover info, and go-to-definition during implementation.
+
+### Conductor Module (v2.5)
+The TUI now uses the **Conductor** module (replacing the legacy Orchestrate pane) for:
+- Track visualization and navigation
+- Agent task delegation
+- Real-time progress monitoring
+- Pi-Mono pipeline control
 
 ## Examples
 
