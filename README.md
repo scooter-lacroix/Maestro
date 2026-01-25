@@ -1,4 +1,4 @@
-# Maestro v2 - The Unified Development Framework
+# Maestro v2.5 - The Unified Development Framework
 
 <div align="center">
 
@@ -22,7 +22,8 @@ Maestro v2 is a major architectural evolution that unifies three powerful system
 - **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
 - **16 Integrated Hooks** - Session start, tool use, coordination, and session end hooks
 - **LeIndex Code Analysis** - 5-layer code analysis with semantic indexing (TLDR compatibility alias)
-- **Orchestrate Engine** - Token-efficient track-based automation (inspired by Ralph TUI)
+- **Conductor Engine** - Token-efficient track-based automation (inspired by Ralph TUI)
+- **Pi-Mono Integration** - Unified agent discovery, detection, and execution across mono-repos
 - **Cockpit TUI** - Rust-based Terminal UI for session, MCP, and orchestration management
 
 Transform AI chat interactions into professional software engineering workflows with:
@@ -92,9 +93,9 @@ Built directly into Maestro - no external MCP required:
 
 Rust-based (ratatui) Terminal UI for complete project management:
 
-- **7 Tabs**: Dashboard, Sessions, Projects, Analysis, LSP, Settings, Orchestrate
+- **7 Tabs**: Dashboard, Sessions, Projects, Analysis, LSP, Memory, Settings
 - **Session Management**: Create, fork, and group tmux sessions by project
-- **Orchestrate Pane**: Track-based task automation with live output
+- **Conductor Module**: Track-based task automation with live output (replaces Orchestrate)
 - **LSP Management**: Status, toggle, restart, and log viewing
 - **MCP Pooling**: Efficient socket pooling reduces memory usage by 50%+
 - **Configuration**: TOML-based config at `~/.config/maestro/config.toml`
@@ -104,7 +105,7 @@ Access via:
 maestro tui
 ```
 
-### Orchestrate Engine
+### Conductor Engine
 
 Token-efficient track-based automation (inspired by [subsy/ralph-tui](https://github.com/subsy/ralph-tui)):
 
@@ -115,12 +116,29 @@ Token-efficient track-based automation (inspired by [subsy/ralph-tui](https://gi
 - **Session Persistence**: Lock files, crash recovery, journal logs
 - **Multi-Agent Support**: claude, gemini, qwen, opencode runners
 
-Access via TUI (Orchestrate tab) or CLI:
+Access via TUI or CLI:
 ```bash
-maestro orchestrate start <track> --mode building
-maestro orchestrate status
-maestro orchestrate pause
+maestro conductor start <track> --mode building
+maestro conductor status
+maestro conductor pause
 ```
+
+### Pi-Mono Integration
+
+Unified agent discovery and execution for mono-repo environments:
+
+- **Detection**: Automatic detection of Pi-enabled projects and configurations
+- **Discovery**: Scan and catalog available agents across the workspace
+- **Config Management**: TOML-based configuration for agent settings
+- **Agent Execution**: Unified interface for running detected agents
+- **Cross-Project Coordination**: Manage agents across multiple sub-projects
+
+Located at `crates/pi-mono/` with modules:
+- `detection.rs` - Pi project detection
+- `discovery.rs` - Agent discovery scanning
+- `config/` - Configuration management
+- `agents/` - Agent definitions and registry
+- `execution/` - Agent execution runtime
 
 ### Web Dashboard
 
@@ -215,7 +233,7 @@ Maestro solves these problems by:
 6. **Memory Aware**: Built-in Nexus Memory learns your project context
 7. **Git Integrated**: Tracks progress alongside commits for complete history
 8. **Rust-First Architecture**: Native performance, memory safety, modular crates
-9. **Orchestrate Engine**: Token-efficient automation with LeIndex context
+9. **Conductor Engine**: Token-efficient automation with LeIndex context
 10. **Session Management**: Cockpit TUI for managing complex workflows
 11. **Visual Dashboard**: Web interface for memory and project exploration
 
@@ -230,18 +248,21 @@ maestro/
 ├── crates/
 │   ├── cli/              # maestro-cli (produces "maestro" binary)
 │   ├── cockpit/          # maestro-cockpit (ratatui TUI library)
+│   │                     # Tabs: Dashboard, Sessions, Projects, Analysis, LSP, Memory, Settings
+│   ├── pi-mono/          # Pi-Mono integration (detection, discovery, agents, execution)
 │   └── lsp-bridge/       # maestro-lsp-mcp-bridge (LSP protocol bridge)
 │
 └── leindex/
-    └── rust/             # leindex-core (core library + analysis engine)
+    └── rust/             # leindex-core (core library + analysis engine, Turso/libsql)
 ```
 
 ### Dependency Rules (One-Way)
 
 ```
-cli → cockpit + core
-cockpit → core
-core ↛ cockpit (forbidden)
+cli → cockpit + leindex-core + pi-mono
+cockpit → leindex-core
+pi-mono → (standalone)
+leindex-core ↛ cockpit (forbidden)
 ```
 
 ### Legacy Code Archive
@@ -617,16 +638,16 @@ maestro tui
 # - View socket pooling statistics
 ```
 
-### Orchestrate Pane (Ralph-Style Autonomous Execution)
+### Conductor Module (Ralph-Style Autonomous Execution)
 
-The Cockpit TUI includes an Orchestrate pane (tab 4) for autonomous track execution, inspired by [Ralph TUI](https://github.com/subsy/ralph-tui).
+The Cockpit TUI includes a Conductor module for autonomous track execution, inspired by [Ralph TUI](https://github.com/subsy/ralph-tui). The Conductor replaces the legacy Orchestrate pane.
 
 **Key Features:**
 - **Track/Task Tree**: Left panel shows all tracks with expandable task hierarchies
 - **Live Output**: Right panel displays real-time iteration output with scrolling
-- **Session Management**: Start, pause, resume, or abort orchestrate loops
+- **Session Management**: Start, pause, resume, or abort conductor loops
 - **LeIndex Integration**: Token-efficient context injection using 5-phase analysis
-- **Crash-Safe Persistence**: Session state saved to `~/.maestro/orchestrate/` with lock files
+- **Crash-Safe Persistence**: Session state saved to `~/.maestro/conductor/` with lock files
 
 **Modes:**
 - **Planning Mode**: Generate/update plans without implementation. Focus on analysis and architecture.
@@ -635,21 +656,21 @@ The Cockpit TUI includes an Orchestrate pane (tab 4) for autonomous track execut
 **Keybindings:**
 - `O` / `Shift+O`: Cycle through tracks
 - `Space`: Expand/collapse task nodes
-- `s`: Start orchestrate loop
-- `p`: Pause orchestrate loop
+- `s`: Start conductor loop
+- `p`: Pause conductor loop
 - `r`: Resume paused loop
-- `x`: Abort orchestrate loop
+- `x`: Abort conductor loop
 - `?`: Show help overlay
 
 **Safety Notes:**
 - **Session Locks**: Each track has a lock file to prevent concurrent execution. Stale locks (>1 hour) are automatically cleaned.
-- **Crash Recovery**: If the orchestrate process crashes, session state is preserved. Resume with `r` key.
+- **Crash Recovery**: If the conductor process crashes, session state is preserved. Resume with `r` key.
 - **Dangerous Mode**: When using auto-approval agents, consider enabling sandbox mode (future enhancement) for file isolation.
 - **Context Budget**: LeIndex context budget is configurable (default: 50K tokens). Ultra mode (<50K) uses minimal context; Balanced mode (>50K) provides full analysis.
 
 **State Directory:**
 ```
-~/.maestro/orchestrate/
+~/.maestro/conductor/
 ├── locks/           # Per-track lock files
 ├── sessions/        # Session state JSON
 └── logs/            # Iteration logs (JSONL)
@@ -658,16 +679,16 @@ The Cockpit TUI includes an Orchestrate pane (tab 4) for autonomous track execut
 **Example Workflow:**
 
 1. Launch Cockpit: `maestro tui`
-2. Navigate to Orchestrate tab (tab 4)
+2. Navigate to Analysis tab and select a track
 3. Select a track using `O` key
-4. Press `s` to start orchestrate loop
+4. Press `s` to start conductor loop
 5. Monitor progress in live output panel
 6. Press `p` to pause if needed
 7. Press `r` to resume
 8. Press `x` to abort when complete
 
 **Completion Detection:**
-The orchestrate engine detects task completion through:
+The conductor engine detects task completion through:
 - Plan.md status marker updates (`[~]` → `[x]`)
 - Git commits with descriptive messages
 - `<promise>COMPLETE</promise>` token in agent output
@@ -689,7 +710,7 @@ Maestro embodies these principles:
 
 ## Testing
 
-Maestro v2 includes comprehensive testing infrastructure:
+Maestro v2.5 includes comprehensive testing infrastructure:
 
 - **250+ tests** across unit, integration, E2E, and performance suites
 - **Target >98% code coverage** for critical paths
@@ -714,10 +735,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Built for Claude Code and OpenCode ecosystems
 - Inspired by test-driven development and spec-first methodologies
 - Integrates Council of Agents framework
-- **Orchestrate Pane**: Inspired by [subsy/ralph-tui](https://github.com/subsy/ralph-tui) (MIT License) - Terminal UI for autonomous task execution
+- **Conductor Module**: Inspired by [subsy/ralph-tui](https://github.com/subsy/ralph-tui) (MIT License) - Terminal UI for autonomous task execution
 - **Ralph Methodology**: Inspired by [ghuntley/how-to-ralph-wiggum](https://github.com/ghuntley/how-to-ralph-wiggum) - Autonomous AI development patterns
 
-The Orchestrate pane in Maestro Cockpit implements concepts from Ralph TUI, providing autonomous task execution with track-based planning, LeIndex-powered context injection, and crash-safe session persistence.
+The Conductor module in Maestro Cockpit implements concepts from Ralph TUI, providing autonomous task execution with track-based planning, LeIndex-powered context injection, and crash-safe session persistence.
 
 ## Support
 
@@ -733,6 +754,6 @@ The Orchestrate pane in Maestro Cockpit implements concepts from Ralph TUI, prov
 
 [Get Started](docs/CLAUDE-CODE.md) · [Features](#key-features) · [Documentation](docs/) · [Web Dashboard](#nexus-memory-system)
 
-**Maestro - The Unified Development Framework**
+**Maestro v2.5 - The Unified Development Framework**
 
 </div>

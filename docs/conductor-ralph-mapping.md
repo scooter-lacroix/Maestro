@@ -51,24 +51,24 @@ This document provides a complete mapping of Ralph TUI components, systems, and 
 
 | Ralph Component | File | Maestro Equivalent | Status |
 |-----------------|------|-------------------|--------|
-| `Header` | `tui/components/Header.tsx` | `conductor/header.rs` | ❌ To Build |
-| `Footer` | `tui/components/Footer.tsx` | `conductor/footer.rs` | ❌ To Build |
-| `LeftPanel` | `tui/components/LeftPanel.tsx` | `conductor/track_tree.rs` | ⚠️ Partial |
-| `RightPanel` | `tui/components/RightPanel.tsx` | `conductor/details_panel.rs` | ⚠️ Partial |
-| `ProgressDashboard` | `tui/components/ProgressDashboard.tsx` | `conductor/dashboard.rs` | ❌ To Build |
-| `SubagentTreePanel` | `tui/components/SubagentTreePanel.tsx` | `conductor/subagent_tree.rs` | ❌ To Build |
+| `Header` | `tui/components/Header.tsx` | `conductor/header.rs` | ✅ Complete |
+| `Footer` | `tui/components/Footer.tsx` | `conductor/footer.rs` | ✅ Complete |
+| `LeftPanel` | `tui/components/LeftPanel.tsx` | `conductor/track_tree.rs` | ✅ Complete |
+| `RightPanel` | `tui/components/RightPanel.tsx` | `conductor/details_panel.rs` | ✅ Complete |
+| `ProgressDashboard` | `tui/components/ProgressDashboard.tsx` | `conductor/dashboard.rs` | ✅ Complete |
+| `SubagentTreePanel` | `tui/components/SubagentTreePanel.tsx` | `conductor/subagent_tree.rs` | ✅ Complete |
 | `TabBar` | `tui/components/TabBar.tsx` | Cockpit tab system (exists) | ✅ Exists |
 | `HelpOverlay` | `tui/components/HelpOverlay.tsx` | Cockpit help modal (exists) | ✅ Exists |
-| `TaskDetailView` | `tui/components/TaskDetailView.tsx` | `conductor/task_detail.rs` | ❌ To Build |
-| `IterationHistoryView` | `tui/components/IterationHistoryView.tsx` | `conductor/iteration_history.rs` | ❌ To Build |
+| `TaskDetailView` | `tui/components/TaskDetailView.tsx` | `conductor/details_panel.rs` | ✅ Complete |
+| `IterationHistoryView` | `tui/components/IterationHistoryView.tsx` | `conductor/iteration_history.rs` | ✅ Complete |
 
 ### 2.2 Engine Components
 
 | Ralph Component | File | Maestro Equivalent | Status |
 |-----------------|------|-------------------|--------|
 | `ExecutionEngine` | `engine/index.ts` | `orchestrate/engine.rs` | ✅ Exists |
-| `RateLimitDetector` | `engine/rate-limit-detector.ts` | `orchestrate/rate_limit.rs` | ❌ To Build |
-| `AutoCommit` | `engine/auto-commit.ts` | `orchestrate/commit.rs` | ❌ To Build |
+| `RateLimitDetector` | `engine/rate-limit-detector.ts` | `orchestrate/rate_limit.rs` | ✅ Complete |
+| `AutoCommit` | `engine/auto-commit.ts` | `conductor/git.rs` | ✅ Complete |
 
 ### 2.3 Session Components
 
@@ -917,37 +917,35 @@ pub struct ContextSource {
 | Component | File | Notes |
 |-----------|------|-------|
 | Path resolution | `maestro_paths.rs` | Smart project discovery |
-| Basic conductor pane | `conductor.rs` | Renamed from orchestrate |
-| Track/Task models | `model.rs` | Full data models |
+| Conductor pane | `conductor/pane.rs` | Full implementation |
+| Track/Task models | `conductor/model.rs` | Full data models |
 | Parser | `parser.rs` | tracks.md + plan.md |
 | Session state | `state.rs` | Lock + persistence |
-| Basic engine | `engine.rs` | Iteration loop |
+| Execution engine | `engine.rs` | Iteration loop |
 | CLI runner | `runner.rs` | Multi-agent support |
+| Header component | `conductor/header.rs` | Compact status bar |
+| Footer component | `conductor/footer.rs` | Keyboard shortcuts |
+| Track tree UI | `conductor/track_tree.rs` | Hierarchical with j/k nav |
+| Details panel | `conductor/details_panel.rs` | Multi-mode (Details/Output/Prompt) |
+| Progress dashboard | `conductor/dashboard.rs` | Detailed status overlay |
+| Subagent tree | `conductor/subagent_tree.rs` | Tool-call visualization |
+| Keybindings | `conductor/keybindings.rs` | Full Ralph keybindings |
+| State machine | `conductor/state_machine.rs` | Transition logic |
+| Live polling | `conductor/polling.rs` | session.json + iterations.jsonl |
+| Rate limit detection | `orchestrate/rate_limit.rs` | Engine-side detection |
+| Git info display | `conductor/git.rs` | Branch + dirty flag |
+| Iteration history | `conductor/iteration_history.rs` | Past iterations view |
+| Project selector | `conductor/project_selector.rs` | Multi-project discovery |
+| Context engine | `orchestrate/context.rs` | 5-phase LeIndex context |
+| Theme | `conductor/theme.rs` | Ralph-inspired styling |
 
-### 9.2 Partial ⚠️
+### 9.2 Deferred (Future Enhancement)
 
-| Component | Current State | Remaining Work |
-|-----------|---------------|----------------|
-| Track tree UI | Basic list | Hierarchical display, status colors, expand/collapse |
-| Details panel | Basic info | View mode toggle, output streaming, prompt preview |
-| Keybindings | Basic navigation | Full Ralph keybindings |
-
-### 9.3 To Build ❌
-
-| Component | Priority | Effort |
-|-----------|----------|--------|
-| Header component | High | S |
-| Footer component | High | S |
-| Progress dashboard | Medium | M |
-| ConductorState model | High | M |
-| Event system | High | M |
-| Live polling | High | M |
-| Rate limit detection | Medium | M |
-| Subagent tree | Low | L |
-| View mode toggle | Medium | S |
-| Iteration timing | Medium | S |
-| Git info display | Low | S |
-| Setup wizard | Low | L |
+| Component | Priority | Notes |
+|-----------|----------|-------|
+| Sandbox execution | Low | bwrap/sandbox-exec style isolation |
+| Remote viewing | Low | Remote session control |
+| Setup wizard | Low | First-run interactive setup |
 
 ---
 

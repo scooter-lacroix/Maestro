@@ -2,7 +2,7 @@
 
 Maestro has a **single installer entrypoint**: `install.sh`.
 
-`install.sh` launches the Rust **Conductor Wizard** (`maestro-setup`) which can configure multiple AI coding tools in one run (Claude Code, OpenCode, Codex, Gemini, Qwen, Amp, Droid).
+`install.sh` launches the Rust **Conductor Wizard** (`maestro-setup`) which can configure multiple AI coding tools in one run (Claude Code, OpenCode, Codex, Gemini, Qwen, Amp, Droid), Pi-Mono integration for subagent workflows, and LSP server auto-installation.
 
 ## Quick Install
 
@@ -26,6 +26,8 @@ The wizard configures the following components (depending on which toggles you e
 | **Maestro protocols** | Canonical command protocols installed under `~/.maestro/integrations/commands/` (or your chosen install path) |
 | **Tool command packs** | Installs the tool-specific command/prompt pack (Claude Code commands, OpenCode skill, Codex prompts, Gemini/Qwen commands) |
 | **LeIndex MCP wiring** | Adds a `leindex` MCP server entry pointing at `maestro mcp tool-search` in each tool’s config format |
+| **Pi-Mono integration** | Subagent workflow orchestration via `crates/pi-mono/` |
+| **LSP servers** | Auto-installs lsp-bridge and language servers for supported languages |
 | **Optional search stack** | Go + Zoekt (if enabled) |
 | **Rust CLI** | Installs the Rust `maestro` binary to `~/.local/bin/maestro` (after build) |
 
@@ -38,11 +40,13 @@ The wizard configures the following components (depending on which toggles you e
 - **Rust + Cargo** - Required to build Maestro’s Rust core (installer will install via rustup if missing)
 - **git** - For version control integration
 - **build tools** - `gcc`, `pkg-config`, `libssl-dev` (installed via the wizard on Debian/Ubuntu)
+- **Turso/libsql** - Required for Pi-Mono persistent storage (auto-installed by wizard)
 
 ### Optional (Recommended)
 
 - **Node.js + npm** - Required to build the Memory Dashboard frontend step (`npm install && npm run build`)
 - **Go** - Required if you enable Zoekt
+- **lsp-bridge** - Enhanced LSP support (wizard provides installation guidance)
 
 The wizard installs some dependencies automatically (Debian/Ubuntu). For other platforms, install equivalents manually.
 
@@ -63,6 +67,8 @@ The wizard installs some dependencies automatically (Debian/Ubuntu). For other p
   - Qwen Code
   - Amp CLI
   - Droid CLI
+- Enable Pi-Mono integration for subagent workflows
+- Configure LSP server auto-installation (wizard provides guidance)
 - Optionally enable Go/Zoekt, tmux tooling, etc
 
 ### Step 2: What “first-class integration” means (per tool)
@@ -133,6 +139,20 @@ Run `/maestro:configure` to enable enhanced agent capabilities:
 ```
 
 This checks for external CLI tools (gemini-cli, qwen-cli, codex-cli) and creates agent configurations for available tools. Maestro works without this step, but with expanded capabilities when configured.
+
+### Optional: Configure Pi-Mono
+
+Run `/maestro:configure --pi-mono` to enable Pi-Mono subagent workflows:
+
+```
+/maestro:configure --pi-mono
+```
+
+Verify Pi-Mono status:
+
+```bash
+maestro pi-status
+```
 
 ---
 

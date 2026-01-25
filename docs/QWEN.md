@@ -225,6 +225,39 @@ maestro le-index phase4 .    # Data flow graph
 maestro le-index phase5 .    # Program slicing
 ```
 
+## Pi-Mono Integration
+
+Maestro v2.5 includes Pi-Mono integration for subagent workflows with adaptive model selection.
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `/maestro:pi-status` | Show Pi-Mono configuration |
+| `/maestro:pi-test` | Test subagent functionality |
+| `/maestro:pi-agents` | List available pi agents |
+
+### Implementation Flags
+
+When using `/maestro:implement`, you can specify Pi-Mono execution modes:
+
+```bash
+# Single agent execution
+/maestro:implement my-track --pi-agent scout
+
+# Chain execution (sequential)
+/maestro:implement my-track --pi-chain scout,architect,critic
+
+# Parallel execution
+/maestro:implement my-track --pi-parallel scout,kraken
+```
+
+**Available Pi Agents**: `scout`, `architect`, `critic`, `kraken`
+
+### Configuration
+
+Pi-Mono settings are stored in: `~/.maestro/config/pi-mono.yaml`
+
 ## Troubleshooting
 
 ### "Command not found: /maestro:*"

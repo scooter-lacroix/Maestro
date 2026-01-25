@@ -211,6 +211,39 @@ This enables:
 /maestro le-index phase5 .    # Program slicing
 ```
 
+## Pi-Mono Integration
+
+Maestro v2.5 includes Pi-Mono integration for subagent workflows with adaptive model selection.
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `/prompts:maestro:pi-status` | Show Pi-Mono configuration |
+| `/prompts:maestro:pi-test` | Test subagent functionality |
+| `/prompts:maestro:pi-agents` | List available pi agents |
+
+### Implementation Flags
+
+When using `/prompts:maestro:implement`, you can specify Pi-Mono execution modes:
+
+```bash
+# Single agent execution
+/prompts:maestro:implement my-track --pi-agent scout
+
+# Chain execution (sequential)
+/prompts:maestro:implement my-track --pi-chain scout,architect,critic
+
+# Parallel execution
+/prompts:maestro:implement my-track --pi-parallel scout,kraken
+```
+
+**Available Pi Agents**: `scout`, `architect`, `critic`, `kraken`
+
+### Configuration
+
+Pi-Mono settings are stored in: `~/.maestro/config/pi-mono.yaml`
+
 ## Troubleshooting
 
 ### "Maestro prompt not found"

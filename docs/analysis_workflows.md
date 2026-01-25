@@ -54,7 +54,7 @@ This document defines the two primary analysis workflows for the LeIndex 5-phase
 **Purpose:** Full 5-phase analysis with balanced mode for generating implementation-ready context bundles.
 
 **Use Cases:**
-- Orchestrate loop context generation
+- Conductor loop context generation
 - Pre-implementation analysis
 - Code modification planning
 - Refactoring preparation
@@ -136,7 +136,7 @@ This document defines the two primary analysis workflows for the LeIndex 5-phase
 4. Data flow hints
 5. Optimization recommendations
 
-**Usage in Orchestrate Loop:**
+**Usage in Conductor Loop:**
 ```python
 context = {
     "phase1": phase1_structural_scan(opts),
@@ -165,7 +165,7 @@ context = {
 /phase5 . --mode balanced
 ```
 
-### Context Bundle (Orchestrate Loop)
+### Context Bundle (Conductor Loop)
 ```bash
 /bundle . --mode balanced
 ```
@@ -194,7 +194,7 @@ The Analysis tab in Cockpit provides:
 1. **Quick Actions** - Pre-configured buttons for common workflows
 2. **Phase Buttons** - Individual phase execution buttons
 3. **History** - Analysis result history with bounded storage
-4. **Export** - Context bundle export for orchestrate loops
+4. **Export** - Context bundle export for conductor loops
 
 ### UI Layout
 

@@ -19,7 +19,7 @@ The enhanced Analysis tab will provide:
 1. **Quick Action Buttons** - Pre-configured workflow buttons
 2. **Phase Buttons** - Individual phase execution buttons
 3. **Enhanced History** - Persisted analysis history with bounded storage
-4. **Context Bundle Export** - Export functionality for orchestrate loops
+4. **Context Bundle Export** - Export functionality for conductor loops
 
 ## UI Layout
 
@@ -145,7 +145,7 @@ async fn execute_analysis_phase(&mut self, phase: usize) -> Result<()> {
 ```
 
 ### Context Bundle (B)
-Runs all 5 phases and formats as JSON bundle for orchestrate.
+Runs all 5 phases and formats as JSON bundle for conductor.
 
 ## Bounded Storage
 
@@ -156,7 +156,7 @@ Analysis history will be limited to:
 
 ## Export Format
 
-Context bundle for orchestrate:
+Context bundle for conductor:
 ```json
 {
   "timestamp": "2026-01-23T14:32:00Z",
