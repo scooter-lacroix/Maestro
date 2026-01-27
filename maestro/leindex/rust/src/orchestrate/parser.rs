@@ -68,19 +68,56 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     let path_str = &line[start + 2..start + end];
                     // Join against parent directory of tracks.md, not the file itself
                     let relative_path = path_str.trim_start_matches("./").trim_start_matches(".");
-                    let resolved_path = tracks_parent.join(relative_path);
+                    
+                    // Intelligent path resolution:
+                    // If the path starts with the same directory name as tracks_parent,
+                    // it's likely relative to the project root, not the maestro/ directory.
+                    let resolved_path = if let Some(dir_name) = tracks_parent.file_name() {
+                        if relative_path.starts_with(dir_name.to_str().unwrap_or("")) {
+                            // Relative to project root (parent of tracks_parent)
+                            tracks_parent.parent().unwrap_or(tracks_parent).join(relative_path)
+                        } else {
+                            // Relative to tracks_parent (maestro/ directory)
+                            tracks_parent.join(relative_path)
+                        }
+                    } else {
+                        tracks_parent.join(relative_path)
+                    };
 
                     // SECURITY: Canonicalize and validate path to prevent traversal attacks
+                    // If canonicalize fails (file doesn't exist), we still want to keep it
+                    // but we should make it absolute if possible to make starts_with reliable.
                     let canonical_path = resolved_path.canonicalize()
-                        .unwrap_or(resolved_path.clone());
+                        .unwrap_or_else(|_| {
+                            if resolved_path.is_relative() {
+                                std::env::current_dir().unwrap_or_default().join(&resolved_path)
+                            } else {
+                                resolved_path.clone()
+                            }
+                        });
+                    
                     let canonical_base = tracks_parent.canonicalize()
-                        .unwrap_or(tracks_parent.to_path_buf());
+                        .unwrap_or_else(|_| {
+                            if tracks_parent.is_relative() {
+                                std::env::current_dir().unwrap_or_default().join(tracks_parent)
+                            } else {
+                                tracks_parent.to_path_buf()
+                            }
+                        });
 
-                    // Verify the resolved path is within the project root (parent directory)
-                    if !canonical_path.starts_with(&canonical_base) {
+                    // For the check, we use the root (parent of maestro/ if named maestro)
+                    let check_base_owned = if canonical_base.file_name().map_or(false, |n| n == "maestro" || n == ".maestro") {
+                        canonical_base.parent().unwrap_or(&canonical_base).to_path_buf()
+                    } else {
+                        canonical_base.clone()
+                    };
+
+                    // Verify the resolved path is within the project root
+                    if !canonical_path.starts_with(&check_base_owned) {
                         tracing::warn!(
-                            "Track path {} resolves outside project root, rejecting",
-                            path_str
+                            "Track path {} resolves outside project root ({:?}), rejecting",
+                            path_str,
+                            check_base_owned
                         );
                         continue;
                     }
@@ -88,8 +125,8 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     link_path = Some(canonical_path);
 
                     // Extract track ID from path
-                    if let Some(folder_name) = path_str.rsplit('/').next() {
-                        track_id = folder_name.trim_end_matches('/').to_string();
+                    if let Some(folder_name) = path_str.trim_end_matches('/').rsplit('/').next() {
+                        track_id = folder_name.to_string();
                     }
                 }
             }

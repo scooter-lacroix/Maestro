@@ -435,6 +435,29 @@ impl MemoryService {
         })
     }
 
+    /// List memories for a specific track
+    pub fn list_memories_for_track(&self, track_id: &str, limit: usize) -> Result<Vec<Memory>> {
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, content, summary, category, importance, source, session_id,
+                        project_id, track_id, command, command_context, created_at,
+                        expires_at, last_accessed, meta_data, tags
+                 FROM memories 
+                 WHERE track_id = ? OR content LIKE ?
+                 ORDER BY created_at DESC
+                 LIMIT ?",
+            )?;
+
+            let track_pattern = format!("%{}%", track_id);
+            let memories = stmt
+                .query_map(params![track_id, track_pattern, limit as i32], |row| self.map_memory(row))?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect track memories")?;
+
+            Ok(memories)
+        })
+    }
+
     // ========================================================================
     // Scanning Operations
     // ========================================================================

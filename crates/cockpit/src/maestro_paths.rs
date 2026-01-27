@@ -12,6 +12,7 @@ const TRACKS_SEARCH_PATHS: &[&str] = &[
     "maestro/tracks.md",       // Standard Maestro project structure
     "tracks.md",               // Legacy or flat structure
     ".maestro/tracks.md",      // Hidden config structure
+    "maestro/tracks/tracks.md", // Deep structure
 ];
 
 /// Maestro project structure after discovery
@@ -32,10 +33,17 @@ pub struct MaestroProject {
 impl MaestroProject {
     /// Create a new MaestroProject from a discovered tracks.md path
     pub fn from_tracks_path(tracks_path: PathBuf) -> Option<Self> {
-        let tracks_dir = tracks_path.parent()?.to_path_buf();
+        // Absolute path is required for reliable parent/root determination
+        let absolute_path = if tracks_path.is_absolute() {
+            tracks_path
+        } else {
+            std::env::current_dir().ok()?.join(tracks_path)
+        };
+
+        let tracks_dir = absolute_path.parent()?.to_path_buf();
         
         // Determine root_dir: if tracks_dir ends with "maestro" or ".maestro", parent is root
-        let dir_name = tracks_dir.file_name()?.to_str()?;
+        let dir_name = tracks_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let root_dir = if dir_name == "maestro" || dir_name == ".maestro" {
             tracks_dir.parent()?.to_path_buf()
         } else {
@@ -49,7 +57,7 @@ impl MaestroProject {
         Some(Self {
             root_dir,
             tracks_dir,
-            tracks_path,
+            tracks_path: absolute_path,
             product_md: product_md.exists().then_some(product_md),
             workflow_md: workflow_md.exists().then_some(workflow_md),
         })

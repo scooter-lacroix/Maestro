@@ -7,6 +7,7 @@
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
 use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::PathBuf;
 
 use leindex_core::orchestrate::{
@@ -119,9 +120,21 @@ impl ConductorPane {
     }
 
     /// Create a conductor pane with auto-resolved tracks directory.
-    /// Uses maestro_paths to discover the tracks directory from current working dir.
+    /// Uses maestro_paths to discover the tracks directory from current working dir
+    /// and active tmux panes.
     pub fn auto_discover() -> Self {
-        let project = crate::maestro_paths::resolve_maestro_project(None);
+        let projects = crate::maestro_paths::discover_all_projects();
+        
+        // Prefer the project matching current working directory, or first available
+        let project = if let Ok(cwd) = std::env::current_dir() {
+            projects.iter()
+                .find(|p| cwd.starts_with(&p.root_dir))
+                .or_else(|| projects.first())
+                .cloned()
+        } else {
+            projects.first().cloned()
+        };
+
         let tracks_dir = project.as_ref().map(|p| p.tracks_dir.clone()).unwrap_or_else(|| PathBuf::from("."));
         let mut pane = Self::new(tracks_dir);
         pane.current_project = project;
@@ -132,29 +145,54 @@ impl ConductorPane {
     pub fn load_tracks(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let tracks_path = self.tracks_dir.join("tracks.md");
         
-        if !tracks_path.exists() {
-            self.error_message = Some(format!(
-                "No tracks.md found at: {}",
-                tracks_path.display()
-            ));
-            self.tracks = Vec::new();
-            return Ok(());
-        }
+        let mut loaded_tracks = if tracks_path.exists() {
+            match parse_tracks_md(&tracks_path) {
+                Ok(tracks) => tracks,
+                Err(e) => {
+                    self.error_message = Some(format!("Error loading tracks.md: {}", e));
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        // Discover external sessions from ~/.maestro/orchestrate
+        self.discover_external_sessions(&mut loaded_tracks);
         
-        match parse_tracks_md(&tracks_path) {
-            Ok(tracks) => {
-                self.tracks = tracks;
-                self.error_message = None;
-            }
-            Err(e) => {
-                self.error_message = Some(format!(
-                    "Error loading tracks.md: {}",
-                    e
-                ));
-                self.tracks = Vec::new();
+        self.tracks = loaded_tracks;
+        Ok(())
+    }
+
+    fn discover_external_sessions(&self, tracks: &mut Vec<Track>) {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
+        
+        if let Ok(entries) = std::fs::read_dir(orchestrate_base) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        let track_id = entry.file_name().to_string_lossy().to_string();
+                        
+                        // If not already in tracks, add it as an external track
+                        if !tracks.iter().any(|t| t.id == track_id) {
+                            let session_path = entry.path().join("session.json");
+                            if session_path.exists() {
+                                // Create a placeholder Track for this external session
+                                tracks.push(Track {
+                                    id: track_id.clone(),
+                                    description: "CLI/External Session".to_string(),
+                                    status: leindex_core::orchestrate::model::TrackStatus::InProgress,
+                                    link_path: entry.path(), // Use orchestrate dir as link path for now
+                                    metadata: None,
+                                    plan: None,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
-        Ok(())
     }
     
     /// Reload tracks (call when tracks_dir changes or to refresh)
@@ -208,9 +246,14 @@ impl ConductorPane {
         let tracks_clone = self.tracks.clone();
         
         for (idx, track) in tracks_clone.iter().enumerate() {
+            let is_master = track.id.contains("master") || track.is_master();
+            let is_external = track.description == "CLI/External Session";
+
             items.push(crate::conductor::model::SelectableItem::Track {
                 index: idx,
                 id: track.id.clone(),
+                is_master,
+                is_external,
             });
             
             // If the track is expanded, show its tasks.
@@ -566,11 +609,34 @@ pub fn render_conductor(frame: &mut Frame, area: Rect, pane: &mut ConductorPane,
     // Left panel top: Track/Task tree
     crate::conductor::track_tree::render_track_tree(frame, left_chunks[0], pane, theme);
 
-    // Left panel bottom: Subagent tree
-    crate::conductor::subagent_tree::render_subagent_tree(frame, left_chunks[1], &pane.state);
+    // Left panel bottom: Logs (Output mode essentially, but pinned to bottom-left)
+    render_logs_pane(frame, left_chunks[1], pane, theme);
 
     // Right panel: Details/Output/Prompt based on mode
-    crate::conductor::details_panel::render_details_panel(frame, main_chunks[1], pane, theme);
+    let right_chunks = if pane.details_mode == crate::conductor::model::DetailsViewMode::Details {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(70), // Details
+                Constraint::Percentage(30), // Iteration History
+            ])
+            .split(main_chunks[1])
+    } else {
+        vec![main_chunks[1]].into()
+    };
+
+    if pane.details_mode == crate::conductor::model::DetailsViewMode::Details {
+        crate::conductor::details_panel::render_details_panel(frame, right_chunks[0], pane, theme);
+        crate::conductor::iteration_history::render_iteration_history(frame, right_chunks[1], pane, theme);
+    } else {
+        crate::conductor::details_panel::render_details_panel(frame, right_chunks[0], pane, theme);
+    }
+
+    // Render Subagent Tree as a floating or secondary pane if there are active subagents
+    if !pane.state.subagents.is_empty() && pane.details_mode == crate::conductor::model::DetailsViewMode::Details {
+        // Overlay it or put it in another chunk. For now, we've replaced it with logs in the bottom-left.
+        // Let's stick with the spec: bottom-left is for logs.
+    }
 
     // Render Dashboard overlay if open
     if pane.show_dashboard {
@@ -599,4 +665,46 @@ fn count_tasks_recursive(tasks: &[Task]) -> (usize, usize) {
         completed += sub_completed;
     }
     (total, completed)
+}
+
+fn render_logs_pane(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, theme: &crate::theme::Theme) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .title(" Runtime Logs ")
+        .border_style(if pane.output_focused {
+            Style::default().fg(theme.accent)
+        } else {
+            Style::default().fg(theme.muted)
+        });
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Filter out common metadata lines to keep logs clean
+    let filtered_logs: Vec<&String> = pane.iteration_output
+        .iter()
+        .rev()
+        .filter(|line| !line.starts_with("--- Iteration"))
+        .take(area.height as usize)
+        .collect();
+
+    let logs_text: Vec<Line> = filtered_logs
+        .into_iter()
+        .rev()
+        .map(|line| {
+            let line_upper = line.to_uppercase();
+            let style = if line_upper.contains("ERROR") || line_upper.contains("FAIL") {
+                Style::default().fg(Color::Red)
+            } else if line.starts_with("---") {
+                Style::default().fg(theme.accent)
+            } else {
+                Style::default().fg(theme.muted)
+            };
+            Line::from(Span::styled(line.as_str(), style))
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(logs_text).wrap(ratatui::widgets::Wrap { trim: true });
+    frame.render_widget(paragraph, inner_area);
 }

@@ -17,6 +17,9 @@ pub mod dashboard;
 pub mod project_selector;
 pub mod subagent_tree;
 pub mod git;
+pub mod telemetry;
+#[cfg(test)]
+pub mod tests;
 
 pub use model::*;
 pub use pane::*;

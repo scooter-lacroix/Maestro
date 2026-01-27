@@ -57,13 +57,33 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
     }
 
     match (key.modifiers, key.code) {
-        // Tree navigation
+        // Navigation
         (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-            pane.move_selection(1);
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+                pane.scroll_output_up(); 
+            } else {
+                pane.move_selection(1);
+            }
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-            pane.move_selection(-1);
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+                pane.scroll_output_down();
+            } else {
+                pane.move_selection(-1);
+            }
+            ConductorAction::Handled
+        }
+        (KeyModifiers::NONE, KeyCode::PageDown) => {
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+                for _ in 0..10 { pane.scroll_output_up(); }
+            }
+            ConductorAction::Handled
+        }
+        (KeyModifiers::NONE, KeyCode::PageUp) => {
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+                for _ in 0..10 { pane.scroll_output_down(); }
+            }
             ConductorAction::Handled
         }
 
@@ -128,28 +148,99 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
 
         // Execution control (Ralph-style shortcuts)
         (KeyModifiers::NONE, KeyCode::Char('s')) => {
+            let track_idx = match pane.get_selected_track_index() {
+                Some(idx) => idx,
+                None => return ConductorAction::StatusMessage("No track selected".to_string()),
+            };
+            let track_id = &pane.tracks[track_idx].id;
+            
+            // Prevention: Don't start if already running
+            if pane.state.track_runtime_statuses.get(track_id) == Some(&crate::conductor::model::ConductorStatus::Running) {
+                return ConductorAction::StatusMessage(format!("Track {} is already running", track_id));
+            }
+
             let cmd = pane.get_start_command(None, false, false);
-            ConductorAction::StatusMessage(format!("Start: {}", cmd))
+            if let Err(e) = execute_orchestrate_command(&cmd) {
+                 return ConductorAction::StatusMessage(format!("Error: {}", e));
+            }
+            ConductorAction::StatusMessage(format!("Started: {}", cmd))
         }
         (KeyModifiers::NONE, KeyCode::Char('p')) => {
             let cmd = pane.get_pause_command();
-            ConductorAction::StatusMessage(format!("Pause: {}", cmd))
+            if let Err(e) = execute_orchestrate_command(&cmd) {
+                 return ConductorAction::StatusMessage(format!("Error: {}", e));
+            }
+            ConductorAction::StatusMessage(format!("Paused: {}", cmd))
         }
         (KeyModifiers::NONE, KeyCode::Char('r')) => {
             let cmd = pane.get_resume_command();
-            ConductorAction::StatusMessage(format!("Resume: {}", cmd))
+            if let Err(e) = execute_orchestrate_command(&cmd) {
+                 return ConductorAction::StatusMessage(format!("Error: {}", e));
+            }
+            ConductorAction::StatusMessage(format!("Resumed: {}", cmd))
         }
         (KeyModifiers::NONE, KeyCode::Char('?')) => {
             let cmd = pane.get_status_command();
-            ConductorAction::StatusMessage(format!("Status: {}", cmd))
+            if let Err(e) = execute_orchestrate_command(&cmd) {
+                 return ConductorAction::StatusMessage(format!("Error: {}", e));
+            }
+            ConductorAction::StatusMessage(format!("Status checked: {}", cmd))
         }
 
         // Focus toggle
-        (KeyModifiers::NONE, KeyCode::Tab) => {
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::ALT, KeyCode::Char('p')) => {
             pane.output_focused = !pane.output_focused;
             ConductorAction::Handled
         }
 
         _ => ConductorAction::None,
     }
+}
+
+fn execute_orchestrate_command(cmd: &str) -> std::io::Result<()> {
+    // Robust argument parsing: handle spaces in paths/IDs using shell-like splitting
+    // For simplicity here, we'll use a basic vector of args.
+    let parts: Vec<String> = cmd.split(" --").enumerate().map(|(i, s)| {
+        if i == 0 {
+            s.to_string()
+        } else {
+            format!("--{}", s)
+        }
+    }).collect();
+
+    if parts.is_empty() {
+        return Ok(());
+    }
+
+    // First part contains "maestro orchestrate <subcmd> <track_id>"
+    let mut initial_parts: Vec<&str> = parts[0].split_whitespace().collect();
+    if initial_parts.is_empty() { return Ok(()); }
+
+    let program_name = initial_parts[0];
+    let program = if program_name == "maestro" {
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("maestro"))
+    } else {
+        std::path::PathBuf::from(program_name)
+    };
+
+    let mut args = Vec::new();
+    // Add "orchestrate", "<subcmd>", "<track_id>"
+    if initial_parts.len() > 1 {
+        args.extend(initial_parts[1..].iter().map(|s| s.to_string()));
+    }
+
+    // Add the remaining flags
+    for part in &parts[1..] {
+        let flag_parts: Vec<&str> = part.split_whitespace().collect();
+        for fp in flag_parts {
+            args.push(fp.to_string());
+        }
+    }
+
+    // Run it detached
+    std::process::Command::new(program)
+        .args(args)
+        .spawn()?;
+    
+    Ok(())
 }

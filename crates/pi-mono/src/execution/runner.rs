@@ -567,6 +567,9 @@ impl SubagentRunner {
     ) -> tokio::process::Command {
         let mut cmd = tokio::process::Command::new(&self.config.pi_path);
 
+        // Always use non-interactive mode for automated execution
+        cmd.arg("-p");
+
         // Add provider if specified
         if let Some(ref provider) = self.config.provider {
             cmd.arg("--provider");

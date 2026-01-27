@@ -286,6 +286,8 @@ impl OrchestrateEngine {
             Some(mut session) => {
                 // Resume existing session
                 session.status = SessionStatus::Running;
+                session.mode = mode;
+                session.agent_config = agent_config; // Allow updating tool/model on resume
                 session.updated_at = Utc::now().to_rfc3339();
                 Ok(session)
             }

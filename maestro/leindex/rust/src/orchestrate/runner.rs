@@ -18,6 +18,7 @@ const ALLOWED_TOOLS: &[&str] = &[
     "qwen",
     "opencode",
     "maestro",
+    "pi",        // Pi-Mono CLI
     "amp",       // Amp CLI - first-class integration
     "codex",     // Codex CLI - first-class integration
     "droid",     // Droid CLI - first-class integration
@@ -274,6 +275,7 @@ impl CliRunner {
             "gemini" => vec!["chat".to_string(), "--prompt-file".to_string(), prompt_str],
             "qwen" => vec!["chat".to_string(), "-f".to_string(), prompt_str],
             "opencode" => vec!["chat".to_string(), "--prompt".to_string(), prompt_str],
+            "pi" => vec!["-p".to_string(), "subagent".to_string(), "worker".to_string(), "--".to_string(), std::fs::read_to_string(prompt_file)?],
             _ => vec![prompt_str], // Default: just pass the prompt file
         };
 

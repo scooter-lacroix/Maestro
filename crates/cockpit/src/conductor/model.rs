@@ -125,6 +125,12 @@ pub struct ConductorState {
     pub available_projects: Vec<MaestroProject>,
     /// Selected index in project selector
     pub selected_project_index: usize,
+    /// Runtime status for discovered tracks (track_id -> status)
+    pub track_runtime_statuses: std::collections::HashMap<String, ConductorStatus>,
+    /// Recent iteration logs for the current track
+    pub iteration_logs: Vec<leindex_core::orchestrate::model::IterationLog>,
+    /// Memories associated with the current track
+    pub track_memories: Vec<leindex_core::memory::models::Memory>,
 }
 
 impl Default for ConductorState {
@@ -154,6 +160,9 @@ impl Default for ConductorState {
             show_project_selector: false,
             available_projects: Vec::new(),
             selected_project_index: 0,
+            track_runtime_statuses: std::collections::HashMap::new(),
+            iteration_logs: Vec::new(),
+            track_memories: Vec::new(),
         }
     }
 }
@@ -272,6 +281,8 @@ pub enum SelectableItem {
     Track {
         index: usize,
         id: String,
+        is_master: bool,
+        is_external: bool, // Session discovered in ~/.maestro/orchestrate but not in tracks.md
     },
     Task {
         id: String,

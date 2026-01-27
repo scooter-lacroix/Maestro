@@ -9,7 +9,6 @@ use std::path::PathBuf;
 // Re-export CLI modules from leindex-core
 use leindex_core::cli::analyze;
 use leindex_core::cli::implement::ImplementSessionTarget;
-use leindex_core::cli::implement;
 use leindex_core::cli::leindex_cmd;
 use leindex_core::cli::memory_cmd as memory;
 use leindex_core::cli::mcp;

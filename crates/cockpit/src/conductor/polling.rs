@@ -11,14 +11,61 @@ use super::pane::ConductorPane;
 use super::model::{ConductorStatus, ConductorEvent, OutputStream, ActiveAgentState, AgentReason};
 
 impl ConductorPane {
-    /// Poll the orchestrate engine state for the currently selected track
+    /// Poll the orchestrate engine state for all tracks to find active ones
     pub fn poll_engine_state(&mut self) {
-        let track_idx = match self.get_selected_track_index() {
-            Some(idx) => idx,
-            None => return,
-        };
-        let track_id = self.tracks[track_idx].id.clone();
+        // Optimization: Only poll all tracks every 4th frame (approx every 2 seconds at 500ms poll)
+        // to minimize blocking I/O in the main loop.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static POLL_COUNTER: AtomicU32 = AtomicU32::new(0);
+        
+        let count = POLL_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let should_poll_all = (count % 4) == 0;
 
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
+
+        if should_poll_all {
+            let tracks_to_poll: Vec<(usize, String)> = self.tracks.iter().enumerate()
+                .map(|(idx, t)| (idx, t.id.clone()))
+                .collect();
+
+            for (_idx, track_id) in tracks_to_poll {
+                let orchestrate_dir = orchestrate_base.join(&track_id);
+                if !orchestrate_dir.exists() {
+                    continue;
+                }
+
+                // Check session status
+                let session_path = orchestrate_dir.join("session.json");
+                if session_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&session_path) {
+                        if let Ok(session) = serde_json::from_str::<SessionState>(&content) {
+                            let runtime_status = map_session_status(session.status);
+                            self.state.track_runtime_statuses.insert(track_id.clone(), runtime_status);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Always poll the selected track for detailed live updates
+        let active_track_id = self.state.track_runtime_statuses.iter()
+            .find(|(_, status)| **status == ConductorStatus::Running)
+            .map(|(id, _)| id.clone());
+
+        // 2. Poll detailed state for the selected track (for output and iteration tracking)
+        let selected_track_id = match self.get_selected_track_index() {
+            Some(idx) => Some(self.tracks[idx].id.clone()),
+            None => active_track_id, // Fallback to active track if nothing selected
+        };
+
+        if let Some(track_id) = selected_track_id {
+            self.poll_track_detailed_state(&track_id, &orchestrate_base);
+        }
+    }
+
+    fn poll_track_detailed_state(&mut self, track_id: &str, orchestrate_base: &Path) {
+        let track_id = track_id.to_string();
         // If track changed, reset polling state and clear output
         if self.state.current_track.as_ref() != Some(&track_id) {
             self.state.current_track = Some(track_id.clone());
@@ -26,11 +73,10 @@ impl ConductorPane {
             self.state.last_poll_offset = 0;
             self.clear_output();
             self.state.status = ConductorStatus::Ready; // Reset status until polled
+            self.state.iteration_logs.clear();
         }
 
-        // Find orchestrate data dir. Default is ~/.maestro/orchestrate
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let orchestrate_dir = PathBuf::from(home).join(".maestro").join("orchestrate").join(&track_id);
+        let orchestrate_dir = orchestrate_base.join(&track_id);
         
         if !orchestrate_dir.exists() {
             // Reset status to Ready if no session exists for this track
@@ -69,13 +115,25 @@ impl ConductorPane {
         // Read to string first to minimize file handle open time and handle partial writes
         if let Ok(content) = std::fs::read_to_string(&session_path) {
             if let Ok(session) = serde_json::from_str::<SessionState>(&content) {
+                // If status changed, broadcast
+                let new_status = map_session_status(session.status);
+                if self.session_status != session.status {
+                    match new_status {
+                        ConductorStatus::Running => crate::conductor::telemetry::BUS.broadcast(ConductorEvent::Resumed),
+                        ConductorStatus::Paused => crate::conductor::telemetry::BUS.broadcast(ConductorEvent::Paused),
+                        _ => {}
+                    }
+                }
+
                 // If task changed, emit TaskSelected to transition state machine
                 if session.current_task_id != self.state.current_task {
                     if let Some(task_id) = &session.current_task_id {
-                        self.state.transition(&ConductorEvent::TaskSelected {
+                        let event = ConductorEvent::TaskSelected {
                             task_id: task_id.clone(),
                             iteration: session.current_iteration,
-                        });
+                        };
+                        self.state.transition(&event);
+                        crate::conductor::telemetry::BUS.broadcast(event);
                     }
                 }
 
@@ -156,6 +214,7 @@ impl ConductorPane {
             if file.seek(SeekFrom::Start(self.state.last_poll_offset)).is_ok() {
                 let mut reader = BufReader::new(file);
                 let mut line = String::new();
+                let is_initial_read = self.state.last_poll_offset == 0;
                 
                 while let Ok(bytes_read) = reader.read_line(&mut line) {
                     if bytes_read == 0 {
@@ -169,7 +228,8 @@ impl ConductorPane {
 
                     if let Ok(log) = serde_json::from_str::<IterationLog>(&line) {
                         // Process this new log entry
-                        self.process_iteration_log(log);
+                        // Suppress output if we're just catching up with history
+                        self.process_iteration_log(log, is_initial_read);
                         self.state.last_poll_iteration += 1;
                         self.state.last_poll_offset += bytes_read as u64;
                     } else {
@@ -183,53 +243,97 @@ impl ConductorPane {
         }
     }
 
-    fn process_iteration_log(&mut self, log: IterationLog) {
-        // Add output to pane
-        self.add_output(format!("--- Iteration {} ({}) ---", log.iteration, log.task_id));
+    pub fn process_iteration_log(&mut self, log: IterationLog, suppress_output: bool) {
+        // Update history list
+        if !self.state.iteration_logs.iter().any(|l| l.iteration == log.iteration) {
+            self.state.iteration_logs.push(log.clone());
+            if self.state.iteration_logs.len() > 50 {
+                self.state.iteration_logs.remove(0);
+            }
+        } else {
+            // Update existing entry if status changed
+            if let Some(existing) = self.state.iteration_logs.iter_mut().find(|l| l.iteration == log.iteration) {
+                *existing = log.clone();
+            }
+        }
+
+        // Add output to pane if not suppressed
+        if !suppress_output {
+            self.add_output(format!("--- Iteration {} ({}) ---", log.iteration, log.task_id));
+        }
         
         // Use events to update state
-        self.state.transition(&ConductorEvent::IterationStarted { 
+        let started_event = ConductorEvent::IterationStarted { 
             iteration: log.iteration, 
             task_id: log.task_id.clone() 
-        });
+        };
+        
+        // Only broadcast and transition on new events (not during history catch-up)
+        if !suppress_output {
+            self.state.transition(&started_event);
+            crate::conductor::telemetry::BUS.broadcast(started_event);
+        }
 
         if !log.output.is_empty() {
-            self.state.transition(&ConductorEvent::AgentOutput { 
+            let output_event = ConductorEvent::AgentOutput { 
                 stream: OutputStream::Stdout, 
                 data: log.output.clone() 
-            });
+            };
             
-            for out_line in log.output.lines() {
-                self.add_output(out_line.to_string());
+            if !suppress_output {
+                self.state.transition(&output_event);
+                crate::conductor::telemetry::BUS.broadcast(output_event);
+                
+                for out_line in log.output.lines() {
+                    self.add_output(out_line.to_string());
+                }
             }
         }
 
         if let Some(err) = log.error {
-            self.state.transition(&ConductorEvent::AgentOutput { 
+            let error_event = ConductorEvent::AgentOutput { 
                 stream: OutputStream::Stderr, 
                 data: err.clone() 
-            });
-            self.add_output(format!("ERROR: {}", err));
+            };
             
-            self.state.transition(&ConductorEvent::IterationFailed {
+            if !suppress_output {
+                self.state.transition(&error_event);
+                crate::conductor::telemetry::BUS.broadcast(error_event);
+                self.add_output(format!("ERROR: {}", err));
+            }
+            
+            let failed_event = ConductorEvent::IterationFailed {
                 iteration: log.iteration,
                 error: err,
-            });
+            };
+            
+            if !suppress_output {
+                self.state.transition(&failed_event);
+                crate::conductor::telemetry::BUS.broadcast(failed_event);
+            }
         } else {
             match log.status {
                 IterationStatus::Completed => {
-                    self.state.transition(&ConductorEvent::IterationCompleted {
+                    let comp_event = ConductorEvent::IterationCompleted {
                         iteration: log.iteration,
                         task_completed: true, // We don't know for sure from IterationLog alone if task is fully complete
                         duration_ms: 0, // Not in IterationLog
-                    });
+                    };
+                    if !suppress_output {
+                        self.state.transition(&comp_event);
+                        crate::conductor::telemetry::BUS.broadcast(comp_event);
+                    }
                 }
                 IterationStatus::Skipped => {
-                    self.state.transition(&ConductorEvent::IterationSkipped {
+                    let skip_event = ConductorEvent::IterationSkipped {
                         iteration: log.iteration,
                         task_id: log.task_id,
                         reason: "Skipped in log".to_string(),
-                    });
+                    };
+                    if !suppress_output {
+                        self.state.transition(&skip_event);
+                        crate::conductor::telemetry::BUS.broadcast(skip_event);
+                    }
                 }
                 _ => {}
             }

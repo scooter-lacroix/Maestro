@@ -19,7 +19,11 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(" Task Details & Commands ")
-        .border_style(Style::default().fg(theme.accent));
+        .border_style(if pane.output_focused {
+            Style::default().fg(theme.accent)
+        } else {
+            Style::default().fg(theme.muted)
+        });
 
     let items = pane.get_selectable_items();
     let selected_item = if items.is_empty() {
@@ -31,8 +35,12 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
     let details_text = if let Some(item) = selected_item {
         match item {
             super::model::SelectableItem::Track { id, .. } => {
-                let start_cmd = pane.get_start_command(Some("claude"), false, false);
-                vec![
+                let tool_name = pane.state.active_agent.as_ref().map(|a| a.tool.clone()).unwrap_or_else(|| "claude".to_string());
+                let start_cmd = pane.get_start_command(Some(&tool_name), false, false);
+                let pause_cmd = pane.get_pause_command();
+                let resume_cmd = pane.get_resume_command();
+                
+                let mut details = vec![
                     Line::from(vec![
                         Span::styled("Track: ", Style::default().fg(conductor_theme.accent_secondary)),
                         Span::styled(id, Style::default().bold().fg(conductor_theme.fg_primary)),
@@ -54,6 +62,51 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
                             })
                         ),
                     ]),
+                    Line::from(vec![
+                        Span::styled("Loop:  ", Style::default().fg(conductor_theme.accent_secondary)),
+                        Span::styled(format!("Iteration {}", pane.state.current_iteration), Style::default().fg(conductor_theme.fg_secondary)),
+                    ]),
+                    Line::from(""),
+                    Line::from(Span::styled("Agent Activity:", Style::default().fg(conductor_theme.accent_primary).underlined())),
+                ];
+
+                if let Some(agent) = &pane.state.active_agent {
+                    details.push(Line::from(vec![
+                        Span::styled("  Tool:  ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(&agent.tool, Style::default().fg(conductor_theme.fg_secondary)),
+                    ]));
+                    if let Some(model) = &agent.model {
+                        details.push(Line::from(vec![
+                            Span::styled("  Model: ", Style::default().fg(conductor_theme.fg_muted)),
+                            Span::styled(model, Style::default().fg(conductor_theme.fg_secondary)),
+                        ]));
+                    }
+                    details.push(Line::from(vec![
+                        Span::styled("  Since: ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(agent.since.format("%H:%M:%S").to_string(), Style::default().fg(conductor_theme.fg_secondary)),
+                    ]));
+                } else {
+                    details.push(Line::from(Span::styled("  No active agent", Style::default().fg(conductor_theme.fg_muted))));
+                }
+
+                if let Some(rl) = &pane.state.rate_limit {
+                    details.push(Line::from(""));
+                    details.push(Line::from(vec![
+                        Span::styled("  ⚠️ RATE LIMITED", Style::default().fg(conductor_theme.status_error).bold()),
+                        Span::styled(format!(" (Retry #{})", rl.retry_count), Style::default().fg(conductor_theme.fg_muted)),
+                    ]));
+                    if let Some(backoff) = rl.backoff_until {
+                        let remaining = backoff.signed_duration_since(chrono::Utc::now()).num_seconds();
+                        if remaining > 0 {
+                            details.push(Line::from(vec![
+                                Span::styled("  Backoff: ", Style::default().fg(conductor_theme.fg_muted)),
+                                Span::styled(format!("{}s", remaining), Style::default().fg(theme.warning)),
+                            ]));
+                        }
+                    }
+                }
+
+                details.extend(vec![
                     Line::from(""),
                     Line::from(Span::styled("Commands:", Style::default().fg(conductor_theme.accent_primary).underlined())),
                     Line::from(vec![
@@ -62,13 +115,28 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
                     ]),
                     Line::from(vec![
                         Span::styled("  [p] Pause:  ", Style::default().fg(conductor_theme.fg_muted)),
-                        Span::styled(pane.get_pause_command(), Style::default().fg(conductor_theme.fg_secondary)),
+                        Span::styled(pause_cmd, Style::default().fg(conductor_theme.fg_secondary)),
                     ]),
                     Line::from(vec![
                         Span::styled("  [r] Resume: ", Style::default().fg(conductor_theme.fg_muted)),
-                        Span::styled(pane.get_resume_command(), Style::default().fg(conductor_theme.fg_secondary)),
+                        Span::styled(resume_cmd, Style::default().fg(conductor_theme.fg_secondary)),
                     ]),
-                ]
+                ]);
+
+                // Memories Section
+                if !pane.state.track_memories.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled("Recent Memories:", Style::default().fg(conductor_theme.accent_primary).underlined())));
+                    for memory in &pane.state.track_memories {
+                        let prefix = format!(" • [{}] ", memory.category);
+                        details.push(Line::from(vec![
+                            Span::styled(prefix, Style::default().fg(theme.accent)),
+                            Span::styled(&memory.content, Style::default().fg(conductor_theme.fg_secondary)),
+                        ]));
+                    }
+                }
+
+                details
             }
             super::model::SelectableItem::Task { title, id, status, .. } => {
                 vec![
@@ -100,7 +168,11 @@ fn render_output_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, c
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(" Live Output ")
-        .border_style(Style::default().fg(theme.accent));
+        .border_style(if pane.output_focused {
+            Style::default().fg(theme.accent)
+        } else {
+            Style::default().fg(theme.muted)
+        });
 
     let output_text: Vec<Line> = pane.iteration_output
         .iter()
@@ -115,12 +187,16 @@ fn render_output_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, c
     frame.render_widget(output, area);
 }
 
-fn render_prompt_view(frame: &mut Frame, area: Rect, _pane: &mut ConductorPane, conductor_theme: &ConductorTheme, theme: &crate::theme::Theme) {
+fn render_prompt_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, conductor_theme: &ConductorTheme, theme: &crate::theme::Theme) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .title(" LLM Prompt Preview ")
-        .border_style(Style::default().fg(theme.accent));
+        .border_style(if pane.output_focused {
+            Style::default().fg(theme.accent)
+        } else {
+            Style::default().fg(theme.muted)
+        });
 
     let text = vec![
         Line::from(Span::styled("Prompt preview not yet implemented.", Style::default().fg(conductor_theme.fg_muted))),

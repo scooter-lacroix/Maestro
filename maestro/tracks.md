@@ -267,3 +267,8 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 **Execution**: `/maestro:implement pi-mono_20260123`
 
+
+---
+
+## [ ] Track: Cockpit Conductor loop & telemetry bug fix
+*Link: [./maestro/tracks/conductor-loop-telemetry_20260127/](./maestro/tracks/conductor-loop-telemetry_20260127/)*

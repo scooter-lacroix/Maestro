@@ -564,6 +564,13 @@ impl App {
 
             // Poll Conductor engine state
             self.conductor.poll_engine_state();
+
+            // Fetch memories for the active track
+            if let Some(track_id) = &self.conductor.state.current_track {
+                if let Ok(memories) = svc.list_memories_for_track(track_id, 10) {
+                    self.conductor.state.track_memories = memories;
+                }
+            }
         }
     }
 
@@ -2104,6 +2111,9 @@ async fn run_app<B: Backend>(
                                         DashFocus::Tabs => DashFocus::Sessions,
                                     };
                                 }
+                                InputMode::Normal if app.tab_index == 4 => {
+                                    app.conductor.output_focused = !app.conductor.output_focused;
+                                }
                                 _ => {}
                             },
                             KeyCode::BackTab => match app.input_mode {
@@ -2133,9 +2143,12 @@ async fn run_app<B: Backend>(
                                         DashFocus::Tabs => DashFocus::Mcp,
                                     };
                                 }
+                                InputMode::Normal if app.tab_index == 4 => {
+                                    app.conductor.output_focused = !app.conductor.output_focused;
+                                }
                                 _ => {}
                             },
-                            KeyCode::Down => {
+                            KeyCode::Down if app.tab_index != 4 => {
                                 if app.input_mode == InputMode::SessionSwitcher {
                                     let i = match app.switcher_state.selected() {
                                         Some(i) => {
@@ -2234,7 +2247,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 4 {
+                                } else if app.tab_index == 5 {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -2258,7 +2271,7 @@ async fn run_app<B: Backend>(
                                 }
                                 app.scroll = app.scroll.saturating_add(1);
                             }
-                            KeyCode::Up => {
+                            KeyCode::Up if app.tab_index != 4 => {
                                 if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
                                         McpOption::StartStop => McpOption::Install,
@@ -2347,7 +2360,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 4 {
+                                } else if app.tab_index == 5 {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -2393,15 +2406,51 @@ async fn run_app<B: Backend>(
                         app.help_scroll = app.help_scroll.min(max_scroll);
                     } else {
                         match (key.modifiers, key.code) {
+                            // 1. Tab Switching (Global)
+                            (_, KeyCode::Char('1')) => app.tab_index = 0,
+                            (_, KeyCode::Char('2')) => app.tab_index = 1,
+                            (_, KeyCode::Char('3')) => app.tab_index = 2,
+                            (_, KeyCode::Char('4')) => app.tab_index = 3,
+                            (_, KeyCode::Char('5')) => app.tab_index = 4,
+                            (_, KeyCode::Char('6')) => app.tab_index = 5,
+                            (_, KeyCode::Char('7')) => app.tab_index = 6,
+                            (_, KeyCode::Char('8')) => app.tab_index = 7,
+
+                            // 2. Conductor Tab (High Priority Override)
+                            _ if app.tab_index == 4 => {
+                                use crate::conductor::keybindings::{handle_key_event, ConductorAction};
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                                // Fall through for global keys like 'q'
+                            }
+
                             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
-                                if app.tab_index == 4 {
+                                if app.tab_index == 5 {
                                     app.input_mode = InputMode::MemorySearch;
                                 }
                             }
                             (KeyModifiers::CONTROL, KeyCode::Char('l')) => {
-                                if app.tab_index == 4 {
+                                if app.tab_index == 5 {
                                     app.memory_query.clear();
                                     app.refresh_from_service(&service);
+                                }
+                            }
+                            // Conductor pane keybindings (High Priority)
+                            _ if app.tab_index == 4 => {
+                                use crate::conductor::keybindings::{handle_key_event, ConductorAction};
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('p')) => {
@@ -2413,10 +2462,18 @@ async fn run_app<B: Backend>(
                                         "List focused."
                                     }
                                     .to_string();
+                                } else if app.tab_index == 4 {
+                                    app.conductor.output_focused = !app.conductor.output_focused;
+                                    app.status_message = if app.conductor.output_focused {
+                                        "Output focused. Scroll with Arrows/PgUp/PgDn."
+                                    } else {
+                                        "Tracks focused."
+                                    }
+                                    .to_string();
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Up)
-                            | (KeyModifiers::ALT, KeyCode::Down) => {
+                            | (KeyModifiers::ALT, KeyCode::Down) if app.tab_index != 4 => {
                                 if app.tab_index == 1 {
                                     let Some(svc) = service.as_ref() else {
                                         app.status_message =
@@ -2521,7 +2578,7 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('p')) => {
+                            (_, KeyCode::Char('p')) if app.tab_index != 4 => {
                                 if app.tab_index == 2 {
                                     // Projects
                                     app.input_mode = InputMode::NewProjectName;
@@ -2554,12 +2611,12 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.should_quit = true,
-                            (_, KeyCode::Esc) => {
+                            (_, KeyCode::Esc) if app.tab_index != 4 => {
                                 if app.project_view_open {
                                     app.project_view_open = false;
                                 }
                             }
-                            (_, KeyCode::Char('r')) => {
+                            (_, KeyCode::Char('r')) if app.tab_index != 4 => {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
                                         match app.session_entries.get(i) {
@@ -2579,7 +2636,7 @@ async fn run_app<B: Backend>(
                                             _ => {}
                                         }
                                     }
-                                } else if app.tab_index == 4 {
+                                } else if app.tab_index == 5 {
                                     if let Some(svc) = service.as_ref() {
                                         match svc.sync_memories_from_system() {
                                             Ok(n) => {
@@ -2606,7 +2663,7 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('k')) => {
+                            (_, KeyCode::Char('k')) if app.tab_index != 4 => {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(SessionEntry::Session(s)) =
@@ -2723,7 +2780,7 @@ async fn run_app<B: Backend>(
                             }
                             (KeyModifiers::ALT, KeyCode::Char('d'))
                             | (KeyModifiers::ALT, KeyCode::Char('D'))
-                            | (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                            | (KeyModifiers::NONE, KeyCode::Char('d')) if app.tab_index != 4 => {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i) {
@@ -3037,9 +3094,9 @@ async fn run_app<B: Backend>(
                                 }
                                 app.scroll = app.scroll.saturating_sub(1);
                             }
-                            (_, KeyCode::Char('1')) => app.tab_index = 0,
-                            (_, KeyCode::Char('2')) => app.tab_index = 1,
-                            (_, KeyCode::Char('3')) => app.tab_index = 2,
+                            (_, KeyCode::Char('1')) if app.tab_index != 4 => app.tab_index = 0,
+                            (_, KeyCode::Char('2')) if app.tab_index != 4 => app.tab_index = 1,
+                            (_, KeyCode::Char('3')) if app.tab_index != 4 => app.tab_index = 2,
                             (_, KeyCode::Char('4')) => app.tab_index = 3,
                             (_, KeyCode::Char('5')) => app.tab_index = 4,
                             (_, KeyCode::Char('6')) => app.tab_index = 5,
@@ -3175,26 +3232,14 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('/') | KeyCode::Char('?')) => {
+                            (_, KeyCode::Char('/') | KeyCode::Char('?')) if app.tab_index != 4 => {
                                 app.show_help = true;
                                 app.help_scroll = 0;
                             }
                             (_, KeyCode::Char('e')) if app.tab_index == 2 => {
                                 app.preview_focused = !app.preview_focused;
                             }
-                            // Conductor pane keybindings
-                            _ if app.tab_index == 4 => {
-                                use crate::conductor::keybindings::{handle_key_event, ConductorAction};
-                                match handle_key_event(&mut app.conductor, key) {
-                                    ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
-                                        continue;
-                                    }
-                                    ConductorAction::None => {}
-                                }
-                            }
-                            (_, KeyCode::Enter) => {
+                            (_, KeyCode::Enter) if app.tab_index != 4 => {
                                 if app.tab_index == 0 {
                                     // Dashboard
                                     match app.dash_focus {
@@ -3390,7 +3435,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (_, KeyCode::Char('s')) => {
+                            (_, KeyCode::Char('s')) if app.tab_index != 4 => {
                                 if app.tab_index == 0 {
                                     // Dashboard (MCP)
                                     if let Some(i) = app.mcp_state.selected() {

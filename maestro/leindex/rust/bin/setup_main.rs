@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, IsTerminal};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -47,6 +47,23 @@ enum Phase {
 }
 
 fn main() -> Result<(), io::Error> {
+    // Check if we're running in a terminal
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        eprintln!("Error: Maestro Setup Wizard requires an interactive terminal.");
+        eprintln!();
+        eprintln!("This installer uses a terminal UI (TUI) that requires:");
+        eprintln!("  - A proper TTY (terminal) attached to stdin/stdout");
+        eprintln!("  - An interactive shell session");
+        eprintln!();
+        eprintln!("If you're seeing this error, try:");
+        eprintln!("  1. Run the installer directly in your terminal (not via a script redirect)");
+        eprintln!("  2. Make sure you're not piping input/output");
+        eprintln!("  3. Try: bash install.sh (from your terminal)");
+        eprintln!();
+        eprintln!("For automation/headless installs, a non-interactive mode will be added in a future release.");
+        std::process::exit(1);
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -76,6 +93,7 @@ fn main() -> Result<(), io::Error> {
             ("OpenCode (Independent)".to_string(), true),
             ("Amp CLI (by Sourcegraph)".to_string(), true),
             ("Droid CLI (by Factory)".to_string(), true),
+            ("pi-mono (Multi-Model CLI)".to_string(), true),
         ],
         config_selection: 0,
         starred: true,

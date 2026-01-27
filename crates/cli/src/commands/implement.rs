@@ -11,7 +11,7 @@ pub use leindex_core::cli::implement as leindex_implement;
 
 use maestro_pi_mono::{
     load_config, PiDetection, SubagentRunner,
-    agents::mapping::{PiAgentType, AgentRole},
+    agents::mapping::PiAgentType,
 };
 use std::path::PathBuf;
 use tracing::{debug, info};
@@ -42,14 +42,12 @@ pub async fn run(
     debug!("Running standard implement with tool: {}", tool);
     // Fall through to standard leindex-core implement
     leindex_implement::run(
-        leindex_implement::ImplementCommand {
-            command,
-            description,
-            session,
-            tool,
-            path,
-            title,
-        },
+        command,
+        description,
+        session,
+        tool,
+        path,
+        title,
     ).await
 }
 
@@ -219,15 +217,16 @@ async fn execute_parallel(
     let futures: Vec<_> = agents
         .iter()
         .map(|agent| {
-            let agent_type = match parse_agent_type(agent) {
-                Ok(t) => t,
-                Err(e) => return futures::future::err(e),
-            };
+            let agent = agent.clone();
             async move {
                 let agent_start = std::time::Instant::now();
-                let result = runner.run(agent_type, task, None::<&str>).await;
+                let agent_type = parse_agent_type(&agent);
+                let result = match agent_type {
+                    Ok(t) => runner.run(t, task, None::<&str>).await.map_err(|e| anyhow::anyhow!(e)),
+                    Err(e) => Err(e),
+                };
                 let duration = agent_start.elapsed();
-                (agent.clone(), result, duration)
+                (agent, result, duration)
             }
         })
         .collect();

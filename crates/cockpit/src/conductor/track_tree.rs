@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use leindex_core::orchestrate::model::TrackStatus;
-use super::model::SelectableItem;
+use super::model::{SelectableItem, ConductorStatus};
 use super::pane::ConductorPane;
 use super::theme::ConductorTheme;
 use super::theme::{STATUS_DONE, STATUS_PENDING, STATUS_ACTIVE};
@@ -60,13 +60,53 @@ pub fn render_track_tree(frame: &mut Frame, area: Rect, pane: &mut ConductorPane
         let is_selected = idx == pane.selected_index;
         
         match item {
-            SelectableItem::Track { id, .. } => {
+            SelectableItem::Track { id, is_master, is_external, .. } => {
+                let runtime_status = pane.state.track_runtime_statuses.get(id);
+                let (status_symbol, status_color) = match runtime_status {
+                    Some(ConductorStatus::Running) => (STATUS_ACTIVE, conductor_theme.task_active),
+                    Some(ConductorStatus::Paused) => ("[P]", theme.warning),
+                    Some(ConductorStatus::Failed) => ("[F]", theme.error),
+                    Some(ConductorStatus::Completed) => (STATUS_DONE, conductor_theme.task_done),
+                    _ => ("", conductor_theme.fg_primary),
+                };
+
+                // Get iteration count for this track if available
+                let iter_str = if let Some(_track_state) = pane.state.track_runtime_statuses.get(id) {
+                     // We need iteration count per track in state. 
+                     // For now, if it's the current track, use the global count.
+                     if pane.state.current_track.as_ref() == Some(id) {
+                         format!(" ({})", pane.state.current_iteration)
+                     } else {
+                         "".to_string()
+                     }
+                } else {
+                    "".to_string()
+                };
+
                 let style = if is_selected {
                     Style::default().fg(conductor_theme.accent_primary).bold().bg(conductor_theme.bg_highlight)
+                } else if *is_master {
+                    Style::default().fg(theme.warning).bold()
                 } else {
                     Style::default().fg(conductor_theme.fg_primary)
                 };
-                ListItem::new(Span::styled(format!(" {} {}", STATUS_ACTIVE, id), style))
+                
+                let mut spans = vec![
+                    Span::styled(format!(" {} ", status_symbol), Style::default().fg(status_color)),
+                ];
+
+                if *is_master {
+                    spans.push(Span::styled("👑 ", Style::default().fg(theme.warning)));
+                }
+
+                spans.push(Span::styled(id.clone(), style));
+                spans.push(Span::styled(iter_str, Style::default().fg(theme.muted)));
+
+                if *is_external {
+                    spans.push(Span::styled(" (ext)", Style::default().fg(theme.muted).italic()));
+                }
+                
+                ListItem::new(Line::from(spans))
             }
             SelectableItem::Task { title, depth, status, has_children, is_expanded, .. } => {
                 let indent = "  ".repeat(*depth);
