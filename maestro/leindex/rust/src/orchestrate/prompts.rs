@@ -130,9 +130,10 @@ impl PromptBuilder {
 
 1. **Analyze the current state** of the codebase using the provided LeIndex context
 2. **Generate or update the plan** (plan.md) with detailed task breakdowns
-3. **Identify dependencies** between tasks
-4. **Estimate complexity** and prioritize tasks
-5. **Document architectural decisions** and technical considerations
+3. **Bank key discoveries** as memories (e.g., "Found existing auth logic in middleware.py")
+4. **Identify dependencies** between tasks
+5. **Estimate complexity** and prioritize tasks
+6. **Document architectural decisions** and technical considerations
 
 ### What NOT To Do:
 
@@ -143,6 +144,7 @@ impl PromptBuilder {
 ### What To Do Instead:
 
 - ✅ Use LeIndex to understand existing code structure
+- ✅ Bank memories for key discoveries or architectural decisions
 - ✅ Break down the task into clear, actionable subtasks
 - ✅ Identify what needs to be created/modified/deleted
 - ✅ Consider edge cases and error handling
@@ -182,20 +184,25 @@ When done, respond with `<promise>COMPLETE</promise>` and a brief summary of you
 ### Implementation Requirements:
 
 1. **Implement ONLY this task** - do not add features beyond the scope
-2. **Follow best practices** for the language/framework
-3. **Write tests** for new functionality
-4. **Run validation** - tests, linters, type checkers
-5. **Update documentation** if needed
+2. **Bank a summary memory** of your implementation upon completion
+3. **Follow best practices** for the language/framework
+4. **Write tests** for new functionality
+5. **Run validation** - tests, linters, type checkers
+6. **Update documentation** if needed
 
 ### Completion Criteria:
 
 Your work is COMPLETE when ALL of the following are true:
 
-1. ✅ Implementation is done and tests pass
-2. ✅ Code follows project conventions
-3. ✅ **plan.md is updated** - mark this task as `[x]`
-4. ✅ **Changes are committed** with a descriptive commit message
-5. ✅ Respond with `<promise>COMPLETE</promise>`
+1. ✅ Implementation is done and **VERIFIED via actual code execution** (tests, analysis)
+2. ✅ **Evidence of verification** is provided in the output (e.g., test results, log snippets)
+3. ✅ **A memory is banked** summarizing key changes or new knowledge
+4. ✅ Code follows project conventions
+5. ✅ **plan.md is updated** - mark this task as `[x]`
+6. ✅ **Changes are committed** with a descriptive commit message
+7. ✅ Respond with `<promise>COMPLETE</promise>`
+
+**CRITICAL:** Do NOT mark a task as complete based on a claim. You MUST run the code, see it work, and include that proof in your response. The orchestrate loop will NOT exit until every task in the track is physically verified.
 
 ### Commit Message Format:
 

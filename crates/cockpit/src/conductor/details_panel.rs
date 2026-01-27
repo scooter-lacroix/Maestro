@@ -3,7 +3,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use super::pane::ConductorPane;
 use super::model::DetailsViewMode;
 use super::theme::ConductorTheme;
-use leindex_core::orchestrate::model::SessionStatus;
+use leindex_core::orchestrate::model::{SessionStatus, IterationStatus};
 
 pub fn render_details_panel(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, theme: &crate::theme::Theme) {
     let conductor_theme = ConductorTheme::default();
@@ -123,6 +123,32 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
                     ]),
                 ]);
 
+                // Iteration Summary Section
+                if let Some(last_log) = pane.state.iteration_logs.last() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled("Last Iteration Summary:", Style::default().fg(conductor_theme.accent_primary).underlined())));
+                    details.push(Line::from(vec![
+                        Span::styled(format!("  Iter {}: ", last_log.iteration), Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(format!("{:?}", last_log.status), Style::default().fg(match last_log.status {
+                            IterationStatus::Completed => conductor_theme.status_success,
+                            IterationStatus::Failed => conductor_theme.status_error,
+                            _ => conductor_theme.fg_secondary,
+                        })),
+                    ]));
+                    
+                    if !last_log.output.is_empty() {
+                        let summary = if last_log.output.len() > 200 {
+                            format!("{}...", &last_log.output[..200].replace('\n', " "))
+                        } else {
+                            last_log.output.replace('\n', " ")
+                        };
+                        details.push(Line::from(vec![
+                            Span::styled("  Output: ", Style::default().fg(conductor_theme.fg_muted)),
+                            Span::styled(summary, Style::default().fg(conductor_theme.fg_secondary).italic()),
+                        ]));
+                    }
+                }
+
                 // Memories Section
                 if !pane.state.track_memories.is_empty() {
                     details.push(Line::from(""));
@@ -187,7 +213,7 @@ fn render_output_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, c
     frame.render_widget(output, area);
 }
 
-fn render_prompt_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, conductor_theme: &ConductorTheme, theme: &crate::theme::Theme) {
+fn render_prompt_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, _conductor_theme: &ConductorTheme, theme: &crate::theme::Theme) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
@@ -198,9 +224,49 @@ fn render_prompt_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, c
             Style::default().fg(theme.muted)
         });
 
-    let text = vec![
-        Line::from(Span::styled("Prompt preview not yet implemented.", Style::default().fg(conductor_theme.fg_muted))),
-    ];
+    let items = pane.get_selectable_items();
+    let selected_item = if items.is_empty() {
+        None
+    } else {
+        Some(&items[pane.selected_index.min(items.len() - 1)])
+    };
+
+    let text = if let Some(item) = selected_item {
+        match item {
+            super::model::SelectableItem::Track { id, .. } => {
+                vec![
+                    Line::from(vec![
+                        Span::styled("Track: ", Style::default().fg(theme.accent)),
+                        Span::styled(id, Style::default().bold()),
+                    ]),
+                    Line::from(""),
+                    Line::from(Span::styled("No prompt preview available for tracks. Select a task.", Style::default().fg(theme.muted).italic())),
+                ]
+            }
+            super::model::SelectableItem::Task { id, title, .. } => {
+                vec![
+                    Line::from(vec![
+                        Span::styled("Task: ", Style::default().fg(theme.accent)),
+                        Span::styled(title, Style::default().bold()),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("ID:   ", Style::default().fg(theme.muted)),
+                        Span::styled(id, Style::default().fg(theme.muted)),
+                    ]),
+                    Line::from(""),
+                    Line::from(Span::styled("Goal:", Style::default().fg(theme.accent).underlined())),
+                    Line::from(Span::styled("Implement this task using the current context.", Style::default().fg(theme.fg))),
+                    Line::from(""),
+                    Line::from(Span::styled("Context Injection:", Style::default().fg(theme.accent).underlined())),
+                    Line::from(Span::styled("• Project analysis (ast, callgraph)", Style::default().fg(theme.fg))),
+                    Line::from(Span::styled("• Recent iteration history", Style::default().fg(theme.fg))),
+                    Line::from(Span::styled("• Relevant memories from database", Style::default().fg(theme.fg))),
+                ]
+            }
+        }
+    } else {
+        vec![Line::from(Span::styled("No item selected.", Style::default().fg(theme.muted)))]
+    };
 
     let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);

@@ -98,7 +98,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         }
 
         // Task interaction
-        (KeyModifiers::NONE, KeyCode::Char(' ')) | (KeyModifiers::NONE, KeyCode::Enter) => {
+        (_, KeyCode::Char(' ')) | (_, KeyCode::Enter) => {
             if !pane.output_focused {
                 let items = pane.get_selectable_items();
                 if let Some(item) = items.get(pane.selected_index) {
@@ -107,47 +107,54 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                         crate::conductor::model::SelectableItem::Task { id, .. } => id.clone(),
                     };
                     pane.toggle_task_expansion(&id);
+                    return ConductorAction::Handled;
                 }
-                ConductorAction::Handled
+                ConductorAction::None
             } else {
                 ConductorAction::None
             }
         }
 
         // Details mode switching
-        (KeyModifiers::NONE, KeyCode::Char('1')) => {
+        (_, KeyCode::Char('1')) => {
             pane.details_mode = crate::conductor::model::DetailsViewMode::Details;
             ConductorAction::Handled
         }
-        (KeyModifiers::NONE, KeyCode::Char('2')) => {
+        (_, KeyCode::Char('2')) => {
             pane.details_mode = crate::conductor::model::DetailsViewMode::Output;
             ConductorAction::Handled
         }
-        (KeyModifiers::NONE, KeyCode::Char('3')) => {
+        (_, KeyCode::Char('3')) => {
             pane.details_mode = crate::conductor::model::DetailsViewMode::Prompt;
             ConductorAction::Handled
         }
 
         // Output control
-        (KeyModifiers::NONE, KeyCode::Char('c')) => {
+        (_, KeyCode::Char('c')) => {
             pane.clear_output();
             ConductorAction::Handled
         }
 
         // Dashboard toggle
-        (KeyModifiers::NONE, KeyCode::Char('d')) => {
+        (_, KeyCode::Char('d')) => {
             pane.show_dashboard = !pane.show_dashboard;
             ConductorAction::Handled
         }
 
         // Project Selector
-        (KeyModifiers::SHIFT, KeyCode::Char('P')) => {
+        (KeyModifiers::SHIFT, KeyCode::Char('P')) | (KeyModifiers::ALT, KeyCode::Char('p')) if !pane.output_focused => {
             pane.open_project_selector();
             ConductorAction::Handled
         }
 
+        // Focus toggle
+        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::ALT, KeyCode::Char('p')) => {
+            pane.output_focused = !pane.output_focused;
+            ConductorAction::Handled
+        }
+
         // Execution control (Ralph-style shortcuts)
-        (KeyModifiers::NONE, KeyCode::Char('s')) => {
+        (_, KeyCode::Char('s')) => {
             let track_idx = match pane.get_selected_track_index() {
                 Some(idx) => idx,
                 None => return ConductorAction::StatusMessage("No track selected".to_string()),
@@ -165,32 +172,26 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             }
             ConductorAction::StatusMessage(format!("Started: {}", cmd))
         }
-        (KeyModifiers::NONE, KeyCode::Char('p')) => {
+        (_, KeyCode::Char('p')) => {
             let cmd = pane.get_pause_command();
             if let Err(e) = execute_orchestrate_command(&cmd) {
                  return ConductorAction::StatusMessage(format!("Error: {}", e));
             }
             ConductorAction::StatusMessage(format!("Paused: {}", cmd))
         }
-        (KeyModifiers::NONE, KeyCode::Char('r')) => {
+        (_, KeyCode::Char('r')) => {
             let cmd = pane.get_resume_command();
             if let Err(e) = execute_orchestrate_command(&cmd) {
                  return ConductorAction::StatusMessage(format!("Error: {}", e));
             }
             ConductorAction::StatusMessage(format!("Resumed: {}", cmd))
         }
-        (KeyModifiers::NONE, KeyCode::Char('?')) => {
+        (_, KeyCode::Char('?')) => {
             let cmd = pane.get_status_command();
             if let Err(e) = execute_orchestrate_command(&cmd) {
                  return ConductorAction::StatusMessage(format!("Error: {}", e));
             }
             ConductorAction::StatusMessage(format!("Status checked: {}", cmd))
-        }
-
-        // Focus toggle
-        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::ALT, KeyCode::Char('p')) => {
-            pane.output_focused = !pane.output_focused;
-            ConductorAction::Handled
         }
 
         _ => ConductorAction::None,

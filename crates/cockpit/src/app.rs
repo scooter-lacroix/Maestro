@@ -2406,15 +2406,15 @@ async fn run_app<B: Backend>(
                         app.help_scroll = app.help_scroll.min(max_scroll);
                     } else {
                         match (key.modifiers, key.code) {
-                            // 1. Tab Switching (Global)
-                            (_, KeyCode::Char('1')) => app.tab_index = 0,
-                            (_, KeyCode::Char('2')) => app.tab_index = 1,
-                            (_, KeyCode::Char('3')) => app.tab_index = 2,
-                            (_, KeyCode::Char('4')) => app.tab_index = 3,
-                            (_, KeyCode::Char('5')) => app.tab_index = 4,
-                            (_, KeyCode::Char('6')) => app.tab_index = 5,
-                            (_, KeyCode::Char('7')) => app.tab_index = 6,
-                            (_, KeyCode::Char('8')) => app.tab_index = 7,
+                            // 1. Tab Switching (Global) - Use ALT+1-8 to avoid collisions
+                            (KeyModifiers::ALT, KeyCode::Char('1')) => app.tab_index = 0,
+                            (KeyModifiers::ALT, KeyCode::Char('2')) => app.tab_index = 1,
+                            (KeyModifiers::ALT, KeyCode::Char('3')) => app.tab_index = 2,
+                            (KeyModifiers::ALT, KeyCode::Char('4')) => app.tab_index = 3,
+                            (KeyModifiers::ALT, KeyCode::Char('5')) => app.tab_index = 4,
+                            (KeyModifiers::ALT, KeyCode::Char('6')) => app.tab_index = 5,
+                            (KeyModifiers::ALT, KeyCode::Char('7')) => app.tab_index = 6,
+                            (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = 7,
 
                             // 2. Conductor Tab (High Priority Override)
                             _ if app.tab_index == 4 => {
@@ -2430,6 +2430,16 @@ async fn run_app<B: Backend>(
                                 // Fall through for global keys like 'q'
                             }
 
+                            // Allow raw numbers if NOT on Conductor tab (for convenience)
+                            (KeyModifiers::NONE, KeyCode::Char('1')) if app.tab_index != 4 => app.tab_index = 0,
+                            (KeyModifiers::NONE, KeyCode::Char('2')) if app.tab_index != 4 => app.tab_index = 1,
+                            (KeyModifiers::NONE, KeyCode::Char('3')) if app.tab_index != 4 => app.tab_index = 2,
+                            (KeyModifiers::NONE, KeyCode::Char('4')) if app.tab_index != 4 => app.tab_index = 3,
+                            (KeyModifiers::NONE, KeyCode::Char('5')) if app.tab_index != 4 => app.tab_index = 4,
+                            (KeyModifiers::NONE, KeyCode::Char('6')) if app.tab_index != 4 => app.tab_index = 5,
+                            (KeyModifiers::NONE, KeyCode::Char('7')) if app.tab_index != 4 => app.tab_index = 6,
+                            (KeyModifiers::NONE, KeyCode::Char('8')) if app.tab_index != 4 => app.tab_index = 7,
+
                             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                                 if app.tab_index == 5 {
                                     app.input_mode = InputMode::MemorySearch;
@@ -2439,18 +2449,6 @@ async fn run_app<B: Backend>(
                                 if app.tab_index == 5 {
                                     app.memory_query.clear();
                                     app.refresh_from_service(&service);
-                                }
-                            }
-                            // Conductor pane keybindings (High Priority)
-                            _ if app.tab_index == 4 => {
-                                use crate::conductor::keybindings::{handle_key_event, ConductorAction};
-                                match handle_key_event(&mut app.conductor, key) {
-                                    ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
-                                        continue;
-                                    }
-                                    ConductorAction::None => {}
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('p')) => {
@@ -3094,14 +3092,6 @@ async fn run_app<B: Backend>(
                                 }
                                 app.scroll = app.scroll.saturating_sub(1);
                             }
-                            (_, KeyCode::Char('1')) if app.tab_index != 4 => app.tab_index = 0,
-                            (_, KeyCode::Char('2')) if app.tab_index != 4 => app.tab_index = 1,
-                            (_, KeyCode::Char('3')) if app.tab_index != 4 => app.tab_index = 2,
-                            (_, KeyCode::Char('4')) => app.tab_index = 3,
-                            (_, KeyCode::Char('5')) => app.tab_index = 4,
-                            (_, KeyCode::Char('6')) => app.tab_index = 5,
-                            (_, KeyCode::Char('7')) => app.tab_index = 6,
-                            (_, KeyCode::Char('8')) => app.tab_index = 7,
                             (_, KeyCode::Char('G')) => {
                                 if app.tab_index == 1 {
                                     app.input_mode = InputMode::NewGroupTitle;
@@ -3664,8 +3654,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Style::default().bg(Color::Cyan).fg(Color::Black),
         ),
         Span::raw(" Scroll  "),
-        Span::styled(" 1-8 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
-        Span::raw(" Jump  "),
+        Span::styled(" Alt+1-8 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
+        Span::raw(" Tabs  "),
         Span::styled(" n ", Style::default().bg(Color::Green).fg(Color::Black)),
         Span::raw(" New  "),
         Span::styled(" s ", Style::default().bg(Color::Magenta).fg(Color::Black)),

@@ -23,9 +23,14 @@ The Conductor module provides autonomous loop execution and telemetry visualizat
 - **Start (s)**: Launches the orchestrate loop for the selected track.
 - **Pause (p)**: Requests a pause after the current iteration.
 - **Resume (r)**: Resumes a paused session.
+- **Dashboard (d)**: Toggles the Conductor dashboard overlay.
 - **Status (?)**: Checks the current status of the orchestrate engine.
+- **Pane Navigation (1, 2, 3)**: Switches between Details, Output, and Prompt views.
+- **Focus Toggle (Alt+p or Tab)**: Toggles focus between the tree and the content pane.
 
-### 4. Live Telemetry & Logs
+## Navigation
+- **Tab Switching**: Use **Alt + 1-8** to switch between main tabs (Dashboard, Sessions, etc.).
+- **Number Keys (1-8)**: On most tabs, these switch tabs directly. On the **Conductor** tab, **1-3** are used for view mode switching, so **Alt** must be used for tab navigation.
 - **Details Panel**: Shows active agent activity (tool, model, uptime), current loop iteration, and rate limit status (with backoff countdown).
 - **Iteration History**: Surfaces results of the last 50 iterations for the selected track.
 - **Runtime Logs**: Streams live stdout/stderr from the agent loop in the bottom-left pane.

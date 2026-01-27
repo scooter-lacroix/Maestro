@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::PathBuf;
 
 use leindex_core::orchestrate::{
-    model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode},
+    model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode, IterationLog, IterationStatus},
     parser::{parse_tracks_md, parse_plan_md},
     setup::{SetupStatus, detect_setup_status, AgentTool},
 };
@@ -179,19 +179,85 @@ impl ConductorPane {
                             let session_path = entry.path().join("session.json");
                             if session_path.exists() {
                                 // Create a placeholder Track for this external session
-                                tracks.push(Track {
+                                let mut track = Track {
                                     id: track_id.clone(),
                                     description: "CLI/External Session".to_string(),
                                     status: leindex_core::orchestrate::model::TrackStatus::InProgress,
                                     link_path: entry.path(), // Use orchestrate dir as link path for now
                                     metadata: None,
                                     plan: None,
-                                });
+                                };
+
+                                // Synthesize a virtual plan from iterations if possible
+                                if let Ok(logs) = self.load_iterations_for_track(&track_id) {
+                                    if !logs.is_empty() {
+                                        track.plan = Some(self.synthesize_plan_from_logs(&track_id, &logs));
+                                    }
+                                }
+
+                                tracks.push(track);
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    fn load_iterations_for_track(&self, track_id: &str) -> Result<Vec<IterationLog>, Box<dyn std::error::Error>> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let log_path = PathBuf::from(home).join(".maestro").join("orchestrate").join(track_id).join("iterations.jsonl");
+        
+        if !log_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let file = std::fs::File::open(log_path)?;
+        let reader = std::io::BufReader::new(file);
+        let mut logs = Vec::new();
+        for line in std::io::BufRead::lines(reader).flatten() {
+            if let Ok(log) = serde_json::from_str::<IterationLog>(&line) {
+                logs.push(log);
+            }
+        }
+        Ok(logs)
+    }
+
+    fn synthesize_plan_from_logs(&self, track_id: &str, logs: &[IterationLog]) -> TrackPlan {
+        use std::collections::HashSet;
+        let mut seen_tasks = HashSet::new();
+        let mut tasks = Vec::new();
+
+        for log in logs {
+            if seen_tasks.insert(&log.task_id) {
+                tasks.push(Task {
+                    id: log.task_id.clone(),
+                    title: log.task_id.clone(), // Use ID as title for virtual tasks
+                    status: match log.status {
+                        IterationStatus::Completed => leindex_core::orchestrate::model::TrackStatus::Completed,
+                        IterationStatus::Running => leindex_core::orchestrate::model::TrackStatus::InProgress,
+                        _ => leindex_core::orchestrate::model::TrackStatus::Pending,
+                    },
+                    dependencies: Vec::new(),
+                    description: "Synthesized from iteration history".to_string(),
+                    subtasks: Vec::new(),
+                    notes: None,
+                    line_number: 0,
+                });
+            } else if let Some(t) = tasks.iter_mut().find(|t| t.id == log.task_id) {
+                // Update status to latest
+                t.status = match log.status {
+                    IterationStatus::Completed => leindex_core::orchestrate::model::TrackStatus::Completed,
+                    IterationStatus::Running => leindex_core::orchestrate::model::TrackStatus::InProgress,
+                    _ => t.status,
+                };
+            }
+        }
+
+        TrackPlan {
+            track_id: track_id.to_string(),
+            tasks,
+            phases: Vec::new(),
         }
     }
     
@@ -307,6 +373,14 @@ impl ConductorPane {
         }
 
         let track = &self.tracks[track_idx];
+
+        // If track already has a plan (e.g. synthesized), use it
+        if let Some(ref plan) = track.plan {
+            self.cached_plan = Some(plan.clone());
+            self.cached_plan_track_index = Some(track_idx);
+            return Ok(Some(plan.clone()));
+        }
+
         let plan_path = track.link_path.join("plan.md");
 
         if !plan_path.exists() {

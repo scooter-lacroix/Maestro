@@ -19,6 +19,7 @@ pub struct OrchestrateEngine {
     config: OrchestrateConfig,
     state_manager: StateManager,
     tracks_dir: PathBuf,
+    memory_service: Option<crate::memory::MemoryService>,
     rate_limit_detector: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitDetector>>,
 }
 
@@ -27,6 +28,9 @@ impl OrchestrateEngine {
     pub fn new(config: OrchestrateConfig, tracks_dir: PathBuf) -> Result<Self> {
         let state_manager = StateManager::new(config.data_dir.clone())
             .context("Failed to initialize state manager")?;
+        
+        let memory_service = crate::memory::MemoryService::new(None).ok();
+
         let rate_limit_detector = std::sync::Arc::new(tokio::sync::Mutex::new(
             crate::rate_limit::RateLimitDetector::new(
                 config.rate_limit_max_retries,
@@ -37,6 +41,7 @@ impl OrchestrateEngine {
             config,
             state_manager,
             tracks_dir,
+            memory_service,
             rate_limit_detector,
         })
     }
@@ -83,7 +88,16 @@ impl OrchestrateEngine {
             let (task_id, task_title, task_description) = match self.select_next_task(&plan, &session)? {
                 Some(t) => (t.id.clone(), t.title.clone(), t.description.clone()),
                 None => {
-                    info!("No more actionable tasks. Track complete!");
+                    // All tasks marked complete. Perform final Track Verification.
+                    info!("All tasks in track {} marked as complete. Verifying integrity...", track_id);
+                    if let Err(e) = self.verify_track_integrity(track_id, &plan, &session).await {
+                        warn!("Track verification failed: {}. Re-opening relevant tasks.", e);
+                        // logic to re-open tasks would go here
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        continue;
+                    }
+
+                    info!("Track verification successful. Track complete!");
                     session.status = SessionStatus::Completed;
                     self.state_manager.save_session(&session)?;
                     break;
@@ -336,7 +350,15 @@ impl OrchestrateEngine {
     }
 
     fn mark_task_complete(&self, plan: &mut TrackPlan, task_id: &str) -> Result<()> {
-        self.update_task_status_recursive(&mut plan.tasks, task_id, TrackStatus::Completed)
+        self.update_task_status_recursive(&mut plan.tasks, task_id, TrackStatus::Completed)?;
+        
+        // Bank a task completion memory
+        if let Some(ref svc) = self.memory_service {
+            let content = format!("Completed task '{}' in track '{}'", task_id, plan.track_id);
+            let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
+        }
+        
+        Ok(())
     }
 
     fn update_task_status_recursive(
@@ -503,6 +525,30 @@ impl OrchestrateEngine {
             }
         }
         Ok(None)
+    }
+
+    async fn verify_track_integrity(&self, track_id: &str, plan: &TrackPlan, session: &SessionState) -> Result<()> {
+        info!("Running final autonomous verification for track: {}", track_id);
+        
+        // Create a verification task
+        let verify_task = Task {
+            id: "track-verification".to_string(),
+            title: "Final Track Verification".to_string(),
+            description: "Verify that all implemented features are working as expected and meet the specification.".to_string(),
+            status: TrackStatus::InProgress,
+            dependencies: Vec::new(),
+            subtasks: Vec::new(),
+            notes: None,
+            line_number: 0,
+        };
+
+        let result = self.run_iteration(track_id, &verify_task, session, plan).await?;
+        
+        if result.success && result.completed {
+            Ok(())
+        } else {
+            Err(anyhow!("Verification failed: {}", result.error_message.unwrap_or_default()))
+        }
     }
 }
 
