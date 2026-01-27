@@ -421,7 +421,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 });
             }
             "pi-mono (Multi-Model CLI)" => {
-                let install_path = config.install_path.clone();
+                let _install_path = config.install_path.clone();
                 steps.push(Step {
                     name: "Strings - pi-mono".to_string(),
                     description: "Integrating Maestro into pi-mono (Multi-Model CLI)...".to_string(),

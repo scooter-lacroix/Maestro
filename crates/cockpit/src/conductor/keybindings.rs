@@ -214,7 +214,7 @@ fn execute_orchestrate_command(cmd: &str) -> std::io::Result<()> {
     }
 
     // First part contains "maestro orchestrate <subcmd> <track_id>"
-    let mut initial_parts: Vec<&str> = parts[0].split_whitespace().collect();
+    let initial_parts: Vec<&str> = parts[0].split_whitespace().collect();
     if initial_parts.is_empty() { return Ok(()); }
 
     let program_name = initial_parts[0];
