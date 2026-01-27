@@ -420,6 +420,86 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     })),
                 });
             }
+            "pi-mono (Multi-Model CLI)" => {
+                let install_path = config.install_path.clone();
+                steps.push(Step {
+                    name: "Strings - pi-mono".to_string(),
+                    description: "Integrating Maestro into pi-mono (Multi-Model CLI)...".to_string(),
+                    action: StepAction::Internal(Box::new(move || {
+                        let repo_root = find_repo_root()?;
+                        let mut logs = Vec::new();
+
+                        // Create extension directory and symlink
+                        let pi_extensions = home_dir()?.join(".pi").join("extensions");
+                        std::fs::create_dir_all(&pi_extensions)?;
+                        logs.push(format!("Created pi-mono extensions directory: {}", pi_extensions.display()));
+
+                        let ext_src = repo_root.join("pi-maestro");
+                        let ext_dst = pi_extensions.join("pi-maestro");
+
+                        // Remove existing symlink if present
+                        if ext_dst.is_symlink() || ext_dst.exists() {
+                            std::fs::remove_file(&ext_dst)?;
+                            logs.push(format!("Removed existing pi-maestro extension link"));
+                        }
+
+                        // Create symlink
+                        #[cfg(unix)]
+                        {
+                            std::os::unix::fs::symlink(&ext_src, &ext_dst)?;
+                            logs.push(format!(
+                                "Created symlink: {} -> {}",
+                                ext_dst.display(),
+                                ext_src.display()
+                            ));
+                        }
+                        #[cfg(windows)]
+                        {
+                            // On Windows, use junction for directories
+                            std::fs::hard_link(&ext_src, &ext_dst)?;
+                            logs.push(format!(
+                                "Created junction: {} -> {}",
+                                ext_dst.display(),
+                                ext_src.display()
+                            ));
+                        }
+
+                        // Build the TypeScript extension
+                        logs.push("Building pi-maestro TypeScript extension...".to_string());
+                        let build_output = std::process::Command::new("npm")
+                            .arg("run")
+                            .arg("build")
+                            .current_dir(&ext_src)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .output();
+
+                        match build_output {
+                            Ok(out) => {
+                                if out.status.success() {
+                                    logs.push("  TypeScript extension built successfully".to_string());
+                                } else {
+                                    let stderr = String::from_utf8_lossy(&out.stderr);
+                                    logs.push(format!("  Build warning: {}", stderr.trim()));
+                                }
+                            }
+                            Err(e) => {
+                                logs.push(format!("  Build skipped (npm not available): {}", e));
+                            }
+                        }
+
+                        // Note: npm publishing will be done separately
+                        logs.push("".to_string());
+                        logs.push("pi-mono extension installed locally".to_string());
+                        logs.push("To install from npm (when published):".to_string());
+                        logs.push("  pi install npm:@<username>/pi-maestro".to_string());
+                        logs.push("".to_string());
+                        logs.push("Local extension active at: ~/.pi/extensions/pi-maestro".to_string());
+
+                        Ok(logs)
+                    })),
+                });
+            }
             _ => {}
         }
     }
@@ -495,47 +575,86 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
         match step.action {
             StepAction::Shell(command) => {
-                // Execute command and capture output to prevent UI corruption
-                let output = Command::new("bash")
-                    .arg("-c")
-                    .arg(&command)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .output();
+                // For long-running commands (like cargo build), use streaming output
+                // For quick commands, use the standard approach
+                let is_long_running = command.contains("cargo build")
+                    || command.contains("npm install")
+                    || command.contains("npm run build")
+                    || command.contains("make")
+                    || command.contains("apt-get");
 
-                match output {
-                    Ok(out) => {
-                        // Send logs from stdout/stderr to the TUI instead of terminal
-                        if !out.stdout.is_empty() {
-                            let s = String::from_utf8_lossy(&out.stdout);
-                            for line in s.lines().take(5) {
-                                // Only take a few lines to avoid flooding
-                                let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
+                if is_long_running {
+                    // Stream output in real-time for better user feedback
+                    match Command::new("bash")
+                        .arg("-c")
+                        .arg(&command)
+                        .stdout(std::process::Stdio::inherit())
+                        .stderr(std::process::Stdio::inherit())
+                        .status()
+                    {
+                        Ok(status) => {
+                            if status.success() {
+                                let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
+                                let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                            } else {
+                                let _ = tx.send(SetupEvent::Error(format!(
+                                    "Step '{}' failed with exit code: {:?}",
+                                    step.name, status.code()
+                                )));
+                                return;
                             }
                         }
-                        if !out.stderr.is_empty() {
-                            let s = String::from_utf8_lossy(&out.stderr);
-                            for line in s.lines().take(10) {
-                                let _ = tx.send(SetupEvent::Log(format!("  [ERR] {}", line)));
-                            }
-                        }
-
-                        if out.status.success() {
-                            let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
-                        } else {
+                        Err(e) => {
                             let _ = tx.send(SetupEvent::Error(format!(
-                                "Step '{}' failed with exit code: {}",
-                                step.name, out.status
+                                "Failed to execute step '{}': {}",
+                                step.name, e
                             )));
                             return;
                         }
                     }
-                    Err(e) => {
-                        let _ = tx.send(SetupEvent::Error(format!(
-                            "Failed to execute step '{}': {}",
-                            step.name, e
-                        )));
-                        return;
+                } else {
+                    // Quick commands: capture output to prevent UI corruption
+                    let output = Command::new("bash")
+                        .arg("-c")
+                        .arg(&command)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output();
+
+                    match output {
+                        Ok(out) => {
+                            // Send logs from stdout/stderr to the TUI instead of terminal
+                            if !out.stdout.is_empty() {
+                                let s = String::from_utf8_lossy(&out.stdout);
+                                for line in s.lines().take(5) {
+                                    // Only take a few lines to avoid flooding
+                                    let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
+                                }
+                            }
+                            if !out.stderr.is_empty() {
+                                let s = String::from_utf8_lossy(&out.stderr);
+                                for line in s.lines().take(10) {
+                                    let _ = tx.send(SetupEvent::Log(format!("  [ERR] {}", line)));
+                                }
+                            }
+
+                            if out.status.success() {
+                                let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                            } else {
+                                let _ = tx.send(SetupEvent::Error(format!(
+                                    "Step '{}' failed with exit code: {}",
+                                    step.name, out.status
+                                )));
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(SetupEvent::Error(format!(
+                                "Failed to execute step '{}': {}",
+                                step.name, e
+                            )));
+                            return;
+                        }
                     }
                 }
             }

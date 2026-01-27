@@ -114,7 +114,15 @@ fi
 echo -e "${G}    Launching Maestro Conductor Wizard...${NC}"
 echo -e "    ${C}Please wait while the orchestra tunes (compiling setup tool)${NC}"
 
-cargo run --release --bin maestro-setup
+# Check if we have a TTY for the TUI
+if [[ -t 0 ]]; then
+    # stdin is a TTY, run directly
+    cargo run --release --bin maestro-setup
+else
+    # No TTY available, use script to provide a pseudo-TTY
+    # This is needed for the ratatui TUI to work
+    script -qec "cargo run --release --bin maestro-setup" /dev/null
+fi
 
 # Clean up temp install directory if we cloned
 if [[ "$INSTALL_DIR" == "$HOME/.maestro/install-temp" ]]; then
