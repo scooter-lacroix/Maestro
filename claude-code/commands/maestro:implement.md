@@ -274,6 +274,20 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
        db_session.commit()
        ```
 
+    **CLI Alternative (for tools without Python access):**
+
+    If you don't have Python access, use the Maestro CLI to store completion memories:
+
+    ```bash
+    # After task completion:
+    maestro memory store --content "Task completed in track ${track_id}: ${task_title}. Files: ${files_modified}" --category decision --importance normal
+
+    # After track completion:
+    maestro memory store --content "Track '${track_id}' completed successfully. Total tasks: ${task_count}. Changes: ${summary}" --category decision --importance high
+    ```
+
+    This CLI-based approach achieves the same result as the Python approach above.
+
 ---
 
 ## 6.0 SYNCHRONIZE PROJECT DOCUMENTATION

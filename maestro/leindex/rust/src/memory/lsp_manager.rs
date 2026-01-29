@@ -1429,9 +1429,12 @@ impl LspManager {
 
         let mut started_lsps = Vec::new();
 
-        // Start each recommended LSP
+        // Start each recommended LSP (with MCP bridge for diagnostics)
         for lsp_type in recommended_lsps {
-            match self.start_lsp(session_id, lsp_type, None).await {
+            let (result, _bridge_pid) = self
+                .start_lsp_with_mcp_bridge(session_id, lsp_type, project_path, None)
+                .await;
+            match result {
                 Ok(()) => {
                     info!(
                         "Successfully auto-started LSP '{}' for session '{}'",
@@ -2131,6 +2134,8 @@ impl LspManager {
             })
             .arg("--project-path")
             .arg(project_path)
+            .arg("--session-id")
+            .arg(session_id)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped()) // Pipe stdout for draining to avoid deadlock
             .stderr(Stdio::piped()) // Pipe stderr for draining to avoid deadlock

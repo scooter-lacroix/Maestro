@@ -59,6 +59,10 @@ struct Args {
     /// Enable debug logging
     #[arg(long, default_value = "false")]
     debug: bool,
+
+    /// Session identifier to associate diagnostics with
+    #[arg(long)]
+    session_id: Option<String>,
 }
 
 /// CLI wrapper for LspType that implements clap ValueEnum
@@ -109,12 +113,21 @@ async fn main() -> Result<()> {
         args.project_path
     );
 
-    run_bridge(LspType::from(args.lsp_type), &args.project_path).await
+    run_bridge(
+        LspType::from(args.lsp_type),
+        &args.project_path,
+        args.session_id,
+    )
+    .await
 }
 
-async fn run_bridge(lsp_type: LspType, project_path: &str) -> Result<()> {
+async fn run_bridge(
+    lsp_type: LspType,
+    project_path: &str,
+    session_id: Option<String>,
+) -> Result<()> {
     // Create the bridge
-    let bridge = Arc::new(McpBridge::new(lsp_type, project_path));
+    let bridge = Arc::new(McpBridge::new_with_session(lsp_type, project_path, session_id));
 
     // Start LSP process
     let (mut stdin, mut stdout, _child) = bridge.start_lsp_process().await?;

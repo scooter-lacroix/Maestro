@@ -9,6 +9,9 @@ pub struct Config {
     pub theme: String,
     pub transparent: bool,
     pub selected_tools: Vec<String>,
+    /// When true, uses terminal's background (transparent) instead of theme's background
+    /// while keeping the theme's color scheme for text and accents
+    pub transparent: bool,
 }
 
 impl Default for Config {
@@ -19,6 +22,7 @@ impl Default for Config {
             theme: "catppuccin-mocha".to_string(),
             transparent: false,
             selected_tools: Vec::new(),
+            transparent: false,
         }
     }
 }
