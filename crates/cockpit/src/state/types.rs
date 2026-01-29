@@ -66,6 +66,7 @@ pub enum SettingsOption {
     Editor,
     InstallPath,
     Theme,
+    Transparent,
     Save,
 }
 
@@ -77,7 +78,7 @@ pub enum SettingsMenuKind {
 }
 
 /// Dashboard focus areas
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
 pub enum DashFocus {
     #[default]
     Sessions,

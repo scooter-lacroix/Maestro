@@ -340,3 +340,12 @@ AskUserQuestion:
        ```python
        db_session.commit()
        ```
+
+    **CLI Alternative (for tools without Python access):**
+
+    If you don't have Python access, use the Maestro CLI to store the memory:
+    ```bash
+    maestro memory store --content "Track created: ${track_id} - ${title}. Type: ${track_type}. Description: ${description}" --category context --importance normal
+    ```
+
+    This CLI-based approach achieves the same result as the Python approach above.

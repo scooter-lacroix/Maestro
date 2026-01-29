@@ -294,7 +294,13 @@ ${jsonTemplate}
    Append to end of maestro/tracks.md:
 ${tracksMdTemplate}
 
-7. Announce completion:
+7. **BANK MEMORY: Track Creation** - Store track creation memory:
+   - Track ID and title
+   - Track type and description
+   - Creation timestamp
+   - Use: \`maestro memory --store --category context --content "Track created: ..."\`
+
+8. Announce completion:
    "New track '<track_id>' has been created. You can now start implementation by running /maestro:implement <track_id>."
 
 ---

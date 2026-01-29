@@ -159,45 +159,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " MEMORY (Tab 6):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Search memories (hybrid Tantivy/SQLite)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Clear memory search"),
-        ]),
-        Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Refresh/import system-wide memories"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " PROJECTS (Tab 3):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled(
-                "   Enter         ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Open Zide (File Picker + Editor)"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " ANALYSIS (Tab 3):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Enter Analysis Command Box"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " ORCHESTRATE (Tab 4):",
+            " CONDUCTOR (Tab 3):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -227,6 +189,82 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("   c             ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Clear Output"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + 1-3     ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Switch View Mode (Details, Output, Prompt)"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Toggle Focus between Tree and Output"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " PROJECTS (Tab 4):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   Enter         ",
+                Style::default().fg(Color::Green).bold(),
+            ),
+            Span::raw(" Open Zide (File Picker + Editor)"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " ANALYSIS (Tab 5):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Enter Analysis Command Box"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " MEMORY (Tab 6):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Search memories (hybrid Tantivy/SQLite)"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Clear memory search"),
+        ]),
+        Line::from(vec![
+            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Refresh/import system-wide memories"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " LSPs (Tab 7):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
+            Span::raw(" Toggle Start/Stop LSP"),
+        ]),
+        Line::from(vec![
+            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Force Restart LSP"),
+        ]),
+        Line::from(vec![
+            Span::styled("   l             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" View LSP Logs"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " SETTINGS (Tab 8):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Navigate options"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
+            Span::raw(" Change setting"),
         ]),
         Line::from(""),
         Line::from("  ---------------------------------- "),

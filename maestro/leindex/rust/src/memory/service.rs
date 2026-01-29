@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 #[cfg(feature = "rusqlite")]
 use rusqlite::{params, Connection, OpenFlags};
 #[cfg(feature = "rusqlite")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "rusqlite")]
 use std::sync::Arc;
 #[cfg(feature = "rusqlite")]
@@ -205,6 +205,37 @@ impl MemoryService {
         })
     }
 
+    /// Get project by path
+    pub fn get_project_by_path(&self, path: &str) -> Result<Option<MaestroProject>> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id, project_path, project_name, description, project_type, tech_stack,
+                        is_active, created_at, updated_at, last_scanned_at
+                 FROM maestro_projects WHERE project_path = ?",
+                [path],
+                |row| {
+                    Ok(MaestroProject {
+                        id: row.get(0)?,
+                        project_path: row.get(1)?,
+                        project_name: row.get(2)?,
+                        description: row.get(3)?,
+                        project_type: row.get(4)?,
+                        tech_stack: row
+                            .get::<_, Option<String>>(5)?
+                            .and_then(|s| serde_json::from_str(&s).ok())
+                            .unwrap_or_default(),
+                        is_active: row.get::<_, i32>(6)? == 1,
+                        created_at: parse_datetime(row.get::<_, String>(7)?),
+                        updated_at: row.get::<_, Option<String>>(8)?.map(parse_datetime),
+                        last_scanned_at: row.get::<_, Option<String>>(9)?.map(parse_datetime),
+                    })
+                },
+            )
+            .optional()
+            .context("Failed to get project by path")
+        })
+    }
+
     // ========================================================================
     // Track Operations
     // ========================================================================
@@ -307,6 +338,58 @@ impl MemoryService {
             conn.execute(
                 "INSERT INTO memories (content, category, importance) VALUES (?, ?, ?)",
                 params![content, category.to_string(), "normal"],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })?;
+
+        // Index in Tantivy (best-effort)
+        if let Some(ref idx) = self.search_index {
+            if let Err(e) = idx.index_memory(id, content, &category.to_string(), None) {
+                warn!("Failed to index memory in Tantivy: {}", e);
+            }
+        }
+
+        Ok(id)
+    }
+
+    /// Store a memory with optional session and project context
+    pub fn store_memory_with_context(
+        &self,
+        content: &str,
+        category: MemoryCategory,
+        source: Option<&str>,
+        session_id: Option<&str>,
+        project_path: Option<&str>,
+        metadata: Option<serde_json::Value>,
+    ) -> Result<i64> {
+        let project_id = if let Some(path) = project_path {
+            let project_name = Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(path)
+                .to_string();
+            self.get_or_create_project(path, &project_name)
+                .map(|p| p.id)
+                .ok()
+        } else {
+            None
+        };
+
+        let metadata_json = metadata
+            .map(|m| serde_json::to_string(&m).unwrap_or_default());
+
+        let id = self.db.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO memories (content, category, importance, source, session_id, project_id, meta_data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    content,
+                    category.to_string(),
+                    "normal",
+                    source,
+                    session_id,
+                    project_id,
+                    metadata_json,
+                ],
             )?;
             Ok(conn.last_insert_rowid())
         })?;
@@ -453,6 +536,37 @@ impl MemoryService {
                 .query_map(params![track_id, track_pattern, limit as i32], |row| self.map_memory(row))?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .context("Failed to collect track memories")?;
+
+            Ok(memories)
+        })
+    }
+
+    /// List recent LSP diagnostics memories for a project path
+    pub fn list_lsp_memories_for_project(
+        &self,
+        project_path: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
+        let project = match self.get_project_by_path(project_path)? {
+            Some(project) => project,
+            None => return Ok(Vec::new()),
+        };
+
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, content, summary, category, importance, source, session_id,
+                        project_id, track_id, command, command_context, created_at,
+                        expires_at, last_accessed, meta_data, tags
+                 FROM memories
+                 WHERE project_id = ? AND source LIKE 'lsp:%'
+                 ORDER BY created_at DESC
+                 LIMIT ?",
+            )?;
+
+            let memories = stmt
+                .query_map(params![project.id, limit as i32], |row| self.map_memory(row))?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect LSP memories")?;
 
             Ok(memories)
         })

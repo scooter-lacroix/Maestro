@@ -308,6 +308,25 @@ enum MemoryCommands {
         #[arg(short, long, default_value = "5")]
         depth: usize,
     },
+
+    /// Store a memory in the Maestro Memory System
+    Store {
+        /// Memory content to store
+        #[arg(short, long)]
+        content: String,
+
+        /// Memory category (context, knowledge, preference, specification, fact, pattern, decision, observation, temporary)
+        #[arg(short, long, default_value = "observation")]
+        category: String,
+
+        /// Importance level (low, normal, high, critical)
+        #[arg(short, long, default_value = "normal")]
+        importance: String,
+
+        /// Path to database file
+        #[arg(short, long)]
+        db: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -340,6 +359,12 @@ async fn main() -> Result<()> {
             } => memory::serve(port, host, db, debug).await,
             MemoryCommands::Status { db } => memory::status(db).await,
             MemoryCommands::Scan { paths, depth } => memory::scan(paths, depth).await,
+            MemoryCommands::Store {
+                content,
+                category,
+                importance,
+                db,
+            } => memory::store(content, category, importance, db).await,
         },
         Commands::Tui => maestro_cockpit::run().await,
         Commands::Implement {

@@ -23,7 +23,14 @@ INSTALL_DIR=$(HOME)/.cargo/bin
 # Rust targets
 # ============================================================================
 
-build:
+apply-vendor-patches:
+	@if [ -x scripts/apply-vendor-patches.sh ]; then \
+		scripts/apply-vendor-patches.sh; \
+	else \
+		echo "⚠️  scripts/apply-vendor-patches.sh not found or not executable"; \
+	fi
+
+build: apply-vendor-patches
 	$(CARGO) build --workspace --release
 	@echo "✅ Rust binaries built: $(INSTALL_DIR)/maestro, $(INSTALL_DIR)/maestro-setup"
 
@@ -38,7 +45,7 @@ clean:
 	@echo "✅ Rust build artifacts cleaned"
 
 # Development targets
-dev-build:
+dev-build: apply-vendor-patches
 	$(CARGO) build --workspace
 
 dev-test:

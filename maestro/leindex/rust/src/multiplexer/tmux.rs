@@ -773,6 +773,25 @@ impl TmuxMultiplexer {
 
         Ok(paths)
     }
+
+    /// Get the active pane's current path (if available)
+    pub fn get_active_pane_path(&self) -> Result<Option<String>> {
+        let output = Command::new("tmux")
+            .args(["display-message", "-p", "#{pane_current_path}"])
+            .output()
+            .context("Failed to query tmux active pane path")?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(path))
+        }
+    }
 }
 
 /// Sanitize a display name to a valid tmux session name

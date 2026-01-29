@@ -44,6 +44,8 @@ use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::memory::lsp_manager::LspType;
+#[cfg(feature = "rusqlite")]
+use crate::memory::{MemoryService, models::MemoryCategory};
 
 /// Maximum message size to prevent DoS (16MB)
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -59,8 +61,15 @@ pub struct McpBridge {
     lsp_type: LspType,
     /// Project root path
     project_path: String,
+    /// Session identifier (if available)
+    session_id: Option<String>,
     /// Diagnostic cache for pull requests (wrapped in Arc for sharing)
     diagnostics_cache: Arc<RwLock<HashMap<String, Vec<Diagnostic>>>>,
+    /// Diagnostics fingerprints to avoid duplicative memory writes
+    diagnostics_fingerprints: Arc<RwLock<HashMap<String, String>>>,
+    /// Optional memory service for storing diagnostics
+    #[cfg(feature = "rusqlite")]
+    memory_service: Option<crate::memory::MemoryService>,
 }
 
 /// MCP tool definition for LSP capabilities
@@ -91,11 +100,30 @@ impl McpBridge {
     /// - `lsp_type`: Type of LSP server to bridge
     /// - `project_path`: Path to the project root
     pub fn new(lsp_type: LspType, project_path: &str) -> Self {
+        Self::new_with_session(lsp_type, project_path, None)
+    }
+
+    /// Create a new LSP to MCP bridge with an optional session id
+    pub fn new_with_session(
+        lsp_type: LspType,
+        project_path: &str,
+        session_id: Option<String>,
+    ) -> Self {
+        #[cfg(feature = "rusqlite")]
+        let memory_service = MemoryService::new(None).ok().map(|svc| {
+            let _ = svc.initialize();
+            svc
+        });
+
         Self {
             lsp_name: lsp_type.display_name().to_string(),
             lsp_type,
             project_path: project_path.to_string(),
+            session_id,
             diagnostics_cache: Arc::new(RwLock::new(HashMap::new())),
+            diagnostics_fingerprints: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(feature = "rusqlite")]
+            memory_service,
         }
     }
 
@@ -712,8 +740,132 @@ impl McpBridge {
 
     /// Update diagnostics cache (called by background task)
     pub async fn update_diagnostics(&self, uri: String, diagnostics: Vec<Diagnostic>) {
-        let mut cache = self.diagnostics_cache.write().await;
-        cache.insert(uri, diagnostics);
+        let fingerprint = serde_json::to_string(&diagnostics).unwrap_or_default();
+
+        {
+            let mut fingerprints = self.diagnostics_fingerprints.write().await;
+            if let Some(existing) = fingerprints.get(&uri) {
+                if existing == &fingerprint {
+                    return;
+                }
+            }
+            fingerprints.insert(uri.clone(), fingerprint);
+        }
+
+        {
+            let mut cache = self.diagnostics_cache.write().await;
+            cache.insert(uri.clone(), diagnostics.clone());
+        }
+
+        self.persist_diagnostics(&uri, &diagnostics).await;
+    }
+
+    /// Persist diagnostics into the memory pipeline (best-effort)
+    async fn persist_diagnostics(&self, uri: &str, diagnostics: &[Diagnostic]) {
+        #[cfg(feature = "rusqlite")]
+        if let Some(service) = self.memory_service.clone() {
+            let lsp_name = self.lsp_name.clone();
+            let session_id = self.session_id.clone();
+            let project_path = self.project_path.clone();
+            let uri = uri.to_string();
+            let diagnostics = diagnostics.to_vec();
+
+            tokio::task::spawn_blocking(move || {
+                let (errors, warnings, infos, hints) = diagnostics.iter().fold(
+                    (0usize, 0usize, 0usize, 0usize),
+                    |mut acc, diag| {
+                        match diag.severity {
+                            Some(sev) => match sev {
+                                lsp_types::DiagnosticSeverity::ERROR => acc.0 += 1,
+                                lsp_types::DiagnosticSeverity::WARNING => acc.1 += 1,
+                                lsp_types::DiagnosticSeverity::INFORMATION => acc.2 += 1,
+                                lsp_types::DiagnosticSeverity::HINT => acc.3 += 1,
+                                _ => acc.2 += 1,
+                            },
+                            None => acc.2 += 1,
+                        }
+                        acc
+                    },
+                );
+
+                let file_path = uri
+                    .strip_prefix("file://")
+                    .and_then(|p| urlencoding::decode(p).ok())
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| uri.clone());
+
+                let summary = if diagnostics.is_empty() {
+                    "No diagnostics reported".to_string()
+                } else {
+                    format!(
+                        "Errors: {}, Warnings: {}, Info: {}, Hints: {}",
+                        errors, warnings, infos, hints
+                    )
+                };
+
+                let mut details = Vec::new();
+                for diag in diagnostics.iter().take(10) {
+                    let severity = match diag.severity {
+                        Some(sev) => match sev {
+                            lsp_types::DiagnosticSeverity::ERROR => "E",
+                            lsp_types::DiagnosticSeverity::WARNING => "W",
+                            lsp_types::DiagnosticSeverity::INFORMATION => "I",
+                            lsp_types::DiagnosticSeverity::HINT => "H",
+                            _ => "I",
+                        },
+                        None => "I",
+                    };
+                    let line = diag.range.start.line + 1;
+                    let col = diag.range.start.character + 1;
+                    let message = diag
+                        .message
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim();
+                    details.push(format!("- [{}] {}:{} {}", severity, line, col, message));
+                }
+
+                let mut content = format!("LSP Diagnostics ({})\n", lsp_name);
+                if let Some(ref sid) = session_id {
+                    content.push_str(&format!("Session: {}\n", sid));
+                }
+                content.push_str(&format!("File: {}\n", file_path));
+                content.push_str(&format!("{}\n", summary));
+                if !details.is_empty() {
+                    content.push_str("\n");
+                    content.push_str(&details.join("\n"));
+                }
+
+                let metadata = serde_json::json!({
+                    "lsp": lsp_name,
+                    "uri": uri,
+                    "errors": errors,
+                    "warnings": warnings,
+                    "info": infos,
+                    "hints": hints,
+                    "diagnostics": diagnostics.iter().take(10).map(|diag| {
+                        serde_json::json!({
+                            "message": diag.message,
+                            "severity": diag.severity.map(|s| format!("{:?}", s).to_lowercase()),
+                            "range": {
+                                "start": { "line": diag.range.start.line, "character": diag.range.start.character },
+                                "end": { "line": diag.range.end.line, "character": diag.range.end.character }
+                            }
+                        })
+                    }).collect::<Vec<_>>()
+                });
+
+                let _ = service.store_memory_with_context(
+                    &content,
+                    MemoryCategory::Observation,
+                    Some(&format!("lsp:{}", lsp_name)),
+                    session_id.as_deref(),
+                    Some(&project_path),
+                    Some(metadata),
+                );
+            });
+        }
     }
 
     /// Process an LSP notification and convert to MCP event
@@ -832,7 +984,11 @@ impl Clone for McpBridge {
             lsp_name: self.lsp_name.clone(),
             lsp_type: self.lsp_type,
             project_path: self.project_path.clone(),
+            session_id: self.session_id.clone(),
             diagnostics_cache: Arc::clone(&self.diagnostics_cache),
+            diagnostics_fingerprints: Arc::clone(&self.diagnostics_fingerprints),
+            #[cfg(feature = "rusqlite")]
+            memory_service: self.memory_service.clone(),
         }
     }
 }

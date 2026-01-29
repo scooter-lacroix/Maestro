@@ -23,6 +23,7 @@ impl PromptBuilder {
         plan: &TrackPlan,
         recent_iterations: &[crate::orchestrate::model::IterationLog],
         leindex_context: Option<&str>,
+        memory_context: Option<&str>,
     ) -> Result<String> {
         let mut prompt = String::new();
         let mut budget_used = 0;
@@ -53,6 +54,18 @@ impl PromptBuilder {
             }
             prompt.push('\n');
             budget_used += prompt.len() - budget_used;
+        }
+
+        // Add memory context (LSP diagnostics, recent observations)
+        if let Some(memory) = memory_context {
+            if !memory.trim().is_empty() {
+                prompt.push_str("## Memory Context\n\n");
+                prompt.push_str(memory);
+                if !memory.ends_with('\n') {
+                    prompt.push('\n');
+                }
+                prompt.push('\n');
+            }
         }
 
         // Add current task details
@@ -281,7 +294,9 @@ mod tests {
             phases: vec![],
         };
 
-        let prompt = builder.build_prompt(&task, &session, &plan, &[], None).unwrap();
+        let prompt = builder
+            .build_prompt(&task, &session, &plan, &[], None, None)
+            .unwrap();
 
         assert!(prompt.contains("PLANNING MODE"));
         assert!(prompt.contains("NOT to implement code"));
@@ -320,7 +335,9 @@ mod tests {
             phases: vec![],
         };
 
-        let prompt = builder.build_prompt(&task, &session, &plan, &[], None).unwrap();
+        let prompt = builder
+            .build_prompt(&task, &session, &plan, &[], None, None)
+            .unwrap();
 
         assert!(prompt.contains("BUILDING MODE"));
         assert!(prompt.contains("Implement Feature X"));

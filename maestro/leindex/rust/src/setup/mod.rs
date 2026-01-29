@@ -684,6 +684,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         install_path: config.install_path.clone(),
         theme: crate::config::Config::default().theme,
         selected_tools: config.selected_tools.clone(),
+        transparent: false,
     };
     if let Err(e) = persistent_config.save() {
         let _ = tx.send(SetupEvent::Error(format!("Failed to save config: {}", e)));

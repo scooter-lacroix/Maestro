@@ -25,6 +25,8 @@ impl ConductorPane {
         let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
 
         if should_poll_all {
+            self.refresh_tracks_if_needed();
+
             let tracks_to_poll: Vec<(usize, String)> = self.tracks.iter().enumerate()
                 .map(|(idx, t)| (idx, t.id.clone()))
                 .collect();

@@ -125,3 +125,46 @@ pub async fn scan(paths: Vec<PathBuf>, depth: usize) -> Result<()> {
 
     Ok(())
 }
+
+/// Store a memory in the Maestro Memory System
+#[cfg(feature = "rusqlite")]
+pub async fn store(content: String, category: String, _importance: String, db: Option<PathBuf>) -> Result<()> {
+    use crate::memory::{MemoryService, MemoryCategory};
+
+    let db_path = db.unwrap_or_else(|| {
+        let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push(".maestro");
+        path.push("maestro.db");
+        path
+    });
+
+    // Parse category
+    let memory_category = match category.to_lowercase().as_str() {
+        "context" => MemoryCategory::Context,
+        "knowledge" => MemoryCategory::Knowledge,
+        "preference" => MemoryCategory::Preference,
+        "specification" => MemoryCategory::Specification,
+        "fact" => MemoryCategory::Fact,
+        "pattern" => MemoryCategory::Pattern,
+        "decision" => MemoryCategory::Decision,
+        "observation" => MemoryCategory::Observation,
+        "temporary" => MemoryCategory::Temporary,
+        _ => {
+            eprintln!("Warning: Unknown category '{}', using 'observation'", category);
+            MemoryCategory::Observation
+        }
+    };
+
+    let service = MemoryService::new(Some(db_path))?;
+    service.initialize()?;
+
+    // Store the memory (project is auto-created from current directory)
+    let memory_id = service.store_memory(&content, memory_category)?;
+
+    println!("✓ Memory stored successfully");
+    println!("  ID: {}", memory_id);
+    println!("  Category: {}", category);
+    println!("  Content: {}", content);
+
+    Ok(())
+}

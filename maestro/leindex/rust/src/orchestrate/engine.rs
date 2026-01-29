@@ -98,6 +98,17 @@ impl OrchestrateEngine {
                     }
 
                     info!("Track verification successful. Track complete!");
+
+                    // Bank track completion memory
+                    if let Some(ref svc) = self.memory_service {
+                        let content = format!(
+                            "Track '{}' completed successfully at {}. All tasks verified and passed.",
+                            track_id,
+                            Utc::now().to_rfc3339()
+                        );
+                        let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
+                    }
+
                     session.status = SessionStatus::Completed;
                     self.state_manager.save_session(&session)?;
                     break;
@@ -351,13 +362,23 @@ impl OrchestrateEngine {
 
     fn mark_task_complete(&self, plan: &mut TrackPlan, task_id: &str) -> Result<()> {
         self.update_task_status_recursive(&mut plan.tasks, task_id, TrackStatus::Completed)?;
-        
-        // Bank a task completion memory
+
+        // Bank a task completion memory with details
         if let Some(ref svc) = self.memory_service {
-            let content = format!("Completed task '{}' in track '{}'", task_id, plan.track_id);
-            let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
+            // Get the task details
+            if let Ok(task) = self.find_task(&plan.tasks, task_id) {
+                let content = format!(
+                    "Task '{}' completed in track '{}'.\n\nTitle: {}\nDescription: {}\n\nCompleted at: {}",
+                    task_id,
+                    plan.track_id,
+                    task.title,
+                    task.description,
+                    Utc::now().to_rfc3339()
+                );
+                let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
+            }
         }
-        
+
         Ok(())
     }
 
@@ -444,7 +465,47 @@ impl OrchestrateEngine {
             None
         };
 
-        builder.build_prompt(task, session, plan, &recent, leindex_context.as_deref())
+        let memory_context = self
+            .memory_service
+            .as_ref()
+            .and_then(|svc| {
+                let project_path = self.resolve_project_path();
+                match svc.list_lsp_memories_for_project(&project_path, 5) {
+                    Ok(memories) if !memories.is_empty() => {
+                        let content = memories
+                            .iter()
+                            .take(5)
+                            .map(|m| m.content.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+                        Some(content)
+                    }
+                    _ => None,
+                }
+            });
+
+        builder.build_prompt(
+            task,
+            session,
+            plan,
+            &recent,
+            leindex_context.as_deref(),
+            memory_context.as_deref(),
+        )
+    }
+
+    fn resolve_project_path(&self) -> String {
+        let tracks_dir = &self.tracks_dir;
+        if let Some(dir_name) = tracks_dir.file_name().and_then(|n| n.to_str()) {
+            if dir_name == "maestro" || dir_name == ".maestro" {
+                return tracks_dir
+                    .parent()
+                    .unwrap_or(tracks_dir)
+                    .to_string_lossy()
+                    .to_string();
+            }
+        }
+        tracks_dir.to_string_lossy().to_string()
     }
 
     fn handle_task_failure(
@@ -513,6 +574,31 @@ impl OrchestrateEngine {
             }
         }
         Err(anyhow!("Task not found: {}", task_id))
+    }
+
+    // Helper to find an immutable task reference by ID
+    fn find_task<'a>(&'a self, tasks: &'a [Task], task_id: &str) -> Result<&'a Task> {
+        for task in tasks {
+            if task.id == task_id {
+                return Ok(task);
+            }
+            if let Some(subtask) = self.find_subtask(&task.subtasks, task_id)? {
+                return Ok(subtask);
+            }
+        }
+        Err(anyhow!("Task not found: {}", task_id))
+    }
+
+    fn find_subtask<'a>(&'a self, subtasks: &'a [Task], task_id: &str) -> Result<Option<&'a Task>> {
+        for subtask in subtasks {
+            if subtask.id == task_id {
+                return Ok(Some(subtask));
+            }
+            if let Some(found) = self.find_subtask(&subtask.subtasks, task_id)? {
+                return Ok(Some(found));
+            }
+        }
+        Ok(None)
     }
 
     fn find_subtask_mut<'a>(&'a self, subtasks: &'a mut [Task], task_id: &str) -> Result<Option<&'a mut Task>> {

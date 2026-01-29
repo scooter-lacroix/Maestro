@@ -50,7 +50,15 @@ pub async fn run() -> Result<()> {
     // Create TursoStorageBackend for LSP operations (FIRST, before any other DB access)
     // This ensures libSQL can configure SQLite threading before it's initialized by rusqlite.
     let storage_backend = match TursoStorageBackend::new(None, None).await {
-        Ok(backend) => Some(Arc::new(backend)),
+        Ok(backend) => {
+            if let Err(e) = backend.initialize().await {
+                eprintln!(
+                    "Warning: Failed to initialize LSP storage backend: {}",
+                    e
+                );
+            }
+            Some(Arc::new(backend))
+        }
         Err(e) => {
             eprintln!(
                 "Warning: Failed to create storage backend for LSP operations: {}",
@@ -176,6 +184,10 @@ pub struct App {
     pub storage_backend: Option<Arc<TursoStorageBackend>>,
     // Flag to trigger async LSP refresh
     pub pending_lsp_refresh: bool,
+    // Persistent LSP Manager to keep processes alive
+    pub lsp_manager: Option<leindex_core::memory::lsp_manager::LspManager>,
+    // Sessions that already ran LSP auto-detection
+    pub lsp_autostarted_sessions: HashSet<String>,
     // Conductor pane state (formerly Orchestrate)
     pub conductor: crate::conductor::ConductorPane,
 }
@@ -261,10 +273,23 @@ impl App {
             lsp_log_scroll: 0,
             lsp_log_source: None,
             lsp_availability: HashMap::new(),
-            storage_backend,
+            storage_backend: storage_backend.clone(),
             pending_lsp_refresh: false,
+            lsp_manager: storage_backend.map(|s| leindex_core::memory::lsp_manager::LspManager::new((*s).clone())),
+            lsp_autostarted_sessions: HashSet::new(),
             conductor: crate::conductor::ConductorPane::auto_discover(),
         };
+        
+        // Restore running LSPs (if any were running in a previous instance or should be running)
+        if let Some(ref lsp_manager) = app.lsp_manager {
+            let manager = lsp_manager.clone();
+            tokio::spawn(async move {
+                if let Err(e) = manager.restore_lsps_on_startup().await {
+                    eprintln!("Failed to restore LSPs: {}", e);
+                }
+            });
+        }
+
         // Check LSP availability on startup
         app.check_lsp_availability();
         app.mcp_state.select(Some(0));
@@ -275,7 +300,13 @@ impl App {
     }
 
     pub fn theme(&self) -> Theme {
-        theme_from_name(&self.config.theme)
+        let mut theme = theme_from_name(&self.config.theme);
+        if self.config.transparent {
+            theme.bg = Color::Reset;
+            theme.panel_bg = Color::Reset;
+            theme.transparent = true;
+        }
+        theme
     }
 
     fn open_settings_menu(&mut self, kind: SettingsMenuKind) {
@@ -559,6 +590,9 @@ impl App {
                 }
             }
 
+            // Auto-start LSPs for newly discovered sessions (best-effort)
+            let _ = self.queue_lsp_autostart_for_sessions();
+
             self.refresh_session_entries();
             self.refresh_dash_session_entries();
 
@@ -791,6 +825,56 @@ impl App {
         self.pending_lsp_refresh = false;
     }
 
+    /// Auto-start LSPs for sessions that haven't been scanned yet.
+    fn queue_lsp_autostart_for_sessions(&mut self) -> bool {
+        let Some(lsp_manager) = self.lsp_manager.clone() else {
+            return false;
+        };
+
+        let known_ids: HashSet<String> =
+            self.sessions.iter().map(|s| s.session_id.clone()).collect();
+        self.lsp_autostarted_sessions
+            .retain(|id| known_ids.contains(id));
+
+        let mut scheduled = false;
+        for session in &self.sessions {
+            if self.lsp_autostarted_sessions.contains(&session.session_id) {
+                continue;
+            }
+
+            if session.project_path.trim().is_empty() {
+                continue;
+            }
+
+            if matches!(
+                session.status,
+                leindex_core::memory::models::SessionStatus::Terminated
+                    | leindex_core::memory::models::SessionStatus::Completed
+            ) {
+                continue;
+            }
+
+            let session_id = session.session_id.clone();
+            let project_path = std::path::PathBuf::from(session.project_path.clone());
+
+            self.lsp_autostarted_sessions.insert(session_id.clone());
+            scheduled = true;
+
+            let manager = lsp_manager.clone();
+            tokio::spawn(async move {
+                let _ = manager
+                    .auto_start_lsps_for_session(&session_id, &project_path)
+                    .await;
+            });
+        }
+
+        if scheduled {
+            self.refresh_lsp_status_impl(true);
+        }
+
+        scheduled
+    }
+
     /// Get selected LSP from cache
     ///
     /// Builds the LSP list in the same order as render_lsps (session order)
@@ -830,27 +914,39 @@ impl App {
             return;
         };
 
-        let Some(storage) = self.storage_backend.clone() else {
-            self.status_message = "Storage backend not available".to_string();
+        let Some(lsp_manager) = self.lsp_manager.clone() else {
+            self.status_message = "LSP Manager not available".to_string();
             return;
         };
+
+        let project_path = self
+            .sessions
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .map(|s| s.project_path.clone())
+            .unwrap_or_else(|| ".".to_string());
 
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
 
         // Spawn the operation in the background
         tokio::spawn(async move {
-            let lsp_manager =
-                leindex_core::memory::lsp_manager::LspManager::new((*storage).clone());
-
             let result = match status {
                 LspStatus::Stopped | LspStatus::Error => {
-                    // Start the LSP
-                    lsp_manager.start_lsp(&session_id, lsp_type, None).await
+                    // Start the LSP with MCP bridge for diagnostics
+                    let (start_result, _bridge_pid) = lsp_manager
+                        .start_lsp_with_mcp_bridge(
+                            &session_id,
+                            lsp_type,
+                            std::path::Path::new(&project_path),
+                            None,
+                        )
+                        .await;
+                    start_result
                 }
                 LspStatus::Running | LspStatus::Starting => {
-                    // Stop the LSP
-                    lsp_manager.stop_lsp(&session_id, lsp_type).await
+                    // Stop the LSP and MCP bridge
+                    lsp_manager.stop_lsp_with_mcp_bridge(&session_id, lsp_type, 0).await
                 }
             };
 
@@ -877,19 +973,34 @@ impl App {
             return;
         };
 
-        let Some(storage) = self.storage_backend.clone() else {
-            self.status_message = "Storage backend not available".to_string();
+        let Some(lsp_manager) = self.lsp_manager.clone() else {
+            self.status_message = "LSP Manager not available".to_string();
             return;
         };
+
+        let project_path = self
+            .sessions
+            .iter()
+            .find(|s| s.session_id == session_id)
+            .map(|s| s.project_path.clone())
+            .unwrap_or_else(|| ".".to_string());
 
         let session_id = session_id.to_string();
         let lsp_name = lsp_name.to_string();
 
         // Spawn the operation in the background
         tokio::spawn(async move {
-            let lsp_manager =
-                leindex_core::memory::lsp_manager::LspManager::new((*storage).clone());
-            lsp_manager.restart_lsp(&session_id, lsp_type).await
+            let _ = lsp_manager
+                .stop_lsp_with_mcp_bridge(&session_id, lsp_type, 0)
+                .await;
+            let _ = lsp_manager
+                .start_lsp_with_mcp_bridge(
+                    &session_id,
+                    lsp_type,
+                    std::path::Path::new(&project_path),
+                    None,
+                )
+                .await;
         });
 
         // Update status message optimistically - actual status will be reflected on next refresh
@@ -1078,7 +1189,22 @@ async fn run_app<B: Backend>(
                                                 None,
                                             ) {
                                                 Ok(session) => {
+                                                    // Ensure project is registered in memory pipeline
+                                                    let project_name = std::path::Path::new(&session.project_path)
+                                                        .file_name()
+                                                        .and_then(|name| name.to_str())
+                                                        .unwrap_or(&session.title)
+                                                        .to_string();
+                                                    let _ = svc.get_or_create_project(
+                                                        &session.project_path,
+                                                        &project_name,
+                                                    );
+                                                    let _ = svc.update_last_accessed(&session.session_id);
+                                                    let _ = svc.sync_mcp_servers_from_system();
+                                                    let _ = svc.sync_memories_from_system();
+
                                                     app.sessions.push(session.clone());
+                                                    let _ = app.queue_lsp_autostart_for_sessions();
                                                     app.refresh_session_entries();
                                                     app.refresh_dash_session_entries();
                                                     app.status_message = format!("Session '{}' created. Press Enter on Sessions tab to attach.", session.title);
@@ -1095,6 +1221,7 @@ async fn run_app<B: Backend>(
                                                         })
                                                         .unwrap_or(0);
                                                     app.session_state.select(Some(new_idx));
+                                                    app.refresh_from_service(&service);
                                                 }
                                                 Err(e) => {
                                                     app.status_message = format!("Error: {}", e);
@@ -2264,7 +2391,8 @@ async fn run_app<B: Backend>(
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
-                                        SettingsOption::Theme => SettingsOption::InstallPath,
+                                        SettingsOption::Theme => SettingsOption::Transparent,
+                                        SettingsOption::Transparent => SettingsOption::InstallPath,
                                         SettingsOption::InstallPath => SettingsOption::Save,
                                         SettingsOption::Save => SettingsOption::Editor,
                                     };
@@ -2377,9 +2505,10 @@ async fn run_app<B: Backend>(
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
-                                        SettingsOption::Theme => SettingsOption::Editor,
-                                        SettingsOption::InstallPath => SettingsOption::Theme,
                                         SettingsOption::Save => SettingsOption::InstallPath,
+                                        SettingsOption::InstallPath => SettingsOption::Transparent,
+                                        SettingsOption::Transparent => SettingsOption::Theme,
+                                        SettingsOption::Theme => SettingsOption::Editor,
                                     };
                                 }
                                 app.scroll = app.scroll.saturating_sub(1);
@@ -2406,7 +2535,74 @@ async fn run_app<B: Backend>(
                         app.help_scroll = app.help_scroll.min(max_scroll);
                     } else {
                         match (key.modifiers, key.code) {
-                            // 1. Tab Switching (Global) - Use ALT+1-8 to avoid collisions
+                            // 1. Global Navigation (Highest Priority)
+                            // Tab / BackTab
+                            (KeyModifiers::NONE, KeyCode::Tab) => {
+                                if app.tab_index == 0 {
+                                    match app.dash_focus {
+                                        DashFocus::Sessions => app.dash_focus = DashFocus::Mcp,
+                                        DashFocus::Mcp => app.dash_focus = DashFocus::Tabs,
+                                        DashFocus::Tabs => {
+                                            app.tab_index = 1;
+                                            app.dash_focus = DashFocus::Sessions;
+                                        }
+                                    };
+                                } else {
+                                    app.tab_index = (app.tab_index + 1) % 8;
+                                    app.preview_focused = false;
+                                }
+                            }
+                            (KeyModifiers::SHIFT, KeyCode::BackTab) | (_, KeyCode::BackTab) => {
+                                if app.tab_index == 0 {
+                                    match app.dash_focus {
+                                        DashFocus::Sessions => {
+                                            app.tab_index = 6;
+                                            app.dash_focus = DashFocus::Sessions;
+                                        }
+                                        DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
+                                        DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
+                                    };
+                                } else {
+                                    app.tab_index = if app.tab_index == 0 {
+                                        6
+                                    } else {
+                                        app.tab_index - 1
+                                    };
+                                    app.preview_focused = false;
+                                }
+                            }
+
+                            // 2. Direct Numbers (Global)
+                            (KeyModifiers::NONE, KeyCode::Char('1')) => app.tab_index = 0,
+                            (KeyModifiers::NONE, KeyCode::Char('2')) => app.tab_index = 1,
+                            (KeyModifiers::NONE, KeyCode::Char('3')) => app.tab_index = 2,
+                            (KeyModifiers::NONE, KeyCode::Char('4')) => app.tab_index = 3,
+                            (KeyModifiers::NONE, KeyCode::Char('5')) => app.tab_index = 4,
+                            (KeyModifiers::NONE, KeyCode::Char('6')) => app.tab_index = 5,
+                            (KeyModifiers::NONE, KeyCode::Char('7')) => app.tab_index = 6,
+                            (KeyModifiers::NONE, KeyCode::Char('8')) => app.tab_index = 7,
+
+                            // 3. Conductor Specific Alt Keys
+                            (KeyModifiers::ALT, KeyCode::Char('1')) if app.tab_index == 4 => {
+                                app.conductor.details_mode = crate::conductor::model::DetailsViewMode::Details;
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('2')) if app.tab_index == 4 => {
+                                app.conductor.details_mode = crate::conductor::model::DetailsViewMode::Output;
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('3')) if app.tab_index == 4 => {
+                                app.conductor.details_mode = crate::conductor::model::DetailsViewMode::Prompt;
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 4 => {
+                                app.conductor.output_focused = !app.conductor.output_focused;
+                                app.status_message = if app.conductor.output_focused {
+                                    "Output focused. Scroll with Arrows/PgUp/PgDn."
+                                } else {
+                                    "Tracks focused."
+                                }
+                                .to_string();
+                            }
+
+                            // 4. Global Alt Keys (Tab Switching)
                             (KeyModifiers::ALT, KeyCode::Char('1')) => app.tab_index = 0,
                             (KeyModifiers::ALT, KeyCode::Char('2')) => app.tab_index = 1,
                             (KeyModifiers::ALT, KeyCode::Char('3')) => app.tab_index = 2,
@@ -2416,7 +2612,7 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('7')) => app.tab_index = 6,
                             (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = 7,
 
-                            // 2. Conductor Tab (High Priority Override)
+                            // 5. Conductor Catch-All
                             _ if app.tab_index == 4 => {
                                 use crate::conductor::keybindings::{handle_key_event, ConductorAction};
                                 match handle_key_event(&mut app.conductor, key) {
@@ -2429,16 +2625,6 @@ async fn run_app<B: Backend>(
                                 }
                                 // Fall through for global keys like 'q'
                             }
-
-                            // Allow raw numbers if NOT on Conductor tab (for convenience)
-                            (KeyModifiers::NONE, KeyCode::Char('1')) if app.tab_index != 4 => app.tab_index = 0,
-                            (KeyModifiers::NONE, KeyCode::Char('2')) if app.tab_index != 4 => app.tab_index = 1,
-                            (KeyModifiers::NONE, KeyCode::Char('3')) if app.tab_index != 4 => app.tab_index = 2,
-                            (KeyModifiers::NONE, KeyCode::Char('4')) if app.tab_index != 4 => app.tab_index = 3,
-                            (KeyModifiers::NONE, KeyCode::Char('5')) if app.tab_index != 4 => app.tab_index = 4,
-                            (KeyModifiers::NONE, KeyCode::Char('6')) if app.tab_index != 4 => app.tab_index = 5,
-                            (KeyModifiers::NONE, KeyCode::Char('7')) if app.tab_index != 4 => app.tab_index = 6,
-                            (KeyModifiers::NONE, KeyCode::Char('8')) if app.tab_index != 4 => app.tab_index = 7,
 
                             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                                 if app.tab_index == 5 {
@@ -2458,14 +2644,6 @@ async fn run_app<B: Backend>(
                                         "Preview focused. Scroll with Arrows/PgUp/PgDn."
                                     } else {
                                         "List focused."
-                                    }
-                                    .to_string();
-                                } else if app.tab_index == 4 {
-                                    app.conductor.output_focused = !app.conductor.output_focused;
-                                    app.status_message = if app.conductor.output_focused {
-                                        "Output focused. Scroll with Arrows/PgUp/PgDn."
-                                    } else {
-                                        "Tracks focused."
                                     }
                                     .to_string();
                                 }
@@ -2652,9 +2830,14 @@ async fn run_app<B: Backend>(
                                     }
                                 } else if app.tab_index == 6 {
                                     // LSPs tab
+                                    let scheduled = app.queue_lsp_autostart_for_sessions();
                                     // Use force=true for manual refresh to bypass throttle
                                     if app.refresh_lsp_status_impl(true) {
-                                        app.status_message = "LSP status refreshed".to_string();
+                                        app.status_message = if scheduled {
+                                            "LSP scan queued; refreshing status".to_string()
+                                        } else {
+                                            "LSP status refreshed".to_string()
+                                        };
                                     } else {
                                         // Should not happen with force=true, but handle gracefully
                                         app.status_message = "LSP refresh pending...".to_string();
@@ -2679,6 +2862,44 @@ async fn run_app<B: Backend>(
                                     {
                                         app.target_session_id = Some(session_id);
                                         app.input_mode = InputMode::KillConfirm;
+                                    }
+                                }
+                            }
+                            (_, KeyCode::Char('D') | KeyCode::Char('d')) if app.tab_index != 4 => {
+                                if app.tab_index == 1 {
+                                    if let Some(i) = app.session_state.selected() {
+                                        if let Some(entry) = app.session_entries.get(i) {
+                                            match entry {
+                                                SessionEntry::Session(s) => {
+                                                    app.target_session_id =
+                                                        Some(s.session_id.clone());
+                                                    app.status_message = format!(
+                                                         "Confirm DELETE session '{}'? (y/n)",
+                                                         s.title
+                                                     );
+                                                    app.input_mode = InputMode::DeleteConfirm;
+                                                }
+                                                SessionEntry::Group(g) => {
+                                                    app.target_group_path = Some(g.path.clone());
+                                                    app.status_message = format!(
+                                                         "Confirm DELETE group '{}' and all sessions? (y/n)",
+                                                         g.name
+                                                     );
+                                                    app.input_mode = InputMode::DeleteConfirm;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if app.tab_index == 0
+                                    && app.dash_focus == DashFocus::Sessions
+                                {
+                                    if let Some((sid, title)) = app.dash_selected_session().map(|s| (s.session_id.clone(), s.title.clone())) {
+                                        app.target_session_id = Some(sid);
+                                        app.status_message = format!(
+                                            "Confirm DELETE session '{}'? (y/n)",
+                                            title
+                                        );
+                                        app.input_mode = InputMode::DeleteConfirm;
                                     }
                                 }
                             }
@@ -2736,13 +2957,11 @@ async fn run_app<B: Backend>(
 
                                     let s_clone = s.clone();
                                     let svc_clone = svc.clone();
-                                    let storage_opt = app.storage_backend.clone();
+                                    let lsp_manager = app.lsp_manager.clone();
                                     let res = tokio::task::spawn_blocking(move || {
                                         let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
-                                        if let Some(storage) = storage_opt {
-                                            use leindex_core::memory::lsp_manager::LspManager;
-                                            let lsp_manager = LspManager::new((*storage).clone());
+                                        if let Some(lsp_manager) = lsp_manager {
                                             manager = manager.with_lsp_manager(lsp_manager);
                                         }
 
@@ -2821,40 +3040,6 @@ async fn run_app<B: Backend>(
                                     // Project list temporary message
                                     app.status_message =
                                         "Project deletion via TUI coming soon in v2.1".to_string();
-                                }
-                            }
-                            (_, KeyCode::Tab) => {
-                                if app.tab_index == 0 {
-                                    match app.dash_focus {
-                                        DashFocus::Sessions => app.dash_focus = DashFocus::Mcp,
-                                        DashFocus::Mcp => app.dash_focus = DashFocus::Tabs,
-                                        DashFocus::Tabs => {
-                                            app.tab_index = 1;
-                                            app.dash_focus = DashFocus::Sessions;
-                                        }
-                                    };
-                                } else {
-                                    app.tab_index = (app.tab_index + 1) % 8;
-                                    app.preview_focused = false;
-                                }
-                            }
-                            (_, KeyCode::BackTab) => {
-                                if app.tab_index == 0 {
-                                    match app.dash_focus {
-                                        DashFocus::Sessions => {
-                                            app.tab_index = 6;
-                                            app.dash_focus = DashFocus::Sessions;
-                                        }
-                                        DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
-                                        DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
-                                    };
-                                } else {
-                                    app.tab_index = if app.tab_index == 0 {
-                                        6
-                                    } else {
-                                        app.tab_index - 1
-                                    };
-                                    app.preview_focused = false;
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('o')) => {
@@ -2973,7 +3158,8 @@ async fn run_app<B: Backend>(
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
-                                        SettingsOption::Theme => SettingsOption::InstallPath,
+                                        SettingsOption::Theme => SettingsOption::Transparent,
+                                        SettingsOption::Transparent => SettingsOption::InstallPath,
                                         SettingsOption::InstallPath => SettingsOption::Save,
                                         SettingsOption::Save => SettingsOption::Editor,
                                     };
@@ -3085,9 +3271,10 @@ async fn run_app<B: Backend>(
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
-                                        SettingsOption::Theme => SettingsOption::Editor,
-                                        SettingsOption::InstallPath => SettingsOption::Theme,
                                         SettingsOption::Save => SettingsOption::InstallPath,
+                                        SettingsOption::InstallPath => SettingsOption::Transparent,
+                                        SettingsOption::Transparent => SettingsOption::Theme,
+                                        SettingsOption::Theme => SettingsOption::Editor,
                                     };
                                 }
                                 app.scroll = app.scroll.saturating_sub(1);
@@ -3276,6 +3463,9 @@ async fn run_app<B: Backend>(
                                         SettingsOption::Theme => {
                                             app.open_settings_menu(SettingsMenuKind::Theme);
                                         }
+                                        SettingsOption::Transparent => {
+                                            app.config.transparent = !app.config.transparent;
+                                        }
                                         SettingsOption::Save => {
                                             let _ = app.config.save();
                                             app.status_message = "Configuration saved to ~/.config/maestro/config.toml".to_string();
@@ -3366,13 +3556,11 @@ async fn run_app<B: Backend>(
 
 	                                                                    let s_clone = s.clone();
 	                                                                    let svc_clone = svc.clone();
-	                                                                    let storage_opt = app.storage_backend.clone();
+	                                                                    let lsp_manager = app.lsp_manager.clone();
 	                                                                    let _ = tokio::task::spawn_blocking(move || {
 	                                                                        let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
-	                                                                        if let Some(storage) = storage_opt {
-	                                                                            use leindex_core::memory::lsp_manager::LspManager;
-	                                                                            let lsp_manager = LspManager::new((*storage).clone());
+	                                                                        if let Some(lsp_manager) = lsp_manager {
 	                                                                            manager = manager.with_lsp_manager(lsp_manager);
 	                                                                        }
 
@@ -3443,7 +3631,14 @@ async fn run_app<B: Backend>(
                                     {
                                         app.toggle_lsp(&session_id, &lsp_name, status);
                                     } else {
-                                        app.status_message = "No LSP selected".to_string();
+                                        let scheduled = app.queue_lsp_autostart_for_sessions();
+                                        app.status_message = if scheduled {
+                                            "Queued LSP auto-detect for active sessions"
+                                                .to_string()
+                                        } else {
+                                            "No LSPs detected yet. Press 'r' to rescan."
+                                                .to_string()
+                                        };
                                     }
                                 } else {
                                     app.input_mode = InputMode::SessionSwitcher;
@@ -3501,13 +3696,11 @@ async fn run_app<B: Backend>(
 
                                     let s_clone = s.clone();
                                     let svc_clone = svc.clone();
-                                    let storage_opt = app.storage_backend.clone();
+                                    let lsp_manager = app.lsp_manager.clone();
                                     let res = tokio::task::spawn_blocking(move || {
                                         let mut manager = leindex_core::memory::session_manager::SessionManager::new(svc_clone)?;
 
-                                        if let Some(storage) = storage_opt {
-                                            use leindex_core::memory::lsp_manager::LspManager;
-                                            let lsp_manager = LspManager::new((*storage).clone());
+                                        if let Some(lsp_manager) = lsp_manager {
                                             manager = manager.with_lsp_manager(lsp_manager);
                                         }
 

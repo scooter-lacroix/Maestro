@@ -272,6 +272,12 @@ All tasks follow a strict lifecycle:
    - **AUTOMATICALLY Launch Code Review:** Use the oracle agent to review all changes made during this task. Provide context: task description, files changed, expected outcomes.
    - **Address Review Findings:** If critical issues are found, fix them before proceeding. If suggestions are provided, address or document decision to defer.
    - **Confirm Review Complete:** Only after oracle passes should you proceed to commit. Document any issues found and resolved.
+   - **BANK MEMORY: Task Completion** - After review, store:
+     - Task summary and completion timestamp
+     - Commit hash(es) for this task
+     - Files modified/created with brief descriptions
+     - Review findings and resolutions
+     - Use memory category `decision` for task completion
 
 10. **Commit Code Changes:**
     - Stage all code changes related to the task.
@@ -420,13 +426,26 @@ Be brutal. Be thorough. Be excellent.
 ### Phase Review Workflow
 
 1. **Verify Phase Complete:** Confirm all tasks in phase are `[x]`
-2. **Collect Phase Commits:** List all commit hashes for the phase
-3. **Invoke codex-reviewer:** Use the directive template above
-4. **Review Findings:** Address ALL critical issues
-5. **Re-test:** Ensure fixes do not break anything
-6. **Document Review:** Create summary of review findings
-7. **Update Phase Status:** Mark phase as "Reviewed & Approved"
-8. **Only Then Proceed:** Move to next phase
+2. **BANK MEMORY: Phase Completion Context** - Before review, store:
+   - Phase completion summary
+   - All commits in this phase
+   - Files modified/created
+   - Any blockers or issues encountered
+   - Use memory category `decision` for architectural decisions
+3. **Collect Phase Commits:** List all commit hashes for the phase
+4. **Invoke codex-reviewer:** Use the directive template above
+5. **Review Findings:** Address ALL critical issues
+6. **Re-test:** Ensure fixes do not break anything
+7. **BANK MEMORY: Tzar Review Results** - After review, store:
+   - Review findings summary
+   - Critical issues found and fixed
+   - Improvements made
+   - Final verdict (PASS/FAIL)
+   - Any technical debt identified
+   - Use memory category `observation` for review notes
+8. **Document Review:** Create summary of review findings
+9. **Update Phase Status:** Mark phase as "Reviewed & Approved"
+10. **Only Then Proceed:** Move to next phase
 
 ### Failure Criteria
 

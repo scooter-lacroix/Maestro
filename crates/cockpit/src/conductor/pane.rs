@@ -8,13 +8,14 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use leindex_core::orchestrate::{
     model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode, IterationLog, IterationStatus},
     parser::{parse_tracks_md, parse_plan_md},
     setup::{SetupStatus, detect_setup_status, AgentTool},
 };
+use leindex_core::multiplexer::TmuxMultiplexer;
 
 use super::model::ConductorState;
 use crate::maestro_paths::MaestroProject;
@@ -75,6 +76,14 @@ pub struct ConductorPane {
     cached_plan: Option<TrackPlan>,
     /// Track index for which the plan is cached
     cached_plan_track_index: Option<usize>,
+    /// Cached plan file mtimes (track_id -> mtime)
+    plan_mtime_cache: std::collections::HashMap<String, std::time::SystemTime>,
+    /// Tracks discovered from ~/.maestro/orchestrate (external sessions)
+    external_track_ids: std::collections::HashSet<String>,
+    /// Last time external sessions were scanned
+    last_external_scan: std::time::Instant,
+    /// Last known tracks.md modification time
+    last_tracks_mtime: Option<std::time::SystemTime>,
     /// Setup state
     pub setup: SetupState,
     /// Whether to show the dashboard overlay
@@ -101,6 +110,10 @@ impl Default for ConductorPane {
             error_message: None,
             cached_plan: None,
             cached_plan_track_index: None,
+            plan_mtime_cache: std::collections::HashMap::new(),
+            external_track_ids: std::collections::HashSet::new(),
+            last_external_scan: std::time::Instant::now(),
+            last_tracks_mtime: None,
             setup: Default::default(),
             show_dashboard: false,
             current_project: None,
@@ -158,13 +171,24 @@ impl ConductorPane {
         };
 
         // Discover external sessions from ~/.maestro/orchestrate
-        self.discover_external_sessions(&mut loaded_tracks);
+        let mut external_ids = std::collections::HashSet::new();
+        self.discover_external_sessions(&mut loaded_tracks, &mut external_ids);
         
         self.tracks = loaded_tracks;
+        self.external_track_ids = external_ids;
+        self.last_tracks_mtime = tracks_path
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok();
+        self.last_external_scan = std::time::Instant::now();
         Ok(())
     }
 
-    fn discover_external_sessions(&self, tracks: &mut Vec<Track>) {
+    fn discover_external_sessions(
+        &self,
+        tracks: &mut Vec<Track>,
+        external_ids: &mut std::collections::HashSet<String>,
+    ) {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
         
@@ -178,24 +202,53 @@ impl ConductorPane {
                         if !tracks.iter().any(|t| t.id == track_id) {
                             let session_path = entry.path().join("session.json");
                             if session_path.exists() {
-                                // Create a placeholder Track for this external session
-                                let mut track = Track {
-                                    id: track_id.clone(),
-                                    description: "CLI/External Session".to_string(),
-                                    status: leindex_core::orchestrate::model::TrackStatus::InProgress,
-                                    link_path: entry.path(), // Use orchestrate dir as link path for now
-                                    metadata: None,
-                                    plan: None,
-                                };
+                                if let Ok(content) = std::fs::read_to_string(&session_path) {
+                                    if let Ok(session) =
+                                        serde_json::from_str::<leindex_core::orchestrate::model::SessionState>(&content)
+                                    {
+                                        // Skip completed/failed sessions to avoid stale phantom entries.
+                                        if matches!(
+                                            session.status,
+                                            leindex_core::orchestrate::model::SessionStatus::Completed
+                                                | leindex_core::orchestrate::model::SessionStatus::Failed
+                                                | leindex_core::orchestrate::model::SessionStatus::Interrupted
+                                                | leindex_core::orchestrate::model::SessionStatus::Idle
+                                        ) {
+                                            continue;
+                                        }
 
-                                // Synthesize a virtual plan from iterations if possible
-                                if let Ok(logs) = self.load_iterations_for_track(&track_id) {
-                                    if !logs.is_empty() {
-                                        track.plan = Some(self.synthesize_plan_from_logs(&track_id, &logs));
+                                        let track_status = match session.status {
+                                            leindex_core::orchestrate::model::SessionStatus::Running
+                                            | leindex_core::orchestrate::model::SessionStatus::Paused => {
+                                                leindex_core::orchestrate::model::TrackStatus::InProgress
+                                            }
+                                            leindex_core::orchestrate::model::SessionStatus::Completed => {
+                                                leindex_core::orchestrate::model::TrackStatus::Completed
+                                            }
+                                            _ => leindex_core::orchestrate::model::TrackStatus::Pending,
+                                        };
+
+                                        // Create a placeholder Track for this external session
+                                        let mut track = Track {
+                                            id: track_id.clone(),
+                                            description: "CLI/External Session".to_string(),
+                                            status: track_status,
+                                            link_path: entry.path(), // Use orchestrate dir as link path for now
+                                            metadata: None,
+                                            plan: None,
+                                        };
+
+                                        // Synthesize a virtual plan from iterations if possible
+                                        if let Ok(logs) = self.load_iterations_for_track(&track_id) {
+                                            if !logs.is_empty() {
+                                                track.plan = Some(self.synthesize_plan_from_logs(&track_id, &logs));
+                                            }
+                                        }
+
+                                        tracks.push(track);
+                                        external_ids.insert(track_id.clone());
                                     }
                                 }
-
-                                tracks.push(track);
                             }
                         }
                     }
@@ -264,6 +317,9 @@ impl ConductorPane {
     /// Reload tracks (call when tracks_dir changes or to refresh)
     pub fn reload(&mut self) {
         self.invalidate_plan_cache();
+        self.plan_mtime_cache.clear();
+        self.external_track_ids.clear();
+        self.last_tracks_mtime = None;
         self.tracks.clear();
         self.selected_index = 0;
         let _ = self.load_tracks();
@@ -273,6 +329,98 @@ impl ConductorPane {
     pub fn set_tracks_dir(&mut self, tracks_dir: PathBuf) {
         self.tracks_dir = tracks_dir;
         self.reload();
+    }
+
+    /// Switch projects automatically based on the active tmux pane.
+    /// Returns true if a project switch occurred.
+    pub fn refresh_project_from_tmux(&mut self) -> bool {
+        if std::env::var("TMUX").is_err() {
+            return false;
+        }
+
+        let mux = TmuxMultiplexer::new();
+        let Some(active_path) = mux.get_active_pane_path().ok().flatten() else {
+            return false;
+        };
+
+        let Some(project) = crate::maestro_paths::resolve_maestro_project(Some(Path::new(&active_path))) else {
+            return false;
+        };
+
+        let should_switch = self
+            .current_project
+            .as_ref()
+            .map(|p| p.root_dir != project.root_dir)
+            .unwrap_or(true);
+
+        if should_switch {
+            self.switch_project(project);
+        }
+
+        should_switch
+    }
+
+    /// Refresh tracks if tracks.md or external sessions have changed.
+    pub fn refresh_tracks_if_needed(&mut self) {
+        use std::time::Duration;
+
+        let tracks_path = self.tracks_dir.join("tracks.md");
+        let tracks_mtime = tracks_path.metadata().and_then(|m| m.modified()).ok();
+        let tracks_changed = match (tracks_mtime, self.last_tracks_mtime) {
+            (Some(new), Some(old)) => new > old,
+            (Some(_), None) => true,
+            (None, Some(_)) => true,
+            (None, None) => false,
+        };
+
+        let external_scan_due = self.last_external_scan.elapsed() >= Duration::from_secs(2);
+        if external_scan_due {
+            if self.refresh_project_from_tmux() {
+                return;
+            }
+        }
+
+        if !tracks_changed && !external_scan_due {
+            return;
+        }
+
+        let mut loaded_tracks = if tracks_path.exists() {
+            match parse_tracks_md(&tracks_path) {
+                Ok(tracks) => tracks,
+                Err(e) => {
+                    self.error_message = Some(format!("Error loading tracks.md: {}", e));
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        let mut external_ids = std::collections::HashSet::new();
+        self.discover_external_sessions(&mut loaded_tracks, &mut external_ids);
+
+        self.tracks = loaded_tracks;
+        self.external_track_ids = external_ids;
+        self.last_tracks_mtime = tracks_mtime;
+        self.last_external_scan = std::time::Instant::now();
+        self.invalidate_plan_cache();
+
+        // Clamp selection to available items
+        let items = self.get_selectable_items();
+        if items.is_empty() {
+            self.selected_index = 0;
+        } else if self.selected_index >= items.len() {
+            self.selected_index = items.len() - 1;
+        }
+
+        // Drop expansion state for removed tracks
+        let track_ids: std::collections::HashSet<String> =
+            self.tracks.iter().map(|t| t.id.clone()).collect();
+        self.expanded_tasks
+            .retain(|id| track_ids.contains(id));
+        self.state
+            .track_runtime_statuses
+            .retain(|id, _| track_ids.contains(id));
     }
 
     /// Open the project selector
@@ -302,6 +450,7 @@ impl ConductorPane {
     pub fn invalidate_plan_cache(&mut self) {
         self.cached_plan = None;
         self.cached_plan_track_index = None;
+        self.plan_mtime_cache.clear();
     }
 
     /// Get the flat list of selectable items for the tree
@@ -366,22 +515,28 @@ impl ConductorPane {
             return Ok(None);
         }
 
+        let track = &self.tracks[track_idx];
+        let plan_path = track.link_path.join("plan.md");
+        let plan_mtime = plan_path.metadata().and_then(|m| m.modified()).ok();
+
         if self.cached_plan_track_index == Some(track_idx) {
             if let Some(ref plan) = self.cached_plan {
-                return Ok(Some(plan.clone()));
+                let cached_mtime = self.plan_mtime_cache.get(&track.id).copied();
+                if cached_mtime.is_some() && cached_mtime == plan_mtime {
+                    return Ok(Some(plan.clone()));
+                }
             }
         }
-
-        let track = &self.tracks[track_idx];
 
         // If track already has a plan (e.g. synthesized), use it
         if let Some(ref plan) = track.plan {
             self.cached_plan = Some(plan.clone());
             self.cached_plan_track_index = Some(track_idx);
+            if let Some(mtime) = plan_mtime {
+                self.plan_mtime_cache.insert(track.id.clone(), mtime);
+            }
             return Ok(Some(plan.clone()));
         }
-
-        let plan_path = track.link_path.join("plan.md");
 
         if !plan_path.exists() {
             return Ok(None);
@@ -390,6 +545,9 @@ impl ConductorPane {
         let plan = parse_plan_md(&plan_path)?;
         self.cached_plan = Some(plan.clone());
         self.cached_plan_track_index = Some(track_idx);
+        if let Some(mtime) = plan_mtime {
+            self.plan_mtime_cache.insert(track.id.clone(), mtime);
+        }
         Ok(Some(plan))
     }
 
@@ -564,7 +722,10 @@ impl ConductorPane {
             LoopMode::Building => "building",
         };
 
-        let mut cmd = format!("maestro orchestrate start {} --mode {} --tool {}", track_id, mode_str, tool);
+        let mut cmd = format!(
+            "maestro orchestrate start {} --mode {} --tool {}",
+            track_id, mode_str, tool
+        );
 
         if dangerous {
             cmd.push_str(" --dangerous");
@@ -573,6 +734,8 @@ impl ConductorPane {
         if sandbox {
             cmd.push_str(" --sandbox");
         }
+
+        cmd.push_str(&format!(" --tracks-dir {}", self.tracks_dir.display()));
 
         cmd
     }
@@ -585,7 +748,11 @@ impl ConductorPane {
         };
 
         let track_id = &self.tracks[track_idx].id;
-        format!("maestro orchestrate pause {}", track_id)
+        format!(
+            "maestro orchestrate pause {} --tracks-dir {}",
+            track_id,
+            self.tracks_dir.display()
+        )
     }
 
     /// Get the recommended resume command for the current track
@@ -596,18 +763,31 @@ impl ConductorPane {
         };
 
         let track_id = &self.tracks[track_idx].id;
-        format!("maestro orchestrate resume {}", track_id)
+        format!(
+            "maestro orchestrate resume {} --tracks-dir {}",
+            track_id,
+            self.tracks_dir.display()
+        )
     }
 
     /// Get the recommended status command for the current track
     pub fn get_status_command(&mut self) -> String {
         let track_idx = match self.get_selected_track_index() {
             Some(idx) => idx,
-            None => return "maestro orchestrate status".to_string(),
+            None => {
+                return format!(
+                    "maestro orchestrate status --tracks-dir {}",
+                    self.tracks_dir.display()
+                )
+            }
         };
 
         let track_id = &self.tracks[track_idx].id;
-        format!("maestro orchestrate status {}", track_id)
+        format!(
+            "maestro orchestrate status {} --tracks-dir {}",
+            track_id,
+            self.tracks_dir.display()
+        )
     }
 
     /// Get the command to create a new track

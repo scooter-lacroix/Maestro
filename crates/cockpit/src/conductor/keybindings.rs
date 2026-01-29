@@ -43,17 +43,27 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                 }
                 return ConductorAction::Handled;
             }
+            // Allow global navigation keys to pass through even when modal is open
+            (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::NONE, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => return ConductorAction::None,
+            (KeyModifiers::NONE, KeyCode::Char('1'..='8')) => return ConductorAction::None,
+            (KeyModifiers::ALT, KeyCode::Char('1'..='8')) => return ConductorAction::None,
             _ => return ConductorAction::Handled, // Absorb other keys when modal is open
         }
     }
 
     // 2. Handle Dashboard if open
     if pane.show_dashboard {
-        if key.code == KeyCode::Esc || key.code == KeyCode::Char('d') {
-            pane.show_dashboard = false;
-            return ConductorAction::Handled;
+        match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Esc) | (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                pane.show_dashboard = false;
+                return ConductorAction::Handled;
+            }
+            // Allow global navigation keys to pass through
+            (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::NONE, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::BackTab) => return ConductorAction::None,
+            (KeyModifiers::NONE, KeyCode::Char('1'..='8')) => return ConductorAction::None,
+            (KeyModifiers::ALT, KeyCode::Char('1'..='8')) => return ConductorAction::None,
+            _ => return ConductorAction::Handled,
         }
-        return ConductorAction::Handled;
     }
 
     match (key.modifiers, key.code) {
@@ -115,19 +125,21 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             }
         }
 
-        // Details mode switching
-        (_, KeyCode::Char('1')) => {
+        // Mode switching
+        (KeyModifiers::ALT, KeyCode::Char('1')) => {
             pane.details_mode = crate::conductor::model::DetailsViewMode::Details;
             ConductorAction::Handled
         }
-        (_, KeyCode::Char('2')) => {
+        (KeyModifiers::ALT, KeyCode::Char('2')) => {
             pane.details_mode = crate::conductor::model::DetailsViewMode::Output;
             ConductorAction::Handled
         }
-        (_, KeyCode::Char('3')) => {
+        (KeyModifiers::ALT, KeyCode::Char('3')) => {
             pane.details_mode = crate::conductor::model::DetailsViewMode::Prompt;
             ConductorAction::Handled
         }
+
+        // Details mode switching (Legacy fallback removed to allow tab switching)
 
         // Output control
         (_, KeyCode::Char('c')) => {
@@ -142,15 +154,20 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         }
 
         // Project Selector
-        (KeyModifiers::SHIFT, KeyCode::Char('P')) | (KeyModifiers::ALT, KeyCode::Char('p')) if !pane.output_focused => {
+        (KeyModifiers::SHIFT, KeyCode::Char('P')) => {
             pane.open_project_selector();
             ConductorAction::Handled
         }
 
         // Focus toggle
-        (KeyModifiers::NONE, KeyCode::Tab) | (KeyModifiers::ALT, KeyCode::Char('p')) => {
+        (KeyModifiers::ALT, KeyCode::Char('p')) => {
             pane.output_focused = !pane.output_focused;
-            ConductorAction::Handled
+            let msg = if pane.output_focused {
+                "Output focused. Scroll with Arrows/PgUp/PgDn."
+            } else {
+                "Tracks focused."
+            };
+            ConductorAction::StatusMessage(msg.to_string())
         }
 
         // Execution control (Ralph-style shortcuts)

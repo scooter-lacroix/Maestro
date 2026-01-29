@@ -248,6 +248,12 @@ ${trackId ? `
       - Read \`maestro/critical_think/templates/criticalthink_after_action.md\`
       - Execute post-agent validation (Steps 1-6)
 
+   h. **BANK MEMORY: Task Completion** - Store task completion:
+      - Task ID and title
+      - Files modified/created
+      - Commit hash
+      - Use: \`maestro memory --store --category decision --content "Task completed: ..."\`
+
 3. **Update Task Checkboxes:**
    - After completing each task, update plan.md
    - Change \`- [ ] Task: ...\` to \`- [x] Task: ...\`
@@ -259,7 +265,14 @@ When all tasks in plan.md are complete:
 1. Update track status to complete:
    - Change \`## [~] Track: ...\` to \`## [x] Track: ...\`
 
-2. Announce completion
+2. **BANK MEMORY: Track Completion** - Store track completion summary:
+   - Track ID and title
+   - Total tasks completed
+   - Final completion timestamp
+   - Brief summary of changes made
+   - Use the maestro memory CLI: \`maestro memory --store --category decision --content "Track completed: ..."\`
+
+3. Announce completion
 
 ## 5.0 IMPORTANT NOTES
 
