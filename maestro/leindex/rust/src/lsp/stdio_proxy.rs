@@ -73,9 +73,6 @@ use crate::memory::lsp_manager::LspType;
 // Type alias for the reader half of UnixStream (used in client handler)
 type ClientReader = BufReader<tokio::net::unix::OwnedReadHalf>;
 
-/// Maximum message size to prevent DoS (16MB)
-const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
-
 /// Maximum header size for LSP messages
 const MAX_HEADER_SIZE: usize = 1024;
 
@@ -653,55 +650,6 @@ impl LspStdioProxy {
         stdin.write_all(message.as_bytes()).await?;
         stdin.flush().await?;
         Ok(())
-    }
-
-    /// Read the next LSP message from stdout (optimized with BufReader pattern)
-    async fn read_next_lsp_message(stdout: &mut tokio::process::ChildStdout) -> Result<Value> {
-        let mut headers = Vec::new();
-        let mut line = String::new();
-        let mut reader = BufReader::new(stdout);
-
-        // Read headers
-        loop {
-            line.clear();
-            let n = reader.read_line(&mut line).await?;
-            if n == 0 {
-                return Err(anyhow!("EOF reading LSP headers"));
-            }
-
-            headers.push(line.clone());
-            if line == "\r\n" || line == "\n" {
-                break;
-            }
-
-            if headers.len() > MAX_HEADER_SIZE {
-                return Err(anyhow!("LSP headers too large"));
-            }
-        }
-
-        // Parse Content-Length
-        let mut content_length = None;
-        for header in &headers {
-            let header_lower = header.to_lowercase();
-            if header_lower.starts_with("content-length:") {
-                let len_str = header[15..].trim();
-                content_length = len_str.parse::<usize>().ok();
-                break;
-            }
-        }
-
-        let length = content_length.ok_or_else(|| anyhow!("Missing Content-Length header"))?;
-
-        if length > MAX_MESSAGE_SIZE {
-            return Err(anyhow!("LSP message too large: {} bytes", length));
-        }
-
-        // Read body
-        let mut buffer = vec![0u8; length];
-        reader.read_exact(&mut buffer).await?;
-
-        let content = String::from_utf8(buffer)?;
-        Ok(serde_json::from_str(&content)?)
     }
 
     /// Signal graceful shutdown
