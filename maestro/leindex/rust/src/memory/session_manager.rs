@@ -32,8 +32,7 @@ use tempfile::NamedTempFile;
 pub struct SessionManager {
     service: MemoryService,
     tmux: TmuxMultiplexer,
-    lsp_manager: std::sync::Mutex<Option<LspManager>>,
-    lsp_manager_init: std::sync::Once,
+    lsp_manager: std::sync::OnceLock<LspManager>,
 }
 
 /// Mode for restoring a session
@@ -52,8 +51,7 @@ impl SessionManager {
         Ok(Self {
             service,
             tmux: TmuxMultiplexer::new(),
-            lsp_manager: std::sync::Mutex::new(None),
-            lsp_manager_init: std::sync::Once::new(),
+            lsp_manager: std::sync::OnceLock::new(),
         })
     }
 
@@ -63,11 +61,7 @@ impl SessionManager {
     /// preventing the "Cannot start a runtime from within a runtime" panic when the
     /// SessionManager is used from within async contexts like the TUI.
     pub fn with_lsp_manager(self, manager: LspManager) -> Self {
-        if let Ok(mut guard) = self.lsp_manager.lock() {
-            *guard = Some(manager);
-            // Mark as initialized to prevent lazy init from creating a nested runtime
-            self.lsp_manager_init.call_once(|| {});
-        }
+        let _ = self.lsp_manager.set(manager);
         self
     }
 
@@ -75,34 +69,32 @@ impl SessionManager {
     ///
     /// This method lazily initializes the LspManager only when first needed.
     /// It now checks if we're already in a tokio runtime and avoids creating a nested one.
-    fn get_lsp_manager(&self) -> Result<std::sync::MutexGuard<'_, Option<LspManager>>> {
-        // Initialize on first access
-        self.lsp_manager_init.call_once(|| {
-            // Check if we're already in a tokio runtime
-            if Handle::try_current().is_ok() {
-                // We're inside a runtime - don't create a new one to avoid panic
-                tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
-                tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
-                return;
-            }
+    fn get_lsp_manager(&self) -> Option<&LspManager> {
+        // Fast path: already initialized
+        if let Some(mgr) = self.lsp_manager.get() {
+            return Some(mgr);
+        }
 
-            // Use blocking runtime for one-time initialization with in-memory storage
-            // This is safe when we're NOT already inside a tokio runtime
-            if let Ok(rt) = tokio::runtime::Runtime::new() {
-                if let Ok(storage) =
-                    rt.block_on(crate::memory::turso_backend::TursoStorageBackend::in_memory(None))
-                {
-                    let manager = LspManager::new(storage);
-                    // Restore any auto-start LSPs from persisted state (best-effort).
-                    if let Err(e) = rt.block_on(manager.restore_lsps_on_startup()) {
-                        tracing::warn!("Failed to restore LSPs on startup: {}", e);
-                    }
-                    *self.lsp_manager.lock().unwrap() = Some(manager);
-                }
-            }
-        });
+        // Check if we're already in a tokio runtime — can't create a nested one
+        if Handle::try_current().is_ok() {
+            tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
+            tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
+            return None;
+        }
 
-        Ok(self.lsp_manager.lock().unwrap())
+        // Build outside the lock, then set atomically via OnceLock
+        let rt = tokio::runtime::Runtime::new().ok()?;
+        let storage = rt
+            .block_on(crate::memory::turso_backend::TursoStorageBackend::in_memory(None))
+            .ok()?;
+        let manager = LspManager::new(storage);
+        if let Err(e) = rt.block_on(manager.restore_lsps_on_startup()) {
+            tracing::warn!("Failed to restore LSPs on startup: {}", e);
+        }
+
+        // OnceLock::set races safely — if another thread beat us, we discard ours
+        let _ = self.lsp_manager.set(manager);
+        self.lsp_manager.get()
     }
 
     /// Create and start a new session
@@ -157,11 +149,7 @@ impl SessionManager {
 
         // Get a reference to LSP manager for the spawned task
         // We clone the Arc from inside the mutex to avoid holding the lock across await
-        let lsp_manager_clone: Option<LspManager> = if let Ok(guard) = self.get_lsp_manager() {
-            guard.as_ref().cloned()
-        } else {
-            None
-        };
+        let lsp_manager_clone = self.get_lsp_manager().cloned();
 
         // Attempt to spawn a task to auto-start LSPs in the background
         if let (Some(lsp_manager), Ok(handle)) = (lsp_manager_clone, Handle::try_current()) {
@@ -711,11 +699,7 @@ impl SessionManager {
             .update_session_status(session_id, SessionStatus::Running)?;
 
         // Restart LSPs for this session
-        let lsp_manager_clone: Option<LspManager> = if let Ok(guard) = self.get_lsp_manager() {
-            guard.as_ref().cloned()
-        } else {
-            None
-        };
+        let lsp_manager_clone = self.get_lsp_manager().cloned();
 
         let session_id_clone = session_id.clone();
         if let (Some(lsp_manager), Ok(handle)) = (lsp_manager_clone, Handle::try_current()) {
@@ -761,11 +745,7 @@ impl SessionManager {
         &self,
         session_id: &str,
     ) -> Result<std::path::PathBuf> {
-        let lsp_manager = if let Ok(guard) = self.get_lsp_manager() {
-            guard.as_ref().cloned()
-        } else {
-            None
-        };
+        let lsp_manager = self.get_lsp_manager().cloned();
 
         self.write_mcp_config_with_proxy(session_id, lsp_manager.as_ref())
             .await
@@ -797,11 +777,7 @@ impl SessionManager {
         let session_id_clone = session_id.to_string();
 
         // Get LSP manager reference for the spawned task
-        let lsp_manager_clone: Option<LspManager> = if let Ok(guard) = self.get_lsp_manager() {
-            guard.as_ref().cloned()
-        } else {
-            None
-        };
+        let lsp_manager_clone = self.get_lsp_manager().cloned();
 
         // Attempt to stop LSPs in a separate task
         if let (Some(lsp_manager), Ok(handle)) = (lsp_manager_clone, Handle::try_current()) {
