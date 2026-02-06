@@ -35,6 +35,6 @@
     "vite": "^7.3.0"
   },
   "overrides": {
-    "inflight": "npm:@aashutoshrathi/word-wrap@^1.1.0"
+    "inflight": "^1.0.6"
   }
 }

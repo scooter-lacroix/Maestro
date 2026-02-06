@@ -69,8 +69,16 @@ if ! command -v cargo &> /dev/null; then
     source $HOME/.cargo/env
 fi
 
-# Switch to the Rust directory
-cd "$(dirname "$0")/maestro/leindex/rust"
+# Determine the repo root directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+if [ -z "$SCRIPT_DIR" ] || [ ! -d "$SCRIPT_DIR/maestro/leindex/rust" ]; then
+    echo -e "${Y}  [!] Running from pipe — cloning Maestro repository...${NC}"
+    TMPDIR="$(mktemp -d)"
+    git clone --depth 1 https://github.com/scooter-lacroix/Maestro.git "$TMPDIR/Maestro"
+    SCRIPT_DIR="$TMPDIR/Maestro"
+fi
+
+cd "$SCRIPT_DIR/maestro/leindex/rust"
 
 # Build and Run the Conductor Wizard
 echo -e "${G}    Launching Maestro Conductor Wizard...${NC}"
