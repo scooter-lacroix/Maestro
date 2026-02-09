@@ -6,9 +6,14 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
-use leindex_analyzers::{
-    MultiLangASTAnalyzer, MultiLangCFGAnalyzer, MultiLangCallGraphAnalyzer, MultiLangDFGAnalyzer,
-    MultiLangSlicingAnalyzer, ProgrammingLanguage,
+// Use analyzer types from the library crate
+use crate::{
+    MultiLangASTAnalyzer,
+    MultiLangCallGraphAnalyzer,
+    MultiLangCFGAnalyzer,
+    MultiLangDFGAnalyzer,
+    MultiLangSlicingAnalyzer,
+    ProgrammingLanguage,
 };
 
 pub async fn run(

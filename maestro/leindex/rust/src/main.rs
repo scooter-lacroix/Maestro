@@ -6,11 +6,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod cli;
-
-use cli::implement::ImplementSessionTarget;
-use cli::mcp;
-use cli::{analyze, implement, memory, tui};
+// Import the CLI module from the leindex_analyzers library
+// This avoids the module being compiled twice (once in lib, once in binary)
+use leindex_analyzers::cli::{analyze, implement, mcp, memory_impl as memory, tui};
+use leindex_analyzers::cli::implement::ImplementSessionTarget;
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]

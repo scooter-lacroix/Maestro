@@ -1,0 +1,38 @@
+[package]
+name = "maestro-pi-mono"
+version = "2.5.0"
+edition = "2021"
+description = "Pi-Mono Integration for Maestro"
+authors = ["Maestro Project"]
+
+[lib]
+name = "maestro_pi_mono"
+crate-type = ["rlib"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# Tokio utilities for CancellationToken
+tokio-util = "0.7"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# Executable discovery and configuration
+which = "7.0"
+dirs = "5.0"
+semver = "1.0"
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+semver = "1.0"
+tempfile = "3.13"

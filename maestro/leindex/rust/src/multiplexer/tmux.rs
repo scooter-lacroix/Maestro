@@ -747,6 +747,85 @@ impl TmuxMultiplexer {
             .map(|r| r.key().clone())
             .collect()
     }
+
+    /// Get all pane current working directories across all tmux sessions
+    ///
+    /// Returns a Result containing a vector of unique working directory paths.
+    /// This is useful for discovering projects that are currently active in tmux sessions.
+    pub fn get_all_pane_paths(&self) -> Result<Vec<String>> {
+        let output = Command::new("tmux")
+            .args([
+                "list-panes",
+                "-a",  // all sessions
+                "-F",  // format
+                "#{pane_current_command}\t#{pane_current_path}",  // command and path
+            ])
+            .output()
+            .context("Failed to list tmux panes")?;
+
+        if !output.status.success() {
+            // tmux might not be running or no sessions exist
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut paths = std::collections::HashSet::new();
+
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.splitn(2, '\t').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+
+            let _command = parts[0];
+            let path = parts[1];
+
+            // Skip empty paths
+            if path.is_empty() {
+                continue;
+            }
+
+            // Skip common non-project paths
+            if path == "/" || path.starts_with("/tmp/") || path.starts_with("/var/") {
+                continue;
+            }
+
+            paths.insert(path.to_string());
+        }
+
+        Ok(paths.into_iter().collect())
+    }
+
+    /// Get the current working directory of the active pane in the active session
+    ///
+    /// Returns the path of the currently active tmux pane, or None if not in tmux
+    /// or if the path cannot be determined.
+    pub fn get_active_pane_path(&self) -> Result<Option<String>> {
+        // First check if we're in a tmux session
+        if std::env::var("TMUX").is_err() {
+            return Ok(None);
+        }
+
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-p",  // print to stdout
+                "#{pane_current_path}",  // current pane's working directory
+            ])
+            .output()
+            .context("Failed to get active pane path")?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(path))
+        }
+    }
 }
 
 /// Sanitize a display name to a valid tmux session name

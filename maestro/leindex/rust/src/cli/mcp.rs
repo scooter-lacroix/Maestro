@@ -9,7 +9,11 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use leindex_analyzers::memory::{McpPool, MemoryService};
+// Import types from the library crate
+#[cfg(feature = "rusqlite")]
+use crate::memory::mcp_pool::McpPool;
+#[cfg(feature = "rusqlite")]
+use crate::memory::service::MemoryService;
 
 pub async fn serve() -> Result<()> {
     let service = MemoryService::new(None)?;

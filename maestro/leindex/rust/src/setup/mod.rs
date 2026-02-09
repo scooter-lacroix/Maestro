@@ -522,14 +522,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
     let _ = tx.send(SetupEvent::Finished);
 
-    // Persist configuration
-    let persistent_config = leindex_analyzers::config::Config {
-        editor: config.editor.clone(),
-        install_path: config.install_path.clone(),
-        theme: leindex_analyzers::config::Config::default().theme,
-        selected_tools: config.selected_tools.clone(),
-    };
-    if let Err(e) = persistent_config.save() {
+    // Persist configuration using the config module
+    // Note: We save to the config file which will be loaded by the config module
+    if let Err(e) = save_setup_config(&config) {
         let _ = tx.send(SetupEvent::Error(format!("Failed to save config: {}", e)));
     }
 }
@@ -975,4 +970,41 @@ fn ensure_toml_table(value: &mut toml::Value) -> &mut toml::value::Table {
     value
         .as_table_mut()
         .expect("value is table after normalization")
+}
+
+/// Save setup configuration to the config file
+/// This writes the selected tools and paths to the config module's config file
+fn save_setup_config(config: &Config) -> Result<()> {
+    use std::fs;
+    use std::io::Write;
+
+    let config_dir = dirs::config_dir()
+        .context("Failed to get config directory")?
+        .join("maestro");
+
+    fs::create_dir_all(&config_dir)
+        .context("Failed to create config directory")?;
+
+    let config_path = config_dir.join("config.toml");
+
+    // Build TOML config
+    let mut toml_content = String::new();
+    toml_content.push_str("# Maestro Configuration\n");
+    toml_content.push_str(&format!("editor = \"{}\"\n", config.editor));
+    toml_content.push_str(&format!("install_path = \"{}\"\n", config.install_path));
+
+    if !config.selected_tools.is_empty() {
+        toml_content.push_str("selected_tools = [\n");
+        for tool in &config.selected_tools {
+            toml_content.push_str(&format!("    \"{}\",\n", tool));
+        }
+        toml_content.push_str("]\n");
+    }
+
+    let mut file = fs::File::create(&config_path)
+        .context("Failed to create config file")?;
+    file.write_all(toml_content.as_bytes())
+        .context("Failed to write config file")?;
+
+    Ok(())
 }

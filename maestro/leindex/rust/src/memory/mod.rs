@@ -23,6 +23,7 @@ pub mod service;
 #[cfg(feature = "rusqlite")]
 pub mod session_manager;
 
+// Re-export public items from submodules
 pub use lsp_manager::*;
 pub use mcp_discovery::*;
 pub use models::*;
@@ -42,3 +43,15 @@ pub use migration::*;
 pub use service::*;
 #[cfg(feature = "rusqlite")]
 pub use session_manager::*;
+
+// Re-export modules for full path access (e.g., crate::memory::models::Session)
+pub mod models_pub {
+    pub use super::models::*;
+}
+pub mod lsp_manager_pub {
+    pub use super::lsp_manager::*;
+}
+#[cfg(feature = "rusqlite")]
+pub mod session_manager_pub {
+    pub use super::session_manager::*;
+}

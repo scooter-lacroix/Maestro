@@ -5,10 +5,14 @@ use clap::ValueEnum;
 use std::path::PathBuf;
 use std::process::Command;
 
-use leindex_analyzers::memory::session_manager::SessionManager;
-use leindex_analyzers::memory::MemoryService;
-use leindex_analyzers::multiplexer::TmuxMultiplexer;
-use leindex_analyzers::token_format::TokenFormatter;
+// Import types from the library crate
+// These imports work because the CLI module is only compiled as part of the library
+use crate::multiplexer::TmuxMultiplexer;
+use crate::token_format::TokenFormatter;
+#[cfg(feature = "rusqlite")]
+use crate::memory::session_manager::SessionManager;
+#[cfg(feature = "rusqlite")]
+use crate::memory::service::MemoryService;
 
 use super::prompt;
 

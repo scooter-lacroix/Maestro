@@ -68,7 +68,7 @@ use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, watch, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
-use crate::memory::lsp_manager::LspType;
+use crate::memory::LspType;
 
 // Type alias for the reader half of UnixStream (used in client handler)
 type ClientReader = BufReader<tokio::net::unix::OwnedReadHalf>;

@@ -23,8 +23,9 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
         println!("   Debug: enabled");
     }
 
-    // Use the api server module
-    use leindex_analyzers::api::{run_server, ServerConfig};
+    // Use the api server module from the library crate
+    use crate::api::run_server;
+    use crate::api::ServerConfig;
 
     let config = ServerConfig {
         host,
@@ -43,8 +44,9 @@ pub async fn serve(port: u16, host: String, db: Option<PathBuf>, debug: bool) ->
 }
 
 /// Show memory system status
+#[cfg(feature = "rusqlite")]
 pub async fn status(db: Option<PathBuf>) -> Result<()> {
-    use leindex_analyzers::memory::service::MemoryService;
+    use crate::memory::service::MemoryService;
 
     let db_path = db.clone().unwrap_or_else(|| {
         let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -122,4 +124,59 @@ pub async fn scan(paths: Vec<PathBuf>, depth: usize) -> Result<()> {
     println!("Found {} Maestro project(s)", found);
 
     Ok(())
+}
+
+/// Store a memory in the Maestro Memory System
+pub async fn store(
+    content: String,
+    category: String,
+    _importance: String,
+    db: Option<PathBuf>,
+) -> Result<()> {
+    #[cfg(feature = "rusqlite")]
+    {
+        use crate::{memory::models::MemoryCategory, memory::service::MemoryService};
+
+        let db_path = db.clone().unwrap_or_else(|| {
+            let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            path.push(".maestro");
+            path.push("maestro.db");
+            path
+        });
+
+        println!("💾 Storing memory in Maestro Memory System");
+        println!();
+
+        let service = MemoryService::new(Some(db_path))?;
+        service.initialize()?;
+
+        // Parse category
+        let memory_category = match category.as_str() {
+            "context" => MemoryCategory::Context,
+            "knowledge" => MemoryCategory::Knowledge,
+            "preference" => MemoryCategory::Preference,
+            "specification" => MemoryCategory::Specification,
+            "fact" => MemoryCategory::Fact,
+            "pattern" => MemoryCategory::Pattern,
+            "decision" => MemoryCategory::Decision,
+            "observation" => MemoryCategory::Observation,
+            "temporary" => MemoryCategory::Temporary,
+            _ => MemoryCategory::Observation,
+        };
+
+        // Store the memory
+        let _id = service.store_memory(&content, memory_category)?;
+
+        println!("✓ Memory stored successfully");
+        println!();
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "rusqlite"))]
+    {
+        eprintln!("Error: Memory store requires the 'rusqlite' feature");
+        eprintln!("Please rebuild with: cargo build --features rusqlite");
+        Err(anyhow::anyhow!("rusqlite feature not enabled"))
+    }
 }

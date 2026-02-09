@@ -7,6 +7,7 @@ pub struct Config {
     pub editor: String,
     pub install_path: String,
     pub theme: String,
+    pub transparent: bool,
     pub selected_tools: Vec<String>,
 }
 
@@ -16,6 +17,7 @@ impl Default for Config {
             editor: "hx".to_string(),
             install_path: "~/.maestro".to_string(),
             theme: "catppuccin-mocha".to_string(),
+            transparent: false,
             selected_tools: Vec::new(),
         }
     }

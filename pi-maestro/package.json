@@ -1,0 +1,52 @@
+{
+  "name": "@stanford-cooper/pi-maestro",
+  "version": "1.0.0",
+  "description": "Maestro workflow commands for pi-mono - control Maestro from within pi-mono",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "src/**/*.ts",
+    "templates/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "pi-mono",
+    "pi-coding-agent",
+    "extension",
+    "maestro",
+    "orchestration",
+    "specification-driven"
+  ],
+  "author": "stanford-cooper <stanford@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stanford-cooper/pi-maestro.git"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "typescript": "^5.9.3"
+  },
+  "piMono": {
+    "typesPath": "/home/stan/pi-mono/packages/coding-agent/src"
+  }
+}

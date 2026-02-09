@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::BTreeSet;
 
-use super::models::{Session, SessionStatus};
+use super::models::{MemoryCategory, Session, SessionStatus};
 #[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
 use crate::multiplexer::{TmuxMultiplexer, TmuxSession};
@@ -142,6 +142,17 @@ impl SessionManager {
         // Save to DB
         self.service.import_session(session.clone())?;
 
+        // Bank memory for session start (best-effort)
+        let memory_content = format!(
+            "Session '{}' started with tool '{}' at project '{}'. Session ID: {}. Started at: {}",
+            title,
+            tool,
+            project_path,
+            session.session_id,
+            session.started_at.format("%Y-%m-%d %H:%M:%S UTC")
+        );
+        let _ = self.service.store_memory(&memory_content, MemoryCategory::Observation);
+
         // Auto-start LSPs for the session based on project language detection
         // Note: This is done in a separate task to avoid blocking session creation
         let project_path_buf = std::path::PathBuf::from(project_path);
@@ -191,6 +202,11 @@ impl SessionManager {
     /// Build the specific command for a tool
     ///
     /// All user inputs are properly escaped to prevent shell injection.
+    ///
+    /// Sets the following environment variables for all CLI tools:
+    /// - MAESTRO_SESSION_ID: Session identifier for memory banking
+    /// - MAESTRO_PROJECT_PATH: Project root path for context
+    /// - MAESTRO_MCP_CONFIG: Path to .mcp.json with tool-search and LSP entries
     fn build_tool_command(
         &self,
         tool: &str,
@@ -199,33 +215,40 @@ impl SessionManager {
     ) -> Result<String> {
         let editor = shell_escape(&std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string()));
         let escaped_project = shell_escape(project_path);
+        let escaped_session_id = shell_escape(session_id);
         let mcp_config_path = self.write_tool_search_mcp_config(session_id)?;
         let mcp_config = shell_escape(&mcp_config_path.to_string_lossy().to_string());
 
+        // Common environment variables for all tools
+        let env_vars = format!(
+            "export EDITOR={} MAESTRO_SESSION_ID={} MAESTRO_PROJECT_PATH={} MAESTRO_MCP_CONFIG={}",
+            editor, escaped_session_id, escaped_project, mcp_config
+        );
+
         match tool.to_lowercase().as_str() {
             "claude" => Ok(format!(
-                "export EDITOR={}; cd {} && claude --strict-mcp-config --mcp-config {}",
-                editor, escaped_project, mcp_config
+                "{}; cd {} && claude --strict-mcp-config --mcp-config {}",
+                env_vars, escaped_project, mcp_config
             )),
             "gemini" => Ok(format!(
-                "export EDITOR={}; cd {} && gemini",
-                editor, escaped_project
+                "{}; cd {} && gemini",
+                env_vars, escaped_project
             )),
             "amp" => Ok(format!(
-                "export EDITOR={}; cd {} && amp",
-                editor, escaped_project
+                "{}; cd {} && amp",
+                env_vars, escaped_project
             )),
             "opencode" => Ok(format!(
-                "export EDITOR={}; cd {} && opencode",
-                editor, escaped_project
+                "{}; cd {} && opencode",
+                env_vars, escaped_project
             )),
             "codex" => Ok(format!(
-                "export EDITOR={}; cd {} && codex -c 'mcp_servers={{}}' -c 'mcp_servers.maestro_tool_search.command=\"maestro\"' -c 'mcp_servers.maestro_tool_search.args=[\"mcp\",\"tool-search\"]'",
-                editor, escaped_project
+                "{}; cd {} && codex -c 'mcp_servers={{}}' -c 'mcp_servers.maestro_tool_search.command=\"maestro\"' -c 'mcp_servers.maestro_tool_search.args=[\"mcp\",\"tool-search\"]'",
+                env_vars, escaped_project
             )),
             "shell" | _ => {
-                // Default to interactive shell
-                Ok(format!("export EDITOR={}; cd {}", editor, escaped_project))
+                // Default to interactive shell with environment variables
+                Ok(format!("{}; cd {}", env_vars, escaped_project))
             }
         }
     }
@@ -805,6 +828,16 @@ impl SessionManager {
         self.tmux.kill_session(session_id)?;
         self.service
             .update_session_status(session_id, SessionStatus::Terminated)?;
+
+        // Bank memory for session end (best-effort)
+        let memory_content = format!(
+            "Session '{}' terminated. Session ID: {}. Ended at: {}",
+            session_id,
+            session_id,
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+        );
+        let _ = self.service.store_memory(&memory_content, MemoryCategory::Observation);
+
         Ok(())
     }
 

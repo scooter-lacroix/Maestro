@@ -3,7 +3,8 @@
 //! Runs vector search benchmarks and generates evaluation reports.
 
 use anyhow::Result;
-use leindex_analyzers::vector::report::{generate_markdown_report, BenchmarkReport};
+use leindex_analyzers::vector::report::generate_markdown_report;
+use leindex_analyzers::vector::report::BenchmarkReport;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {

@@ -1,0 +1,46 @@
+[package]
+name = "maestro-cli"
+version = "2.5.0"
+edition = "2021"
+description = "Maestro CLI - Command-line interface"
+authors = ["Maestro Project"]
+
+[[bin]]
+name = "maestro"
+path = "src/main.rs"
+
+[dependencies]
+# Core library
+leindex-analyzers = { path = "../../maestro/leindex/rust" }
+
+# Cockpit TUI
+maestro-cockpit = { path = "../cockpit" }
+
+# Pi-mono integration
+maestro-pi-mono = { path = "../pi-mono" }
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Interactive prompts
+dialoguer = "0.11"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Serialization
+serde_json = "1.0"
+
+[dev-dependencies]
+# Testing utilities
+tempfile = "3.13"
+# Serialization for tests
+serde_yaml = "0.9"

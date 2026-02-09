@@ -1,0 +1,21 @@
+//! Maestro Cockpit v2 - Ratatui Terminal UI
+//!
+//! This crate provides the canonical Maestro TUI with a modular architecture
+//! separating UI state, rendering, and actions.
+
+pub mod app;
+pub mod conductor;
+pub mod maestro_paths;
+pub mod modals;
+pub mod orchestrate;  // Deprecated: use conductor module instead
+pub mod state;
+pub mod tabs;
+pub mod theme;
+
+pub use app::run;
+
+/// Re-export commonly used types for convenience
+pub use leindex_analyzers::{
+    memory::models::{Session, McpServer},
+    config::Config,
+};

@@ -22,14 +22,27 @@ use std::{
     time::Instant,
 };
 
-use leindex_analyzers::config::Config;
-use leindex_analyzers::memory::lsp_manager::LspType;
-use leindex_analyzers::memory::models::McpStatus;
-use leindex_analyzers::memory::LspStatus;
-use leindex_analyzers::memory::McpPool;
-use leindex_analyzers::memory::MemoryService;
-use leindex_analyzers::memory::TursoStorageBackend;
-use leindex_analyzers::multiplexer::TmuxMultiplexer;
+use crate::config::Config;
+
+// Import types from the library crate
+use crate::memory::lsp_manager::LspManager;
+use crate::LspType;
+use crate::memory::models::McpServer;
+use crate::memory::models::McpStatus;
+use crate::memory::turso_backend::TursoStorageBackend;
+use crate::memory::turso_backend::LspStatus;
+use crate::memory::models::Session;
+use crate::memory::models::SessionGroup;
+use crate::memory::models::SessionStatus as MemSessionStatus;
+use crate::multiplexer::TmuxMultiplexer;
+#[cfg(feature = "rusqlite")]
+use crate::memory::session_manager::SessionManager;
+#[cfg(feature = "rusqlite")]
+use crate::memory::session_manager::SessionRestoreMode;
+#[cfg(feature = "rusqlite")]
+use crate::memory::service::MemoryService;
+#[cfg(feature = "rusqlite")]
+use crate::memory::mcp_pool::McpPool;
 
 use super::theme::{theme_from_name, Theme, THEMES};
 
@@ -93,11 +106,11 @@ struct App {
     memories: Vec<MemoryInfo>,
     memory_state: ratatui::widgets::ListState,
     memory_query: String,
-    sessions: Vec<leindex_analyzers::memory::models::Session>,
+    sessions: Vec<Session>,
     session_entries: Vec<SessionEntry>,
     session_state: ratatui::widgets::ListState,
-    groups: Vec<leindex_analyzers::memory::models::SessionGroup>,
-    mcp_servers: Vec<leindex_analyzers::memory::models::McpServer>,
+    groups: Vec<SessionGroup>,
+    mcp_servers: Vec<McpServer>,
     stats: Stats,
     scroll: usize,
     // Session switcher state
@@ -247,14 +260,14 @@ enum DashFocus {
 
 #[derive(Clone)]
 enum SessionEntry {
-    Group(leindex_analyzers::memory::models::SessionGroup),
-    Session(leindex_analyzers::memory::models::Session),
+    Group(SessionGroup),
+    Session(Session),
 }
 
 #[derive(Clone)]
 enum DashSessionEntry {
     GroupHeader { group_path: String },
-    Session(leindex_analyzers::memory::models::Session),
+    Session(Session),
 }
 
 #[derive(Clone)]
@@ -423,7 +436,7 @@ impl App {
             })
     }
 
-    fn dash_selected_session(&self) -> Option<&leindex_analyzers::memory::models::Session> {
+    fn dash_selected_session(&self) -> Option<&Session> {
         let selected = self.dash_session_state.selected()?;
         match self.dash_session_entries.get(selected) {
             Some(DashSessionEntry::Session(s)) => Some(s),
@@ -668,9 +681,9 @@ impl App {
             for session in &mut self.sessions {
                 let exists = multiplexer.session_exists(&session.session_id);
                 let new_status = if exists {
-                    leindex_analyzers::memory::models::SessionStatus::Running
+                    MemSessionStatus::Running
                 } else {
-                    leindex_analyzers::memory::models::SessionStatus::Terminated
+                    MemSessionStatus::Terminated
                 };
 
                 if session.status != new_status {
@@ -720,7 +733,7 @@ impl App {
         // Add Uncategorized as a selectable Group if sessions exist
         let has_uncategorized = self.sessions.iter().any(|s| s.group_path.is_none());
         if has_uncategorized {
-            let uncategorized_group = leindex_analyzers::memory::models::SessionGroup {
+            let uncategorized_group = SessionGroup {
                 id: -1, // Special ID
                 name: "[Uncategorized]".to_string(),
                 path: "uncategorized".to_string(),
@@ -858,7 +871,7 @@ impl App {
     ///
     /// This must be called from an async context.
     async fn do_refresh_lsp_status(&mut self) {
-        let Some(storage) = self.storage_backend.clone() else {
+        let Some(storage): Option<Arc<TursoStorageBackend>> = self.storage_backend.clone() else {
             self.status_message = "Storage backend not available for LSP refresh".to_string();
             self.pending_lsp_refresh = false;
             return;
@@ -890,7 +903,7 @@ impl App {
         self.lsp_status_cache = new_cache;
 
         // Clamp selection to valid range
-        let total_count: usize = self.lsp_status_cache.values().map(|v| v.len()).sum();
+        let total_count: usize = self.lsp_status_cache.values().map(|v: &Vec<(String, LspStatus)>| v.len()).sum();
         if let Some(selected) = self.lsp_state.selected() {
             if selected >= total_count && total_count > 0 {
                 self.lsp_state.select(Some(total_count.saturating_sub(1)));
@@ -913,8 +926,8 @@ impl App {
         let mut all_lsps: Vec<(String, String, LspStatus)> = Vec::new();
         for session in &self.sessions {
             if let Some(lsp_states) = self.lsp_status_cache.get(&session.session_id) {
-                for (lsp_name, status) in lsp_states {
-                    all_lsps.push((session.session_id.clone(), lsp_name.clone(), *status));
+                for entry in lsp_states {
+                    all_lsps.push((session.session_id.clone(), entry.0.clone(), entry.1));
                 }
             }
         }
@@ -952,7 +965,7 @@ impl App {
         // Spawn the operation in the background
         tokio::spawn(async move {
             let lsp_manager =
-                leindex_analyzers::memory::lsp_manager::LspManager::new((*storage).clone());
+                LspManager::new((*storage).clone());
 
             let result = match status {
                 LspStatus::Stopped | LspStatus::Error => {
@@ -999,7 +1012,7 @@ impl App {
         // Spawn the operation in the background
         tokio::spawn(async move {
             let lsp_manager =
-                leindex_analyzers::memory::lsp_manager::LspManager::new((*storage).clone());
+                LspManager::new((*storage).clone());
             lsp_manager.restart_lsp(&session_id, lsp_type).await
         });
 
@@ -1173,7 +1186,7 @@ async fn run_app<B: Backend>(
                                         // let _ = terminal.draw(|frame| ui(frame, \u0026mut app));
 
                                         if let Some(svc) = service.as_ref() {
-                                            let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                            let manager = match SessionManager::new(svc.clone()) {
                                                 Ok(m) => m,
                                                 Err(e) => {
                                                     app.status_message = format!("Failed to create session manager: {}", e);
@@ -1291,7 +1304,7 @@ async fn run_app<B: Backend>(
                                             );
 
                                             let group =
-                                                leindex_analyzers::memory::models::SessionGroup {
+                                                SessionGroup {
                                                     id: 0,
                                                     name: clean_name.to_string(),
                                                     path: new_path.clone(),
@@ -1413,7 +1426,7 @@ async fn run_app<B: Backend>(
                                                 if let Some(orig) =
                                                     app.sessions.iter().find(|s| s.session_id == id)
                                                 {
-                                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                    let manager = match SessionManager::new(svc.clone()) {
                                                         Ok(m) => m,
                                                         Err(e) => {
                                                             app.status_message = format!("Failed to create session manager: {}", e);
@@ -1443,7 +1456,7 @@ async fn run_app<B: Backend>(
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
-                                                let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                let manager = match SessionManager::new(svc.clone()) {
                                                     Ok(m) => m,
                                                     Err(e) => {
                                                         app.status_message = format!("Failed to create session manager: {}", e);
@@ -1502,7 +1515,7 @@ async fn run_app<B: Backend>(
 
                                             let parse_phase_opts = || {
                                                 let mut opts =
-                                                    leindex_analyzers::five_phase::PhaseOptions::new(
+                                                    crate::five_phase::PhaseOptions::new(
                                                         std::path::PathBuf::from("."),
                                                     );
 
@@ -1513,7 +1526,7 @@ async fn run_app<B: Backend>(
                                                     match t {
                                                         "--mode" | "-m" => {
                                                             if let Some(v) = tokens.get(i + 1) {
-                                                                opts.mode = leindex_analyzers::token_format::FormatMode::from_str(v);
+                                                                opts.mode = crate::token_format::FormatMode::from_str(v);
                                                                 i += 1;
                                                             }
                                                         }
@@ -1552,7 +1565,7 @@ async fn run_app<B: Backend>(
                                                         t if t.starts_with("--mode=") => {
                                                             if let Some((_, v)) = t.split_once('=') {
                                                                 opts.mode =
-                                                                    leindex_analyzers::token_format::FormatMode::from_str(v);
+                                                                    crate::token_format::FormatMode::from_str(v);
                                                             }
                                                         }
                                                         t if t.starts_with("--files=") => {
@@ -1584,15 +1597,15 @@ async fn run_app<B: Backend>(
                                                             }
                                                         }
                                                         "ultra" | "u" => {
-                                                            opts.mode = leindex_analyzers::token_format::FormatMode::Ultra
+                                                            opts.mode = crate::token_format::FormatMode::Ultra
                                                         }
                                                         "balanced" | "b" => {
                                                             opts.mode =
-                                                                leindex_analyzers::token_format::FormatMode::Balanced
+                                                                crate::token_format::FormatMode::Balanced
                                                         }
                                                         "verbose" | "v" => {
                                                             opts.mode =
-                                                                leindex_analyzers::token_format::FormatMode::Verbose
+                                                                crate::token_format::FormatMode::Verbose
                                                         }
                                                         t if !t.starts_with('-') && !path_set => {
                                                             opts.root = std::path::PathBuf::from(t);
@@ -1609,7 +1622,7 @@ async fn run_app<B: Backend>(
                                             match cmd.as_str() {
                                                 "/phase1" | "/p1" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase1_structural_scan(&opts)
+                                                    match crate::five_phase::phase1_structural_scan(&opts)
                                                     {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
@@ -1620,7 +1633,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase2" | "/p2" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase2_dependency_map(&opts) {
+                                                    match crate::five_phase::phase2_dependency_map(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase2: {}",
@@ -1630,7 +1643,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase3" | "/p3" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase3_logic_flow(&opts) {
+                                                    match crate::five_phase::phase3_logic_flow(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase3: {}",
@@ -1640,7 +1653,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase4" | "/p4" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase4_critical_path(&opts) {
+                                                    match crate::five_phase::phase4_critical_path(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase4: {}",
@@ -1650,7 +1663,7 @@ async fn run_app<B: Backend>(
                                                 }
                                                 "/phase5" | "/p5" => {
                                                     let opts = parse_phase_opts();
-                                                    match leindex_analyzers::five_phase::phase5_optimization_report(&opts) {
+                                                    match crate::five_phase::phase5_optimization_report(&opts) {
                                                         Ok(out) => push_block(&out),
                                                         Err(e) => push_block(&format!(
                                                             "Error running /phase5: {}",
@@ -1708,7 +1721,7 @@ async fn run_app<B: Backend>(
 
                                         match app.mcp_menu_option {
                                             McpOption::StartStop => {
-                                                let Some(pool) = app.mcp_pool.clone() else {
+                                                let Some(pool): Option<Arc<McpPool>> = app.mcp_pool.clone() else {
                                                     app.status_message =
                                                         "MCP pool not available".to_string();
                                                     app.input_mode = InputMode::Normal;
@@ -1778,7 +1791,7 @@ async fn run_app<B: Backend>(
                                                 }
                                             }
                                             McpOption::Remove => {
-                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                if let Some(pool) = app.mcp_pool.clone() as Option<Arc<McpPool>> {
                                                     let _ = pool.stop_server(&name).await;
                                                 }
                                                 let _ = svc.delete_mcp_server(&name);
@@ -1788,7 +1801,7 @@ async fn run_app<B: Backend>(
                                             McpOption::Install => {
                                                 let discovered =
                                                     svc.sync_mcp_servers_from_system().unwrap_or(0);
-                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                if let Some(pool) = app.mcp_pool.clone() as Option<Arc<McpPool>> {
                                                     let _ = pool.start_all_from_db().await;
                                                 }
                                                 app.status_message = format!(
@@ -1882,7 +1895,7 @@ async fn run_app<B: Backend>(
                                                     };
 
                                                 // Ensure group exists
-                                                let group = leindex_analyzers::memory::models::SessionGroup {
+                                                let group = SessionGroup {
                                                     id: 0,
                                                     name: clean_name.to_string(),
                                                     path: path.clone(),
@@ -1932,7 +1945,7 @@ async fn run_app<B: Backend>(
                                                 if let Some(svc) = service.as_ref() {
                                                     if let Some(id) = app.target_session_id.clone()
                                                     {
-                                                        let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                        let manager = match SessionManager::new(svc.clone()) {
                                                             Ok(m) => m,
                                                             Err(e) => {
                                                                 app.status_message = format!("Failed to create session manager: {}", e);
@@ -2139,7 +2152,7 @@ async fn run_app<B: Backend>(
                                         if c == 'y' || c == 'Y' {
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
-                                                    let manager = match leindex_analyzers::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                    let manager = match SessionManager::new(svc.clone()) {
                                                         Ok(m) => m,
                                                         Err(e) => {
                                                             app.status_message = format!("Failed to create session manager: {}", e);
@@ -2801,17 +2814,17 @@ async fn run_app<B: Backend>(
                                     let svc_clone = svc.clone();
                                     let storage_opt = app.storage_backend.clone();
                                     let res = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+                                        let mut manager = SessionManager::new(svc_clone)?;
 
                                         if let Some(storage) = storage_opt {
-                                            use leindex_analyzers::memory::lsp_manager::LspManager;
+                                            use LspManager;
                                             let lsp_manager = LspManager::new((*storage).clone());
                                             manager = manager.with_lsp_manager(lsp_manager);
                                         }
 
                                         manager.restore_session(
                                             &s_clone,
-                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+                                            SessionRestoreMode::Resume,
                                         )?;
                                         Ok(())
                                     }).await.unwrap_or_else(|e| Err(anyhow::anyhow!("Spawn blocking error: {}", e)));
@@ -3021,7 +3034,7 @@ async fn run_app<B: Backend>(
                                             if i >= app
                                                 .lsp_status_cache
                                                 .values()
-                                                .map(|v| v.len())
+                                                .map(|v: &Vec<(String, LspStatus)>| v.len())
                                                 .sum::<usize>()
                                                 .saturating_sub(1)
                                             {
@@ -3134,7 +3147,7 @@ async fn run_app<B: Backend>(
                                             let total_lsps = app
                                                 .lsp_status_cache
                                                 .values()
-                                                .map(|v| v.len())
+                                                .map(|v: &Vec<(String, LspStatus)>| v.len())
                                                 .sum::<usize>();
                                             if i == 0 {
                                                 total_lsps.saturating_sub(1)
@@ -3361,7 +3374,7 @@ async fn run_app<B: Backend>(
                                         let _ = terminal.draw(|frame| ui(frame, &mut app));
 
                                         let _ = suspend_fullscreen_app(terminal);
-                                        let res = leindex_analyzers::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name);
+                                        let res = crate::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name);
                                         let _ = resume_fullscreen_app(terminal);
 
                                         match res {
@@ -3422,7 +3435,7 @@ async fn run_app<B: Backend>(
                                                             // If the session is dead, do the useful thing:
                                                             // recreate the shell and attempt to resume the agent (best-effort).
                                                             if s.status
-	                                                                == leindex_analyzers::memory::models::SessionStatus::Terminated
+	                                                                == MemSessionStatus::Terminated
 	                                                            {
 	                                                                if let Some(svc) = service.as_ref()
 	                                                                {
@@ -3439,17 +3452,17 @@ async fn run_app<B: Backend>(
 	                                                                    let svc_clone = svc.clone();
 	                                                                    let storage_opt = app.storage_backend.clone();
 	                                                                    let _ = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-	                                                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+	                                                                        let mut manager = SessionManager::new(svc_clone)?;
 
 	                                                                        if let Some(storage) = storage_opt {
-	                                                                            use leindex_analyzers::memory::lsp_manager::LspManager;
+	                                                                            use LspManager;
 	                                                                            let lsp_manager = LspManager::new((*storage).clone());
 	                                                                            manager = manager.with_lsp_manager(lsp_manager);
 	                                                                        }
 
 	                                                                        manager.restore_session(
 	                                                                            &s_clone,
-	                                                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Resume,
+	                                                                            SessionRestoreMode::Resume,
 	                                                                        )?;
 	                                                                        Ok(())
 	                                                                    }).await;
@@ -3575,17 +3588,17 @@ async fn run_app<B: Backend>(
                                     let svc_clone = svc.clone();
                                     let storage_opt = app.storage_backend.clone();
                                     let res = tokio::task::spawn_blocking(move || -> Result<(), anyhow::Error> {
-                                        let mut manager = leindex_analyzers::memory::session_manager::SessionManager::new(svc_clone)?;
+                                        let mut manager = SessionManager::new(svc_clone)?;
 
                                         if let Some(storage) = storage_opt {
-                                            use leindex_analyzers::memory::lsp_manager::LspManager;
+                                            use LspManager;
                                             let lsp_manager = LspManager::new((*storage).clone());
                                             manager = manager.with_lsp_manager(lsp_manager);
                                         }
 
                                         manager.restore_session(
                                             &s_clone,
-                                            leindex_analyzers::memory::session_manager::SessionRestoreMode::Restart,
+                                            SessionRestoreMode::Restart,
                                         )?;
                                         Ok(())
                                     }).await.unwrap_or_else(|e| Err(anyhow::anyhow!("Spawn blocking error: {}", e)));
@@ -4086,24 +4099,25 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         // Pre-collect LSP indicators for all sessions (single borrow, then release)
         // Clone the cache first to avoid borrow checker issues
         let lsp_cache = app.lsp_status_cache.clone();
-        let lsp_indicators_map = {
+        let lsp_indicators_map: std::collections::HashMap<String, Vec<Span>> = {
             let mut map = std::collections::HashMap::new();
             for (session_id, lsps) in &lsp_cache {
+                let lsps: &Vec<(String, LspStatus)> = lsps;
                 if !lsps.is_empty() {
                     let indicators: Vec<Span> = lsps
                         .iter()
-                        .map(|(lsp_name, status)| {
-                            let (icon, color) = match status {
+                        .map(|entry| {
+                            let (icon, color) = match entry.1 {
                                 LspStatus::Running => (" ● ", Color::Green),
                                 LspStatus::Starting => (" ◐ ", Color::Yellow),
                                 LspStatus::Error => (" x ", Color::Red),
                                 LspStatus::Stopped => (" ○ ", Color::Gray),
                             };
-                            let short_name = if lsp_name.contains("rust") {
+                            let short_name = if entry.0.contains("rust") {
                                 "R"
-                            } else if lsp_name.contains("ruff") || lsp_name.contains("python") {
+                            } else if entry.0.contains("ruff") || entry.0.contains("python") {
                                 "P"
-                            } else if lsp_name.contains("typescript") || lsp_name.contains("ts") {
+                            } else if entry.0.contains("typescript") || entry.0.contains("ts") {
                                 "T"
                             } else {
                                 "?"
@@ -4140,13 +4154,13 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
                 }
                 DashSessionEntry::Session(sess) => {
                     let status_icon = match sess.status {
-                        leindex_analyzers::memory::models::SessionStatus::Running => {
+                        MemSessionStatus::Running => {
                             Span::styled(" ● ", Style::default().fg(Color::Green))
                         }
-                        leindex_analyzers::memory::models::SessionStatus::Terminated => {
+                        MemSessionStatus::Terminated => {
                             Span::styled(" x ", Style::default().fg(Color::Red))
                         }
-                        leindex_analyzers::memory::models::SessionStatus::Waiting => {
+                        MemSessionStatus::Waiting => {
                             Span::styled(" ◒ ", Style::default().fg(Color::Yellow))
                         }
                         _ => Span::styled(" o ", Style::default().fg(Color::Gray)),
@@ -4161,11 +4175,12 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
 
                     // Add LSP indicators if any exist (use pre-collected map)
                     if let Some(indicators) = lsp_indicators_map.get(&sess.session_id) {
+                        let indicators: &Vec<Span> = indicators;
                         if !indicators.is_empty() {
                             line_spans.push(Span::raw(" "));
                             line_spans
                                 .push(Span::styled("LSP:", Style::default().fg(Color::DarkGray)));
-                            for indicator in indicators {
+                            for indicator in indicators.iter() {
                                 line_spans.push(indicator.clone());
                             }
                         }
@@ -4223,7 +4238,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .mcp_servers
         .iter()
         .map(|s| {
-            let status_color = if s.status == leindex_analyzers::memory::models::McpStatus::Running
+            let status_color = if s.status == McpStatus::Running
             {
                 Color::Green
             } else {
@@ -5063,7 +5078,7 @@ fn render_switcher_modal(frame: &mut Frame, app: &mut App) {
             .iter()
             .map(|s| {
                 let status_color =
-                    if s.status == leindex_analyzers::memory::models::SessionStatus::Running {
+                    if s.status == MemSessionStatus::Running {
                         Color::Green
                     } else {
                         Color::Gray
@@ -5412,11 +5427,11 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
     for session in &app.sessions {
         let session_title = session.title.clone();
         if let Some(lsp_states) = app.lsp_status_cache.get(&session.session_id) {
-            for (lsp_name, status) in lsp_states {
+            for entry in lsp_states {
                 lsp_entries.push((
                     session.session_id.clone(),
-                    lsp_name.clone(),
-                    *status,
+                    entry.0.clone(),
+                    entry.1,
                     Some(session_title.clone()),
                 ));
             }
@@ -5443,7 +5458,7 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
         // Create list items with color-coded status
         let lsp_items: Vec<ListItem> = lsp_entries
             .iter()
-            .map(|(_session_id, lsp_name, status, session_title)| {
+            .map(|(_session_id, lsp_name, status, session_title): &(String, String, LspStatus, Option<String>)| {
                 let (status_text, status_color, icon) = match status {
                     LspStatus::Running => ("Running", Color::Green, "●"),
                     LspStatus::Stopped => ("Stopped", Color::Red, "■"),
@@ -5455,7 +5470,7 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
                 // Use character-based slicing to avoid UTF-8 truncation panic
                 let short_title = session_title
                     .as_ref()
-                    .map(|t| {
+                    .map(|t: &String| {
                         if t.chars().count() > 20 {
                             let truncated: String = t.chars().take(17).collect();
                             format!("{}...", truncated)
@@ -5701,24 +5716,25 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
         // Pre-collect LSP indicators for all sessions (single borrow, then release)
         // Clone the cache first to avoid borrow checker issues
         let lsp_cache = app.lsp_status_cache.clone();
-        let lsp_indicators_map = {
+        let lsp_indicators_map: std::collections::HashMap<String, Vec<Span>> = {
             let mut map = std::collections::HashMap::new();
             for (session_id, lsps) in &lsp_cache {
+                let lsps: &Vec<(String, LspStatus)> = lsps;
                 if !lsps.is_empty() {
                     let indicators: Vec<Span> = lsps
                         .iter()
-                        .map(|(lsp_name, status)| {
-                            let (icon, color) = match status {
+                        .map(|entry| {
+                            let (icon, color) = match entry.1 {
                                 LspStatus::Running => (" ● ", Color::Green),
                                 LspStatus::Starting => (" ◐ ", Color::Yellow),
                                 LspStatus::Error => (" x ", Color::Red),
                                 LspStatus::Stopped => (" ○ ", Color::Gray),
                             };
-                            let short_name = if lsp_name.contains("rust") {
+                            let short_name = if entry.0.contains("rust") {
                                 "R"
-                            } else if lsp_name.contains("ruff") || lsp_name.contains("python") {
+                            } else if entry.0.contains("ruff") || entry.0.contains("python") {
                                 "P"
-                            } else if lsp_name.contains("typescript") || lsp_name.contains("ts") {
+                            } else if entry.0.contains("typescript") || entry.0.contains("ts") {
                                 "T"
                             } else {
                                 "?"
@@ -5759,11 +5775,11 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                 }
                 SessionEntry::Session(s) => {
                     let is_running =
-                        s.status == leindex_analyzers::memory::models::SessionStatus::Running;
+                        s.status == MemSessionStatus::Running;
                     let is_terminated =
-                        s.status == leindex_analyzers::memory::models::SessionStatus::Terminated;
+                        s.status == MemSessionStatus::Terminated;
                     let is_waiting =
-                        s.status == leindex_analyzers::memory::models::SessionStatus::Waiting;
+                        s.status == MemSessionStatus::Waiting;
 
                     let (status_icon, status_color) = if is_running {
                         (" * ", Color::Green)
@@ -5805,7 +5821,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                         Span::styled(&s.title, title_style),
                     ];
 
-                    if s.status == leindex_analyzers::memory::models::SessionStatus::Terminated {
+                    if s.status == MemSessionStatus::Terminated {
                         line_spans.push(Span::styled(
                             " [KILLED]",
                             Style::default().fg(Color::Red).bold(),
@@ -5819,6 +5835,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
 
                     // Add LSP indicators if any exist (use pre-collected map)
                     if let Some(indicators) = lsp_indicators_map.get(&s.session_id) {
+                        let indicators: &Vec<Span> = indicators;
                         if !indicators.is_empty() {
                             line_spans.push(Span::raw(" "));
                             for indicator in indicators {
@@ -5847,14 +5864,14 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
                 // Header (Replicating Go TUI)
                 let status_icon = match s.status {
-                    leindex_analyzers::memory::models::SessionStatus::Running => "●",
-                    leindex_analyzers::memory::models::SessionStatus::Waiting => "◐",
+                    MemSessionStatus::Running => "●",
+                    MemSessionStatus::Waiting => "◐",
                     _ => "○",
                 };
                 let status_color = match s.status {
-                    leindex_analyzers::memory::models::SessionStatus::Running => Color::Green,
-                    leindex_analyzers::memory::models::SessionStatus::Waiting => Color::Yellow,
-                    leindex_analyzers::memory::models::SessionStatus::Terminated => Color::Red,
+                    MemSessionStatus::Running => Color::Green,
+                    MemSessionStatus::Waiting => Color::Yellow,
+                    MemSessionStatus::Terminated => Color::Red,
                     _ => Color::DarkGray,
                 };
 
@@ -5970,7 +5987,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     {
                         let mcp_names: Vec<String> = mcps
                             .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .filter_map(|v: &serde_json::Value| v.as_str().map(|s| s.to_string()))
                             .collect();
                         if !mcp_names.is_empty() {
                             preview_lines.push(Line::from(vec![

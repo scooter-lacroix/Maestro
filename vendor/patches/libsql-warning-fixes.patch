@@ -1,0 +1,83 @@
+diff --git a/vendor/libsql/src/sync.rs b/vendor/libsql/src/sync.rs
+--- a/vendor/libsql/src/sync.rs
++++ b/vendor/libsql/src/sync.rs
+@@
+-#[derive(Debug)]
+-struct PushFramesResult {
++#[derive(Debug)]
++pub(crate) struct PushFramesResult {
+     max_frame_no: u32,
+     baton: Option<String>,
+ }
+
+diff --git a/vendor/libsql/src/local/statement.rs b/vendor/libsql/src/local/statement.rs
+--- a/vendor/libsql/src/local/statement.rs
++++ b/vendor/libsql/src/local/statement.rs
+@@
+-    pub fn columns(&self) -> Vec<Column> {
++    pub fn columns(&self) -> Vec<Column<'_>> {
+         let n = self.column_count();
+         let mut cols = Vec::with_capacity(n);
+         for i in 0..n {
+
+diff --git a/vendor/libsql/src/local/impls.rs b/vendor/libsql/src/local/impls.rs
+--- a/vendor/libsql/src/local/impls.rs
++++ b/vendor/libsql/src/local/impls.rs
+@@
+-    fn columns(&self) -> Vec<Column> {
++    fn columns(&self) -> Vec<Column<'_>> {
+         self.0.columns()
+     }
+ }
+
+diff --git a/vendor/libsql/src/sync/statement.rs b/vendor/libsql/src/sync/statement.rs
+--- a/vendor/libsql/src/sync/statement.rs
++++ b/vendor/libsql/src/sync/statement.rs
+@@
+-    fn columns(&self) -> Vec<Column> {
++    fn columns(&self) -> Vec<Column<'_>> {
+         self.inner.columns()
+     }
+ }
+
+diff --git a/vendor/libsql/src/replication/connection.rs b/vendor/libsql/src/replication/connection.rs
+--- a/vendor/libsql/src/replication/connection.rs
++++ b/vendor/libsql/src/replication/connection.rs
+@@
+-    fn columns(&self) -> Vec<Column> {
++    fn columns(&self) -> Vec<Column<'_>> {
+         if let Some(stmt) = self.local_statement.as_ref() {
+             return stmt.columns();
+         }
+
+diff --git a/vendor/libsql/src/statement.rs b/vendor/libsql/src/statement.rs
+--- a/vendor/libsql/src/statement.rs
++++ b/vendor/libsql/src/statement.rs
+@@
+-    fn columns(&self) -> Vec<Column>;
++    fn columns(&self) -> Vec<Column<'_>>;
+@@
+-    pub fn columns(&self) -> Vec<Column> {
++    pub fn columns(&self) -> Vec<Column<'_>> {
+         self.inner.columns()
+     }
+ }
+
+diff --git a/vendor/libsql/src/hrana/hyper.rs b/vendor/libsql/src/hrana/hyper.rs
+--- a/vendor/libsql/src/hrana/hyper.rs
++++ b/vendor/libsql/src/hrana/hyper.rs
+@@
+-    fn columns(&self) -> Vec<crate::Column> {
++    fn columns(&self) -> Vec<crate::Column<'_>> {
+         //FIXME: there are several blockers here:
+         // 1. We cannot know the column types before sending a query, so this method will never return results right
+         //    away.
+
+diff --git a/vendor/libsql/src/hrana/cursor.rs b/vendor/libsql/src/hrana/cursor.rs
+--- a/vendor/libsql/src/hrana/cursor.rs
++++ b/vendor/libsql/src/hrana/cursor.rs
+@@
+-    pub async fn next_step(&mut self) -> Result<CursorStep<S>> {
++    pub async fn next_step(&mut self) -> Result<CursorStep<'_, S>> {
+         CursorStep::new(self).await
+     }
