@@ -194,8 +194,8 @@ async fn main() -> Result<()> {
             MemoryCommands::Scan { paths, depth } => mem_cmd::scan(paths, depth).await,
         },
         Commands::Tui => {
-            // TODO: The Cockpit TUI has been extracted to the maestro-cockpit crate
-            // Use the separate maestro CLI (crates/cli) to access the TUI: `maestro tui`
+            // The Cockpit TUI has been extracted to the maestro-cockpit crate.
+            // Use the maestro CLI to access the TUI: `maestro tui`
             eprintln!("Error: The TUI has been moved to the maestro-cockpit crate.");
             eprintln!("Please use the maestro CLI binary from crates/cli instead.");
             eprintln!("Run: cargo run --manifest-path=crates/cli/Cargo.toml --bin maestro -- tui");

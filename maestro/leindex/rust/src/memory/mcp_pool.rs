@@ -75,16 +75,40 @@ impl McpPool {
 
     /// Start all stdio MCP servers currently registered in the DB.
     pub async fn start_all_from_db(&self) -> Result<usize> {
+        // First reconcile DB state with reality (sockets/processes may have disappeared
+        // between runs). This keeps the UI from showing stale "running" rows.
+        let _ = self.refresh_all_statuses().await;
+
         let servers = self.service.list_mcp_servers().unwrap_or_default();
         let mut started = 0usize;
+
         for s in servers {
             if s.transport != McpTransport::Stdio {
                 continue;
             }
-            if self.start_server_record(&s).await.is_ok() {
-                started += 1;
+
+            // Check if already running
+            {
+                let proxies = self.proxies.read().await;
+                if let Some(proxy) = proxies.get(&s.name) {
+                    if proxy.is_running().await {
+                        info!("MCP server '{}' is already running", s.name);
+                        continue;
+                    }
+                }
+            }
+
+            match self.start_server_record(&s).await {
+                Ok(_) => {
+                    started += 1;
+                }
+                Err(e) => {
+                    error!("Failed to start MCP server '{}': {}", s.name, e);
+                }
             }
         }
+        // One more reconciliation after attempting starts to persist any failures.
+        let _ = self.refresh_all_statuses().await;
         Ok(started)
     }
 
@@ -123,12 +147,36 @@ impl McpPool {
             }
         });
 
-        proxies.insert(server.name.clone(), proxy_arc);
+        proxies.insert(server.name.clone(), proxy_arc.clone());
 
-        // Update DB to reflect socket path (status is updated opportunistically by the UI).
+        // Wait for successful startup before updating DB
+        // Give servers up to 5 seconds to start (some MCP servers take time to initialize)
+        info!(
+            "MCP pool '{}' starting up, waiting for confirmation...",
+            server.name
+        );
+        let startup_result = proxy_arc.wait_for_startup(5000).await;
+
+        // Check the result and update DB accordingly
+        let status = if startup_result.is_ok() {
+            info!("MCP pool '{}' startup confirmed", server.name);
+            // Server started successfully
+            McpStatus::Running
+        } else {
+            let e = startup_result.unwrap_err();
+            error!("MCP pool '{}' failed to start: {}", server.name, e);
+            // Server failed to start
+            McpStatus::Stopped
+        };
+
+        // Update DB to reflect socket path and status
         let mut updated = server.clone();
-        updated.socket_path = Some(socket_path.to_string_lossy().to_string());
-        updated.status = McpStatus::Running;
+        updated.socket_path = if status == McpStatus::Running {
+            Some(socket_path.to_string_lossy().to_string())
+        } else {
+            None
+        };
+        updated.status = status;
         updated.last_started_at = Some(chrono::Utc::now());
         let _ = self.service.update_mcp_server(updated);
 
@@ -153,6 +201,49 @@ impl McpPool {
 
         // Remove proxy record (a new start will recreate it).
         self.proxies.write().await.remove(name);
+        Ok(())
+    }
+
+    /// Refresh all server statuses from the pool (check real status, not just DB state)
+    pub async fn refresh_all_statuses(&self) -> Result<()> {
+        let proxies = self.proxies.read().await;
+        for (name, proxy) in proxies.iter() {
+            let status = proxy.check_real_status().await;
+            // Only update if status changed
+            if let Ok(servers) = self.service.list_mcp_servers() {
+                if let Some(server) = servers.iter().find(|s| s.name == *name) {
+                    if server.status != status {
+                        let mut updated = server.clone();
+                        updated.status = status;
+                        let _ = self.service.update_mcp_server(updated);
+                    }
+                }
+            }
+        }
+
+        // Also reconcile DB rows that are marked running but have no active proxy (e.g., after crash).
+        if let Ok(servers) = self.service.list_mcp_servers() {
+            for server in servers
+                .into_iter()
+                .filter(|s| s.status == McpStatus::Running)
+            {
+                if proxies.contains_key(&server.name) {
+                    continue;
+                }
+                let socket_missing = server
+                    .socket_path
+                    .as_deref()
+                    .map(|p| !std::path::Path::new(p).exists())
+                    .unwrap_or(true);
+                if socket_missing {
+                    let mut updated = server.clone();
+                    updated.status = McpStatus::Stopped;
+                    updated.socket_path = None;
+                    updated.client_count = 0;
+                    let _ = self.service.update_mcp_server(updated);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -185,6 +276,7 @@ pub struct SocketProxy {
     pub(crate) socket_path: PathBuf,
     status: RwLock<McpStatus>,
     shutdown_tx: watch::Sender<bool>,
+    startup_tx: watch::Sender<Result<()>>,
     next_client_id: AtomicU64,
 }
 
@@ -198,6 +290,8 @@ impl SocketProxy {
         socket_path: PathBuf,
     ) -> Result<Self> {
         let (shutdown_tx, _) = watch::channel(false);
+        // Use an initial error value that will be replaced with Ok(()) on successful startup
+        let (startup_tx, _) = watch::channel(Err(anyhow::anyhow!("Server not started yet")));
         Ok(Self {
             name: name.to_string(),
             command: command.to_string(),
@@ -207,12 +301,51 @@ impl SocketProxy {
             socket_path,
             status: RwLock::new(McpStatus::Stopped),
             shutdown_tx,
+            startup_tx,
             next_client_id: AtomicU64::new(1),
         })
     }
 
+    /// Waits for the server to successfully start up to a maximum timeout.
+    pub async fn wait_for_startup(&self, timeout_ms: u64) -> Result<()> {
+        let mut rx = self.startup_tx.subscribe();
+        let timeout = tokio::time::Duration::from_millis(timeout_ms);
+        tokio::select! {
+            result = rx.changed() => {
+                result?;
+                // Check the result without cloning (use a reference)
+                match &*rx.borrow() {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(anyhow::anyhow!("MCP server '{}' failed to start: {}", self.name, e)),
+                }
+            }
+            _ = tokio::time::sleep(timeout) => {
+                anyhow::bail!("MCP server '{}' startup timed out after {}ms", self.name, timeout_ms);
+            }
+        }
+    }
+
     pub async fn is_running(&self) -> bool {
         *self.status.read().await == McpStatus::Running
+    }
+
+    /// Check if the server process is actually running (re-reads status from process)
+    pub async fn check_real_status(&self) -> McpStatus {
+        let is_running = self.is_running().await;
+
+        // If our tracking says it's running but the socket doesn't exist, it's actually stopped
+        let socket_exists = self.socket_path.exists();
+
+        if is_running && !socket_exists {
+            warn!(
+                "MCP server '{}' marked as running but socket missing, updating to Stopped",
+                self.name
+            );
+            *self.status.write().await = McpStatus::Stopped;
+            return McpStatus::Stopped;
+        }
+
+        *self.status.read().await
     }
 
     pub async fn shutdown(&self) {
@@ -220,6 +353,21 @@ impl SocketProxy {
     }
 
     pub async fn run(&self) -> Result<()> {
+        // Signal startup result when this function completes
+        let startup_result = match self.run_internal().await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // Ensure we signal the error on startup failure
+                let _ = self.startup_tx.send(Err(anyhow::anyhow!("{}", e)));
+                return Err(e);
+            }
+        };
+        // On graceful shutdown, signal success
+        let _ = self.startup_tx.send(startup_result);
+        Ok(())
+    }
+
+    async fn run_internal(&self) -> Result<()> {
         if self.socket_path.exists() {
             let _ = std::fs::remove_file(&self.socket_path);
         }
@@ -257,6 +405,9 @@ impl SocketProxy {
             Arc::new(Mutex::new(HashMap::new()));
 
         *self.status.write().await = McpStatus::Running;
+
+        // Signal successful startup - process is spawned and socket is bound
+        let _ = self.startup_tx.send(Ok(()));
 
         // STDERR logger
         tokio::spawn({
@@ -380,8 +531,14 @@ impl SocketProxy {
                 }
                 status = child.wait() => {
                     match status {
-                        Ok(s) => warn!("MCP server '{}' exited: {}", self.name, s),
-                        Err(e) => warn!("MCP server '{}' wait error: {}", self.name, e),
+                        Ok(s) => {
+                            warn!("MCP server '{}' exited with status: {}", self.name, s);
+                            *self.status.write().await = McpStatus::Stopped;
+                        }
+                        Err(e) => {
+                            warn!("MCP server '{}' wait error: {}", self.name, e);
+                            *self.status.write().await = McpStatus::Stopped;
+                        }
                     }
                     break;
                 }
@@ -390,6 +547,7 @@ impl SocketProxy {
 
         let _ = child.kill().await;
         *self.status.write().await = McpStatus::Stopped;
+
         let _ = std::fs::remove_file(&self.socket_path);
         Ok(())
     }

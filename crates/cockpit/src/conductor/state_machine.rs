@@ -2,19 +2,28 @@
 //!
 //! Handles the logic for valid state transitions and engine guards.
 
-use super::model::{ConductorState, ConductorStatus, ConductorEvent, StopReason, OutputStream};
+use super::model::{ConductorEvent, ConductorState, ConductorStatus, OutputStream, StopReason};
 
 impl ConductorState {
     /// Check if the engine can transition to Started
     pub fn can_start(&self) -> bool {
-        matches!(self.status, ConductorStatus::Ready | ConductorStatus::Idle | ConductorStatus::Completed | ConductorStatus::Failed)
+        matches!(
+            self.status,
+            ConductorStatus::Ready
+                | ConductorStatus::Idle
+                | ConductorStatus::Completed
+                | ConductorStatus::Failed
+        )
     }
-    
+
     /// Check if the engine can be paused
     pub fn can_pause(&self) -> bool {
-        matches!(self.status, ConductorStatus::Running | ConductorStatus::Selecting | ConductorStatus::Executing)
+        matches!(
+            self.status,
+            ConductorStatus::Running | ConductorStatus::Selecting | ConductorStatus::Executing
+        )
     }
-    
+
     /// Check if the engine can be resumed
     pub fn can_resume(&self) -> bool {
         matches!(self.status, ConductorStatus::Paused)
@@ -22,25 +31,42 @@ impl ConductorState {
 
     /// Check if the engine can be stopped
     pub fn can_stop(&self) -> bool {
-        !matches!(self.status, ConductorStatus::Stopping | ConductorStatus::Ready)
+        !matches!(
+            self.status,
+            ConductorStatus::Stopping | ConductorStatus::Ready
+        )
     }
 
     /// Apply an event to the state machine to transition the status
     pub fn transition(&mut self, event: &ConductorEvent) {
         match (&self.status, event) {
-            (ConductorStatus::Ready | ConductorStatus::Idle | ConductorStatus::Completed | ConductorStatus::Failed, ConductorEvent::Started { total_tasks, .. }) => {
+            (
+                ConductorStatus::Ready
+                | ConductorStatus::Idle
+                | ConductorStatus::Completed
+                | ConductorStatus::Failed,
+                ConductorEvent::Started { total_tasks, .. },
+            ) => {
                 self.status = ConductorStatus::Running;
                 self.total_tasks = *total_tasks;
                 self.tasks_completed = 0;
             }
-            (ConductorStatus::Running | ConductorStatus::Selecting | ConductorStatus::Executing, ConductorEvent::TaskSelected { task_id, .. }) => {
+            (
+                ConductorStatus::Running | ConductorStatus::Selecting | ConductorStatus::Executing,
+                ConductorEvent::TaskSelected { task_id, .. },
+            ) => {
                 // Only transition to Selecting if we're not already executing this task
-                if self.current_task.as_ref() != Some(task_id) || !matches!(self.status, ConductorStatus::Executing) {
+                if self.current_task.as_ref() != Some(task_id)
+                    || !matches!(self.status, ConductorStatus::Executing)
+                {
                     self.status = ConductorStatus::Selecting;
                 }
                 self.current_task = Some(task_id.clone());
             }
-            (ConductorStatus::Running | ConductorStatus::Selecting | ConductorStatus::Executing, ConductorEvent::IterationStarted { iteration, .. }) => {
+            (
+                ConductorStatus::Running | ConductorStatus::Selecting | ConductorStatus::Executing,
+                ConductorEvent::IterationStarted { iteration, .. },
+            ) => {
                 self.status = ConductorStatus::Executing;
                 self.current_iteration = *iteration;
                 self.current_output.clear();
@@ -59,27 +85,69 @@ impl ConductorState {
             (ConductorStatus::Paused, ConductorEvent::Resumed) => {
                 self.status = ConductorStatus::Running;
             }
-            (_, ConductorEvent::Stopped { reason, .. }) => {
-                match reason {
-                    StopReason::Completed => self.status = ConductorStatus::Completed,
-                    StopReason::Error => self.status = ConductorStatus::Failed,
-                    StopReason::NoTasks => self.status = ConductorStatus::Idle,
-                    StopReason::Interrupted => self.status = ConductorStatus::Ready,
-                    StopReason::MaxIterations => self.status = ConductorStatus::Completed,
-                }
-            }
-            (_, ConductorEvent::AllComplete { total_completed, .. }) => {
+            (_, ConductorEvent::Stopped { reason, .. }) => match reason {
+                StopReason::Completed => self.status = ConductorStatus::Completed,
+                StopReason::Error => self.status = ConductorStatus::Failed,
+                StopReason::NoTasks => self.status = ConductorStatus::Idle,
+                StopReason::Interrupted => self.status = ConductorStatus::Ready,
+                StopReason::MaxIterations => self.status = ConductorStatus::Completed,
+            },
+            (
+                _,
+                ConductorEvent::AllComplete {
+                    total_completed, ..
+                },
+            ) => {
                 self.status = ConductorStatus::Completed;
                 self.tasks_completed = *total_completed;
             }
             (_, ConductorEvent::TaskCompleted { .. }) => {
                 self.status = ConductorStatus::Running;
             }
-            (_, ConductorEvent::AgentOutput { stream, data }) => {
-                match stream {
-                    OutputStream::Stdout => self.current_output.push_str(data),
-                    OutputStream::Stderr => self.current_stderr.push_str(data),
+            (_, ConductorEvent::AgentOutput { stream, data }) => match stream {
+                OutputStream::Stdout => self.current_output.push_str(data),
+                OutputStream::Stderr => self.current_stderr.push_str(data),
+            },
+            // LSP Diagnostic events
+            (_, ConductorEvent::DiagnosticsStarted { .. }) => {
+                // Clear previous diagnostics
+                self.lsp_diagnostics_errors.clear();
+                self.lsp_diagnostics_warnings.clear();
+            }
+            (_, ConductorEvent::DiagnosticsCompleted { error_count, warning_count, diagnostics, .. }) => {
+                // Store error diagnostics
+                for diag in diagnostics {
+                    // Simple heuristic: ERROR/WARN in the formatted string
+                    if diag.contains("ERROR") || diag.contains("error:") {
+                        self.lsp_diagnostics_errors.push(diag.clone());
+                    } else if diag.contains("WARN") || diag.contains("warning:") {
+                        self.lsp_diagnostics_warnings.push(diag.clone());
+                    } else {
+                        // Default to warnings for unknown format
+                        self.lsp_diagnostics_warnings.push(diag.clone());
+                    }
                 }
+                // Log the diagnostic check
+                tracing::info!(
+                    "LSP diagnostics completed: {} errors, {} warnings",
+                    error_count,
+                    warning_count
+                );
+                // If errors found, add to stderr for visibility
+                if *error_count > 0 {
+                    self.current_stderr.push_str(&format!(
+                        "\n[!] LSP found {} error(s). See diagnostics panel for details.\n",
+                        error_count
+                    ));
+                }
+            }
+            (_, ConductorEvent::DiagnosticsFailed { error }) => {
+                tracing::warn!("LSP diagnostics failed: {}", error);
+                self.current_stderr.push_str(&format!("[!] LSP diagnostic check failed: {}\n", error));
+            }
+            (_, ConductorEvent::LspStatusUpdated { lsp_servers }) => {
+                self.running_lsp_servers = lsp_servers.clone();
+                tracing::debug!("LSP status updated: {} servers running", lsp_servers.len());
             }
             _ => {}
         }

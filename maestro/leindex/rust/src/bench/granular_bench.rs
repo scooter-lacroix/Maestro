@@ -75,7 +75,9 @@ fn main() {
         let store = HnswVectorStore::new(Some(temp_dir.path().to_path_buf()), None).unwrap();
 
         // OPTIMIZATION: Use batch insert for HNSW (100x faster than individual inserts)
-        let items: Vec<(String, Vec<f32>, VectorMetadata)> = embeddings.iter().enumerate()
+        let items: Vec<(String, Vec<f32>, VectorMetadata)> = embeddings
+            .iter()
+            .enumerate()
             .map(|(i, embedding)| {
                 let metadata = VectorMetadata::new(&format!("file_{}.rs", i / 1000), i as i32);
                 (format!("content {}", i), embedding.clone(), metadata)

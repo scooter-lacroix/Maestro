@@ -132,7 +132,7 @@ async fn test_concurrent_mode_switch() {
     let monitor_handle = task::spawn(async move {
         for _i in 0..150 {
             let _current_mode = monitor_store.mode(); // Just verify mode doesn't panic
-            // Brief pause
+                                                      // Brief pause
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     });

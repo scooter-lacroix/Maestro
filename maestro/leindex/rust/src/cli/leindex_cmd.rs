@@ -196,9 +196,12 @@ pub async fn run(cmd: LeIndexCommand) -> Result<()> {
     match cmd.command {
         LeIndexSubcommand::Init { path, force } => run_init(path, force).await,
         LeIndexSubcommand::Status => run_status().await,
-        LeIndexSubcommand::Search { query, limit, file, format } => {
-            run_search(query, limit, file, format).await
-        }
+        LeIndexSubcommand::Search {
+            query,
+            limit,
+            file,
+            format,
+        } => run_search(query, limit, file, format).await,
         LeIndexSubcommand::Analyze {
             path,
             phase,
@@ -248,7 +251,9 @@ pub async fn run(cmd: LeIndexCommand) -> Result<()> {
 
 async fn run_init(path: PathBuf, _force: bool) -> Result<()> {
     println!("Initializing LeIndex for: {}", path.display());
-    println!("Note: Full indexing not yet implemented - use `maestro analyze` for file-level analysis");
+    println!(
+        "Note: Full indexing not yet implemented - use `maestro analyze` for file-level analysis"
+    );
     Ok(())
 }
 
@@ -261,7 +266,12 @@ async fn run_status() -> Result<()> {
     Ok(())
 }
 
-async fn run_search(query: String, _limit: usize, _file: Option<PathBuf>, _format: String) -> Result<()> {
+async fn run_search(
+    query: String,
+    _limit: usize,
+    _file: Option<PathBuf>,
+    _format: String,
+) -> Result<()> {
     println!("LeIndex Search: '{}'", query);
     println!("Note: Full-text search not yet implemented - use `maestro analyze` for file-level analysis");
     Ok(())
@@ -301,7 +311,13 @@ async fn run_analyze(
     }
 }
 
-async fn run_phase(phase: usize, path: PathBuf, mode: String, max_files: usize, max_chars: usize) -> Result<()> {
+async fn run_phase(
+    phase: usize,
+    path: PathBuf,
+    mode: String,
+    max_files: usize,
+    max_chars: usize,
+) -> Result<()> {
     let format_mode = parse_mode(&mode);
     let opts = PhaseOptions {
         root: path,

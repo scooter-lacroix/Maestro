@@ -15,8 +15,8 @@
 
 use std::sync::Arc;
 
-use leindex_analyzers::memory::turso_backend::{TursoStorageBackend, LspServerState, LspStatus};
 use chrono::Utc;
+use leindex_analyzers::memory::turso_backend::{LspServerState, LspStatus, TursoStorageBackend};
 
 /// Test LSP status formatting for TUI display
 ///
@@ -98,11 +98,11 @@ fn test_lsp_aggregated_status_display() {
     );
     assert_eq!(
         aggregate_lsp_status(&[LspStatus::Running, LspStatus::Error]),
-        LspStatus::Error  // Error takes priority
+        LspStatus::Error // Error takes priority
     );
     assert_eq!(
         aggregate_lsp_status(&[LspStatus::Starting, LspStatus::Running]),
-        LspStatus::Starting  // Starting takes priority over running
+        LspStatus::Starting // Starting takes priority over running
     );
     assert_eq!(
         aggregate_lsp_status(&[LspStatus::Stopped, LspStatus::Stopped]),
@@ -110,7 +110,7 @@ fn test_lsp_aggregated_status_display() {
     );
     assert_eq!(
         aggregate_lsp_status(&[]),
-        LspStatus::Stopped  // No LSPs = stopped/disabled
+        LspStatus::Stopped // No LSPs = stopped/disabled
     );
 }
 
@@ -122,9 +122,7 @@ fn test_lsp_aggregated_status_display() {
 async fn test_lsp_state_transitions_for_tui() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     let session_id = "test-session";
@@ -152,7 +150,11 @@ async fn test_lsp_state_transitions_for_tui() {
     };
     storage.upsert_lsp_state(&state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Stopped);
 
     // Test 3: Transition to Starting (TUI "Start" action)
@@ -162,7 +164,11 @@ async fn test_lsp_state_transitions_for_tui() {
     };
     storage.upsert_lsp_state(&starting_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Starting);
 
     // Test 4: Transition to Running (LSP started successfully)
@@ -174,7 +180,11 @@ async fn test_lsp_state_transitions_for_tui() {
     };
     storage.upsert_lsp_state(&running_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Running);
     assert_eq!(retrieved.pid, Some(12345));
 
@@ -187,7 +197,11 @@ async fn test_lsp_state_transitions_for_tui() {
     };
     storage.upsert_lsp_state(&error_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Error);
     assert!(retrieved.last_error.is_some());
 
@@ -196,12 +210,16 @@ async fn test_lsp_state_transitions_for_tui() {
         status: LspStatus::Stopped,
         pid: None,
         auto_start: false,
-        use_proxy: false,  // User disabled auto-start
+        use_proxy: false, // User disabled auto-start
         ..error_state
     };
     storage.upsert_lsp_state(&stopped_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Stopped);
     assert_eq!(retrieved.auto_start, false);
 }
@@ -233,12 +251,24 @@ async fn test_lsp_tab_data_structure() {
                 session_id: session_id.to_string(),
                 language: language.to_string(),
                 lsp_name: lsp_name.to_string(),
-                status: if i % 2 == 0 { LspStatus::Running } else { LspStatus::Stopped },
-                pid: if i % 2 == 0 { Some(10000 + i as i64) } else { None },
+                status: if i % 2 == 0 {
+                    LspStatus::Running
+                } else {
+                    LspStatus::Stopped
+                },
+                pid: if i % 2 == 0 {
+                    Some(10000 + i as i64)
+                } else {
+                    None
+                },
                 port: None,
                 auto_start: true,
                 use_proxy: false,
-                last_started: if i % 2 == 0 { Some(Utc::now().to_rfc3339()) } else { None },
+                last_started: if i % 2 == 0 {
+                    Some(Utc::now().to_rfc3339())
+                } else {
+                    None
+                },
                 last_error: None,
                 created_at: Utc::now().to_rfc3339(),
                 updated_at: Some(Utc::now().to_rfc3339()),
@@ -260,7 +290,10 @@ async fn test_lsp_tab_data_structure() {
     let mut running_count = 0;
     for session_id in &sessions {
         let session_lsps = storage.get_session_lsp_states(session_id).await.unwrap();
-        running_count += session_lsps.iter().filter(|s| matches!(s.status, LspStatus::Running)).count();
+        running_count += session_lsps
+            .iter()
+            .filter(|s| matches!(s.status, LspStatus::Running))
+            .count();
     }
     assert_eq!(running_count, 6); // 2 sessions with 3 LSPs each
 
@@ -279,9 +312,7 @@ async fn test_lsp_tab_data_structure() {
 async fn test_lsp_autostart_flag_for_tui() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     let session_id = "test-session";
@@ -314,7 +345,11 @@ async fn test_lsp_autostart_flag_for_tui() {
     storage.upsert_lsp_state(&auto_off_state).await.unwrap();
 
     // Verify auto_start is disabled
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.auto_start, false);
 
     // TUI "Enable Auto-Start" action
@@ -325,7 +360,11 @@ async fn test_lsp_autostart_flag_for_tui() {
     };
     storage.upsert_lsp_state(&reenabled_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.auto_start, true);
 }
 
@@ -337,9 +376,7 @@ async fn test_lsp_autostart_flag_for_tui() {
 async fn test_lsp_error_display_for_tui() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     // Simulate LSP failure with error message
@@ -361,17 +398,28 @@ async fn test_lsp_error_display_for_tui() {
     storage.upsert_lsp_state(&error_state).await.unwrap();
 
     // TUI retrieves error for display
-    let retrieved = storage.get_lsp_state("test-session", "rust-analyzer").await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state("test-session", "rust-analyzer")
+        .await
+        .unwrap()
+        .unwrap();
 
     // Verify error information is available for TUI display
     assert_eq!(retrieved.status, LspStatus::Error);
-    assert_eq!(retrieved.last_error, Some("Failed to start: binary not found in PATH".to_string()));
+    assert_eq!(
+        retrieved.last_error,
+        Some("Failed to start: binary not found in PATH".to_string())
+    );
 
     // Format error message for TUI display
     let error_display = format!(
         "{}: {}",
         retrieved.lsp_name,
-        retrieved.last_error.as_ref().map(|s| s.as_str()).unwrap_or("Unknown error")
+        retrieved
+            .last_error
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("Unknown error")
     );
     assert!(error_display.contains("rust-analyzer"));
     assert!(error_display.contains("binary not found"));
@@ -384,9 +432,15 @@ async fn test_lsp_error_display_for_tui() {
 fn test_lsp_process_info_for_tui_display() {
     // Test extracting process info for TUI display
     fn format_lsp_process_info(name: &str, pid: Option<i64>, port: Option<u16>) -> String {
-        let pid_info = pid.map(|p| format!("PID: {}", p)).unwrap_or_else(|| "Not running".to_string());
-        let port_info = port.map(|p| format!("Port: {}", p)).unwrap_or_else(|| "".to_string());
-        format!("{} - {} {}", name, pid_info, port_info).trim().to_string()
+        let pid_info = pid
+            .map(|p| format!("PID: {}", p))
+            .unwrap_or_else(|| "Not running".to_string());
+        let port_info = port
+            .map(|p| format!("Port: {}", p))
+            .unwrap_or_else(|| "".to_string());
+        format!("{} - {} {}", name, pid_info, port_info)
+            .trim()
+            .to_string()
     }
 
     // Test formatting with different states
@@ -448,9 +502,7 @@ fn test_tui_tab_navigation_state() {
 async fn test_session_lsp_count_for_tui() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     // Create sessions with varying LSP counts
@@ -465,7 +517,7 @@ async fn test_session_lsp_count_for_tui() {
             pid: Some(10000),
             port: None,
             auto_start: true,
-        use_proxy: false,
+            use_proxy: false,
             last_started: Some(Utc::now().to_rfc3339()),
             last_error: None,
             created_at: Utc::now().to_rfc3339(),
@@ -495,13 +547,25 @@ async fn test_session_lsp_count_for_tui() {
     // session-3: 0 LSPs (no LSPs configured)
 
     // Test LSP count retrieval for TUI display
-    let count_1 = storage.get_session_lsp_states("session-1").await.unwrap().len();
+    let count_1 = storage
+        .get_session_lsp_states("session-1")
+        .await
+        .unwrap()
+        .len();
     assert_eq!(count_1, 3);
 
-    let count_2 = storage.get_session_lsp_states("session-2").await.unwrap().len();
+    let count_2 = storage
+        .get_session_lsp_states("session-2")
+        .await
+        .unwrap()
+        .len();
     assert_eq!(count_2, 1);
 
-    let count_3 = storage.get_session_lsp_states("session-3").await.unwrap().len();
+    let count_3 = storage
+        .get_session_lsp_states("session-3")
+        .await
+        .unwrap()
+        .len();
     assert_eq!(count_3, 0);
 }
 
@@ -564,7 +628,11 @@ async fn test_tui_lsp_refresh_logic() {
     assert!(!session_lsps.is_empty());
 
     // Verify the most recent state is Running
-    let latest_state = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let latest_state = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(latest_state.status, LspStatus::Running);
     assert_eq!(latest_state.pid, Some(54321));
 }
@@ -577,9 +645,7 @@ async fn test_tui_lsp_refresh_logic() {
 async fn test_tui_lsp_control_actions() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     let session_id = "control-test";
@@ -614,7 +680,11 @@ async fn test_tui_lsp_control_actions() {
     storage.upsert_lsp_state(&restart_state).await.unwrap();
 
     // Verify restart state
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Starting);
     assert!(retrieved.last_error.is_none());
 
@@ -627,7 +697,11 @@ async fn test_tui_lsp_control_actions() {
     };
     storage.upsert_lsp_state(&running_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retrieved.status, LspStatus::Running);
 }
 
@@ -639,9 +713,7 @@ async fn test_tui_lsp_control_actions() {
 async fn test_tui_lsp_log_data() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     let session_id = "log-test";
@@ -666,7 +738,11 @@ async fn test_tui_lsp_log_data() {
     storage.upsert_lsp_state(&state_with_error).await.unwrap();
 
     // TUI retrieves log entry for display
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
 
     // Format log entry for TUI log viewer
     let log_entry = format!(
@@ -674,7 +750,11 @@ async fn test_tui_lsp_log_data() {
         Utc::now().format("%Y-%m-%d %H:%M:%S"),
         retrieved.session_id,
         retrieved.lsp_name,
-        retrieved.last_error.as_ref().map(|s| s.as_str()).unwrap_or("No logs")
+        retrieved
+            .last_error
+            .as_ref()
+            .map(|s| s.as_str())
+            .unwrap_or("No logs")
     );
 
     assert!(log_entry.contains("[ERROR]"));
@@ -687,8 +767,15 @@ async fn test_tui_lsp_log_data() {
     };
     storage.upsert_lsp_state(&newer_state).await.unwrap();
 
-    let retrieved = storage.get_lsp_state(session_id, lsp_name).await.unwrap().unwrap();
-    assert_eq!(retrieved.last_error, Some("[WARN] High memory usage detected".to_string()));
+    let retrieved = storage
+        .get_lsp_state(session_id, lsp_name)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        retrieved.last_error,
+        Some("[WARN] High memory usage detected".to_string())
+    );
 }
 
 /// Test TUI multi-language session display
@@ -698,9 +785,7 @@ async fn test_tui_lsp_log_data() {
 async fn test_tui_multi_language_session_display() {
     let temp_dir = tempfile::tempdir().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    let storage = TursoStorageBackend::new(Some(db_path), None)
-        .await
-        .unwrap();
+    let storage = TursoStorageBackend::new(Some(db_path), None).await.unwrap();
     storage.initialize().await.unwrap();
 
     // Create session with 3 LSPs (multi-language project)
@@ -709,7 +794,11 @@ async fn test_tui_multi_language_session_display() {
     for (lsp_name, language, status) in [
         ("rust-analyzer", "rust", LspStatus::Running),
         ("ruff-lsp", "python", LspStatus::Running),
-        ("typescript-language-server", "typescript", LspStatus::Starting),
+        (
+            "typescript-language-server",
+            "typescript",
+            LspStatus::Starting,
+        ),
     ] {
         let state = LspServerState {
             id: 0,
@@ -720,7 +809,7 @@ async fn test_tui_multi_language_session_display() {
             pid: Some(10000),
             port: None,
             auto_start: true,
-        use_proxy: false,
+            use_proxy: false,
             last_started: Some(Utc::now().to_rfc3339()),
             last_error: None,
             created_at: Utc::now().to_rfc3339(),
@@ -747,10 +836,15 @@ async fn test_tui_multi_language_session_display() {
 
     assert!(lsp_info.iter().any(|(name, _, _)| name == "rust-analyzer"));
     assert!(lsp_info.iter().any(|(name, _, _)| name == "ruff-lsp"));
-    assert!(lsp_info.iter().any(|(name, _, _)| name == "typescript-language-server"));
+    assert!(lsp_info
+        .iter()
+        .any(|(name, _, _)| name == "typescript-language-server"));
 
     // Verify status aggregation for session display
-    let statuses: Vec<&str> = lsp_info.iter().map(|(_, _, status)| status.as_str()).collect();
+    let statuses: Vec<&str> = lsp_info
+        .iter()
+        .map(|(_, _, status)| status.as_str())
+        .collect();
     assert!(statuses.contains(&"running"));
     assert!(statuses.contains(&"starting"));
 

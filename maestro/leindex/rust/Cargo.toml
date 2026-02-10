@@ -96,6 +96,7 @@ regex = "1"
 tempfile = "3.8"  # Secure temporary file creation for atomic writes
 base64 = "0.22"  # For libsql vector extension encoding
 hostname = "0.4"  # For session lock hostnames
+ignore = "0.4"  # Gitignore-style file filtering for edit detection
 
 # Full-text search (preserves existing Tantivy capability)
 tantivy = "0.22"
@@ -109,6 +110,7 @@ wide = "1.1"  # SIMD-accelerated cosine similarity
 # LSP support for on-demand language server integration
 lsp-types = "0.97"  # LSP protocol types
 urlencoding = "2.1"  # URL encoding for file:// URIs
+percent-encoding = "2.3"  # URL percent-decoding
 # tokio already has "full" features which includes process::Command for LSP spawning
 
 # Database migrations

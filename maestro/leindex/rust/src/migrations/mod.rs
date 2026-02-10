@@ -1979,7 +1979,8 @@ mod tests {
         let use_proxy = AddLspUseProxyColumn;
 
         // Run all migrations
-        let migrations: Vec<&dyn Migration> = vec![&base_schema, &fts5_indexes, &olap_views, &use_proxy];
+        let migrations: Vec<&dyn Migration> =
+            vec![&base_schema, &fts5_indexes, &olap_views, &use_proxy];
         let applied_count = manager.run_migrations(&migrations, false).await?;
         assert_eq!(applied_count, 4, "Should apply 4 migrations");
 

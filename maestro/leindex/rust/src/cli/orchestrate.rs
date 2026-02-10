@@ -4,7 +4,7 @@
 
 use crate::orchestrate::{
     model::{AgentConfig, LoopMode, OrchestrateConfig},
-    parser::{parse_tracks_md, parse_plan_md},
+    parser::{parse_plan_md, parse_tracks_md},
     OrchestrateEngine,
 };
 use anyhow::Result;
@@ -116,21 +116,29 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
             max_retries,
             error_strategy,
         } => {
-            let tracks_dir = tracks_dir.unwrap_or_else(|| {
-                PathBuf::from("./maestro/tracks")
-            });
+            let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
             let loop_mode = match mode.as_str() {
                 "planning" => LoopMode::Planning,
                 "building" => LoopMode::Building,
-                _ => return Err(anyhow::anyhow!("Invalid mode: {}. Use 'planning' or 'building'", mode)),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Invalid mode: {}. Use 'planning' or 'building'",
+                        mode
+                    ))
+                }
             };
 
             let error_strategy = match error_strategy.as_str() {
                 "retry" => crate::orchestrate::model::ErrorStrategy::Retry,
                 "skip" => crate::orchestrate::model::ErrorStrategy::Skip,
                 "abort" => crate::orchestrate::model::ErrorStrategy::Abort,
-                _ => return Err(anyhow::anyhow!("Invalid error strategy: {}. Use 'retry', 'skip', or 'abort'", error_strategy)),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Invalid error strategy: {}. Use 'retry', 'skip', or 'abort'",
+                        error_strategy
+                    ))
+                }
             };
 
             let config = OrchestrateConfig {
@@ -146,7 +154,7 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
                 sandbox,
             };
 
-            let engine = OrchestrateEngine::new(config, tracks_dir)?;
+            let mut engine = OrchestrateEngine::new(config, tracks_dir)?;
             engine.start(&track_id, loop_mode, agent_config).await?;
             Ok(())
         }
@@ -155,9 +163,7 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
             track_id,
             tracks_dir,
         } => {
-            let tracks_dir = tracks_dir.unwrap_or_else(|| {
-                PathBuf::from("./maestro/tracks")
-            });
+            let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
             let config = OrchestrateConfig::default();
             let engine = OrchestrateEngine::new(config, tracks_dir)?;
@@ -169,9 +175,7 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
             track_id,
             tracks_dir,
         } => {
-            let tracks_dir = tracks_dir.unwrap_or_else(|| {
-                PathBuf::from("./maestro/tracks")
-            });
+            let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
             let config = OrchestrateConfig::default();
             let engine = OrchestrateEngine::new(config, tracks_dir)?;
@@ -183,9 +187,7 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
             track_id,
             tracks_dir,
         } => {
-            let tracks_dir = tracks_dir.unwrap_or_else(|| {
-                PathBuf::from("./maestro/tracks")
-            });
+            let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
             let config = OrchestrateConfig::default();
             let engine = OrchestrateEngine::new(config, tracks_dir)?;
@@ -197,20 +199,14 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
             track_id,
             tracks_dir,
         } => {
-            let tracks_dir = tracks_dir.unwrap_or_else(|| {
-                PathBuf::from("./maestro/tracks")
-            });
+            let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
             show_status(tracks_dir, track_id.as_deref()).await?;
             Ok(())
         }
 
-        OrchestrateSubcommand::List {
-            tracks_dir,
-        } => {
-            let tracks_dir = tracks_dir.unwrap_or_else(|| {
-                PathBuf::from("./maestro/tracks")
-            });
+        OrchestrateSubcommand::List { tracks_dir } => {
+            let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
             list_tracks(tracks_dir).await?;
             Ok(())
@@ -243,7 +239,8 @@ async fn show_status(tracks_dir: PathBuf, track_id: Option<&str>) -> Result<()> 
             if !recent.is_empty() {
                 println!("\nRecent Iterations:");
                 for log in recent {
-                    println!("  [{}] {}: {} - {}",
+                    println!(
+                        "  [{}] {}: {} - {}",
                         log.iteration,
                         log.completed_at.unwrap_or_else(|| log.started_at.clone()),
                         log.task_id,
@@ -315,7 +312,10 @@ async fn list_tracks(tracks_dir: PathBuf) -> Result<()> {
         if plan_path.exists() {
             if let Ok(plan) = parse_plan_md(&plan_path) {
                 let all_tasks: Vec<&crate::orchestrate::model::Task> = plan.all_tasks();
-                let completed = all_tasks.iter().filter(|t| t.status == crate::orchestrate::model::TrackStatus::Completed).count();
+                let completed = all_tasks
+                    .iter()
+                    .filter(|t| t.status == crate::orchestrate::model::TrackStatus::Completed)
+                    .count();
                 let total = all_tasks.len();
 
                 if total > 0 {

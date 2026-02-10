@@ -5,11 +5,11 @@
 //! multi-step input processes.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use crate::state::InputMode;
 use crate::app::App;
+use crate::state::InputMode;
 
 /// Renders the new project wizard modal.
 ///

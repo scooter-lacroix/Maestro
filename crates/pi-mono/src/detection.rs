@@ -48,12 +48,7 @@ impl Capabilities {
     }
 
     /// Create a new Capabilities instance with custom settings
-    pub fn with_capabilities(
-        subagent: bool,
-        streaming: bool,
-        parallel: bool,
-        chain: bool,
-    ) -> Self {
+    pub fn with_capabilities(subagent: bool, streaming: bool, parallel: bool, chain: bool) -> Self {
         Self {
             subagent,
             streaming,
@@ -193,24 +188,28 @@ impl PiDetection {
         let output = tokio::time::timeout(
             Duration::from_secs(5),
             tokio::task::spawn_blocking(move || {
-                Command::new(&executable_path)
-                    .arg("--version")
-                    .output()
-            })
+                Command::new(&executable_path).arg("--version").output()
+            }),
         )
         .await
-        .map_err(|_| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str.clone(),
-            reason: "Command timed out after 5 seconds".to_string(),
-        }))?
-        .map_err(|e| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str.clone(),
-            reason: format!("Task join failed: {}", e),
-        }))?
-        .map_err(|e| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str,
-            reason: format!("Failed to execute: {}", e),
-        }))?;
+        .map_err(|_| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str.clone(),
+                reason: "Command timed out after 5 seconds".to_string(),
+            })
+        })?
+        .map_err(|e| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str.clone(),
+                reason: format!("Task join failed: {}", e),
+            })
+        })?
+        .map_err(|e| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str,
+                reason: format!("Failed to execute: {}", e),
+            })
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -232,12 +231,11 @@ impl PiDetection {
             version_str.to_string()
         } else {
             // Try to extract version from the last word
-            let last_word = version_str
-                .split_whitespace()
-                .last()
-                .ok_or_else(|| Error::Detection(DetectionError::VersionParseFailed {
+            let last_word = version_str.split_whitespace().last().ok_or_else(|| {
+                Error::Detection(DetectionError::VersionParseFailed {
                     output: version_str.to_string(),
-                }))?;
+                })
+            })?;
 
             if let Ok(_v) = last_word.parse::<semver::Version>() {
                 last_word.to_string()
@@ -365,7 +363,10 @@ mod tests {
             capabilities: Capabilities::default(),
         };
 
-        assert_eq!(detection.executable_path, PathBuf::from("/usr/local/bin/pi"));
+        assert_eq!(
+            detection.executable_path,
+            PathBuf::from("/usr/local/bin/pi")
+        );
         assert_eq!(detection.version, Some("0.49.3".to_string()));
         assert!(detection.capabilities.streaming);
     }

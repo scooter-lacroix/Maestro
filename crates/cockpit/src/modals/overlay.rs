@@ -4,8 +4,8 @@
 //! the system is performing async operations like spawning new sessions.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::widgets::Clear;
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use crate::app::App;
 

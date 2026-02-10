@@ -107,6 +107,10 @@ mod tests {
 
         // Verify performance is reasonable (should be much faster than scalar)
         // SIMD implementation should handle 10K iterations in reasonable time
-        assert!(elapsed.as_millis() < 5000, "SIMD performance too slow: {:?}", elapsed);
+        assert!(
+            elapsed.as_millis() < 5000,
+            "SIMD performance too slow: {:?}",
+            elapsed
+        );
     }
 }

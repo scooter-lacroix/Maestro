@@ -7,7 +7,7 @@ pub mod app;
 pub mod conductor;
 pub mod maestro_paths;
 pub mod modals;
-pub mod orchestrate;  // Deprecated: use conductor module instead
+pub mod orchestrate; // Deprecated: use conductor module instead
 pub mod state;
 pub mod tabs;
 pub mod theme;
@@ -16,6 +16,6 @@ pub use app::run;
 
 /// Re-export commonly used types for convenience
 pub use leindex_core::{
-    memory::models::{Session, McpServer},
     config::Config,
+    memory::models::{McpServer, Session},
 };

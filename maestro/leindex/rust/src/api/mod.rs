@@ -12,9 +12,14 @@ pub mod routes;
 #[cfg(feature = "rusqlite")]
 pub mod server;
 
+// Lattice module is always available (doesn't depend on rusqlite)
+pub mod lattice;
+
 #[cfg(feature = "rusqlite")]
 pub use handlers::*;
 #[cfg(feature = "rusqlite")]
 pub use routes::*;
 #[cfg(feature = "rusqlite")]
 pub use server::*;
+
+pub use lattice::*;

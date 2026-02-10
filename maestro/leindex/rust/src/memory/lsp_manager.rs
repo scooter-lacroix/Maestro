@@ -760,7 +760,7 @@ impl LspManager {
                         project_path.to_string_lossy().as_ref(),
                     ) {
                         Ok(mut proxy) => {
-                            let socket_path = proxy.socket_path().clone();
+                            let socket_path: std::path::PathBuf = proxy.socket_path().clone();
                             let socket_path_for_log = socket_path.clone();
 
                             // Spawn proxy in background task
@@ -1859,18 +1859,11 @@ impl LspManager {
         };
 
         // Update the database state with the new configuration
-        let mut state = LspProcess::create_db_state_from_config(
-            session_id,
-            lsp_type,
-            &config,
-        );
+        let mut state = LspProcess::create_db_state_from_config(session_id, lsp_type, &config);
         state.status = LspStatus::Stopped; // Will be updated when LSP starts
-        
+
         if let Err(e) = self.storage.upsert_lsp_state(&state).await {
-            warn!(
-                "Failed to update LSP state for proxy mode: {}",
-                e
-            );
+            warn!("Failed to update LSP state for proxy mode: {}", e);
         }
 
         // Stop the LSP if it's running, then start it with proxy mode enabled
@@ -1973,7 +1966,7 @@ impl LspManager {
 
         // Create config with proxy mode disabled
         let config = LspConfig {
-            auto_start: true,  // Will be loaded from DB if exists
+            auto_start: true, // Will be loaded from DB if exists
             use_proxy: false,
             ..Default::default()
         };
@@ -2121,8 +2114,9 @@ impl LspManager {
         let bridge_binary = PathBuf::from("maestro-lsp-mcp-bridge");
 
         // Validate binary exists before spawning (Task 10.1)
-        validate_binary_exists(&bridge_binary, "maestro-lsp-mcp-bridge")
-            .with_context(|| format!("Failed to validate MCP bridge binary: {:?}", bridge_binary))?;
+        validate_binary_exists(&bridge_binary, "maestro-lsp-mcp-bridge").with_context(|| {
+            format!("Failed to validate MCP bridge binary: {:?}", bridge_binary)
+        })?;
 
         // Build the command to start the MCP bridge
         let mut cmd = TokioCommand::new(&bridge_binary);
@@ -2351,6 +2345,211 @@ impl LspManager {
 
         Ok(())
     }
+
+    // ========================================================================
+    // Diagnostic Integration for Agent Loops
+    // ========================================================================
+
+    /// Notify LSP of file changes and get diagnostics
+    ///
+    /// This method is used by the orchestrate runner to trigger LSP diagnostics
+    /// after an agent makes file edits. It sends a didChange notification and waits
+    /// for the LSP to publish updated diagnostics.
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `file_path`: Path to the modified file
+    /// - `timeout_secs`: Maximum time to wait for diagnostics (default: 10)
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Ok(Some(diagnostics))` if diagnostics were found, `Ok(None)` if clean,
+    /// or an error if the LSP communication failed
+    ///
+    /// ## Integration Point
+    ///
+    /// This is called by the orchestrate runner after detecting file edits.
+    /// The runner uses the results to determine if the iteration should fail
+    /// due to LSP errors.
+    pub async fn notify_file_change_and_get_diagnostics(
+        &self,
+        session_id: &str,
+        file_path: &std::path::Path,
+        _timeout_secs: u64,
+    ) -> Result<Option<Vec<lsp_types::Diagnostic>>> {
+        let file_uri = path_to_file_uri(file_path)?;
+
+        // Determine which LSP handles this file
+        let lsp_type = self.detect_lsp_for_file(file_path)?;
+        if lsp_type.is_none() {
+            debug!("No LSP configured for file: {:?}", file_path);
+            return Ok(None);
+        }
+        let lsp_type = lsp_type.unwrap();
+
+        // Get the LSP process
+        let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
+
+        // Check if LSP is running
+        let lsp_running = {
+            let running = self.running_lsps.read().await;
+            let process = running.get(&lsp_key);
+
+            match process {
+                Some(p) if p.status == LspStatus::Running => {
+                    debug!("LSP {} is running for session {}", lsp_type.binary_name(), session_id);
+                    true
+                }
+                Some(p) => {
+                    debug!(
+                        "LSP {} is not running (status: {:?})",
+                        lsp_type.binary_name(),
+                        p.status
+                    );
+                    false
+                }
+                None => {
+                    debug!("LSP {} not found for session {}", lsp_type.binary_name(), session_id);
+                    false
+                }
+            }
+        };
+
+        if !lsp_running {
+            return Ok(None);
+        }
+
+        // TODO: Implement actual LSP communication
+        // This requires:
+        // 1. Acquiring write access to the child's stdin
+        // 2. Sending didChange notification
+        // 3. Reading publishDiagnostics notification
+        // 4. Parsing and returning diagnostics
+        //
+        // For now, this is a placeholder that returns Ok(None)
+        // The actual implementation would need to use the LspStdioProxy or
+        // direct stdio communication
+
+        tracing::debug!(
+            "Would send didChange notification to LSP {} for file {}",
+            lsp_type.binary_name(),
+            file_uri
+        );
+
+        Ok(None)
+    }
+
+    /// Batch diagnostic check for multiple files
+    ///
+    /// More efficient than checking each file individually as it can
+    /// batch requests to multiple LSPs.
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    /// - `file_paths`: Paths to check
+    /// - `timeout_secs`: Maximum time to wait for diagnostics
+    ///
+    /// ## Returns
+    ///
+    /// Returns a map of file path -> diagnostics (empty if clean)
+    pub async fn batch_diagnostics(
+        &self,
+        session_id: &str,
+        file_paths: &[std::path::PathBuf],
+        timeout_secs: u64,
+    ) -> Result<std::collections::HashMap<String, Vec<lsp_types::Diagnostic>>> {
+        let mut results = std::collections::HashMap::new();
+
+        // Group files by LSP type
+        let mut by_lsp: std::collections::HashMap<LspType, Vec<std::path::PathBuf>> =
+            std::collections::HashMap::new();
+
+        for path in file_paths {
+            if let Some(lsp_type) = self.detect_lsp_for_file(path)? {
+                by_lsp.entry(lsp_type).or_default().push(path.clone());
+            }
+        }
+
+        // Process each LSP group
+        for (_lsp_type, paths) in by_lsp {
+            for path in paths {
+                if let Ok(Some(diags)) = self
+                    .notify_file_change_and_get_diagnostics(session_id, &path, timeout_secs)
+                    .await
+                {
+                    if !diags.is_empty() {
+                        results.insert(path.to_string_lossy().to_string(), diags);
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Detect which LSP should handle a file based on extension
+    ///
+    /// ## Arguments
+    ///
+    /// - `file_path`: Path to the file
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Some(LspType)` if an LSP is configured, `None` otherwise
+    fn detect_lsp_for_file(&self, file_path: &std::path::Path) -> Result<Option<LspType>> {
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+
+        let lsp_type = match ext {
+            "rs" => Some(LspType::Rust),
+            "py" => Some(LspType::Python),
+            "pyi" => Some(LspType::Python),
+            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => Some(LspType::TypeScript),
+            _ => None,
+        };
+
+        Ok(lsp_type)
+    }
+
+    /// Check if LSP diagnostics are available for a session
+    ///
+    /// ## Arguments
+    ///
+    /// - `session_id`: Session identifier
+    ///
+    /// ## Returns
+    ///
+    /// Returns `true` if at least one LSP is running for the session
+    pub async fn has_diagnostics_support(&self, session_id: &str) -> bool {
+        let running = self.running_lsps.read().await;
+
+        for (key, process) in running.iter() {
+            if key.starts_with(&format!("{}:", session_id)) && process.status == LspStatus::Running {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Convert file path to file:// URI
+///
+/// Helper function for diagnostic integration
+fn path_to_file_uri(path: &std::path::Path) -> Result<String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::fs::canonicalize(path)
+            .with_context(|| format!("Failed to canonicalize: {:?}", path))?
+    };
+
+    let path_str = absolute.to_string_lossy();
+    Ok(format!("file://{}", path_str))
 }
 
 #[cfg(test)]
@@ -2797,7 +2996,10 @@ done
             .expect("LSP state not found");
 
         assert_eq!(retrieved.status, LspStatus::Error);
-        assert_eq!(retrieved.last_error, Some("Failed to start LSP".to_string()));
+        assert_eq!(
+            retrieved.last_error,
+            Some("Failed to start LSP".to_string())
+        );
     }
 
     /// Test multiple LSPs per session
@@ -2858,11 +3060,10 @@ done
     /// Test MCP bridge double-spawn protection
     #[tokio::test]
     async fn test_mcp_bridge_double_spawn_protection() {
-        use std::fs;
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let project_path = temp_dir.path();
+        let _project_path = temp_dir.path();
 
         let storage = TursoStorageBackend::in_memory(None)
             .await
@@ -2874,10 +3075,14 @@ done
         // but we can still test the double-spawn protection logic
 
         // First call will try to spawn (but fail because binary doesn't exist)
-        let result1 = manager.start_mcp_bridge("test-session", LspType::Rust, project_path).await;
+        let _result1 = manager
+            .start_mcp_bridge("test-session", LspType::Rust, _project_path)
+            .await;
 
         // Second call should trigger the double-spawn protection
-        let result2 = manager.start_mcp_bridge("test-session", LspType::Rust, project_path).await;
+        let _result2 = manager
+            .start_mcp_bridge("test-session", LspType::Rust, _project_path)
+            .await;
 
         // The first result should fail (binary not found), the second should be prevented by protection
         // The exact behavior depends on whether the first call adds an entry despite failure
@@ -2887,11 +3092,10 @@ done
     /// Test MCP bridge cleanup during shutdown
     #[tokio::test]
     async fn test_mcp_bridge_cleanup_on_shutdown() {
-        use std::fs;
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let project_path = temp_dir.path();
+        let _project_path = temp_dir.path();
 
         let storage = TursoStorageBackend::in_memory(None)
             .await
@@ -2900,14 +3104,14 @@ done
 
         // Check that initially there are no bridges
         {
-            let bridges = manager.running_bridges.read().await;
-            assert_eq!(bridges.len(), 0);
+            let _bridges = manager.running_bridges.read().await;
+            assert!(manager.running_bridges.read().await.is_empty());
         }
 
         // Simulate adding a bridge to the HashMap (without actually spawning)
         // This is to test the cleanup logic in shutdown
         {
-            let mut bridges = manager.running_bridges.write().await;
+            let _bridges = manager.running_bridges.write().await;
             // We'll add a dummy child process to test the cleanup
             // Since we can't create a real TokioChild without spawning, we'll test the scenario differently
         }
@@ -2930,7 +3134,7 @@ done
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let project_path = temp_dir.path();
+        let _project_path = temp_dir.path();
 
         // Create a mock script that acts like an MCP bridge
         let mock_script = temp_dir.path().join("maestro-lsp-mcp-bridge");
@@ -2940,7 +3144,8 @@ done
 # Mock MCP bridge that just waits for input
 exec cat
 "#,
-        ).expect("Failed to write mock bridge");
+        )
+        .expect("Failed to write mock bridge");
 
         #[cfg(unix)]
         {
@@ -2956,18 +3161,18 @@ exec cat
         let manager = LspManager::new(storage);
 
         // Test the double-spawn protection by temporarily adding a mock bridge
-        let bridge_key = "test-session:rust-analyzer:mcp".to_string();
+        let _bridge_key = "test-session:rust-analyzer:mcp".to_string();
 
         // Add a dummy entry to test double-spawn protection
         {
-            let mut bridges = manager.running_bridges.write().await;
+            let _bridges = manager.running_bridges.write().await;
             // We can't create a real TokioChild without spawning, so we'll test the logic differently
             // by testing the HashMap operations directly
         }
 
         // Verify that the bridge HashMap is accessible
         {
-            let bridges = manager.running_bridges.read().await;
+            let _bridges = manager.running_bridges.read().await;
             // Initially empty
         }
     }

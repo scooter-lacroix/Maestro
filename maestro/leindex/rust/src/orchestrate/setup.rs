@@ -4,9 +4,9 @@
 //! and guiding users through the setup process.
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use serde::{Deserialize, Serialize};
 
 /// Supported agent tools
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +78,10 @@ impl SetupStatus {
         self.maestro_config_exists
             && self.tracks_md_exists
             && !self.available_tools.is_empty()
-            && self.available_tools.iter().any(|t| matches!(t, AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen))
+            && self
+                .available_tools
+                .iter()
+                .any(|t| matches!(t, AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen))
     }
 
     /// Get missing requirements
@@ -91,7 +94,8 @@ impl SetupStatus {
 
         if self.available_tools.is_empty() {
             missing.push(
-                "No AI tools found. Install at least one: claude, gemini, qwen, or opencode.".to_string()
+                "No AI tools found. Install at least one: claude, gemini, qwen, or opencode."
+                    .to_string(),
             );
         }
 
@@ -103,15 +107,25 @@ impl SetupStatus {
         let mut improvements = Vec::new();
 
         if !self.maestro_config_exists {
-            improvements.push("~/.maestro/config.toml not found. Run 'maestro configure' to set defaults.".to_string());
+            improvements.push(
+                "~/.maestro/config.toml not found. Run 'maestro configure' to set defaults."
+                    .to_string(),
+            );
         }
 
-        if !self.available_tools.iter().any(|t| matches!(t, AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen)) {
+        if !self
+            .available_tools
+            .iter()
+            .any(|t| matches!(t, AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen))
+        {
             improvements.push("No primary AI tool (claude/gemini/qwen) found. These are recommended for orchestrate.".to_string());
         }
 
         if !self.sandbox_available {
-            improvements.push("bubblewrap (bwrap) not found. Install for sandbox mode: apt install bubblewrap".to_string());
+            improvements.push(
+                "bubblewrap (bwrap) not found. Install for sandbox mode: apt install bubblewrap"
+                    .to_string(),
+            );
         }
 
         improvements
@@ -129,8 +143,7 @@ pub fn check_binary_available(name: &str) -> bool {
 
 /// Get the Maestro config directory
 pub fn get_maestro_config_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .context("HOME environment variable not set")?;
+    let home = std::env::var("HOME").context("HOME environment variable not set")?;
     Ok(PathBuf::from(home).join(".maestro"))
 }
 
@@ -193,7 +206,10 @@ impl Default for SetupRecommendation {
 /// Generate setup recommendations based on detected status
 pub fn generate_recommendations(status: &SetupStatus) -> SetupRecommendation {
     // Pick the best available tool
-    let recommended_tool = status.available_tools.first().map(|t| t.as_str().to_string());
+    let recommended_tool = status
+        .available_tools
+        .first()
+        .map(|t| t.as_str().to_string());
 
     // Recommend sandbox if available
     let recommend_sandbox = status.sandbox_available;

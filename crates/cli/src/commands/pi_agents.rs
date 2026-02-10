@@ -4,20 +4,14 @@
 //! available agent mappings from the AgentRegistry and displays model assignments.
 
 use anyhow::Result;
-use maestro_pi_mono::{
-    load_config, default_mappings, ModelConfig,
-};
+use maestro_pi_mono::{default_mappings, load_config, ModelConfig};
 use std::path::PathBuf;
 use tracing::debug;
 
 /// Run the pi-agents command
 ///
 /// Lists available agent mappings and displays model assignments.
-pub async fn run(
-    _config_path: Option<PathBuf>,
-    verbose: bool,
-    json: bool,
-) -> Result<()> {
+pub async fn run(_config_path: Option<PathBuf>, verbose: bool, json: bool) -> Result<()> {
     debug!("Running pi-agents command");
 
     // Load configuration - load_config returns ModelConfig (full config)
@@ -33,10 +27,7 @@ pub async fn run(
 }
 
 /// Print agents in human-readable format
-async fn print_agents_human(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<()> {
+async fn print_agents_human(config: &ModelConfig, verbose: bool) -> Result<()> {
     println!();
     println!("═══════════════════════════════════════════════════════════════");
     println!("  Pi-Mono Agent Mappings");
@@ -54,7 +45,10 @@ async fn print_agents_human(
     for mapping in &mappings {
         println!("{:?} ({:?})", mapping.maestro_role, mapping.pi_agent_type);
         println!("  Description: {}", mapping.description);
-        println!("  Complexity: {:?} to {:?}", mapping.complexity_range.0, mapping.complexity_range.1);
+        println!(
+            "  Complexity: {:?} to {:?}",
+            mapping.complexity_range.0, mapping.complexity_range.1
+        );
 
         // Get model assignment
         let role_key = role_to_config_key(&mapping.maestro_role);
@@ -71,12 +65,49 @@ async fn print_agents_human(
 
         if verbose {
             println!("  Tool Access:");
-            println!("    Read: {}", if mapping.tool_access.can_read { "✓" } else { "✗" });
-            println!("    Write: {}", if mapping.tool_access.can_write { "✓" } else { "✗" });
-            println!("    Execute: {}", if mapping.tool_access.can_execute { "✓" } else { "✗" });
-            println!("    Search: {}", if mapping.tool_access.can_search { "✓" } else { "✗" });
+            println!(
+                "    Read: {}",
+                if mapping.tool_access.can_read {
+                    "✓"
+                } else {
+                    "✗"
+                }
+            );
+            println!(
+                "    Write: {}",
+                if mapping.tool_access.can_write {
+                    "✓"
+                } else {
+                    "✗"
+                }
+            );
+            println!(
+                "    Execute: {}",
+                if mapping.tool_access.can_execute {
+                    "✓"
+                } else {
+                    "✗"
+                }
+            );
+            println!(
+                "    Search: {}",
+                if mapping.tool_access.can_search {
+                    "✓"
+                } else {
+                    "✗"
+                }
+            );
             if !mapping.tool_access.allowed_tools.is_empty() {
-                println!("    Allowed Tools: {}", mapping.tool_access.allowed_tools.iter().cloned().collect::<Vec<_>>().join(", "));
+                println!(
+                    "    Allowed Tools: {}",
+                    mapping
+                        .tool_access
+                        .allowed_tools
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
             }
         }
 
@@ -92,10 +123,7 @@ async fn print_agents_human(
 }
 
 /// Print agents in JSON format
-async fn print_agents_json(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<()> {
+async fn print_agents_json(config: &ModelConfig, verbose: bool) -> Result<()> {
     use serde_json::json;
 
     let mappings = default_mappings();
@@ -159,8 +187,8 @@ fn role_to_config_key(role: &maestro_pi_mono::AgentRole) -> String {
 mod tests {
     use super::*;
     use maestro_pi_mono::{
-        config::models::{PiMonoConfig, RoleAssignment},
         agents::mapping::AgentRole,
+        config::models::{PiMonoConfig, RoleAssignment},
     };
     use std::collections::HashMap;
 

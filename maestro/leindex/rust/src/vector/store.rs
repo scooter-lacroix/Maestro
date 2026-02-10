@@ -251,17 +251,23 @@ impl VectorStore {
 
         // Parallel validation
         use rayon::prelude::*;
-        items.par_iter().try_for_each(|(id, _, embedding, metadata)| {
-            validate_vector_id(id)?;
-            validate_embedding_dim(embedding)?;
-            validate_chunk_index(metadata.chunk_index)?;
-            validate_file_path(&metadata.file_path)?;
-            Ok::<(), anyhow::Error>(())
-        })?;
+        items
+            .par_iter()
+            .try_for_each(|(id, _, embedding, metadata)| {
+                validate_vector_id(id)?;
+                validate_embedding_dim(embedding)?;
+                validate_chunk_index(metadata.chunk_index)?;
+                validate_file_path(&metadata.file_path)?;
+                Ok::<(), anyhow::Error>(())
+            })?;
 
-        let mut vectors_guard = self.vectors.write()
+        let mut vectors_guard = self
+            .vectors
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut meta_guard = self.metadata.write()
+        let mut meta_guard = self
+            .metadata
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         let mut added_count = 0;
@@ -289,10 +295,7 @@ impl VectorStore {
         meta_guard.updated_at = chrono::Utc::now();
         let _ = self.cache.clear();
 
-        debug!(
-            "Added {} vectors to Linear store in batch",
-            added_count
-        );
+        debug!("Added {} vectors to Linear store in batch", added_count);
         Ok(())
     }
 
@@ -555,13 +558,19 @@ mod tests {
         // NaN embedding returns neutral 0.0 similarity - results may exist but score is 0.0
         // Check that at least one result exists (the one we added) but has 0.0 similarity
         assert!(!results.is_empty(), "Should return results even with NaN");
-        assert_eq!(results[0].score, 0.0, "NaN query should return 0.0 similarity");
+        assert_eq!(
+            results[0].score, 0.0,
+            "NaN query should return 0.0 similarity"
+        );
 
         // Search with Inf in query embedding - should return 0.0 similarity
         let mut query_with_inf = vec![0.1; 768];
         query_with_inf[0] = f32::INFINITY;
         let results = store.search(&query_with_inf, 10).unwrap();
         assert!(!results.is_empty(), "Should return results even with Inf");
-        assert_eq!(results[0].score, 0.0, "Inf query should return 0.0 similarity");
+        assert_eq!(
+            results[0].score, 0.0,
+            "Inf query should return 0.0 similarity"
+        );
     }
 }

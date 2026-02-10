@@ -146,10 +146,8 @@ impl ModelDiscovery {
         let all_providers = Self::get_providers_with_env_vars();
 
         // Find which providers have at least one model (case-insensitive)
-        let configured_providers: std::collections::HashSet<String> = models
-            .iter()
-            .map(|m| m.provider.to_lowercase())
-            .collect();
+        let configured_providers: std::collections::HashSet<String> =
+            models.iter().map(|m| m.provider.to_lowercase()).collect();
 
         all_providers
             .into_iter()
@@ -177,10 +175,8 @@ impl ModelDiscovery {
 
     /// Get authentication guidance for unconfigured providers
     pub fn get_auth_guidance(providers: &[ProviderStatus]) -> String {
-        let unconfigured: Vec<&ProviderStatus> = providers
-            .iter()
-            .filter(|p| !p.is_configured)
-            .collect();
+        let unconfigured: Vec<&ProviderStatus> =
+            providers.iter().filter(|p| !p.is_configured).collect();
 
         if unconfigured.is_empty() {
             return "All providers are configured.".to_string();
@@ -198,7 +194,10 @@ impl ModelDiscovery {
     }
 
     /// Discover available models (with mock executor for testing)
-    pub async fn discover_models_with_mock(&mut self, mock_output: &str) -> Result<DiscoveryResult> {
+    pub async fn discover_models_with_mock(
+        &mut self,
+        mock_output: &str,
+    ) -> Result<DiscoveryResult> {
         let now = SystemTime::now();
 
         // Check if we have a valid cache
@@ -256,21 +255,27 @@ impl ModelDiscovery {
             Duration::from_secs(10),
             tokio::task::spawn_blocking(move || {
                 Command::new(&executable_path).arg("--list-models").output()
-            })
+            }),
         )
         .await
-        .map_err(|_| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str.clone(),
-            reason: "Command timed out after 10 seconds".to_string(),
-        }))?
-        .map_err(|e| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str.clone(),
-            reason: format!("Task join failed: {}", e),
-        }))?
-        .map_err(|e| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str,
-            reason: format!("Failed to execute: {}", e),
-        }))?;
+        .map_err(|_| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str.clone(),
+                reason: "Command timed out after 10 seconds".to_string(),
+            })
+        })?
+        .map_err(|e| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str.clone(),
+                reason: format!("Task join failed: {}", e),
+            })
+        })?
+        .map_err(|e| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str,
+                reason: format!("Failed to execute: {}", e),
+            })
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -406,7 +411,10 @@ mod tests {
         let providers = ModelDiscovery::determine_provider_status(&models);
         assert_eq!(providers.len(), 5);
 
-        let anthropic = providers.iter().find(|p| p.provider == "anthropic").unwrap();
+        let anthropic = providers
+            .iter()
+            .find(|p| p.provider == "anthropic")
+            .unwrap();
         assert!(anthropic.is_configured);
         assert_eq!(anthropic.env_var, "ANTHROPIC_API_KEY");
 

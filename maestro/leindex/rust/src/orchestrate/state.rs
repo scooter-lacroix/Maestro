@@ -21,8 +21,12 @@ impl StateManager {
     /// Create a new state manager
     pub fn new(data_dir: PathBuf) -> Result<Self> {
         // Ensure directory exists and propagate errors
-        fs::create_dir_all(&data_dir)
-            .with_context(|| format!("Failed to create orchestrate state directory: {:?}", data_dir))?;
+        fs::create_dir_all(&data_dir).with_context(|| {
+            format!(
+                "Failed to create orchestrate state directory: {:?}",
+                data_dir
+            )
+        })?;
         Ok(Self { data_dir })
     }
 
@@ -183,7 +187,11 @@ impl StateManager {
     /// Get recent N iterations for context
     pub fn recent_iterations(&self, track_id: &str, n: usize) -> Result<Vec<IterationLog>> {
         let all_logs = self.load_iteration_logs(track_id)?;
-        let start = if all_logs.len() > n { all_logs.len() - n } else { 0 };
+        let start = if all_logs.len() > n {
+            all_logs.len() - n
+        } else {
+            0
+        };
         Ok(all_logs[start..].to_vec())
     }
 
@@ -326,7 +334,7 @@ mod tests {
     #[test]
     fn test_state_manager() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = StateManager::new(temp_dir.path().to_path_buf());
+        let manager = StateManager::new(temp_dir.path().to_path_buf()).unwrap();
 
         // Test lock acquisition
         let lock = manager.acquire_lock("test-track").unwrap();
@@ -349,9 +357,10 @@ mod tests {
     #[test]
     fn test_session_state_persistence() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = StateManager::new(temp_dir.path().to_path_buf());
+        let manager = StateManager::new(temp_dir.path().to_path_buf()).unwrap();
 
         let state = SessionState {
+            session_id: "test-session".to_string(),
             track_id: "test-track".to_string(),
             mode: LoopMode::Building,
             agent_config: AgentConfig::default(),
@@ -360,6 +369,9 @@ mod tests {
             started_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
             status: SessionStatus::Running,
+            rate_limit: None,
+            retry_counts: std::collections::HashMap::new(),
+            max_iterations: 10,
         };
 
         manager.save_session(&state).unwrap();

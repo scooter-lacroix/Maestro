@@ -97,9 +97,7 @@ impl TursoVectorStore {
         match super::migrations::migrate_chunk_type_to_integer(&store.database).await {
             Ok(migrated) => {
                 if migrated {
-                    info!(
-                        "Successfully migrated database schema from TEXT to INTEGER"
-                    );
+                    info!("Successfully migrated database schema from TEXT to INTEGER");
                 }
             }
             Err(e) => {
@@ -140,7 +138,10 @@ impl TursoVectorStore {
                 }
             }
             Err(e) => {
-                warn!("Schema migration failed for in-memory database: {}, continuing...", e);
+                warn!(
+                    "Schema migration failed for in-memory database: {}, continuing...",
+                    e
+                );
             }
         }
 
@@ -756,7 +757,9 @@ impl TursoVectorStore {
     /// ## Returns
     ///
     /// Vector of (content, embedding, metadata, vector_id) tuples
-    pub async fn get_all_vectors_with_ids(&self) -> Result<Vec<(String, Vec<f32>, VectorMetadata, String)>> {
+    pub async fn get_all_vectors_with_ids(
+        &self,
+    ) -> Result<Vec<(String, Vec<f32>, VectorMetadata, String)>> {
         if self.is_shutdown.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("Cannot get vectors: store is shut down"));
         }
@@ -850,7 +853,7 @@ impl TursoVectorStore {
 
         // OPTIMIZATION: Use rayon for parallel pre-processing (Task 8.7)
         use rayon::prelude::*;
-        
+
         let (vector_ids, embedding_jsons): (Vec<String>, Vec<String>) = items
             .par_iter()
             .enumerate()
@@ -909,10 +912,7 @@ impl TursoVectorStore {
                                 .unwrap_or(libsql::Value::Null),
                             libsql::Value::Integer(chunk_type_int as i64),
                             libsql::Value::Text(
-                                metadata
-                                    .parent_context
-                                    .clone()
-                                    .unwrap_or_default(),
+                                metadata.parent_context.clone().unwrap_or_default(),
                             ),
                             libsql::Value::Text(content.clone()),
                             libsql::Value::Text(embedding_json.clone()),
@@ -951,7 +951,9 @@ impl TursoVectorStore {
         items: Vec<(String, String, Vec<f32>, VectorMetadata)>,
     ) -> Result<()> {
         if self.is_shutdown.load(Ordering::SeqCst) {
-            return Err(anyhow::anyhow!("Cannot add vectors with IDs: store is shut down"));
+            return Err(anyhow::anyhow!(
+                "Cannot add vectors with IDs: store is shut down"
+            ));
         }
 
         let items_count = items.len();
@@ -1024,10 +1026,7 @@ impl TursoVectorStore {
                                 .unwrap_or(libsql::Value::Null),
                             libsql::Value::Integer(chunk_type_int as i64),
                             libsql::Value::Text(
-                                metadata
-                                    .parent_context
-                                    .clone()
-                                    .unwrap_or_default(),
+                                metadata.parent_context.clone().unwrap_or_default(),
                             ),
                             libsql::Value::Text(content.clone()),
                             libsql::Value::Text(embedding_json.clone()),
@@ -1074,9 +1073,7 @@ impl TursoVectorStore {
         limit: usize,
     ) -> Result<Vec<(String, Vec<f32>, VectorMetadata)>> {
         if self.is_shutdown.load(Ordering::SeqCst) {
-            return Err(anyhow::anyhow!(
-                "Cannot get vectors: store is shut down"
-            ));
+            return Err(anyhow::anyhow!("Cannot get vectors: store is shut down"));
         }
 
         self.execute_with_retry("get_vectors_paginated", || async {

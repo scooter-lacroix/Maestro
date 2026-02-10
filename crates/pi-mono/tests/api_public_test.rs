@@ -3,10 +3,8 @@
 //! This test verifies that the public API exports are accessible from external crates.
 
 use maestro_pi_mono::{
-    AgentRegistry, RegisteredAgent,
-    AgentRole, PiAgentType, ToolAccess, TaskComplexity,
-    ModelConfig,
-    RoleAssignment,
+    AgentRegistry, AgentRole, ModelConfig, PiAgentType, RegisteredAgent, RoleAssignment,
+    TaskComplexity, ToolAccess,
 };
 use std::collections::HashMap;
 
@@ -67,7 +65,12 @@ fn test_public_api_from_config() {
     // Test creating registry from config with role assignments
     let mut role_assignments = HashMap::new();
 
-    for role in &[AgentRole::Scout, AgentRole::Architect, AgentRole::Critic, AgentRole::Kraken] {
+    for role in &[
+        AgentRole::Scout,
+        AgentRole::Architect,
+        AgentRole::Critic,
+        AgentRole::Kraken,
+    ] {
         let role_key = match role {
             AgentRole::Scout => "scout",
             AgentRole::Architect => "architect",
@@ -98,7 +101,12 @@ fn test_public_api_from_config() {
     assert_eq!(roles.len(), 4);
 
     // Verify we can get model assignments
-    for role in &[AgentRole::Scout, AgentRole::Architect, AgentRole::Critic, AgentRole::Kraken] {
+    for role in &[
+        AgentRole::Scout,
+        AgentRole::Architect,
+        AgentRole::Critic,
+        AgentRole::Kraken,
+    ] {
         let model = registry.get_model_for_role(role.clone()).unwrap();
         assert_eq!(model, "claude-sonnet-4-5");
     }

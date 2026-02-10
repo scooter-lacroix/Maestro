@@ -2,7 +2,7 @@
 //!
 //! Provides planning and building mode prompt templates.
 
-use crate::orchestrate::model::{LoopMode, Task, TrackPlan, SessionState};
+use crate::orchestrate::model::{LoopMode, SessionState, Task, TrackPlan};
 use anyhow::Result;
 
 /// Prompt template builder
@@ -90,7 +90,10 @@ impl PromptBuilder {
                 prompt.push_str(&format!("{} {}\n", status_marker, subtask.title));
             }
             if task.subtasks.len() > 10 {
-                prompt.push_str(&format!("... ({} more subtasks)\n", task.subtasks.len() - 10));
+                prompt.push_str(&format!(
+                    "... ({} more subtasks)\n",
+                    task.subtasks.len() - 10
+                ));
             }
         }
         budget_used += prompt.len() - budget_used;
@@ -243,9 +246,7 @@ Your work is COMPLETE when ALL of the following are true:
 
 **Remember:** Quality over speed. A single well-implemented task is better than many half-done ones.
 "#,
-            task.title,
-            task.id,
-            task.title
+            task.title, task.id, task.title
         )
     }
 }
@@ -259,7 +260,7 @@ impl Default for PromptBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestrate::model::{TrackStatus, SessionStatus};
+    use crate::orchestrate::model::{SessionStatus, TrackStatus};
     use chrono::Utc;
 
     #[test]
@@ -278,6 +279,7 @@ mod tests {
         };
 
         let session = SessionState {
+            session_id: "test-session".to_string(),
             track_id: "test-track".to_string(),
             mode: LoopMode::Planning,
             agent_config: Default::default(),
@@ -286,6 +288,9 @@ mod tests {
             started_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
             status: SessionStatus::Running,
+            rate_limit: None,
+            retry_counts: std::collections::HashMap::new(),
+            max_iterations: 10,
         };
 
         let plan = TrackPlan {
@@ -319,6 +324,7 @@ mod tests {
         };
 
         let session = SessionState {
+            session_id: "test-session".to_string(),
             track_id: "test-track".to_string(),
             mode: LoopMode::Building,
             agent_config: Default::default(),
@@ -327,6 +333,9 @@ mod tests {
             started_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
             status: SessionStatus::Running,
+            rate_limit: None,
+            retry_counts: std::collections::HashMap::new(),
+            max_iterations: 10,
         };
 
         let plan = TrackPlan {

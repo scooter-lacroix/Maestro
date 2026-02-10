@@ -55,12 +55,12 @@ pub enum HubFocus {
 #[derive(PartialEq, Eq, Clone, Copy, Default)]
 pub enum McpOption {
     #[default]
-    StartStop,
+    Start,
+    Stop,
     Pause,
     Logs,
     Add,
     Remove,
-    Install,
 }
 
 /// Settings options

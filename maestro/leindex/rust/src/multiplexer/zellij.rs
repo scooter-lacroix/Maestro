@@ -37,10 +37,7 @@ impl ZellijMultiplexer {
         let user_zide_path = home.join(".maestro").join("resources").join("zide");
         let user_zide_str = user_zide_path.to_string_lossy();
 
-        let possible_paths = [
-            &user_zide_str,
-            "/usr/local/share/maestro/zide",
-        ];
+        let possible_paths = [&user_zide_str, "/usr/local/share/maestro/zide"];
 
         let zide_dir = possible_paths
             .iter()
@@ -144,10 +141,7 @@ impl ZellijMultiplexer {
         let user_zide_path = home.join(".maestro").join("resources").join("zide");
         let user_zide_str = user_zide_path.to_string_lossy();
 
-        let possible_paths = [
-            &user_zide_str,
-            "/usr/local/share/maestro/zide",
-        ];
+        let possible_paths = [&user_zide_str, "/usr/local/share/maestro/zide"];
 
         let zide_dir = possible_paths
             .iter()

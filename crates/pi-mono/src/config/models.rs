@@ -557,14 +557,12 @@ mod tests {
                 },
             );
 
-            let model_preferences = vec![
-                ModelPreference {
-                    model_id: "claude-sonnet-4-5".to_string(),
-                    provider: "anthropic".to_string(),
-                    tier: ModelTier::Balanced,
-                    is_default: true,
-                },
-            ];
+            let model_preferences = vec![ModelPreference {
+                model_id: "claude-sonnet-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                tier: ModelTier::Balanced,
+                is_default: true,
+            }];
 
             let mut role_assignments = HashMap::new();
             role_assignments.insert(
@@ -677,38 +675,59 @@ mod tests {
             assert_eq!(config.path, deserialized.path);
             assert_eq!(config.version_info, deserialized.version_info);
             assert_eq!(config.providers.len(), deserialized.providers.len());
-            assert_eq!(config.model_preferences.len(), deserialized.model_preferences.len());
-            assert_eq!(config.role_assignments.len(), deserialized.role_assignments.len());
+            assert_eq!(
+                config.model_preferences.len(),
+                deserialized.model_preferences.len()
+            );
+            assert_eq!(
+                config.role_assignments.len(),
+                deserialized.role_assignments.len()
+            );
         }
 
         #[test]
         fn test_pi_mono_config_with_all_providers() {
             let mut providers = HashMap::new();
-            providers.insert("anthropic".to_string(), ProviderConfig {
-                display_name: "Anthropic".to_string(),
-                is_configured: true,
-                env_var: "ANTHROPIC_API_KEY".to_string(),
-            });
-            providers.insert("openai".to_string(), ProviderConfig {
-                display_name: "OpenAI".to_string(),
-                is_configured: true,
-                env_var: "OPENAI_API_KEY".to_string(),
-            });
-            providers.insert("google".to_string(), ProviderConfig {
-                display_name: "Google".to_string(),
-                is_configured: false,
-                env_var: "GEMINI_API_KEY".to_string(),
-            });
-            providers.insert("groq".to_string(), ProviderConfig {
-                display_name: "Groq".to_string(),
-                is_configured: false,
-                env_var: "GROQ_API_KEY".to_string(),
-            });
-            providers.insert("openrouter".to_string(), ProviderConfig {
-                display_name: "OpenRouter".to_string(),
-                is_configured: false,
-                env_var: "OPENROUTER_API_KEY".to_string(),
-            });
+            providers.insert(
+                "anthropic".to_string(),
+                ProviderConfig {
+                    display_name: "Anthropic".to_string(),
+                    is_configured: true,
+                    env_var: "ANTHROPIC_API_KEY".to_string(),
+                },
+            );
+            providers.insert(
+                "openai".to_string(),
+                ProviderConfig {
+                    display_name: "OpenAI".to_string(),
+                    is_configured: true,
+                    env_var: "OPENAI_API_KEY".to_string(),
+                },
+            );
+            providers.insert(
+                "google".to_string(),
+                ProviderConfig {
+                    display_name: "Google".to_string(),
+                    is_configured: false,
+                    env_var: "GEMINI_API_KEY".to_string(),
+                },
+            );
+            providers.insert(
+                "groq".to_string(),
+                ProviderConfig {
+                    display_name: "Groq".to_string(),
+                    is_configured: false,
+                    env_var: "GROQ_API_KEY".to_string(),
+                },
+            );
+            providers.insert(
+                "openrouter".to_string(),
+                ProviderConfig {
+                    display_name: "OpenRouter".to_string(),
+                    is_configured: false,
+                    env_var: "OPENROUTER_API_KEY".to_string(),
+                },
+            );
 
             let config = PiMonoConfig {
                 providers,
@@ -726,30 +745,42 @@ mod tests {
         #[test]
         fn test_pi_mono_config_all_roles() {
             let mut role_assignments = HashMap::new();
-            role_assignments.insert("scout".to_string(), RoleAssignment {
-                model_id: "claude-haiku-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                fallback_models: Some(vec!["gpt-4o-mini".to_string()]),
-                use_reasoning: None,
-            });
-            role_assignments.insert("architect".to_string(), RoleAssignment {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                fallback_models: None,
-                use_reasoning: Some(true),
-            });
-            role_assignments.insert("critic".to_string(), RoleAssignment {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                fallback_models: None,
-                use_reasoning: None,
-            });
-            role_assignments.insert("kraken".to_string(), RoleAssignment {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                fallback_models: None,
-                use_reasoning: None,
-            });
+            role_assignments.insert(
+                "scout".to_string(),
+                RoleAssignment {
+                    model_id: "claude-haiku-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    fallback_models: Some(vec!["gpt-4o-mini".to_string()]),
+                    use_reasoning: None,
+                },
+            );
+            role_assignments.insert(
+                "architect".to_string(),
+                RoleAssignment {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    fallback_models: None,
+                    use_reasoning: Some(true),
+                },
+            );
+            role_assignments.insert(
+                "critic".to_string(),
+                RoleAssignment {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    fallback_models: None,
+                    use_reasoning: None,
+                },
+            );
+            role_assignments.insert(
+                "kraken".to_string(),
+                RoleAssignment {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    fallback_models: None,
+                    use_reasoning: None,
+                },
+            );
 
             let config = PiMonoConfig {
                 role_assignments,

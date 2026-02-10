@@ -110,6 +110,8 @@ impl ExecutionResult {
 
 /// Executor for Pi-Mono operations.
 ///
+/// Executes commands with timeout and retry support.
+///
 /// # Examples
 ///
 /// Creating an executor with default configuration:
@@ -171,16 +173,10 @@ impl Executor {
         Self { config }
     }
 
-    /// Execute a Pi-Mono command.
+    /// Execute a command with timeout and retry support.
     ///
-    /// # TODO
-    ///
-    /// This is a placeholder implementation. The full implementation should:
-    /// - Spawn the pi-mono process with the given command
-    /// - Handle process timeouts based on `config.timeout_secs`
-    /// - Implement retry logic based on `config.max_retries`
-    /// - Capture stdout/stderr properly
-    /// - Return proper error types using `crate::error::ExecutionError`
+    /// The command string is parsed into arguments using shell-like splitting.
+    /// For complex shell operations, use a shell explicitly.
     ///
     /// # Arguments
     ///
@@ -197,20 +193,85 @@ impl Executor {
     ///
     /// # async fn example() -> anyhow::Result<()> {
     /// let executor = Executor::default();
-    /// let result = executor.execute("status").await?;
+    /// let result = executor.execute("echo hello").await?;
     /// # Ok(())
     /// # }
     /// ```
     pub async fn execute(&self, command: &str) -> anyhow::Result<ExecutionResult> {
-        // TODO: Implement actual command execution with:
-        // - Process spawning (tokio::process::Command)
-        // - Timeout handling (tokio::time::timeout)
-        // - Retry logic with exponential backoff
-        // - Proper error handling using crate::error::ExecutionError
-        Ok(ExecutionResult::success(format!(
-            "Executed: {}",
-            command
-        )))
+        use crate::error::{ExecutionError, Error as PiError};
+        use tokio::process::Command;
+
+        // Parse command into arguments
+        let parts = shell_words::split(command)
+            .map_err(|e| anyhow::anyhow!("Invalid command syntax: {}", e))?;
+
+        if parts.is_empty() {
+            return Err(anyhow::anyhow!("Empty command"));
+        }
+
+        let binary = &parts[0];
+        let args = &parts[1..];
+
+        let timeout_duration = Duration::from_secs(self.config.timeout_secs);
+        let mut last_error = None;
+
+        // Retry loop with exponential backoff
+        for attempt in 0..=self.config.max_retries {
+            let result = tokio::time::timeout(
+                timeout_duration,
+                Command::new(binary)
+                    .args(args)
+                    .output()
+            ).await;
+
+            match result {
+                Ok(Ok(output)) => {
+                    if output.status.success() {
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        return Ok(ExecutionResult::success(stdout));
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        let code = output.status.code().unwrap_or(-1);
+                        last_error = Some(anyhow::Error::new(PiError::Execution(
+                            ExecutionError::NonZeroExit {
+                                command: command.to_string(),
+                                exit_code: code,
+                                stderr: if stderr.is_empty() { None } else { Some(stderr) },
+                            }
+                        )));
+                    }
+                }
+                Ok(Err(e)) => {
+                    last_error = Some(e.into());
+                }
+                Err(_) => {
+                    last_error = Some(anyhow::Error::new(PiError::Execution(
+                        ExecutionError::Timeout {
+                            command: command.to_string(),
+                            timeout_secs: self.config.timeout_secs,
+                        }
+                    )));
+                }
+            }
+
+            // Exponential backoff before retry
+            if attempt < self.config.max_retries {
+                let backoff = Duration::from_millis(100 * 2u64.pow(attempt as u32));
+                tokio::time::sleep(backoff).await;
+            }
+        }
+
+        // All retries exhausted
+        let error_msg = last_error
+            .as_ref()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "Unknown error".to_string());
+
+        Err(anyhow::anyhow!(
+            "Command failed after {} attempts: {}",
+            self.config.max_retries + 1,
+            error_msg
+        ))
     }
 }
 
@@ -355,9 +416,8 @@ impl UsageMetrics {
     /// assert_eq!(cost_per_million, Some(2.0));
     /// ```
     pub fn cost_per_million_tokens(&self) -> Option<f64> {
-        self.cost_estimate_usd.map(|cost| {
-            (cost / self.tokens_total as f64) * 1_000_000.0
-        })
+        self.cost_estimate_usd
+            .map(|cost| (cost / self.tokens_total as f64) * 1_000_000.0)
     }
 
     /// Calculate tokens per second.

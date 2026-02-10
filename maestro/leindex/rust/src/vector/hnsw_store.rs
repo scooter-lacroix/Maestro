@@ -307,22 +307,29 @@ impl HnswVectorStore {
         })?;
 
         // Extract vectors for batch insert
-        let vectors: Vec<Vec<f32>> = items.iter()
+        let vectors: Vec<Vec<f32>> = items
+            .iter()
             .map(|(_, embedding, _)| embedding.clone())
             .collect();
 
         // OPTIMIZATION: Use hnsw.insert_batch() instead of loop
         // This is CRITICAL for performance - batch insert optimizes graph construction
         let internal_ids = {
-            let mut hnsw = self.hnsw.write()
+            let mut hnsw = self
+                .hnsw
+                .write()
                 .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             hnsw.insert_batch(vectors)
         };
 
         // Now store metadata with IDs (single write lock)
-        let mut id_map = self.id_to_data.write()
+        let mut id_map = self
+            .id_to_data
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut meta = self.metadata.write()
+        let mut meta = self
+            .metadata
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         let mut external_ids = Vec::with_capacity(internal_ids.len());
@@ -367,19 +374,27 @@ impl HnswVectorStore {
 
         // Parallel validation
         use rayon::prelude::*;
-        items.par_iter().try_for_each(|(id, _, embedding, metadata)| {
-            validate_vector_id(id)?;
-            validate_embedding_dim(embedding)?;
-            validate_chunk_index(metadata.chunk_index)?;
-            validate_file_path(&metadata.file_path)?;
-            Ok::<(), anyhow::Error>(())
-        })?;
+        items
+            .par_iter()
+            .try_for_each(|(id, _, embedding, metadata)| {
+                validate_vector_id(id)?;
+                validate_embedding_dim(embedding)?;
+                validate_chunk_index(metadata.chunk_index)?;
+                validate_file_path(&metadata.file_path)?;
+                Ok::<(), anyhow::Error>(())
+            })?;
 
-        let mut hnsw_guard = self.hnsw.write()
+        let mut hnsw_guard = self
+            .hnsw
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut id_map_guard = self.id_to_data.write()
+        let mut id_map_guard = self
+            .id_to_data
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
-        let mut meta_guard = self.metadata.write()
+        let mut meta_guard = self
+            .metadata
+            .write()
             .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
 
         for (vector_id, content, embedding, metadata) in items {

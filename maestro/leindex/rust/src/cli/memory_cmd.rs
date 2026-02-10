@@ -55,8 +55,13 @@ pub async fn run(cmd: MemoryCommands) -> Result<()> {
 
 /// Store a memory in the Maestro Memory System
 #[cfg(feature = "rusqlite")]
-pub async fn store(content: String, category: String, _importance: String, db: Option<PathBuf>) -> Result<()> {
-    use crate::memory::{MemoryService, MemoryCategory};
+pub async fn store(
+    content: String,
+    category: String,
+    _importance: String,
+    db: Option<PathBuf>,
+) -> Result<()> {
+    use crate::memory::{MemoryCategory, MemoryService};
 
     let db_path = db.unwrap_or_else(|| {
         let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -77,7 +82,10 @@ pub async fn store(content: String, category: String, _importance: String, db: O
         "observation" => MemoryCategory::Observation,
         "temporary" => MemoryCategory::Temporary,
         _ => {
-            eprintln!("Warning: Unknown category '{}', using 'observation'", category);
+            eprintln!(
+                "Warning: Unknown category '{}', using 'observation'",
+                category
+            );
             MemoryCategory::Observation
         }
     };

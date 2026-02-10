@@ -39,9 +39,7 @@ const VECTOR_SIZES: &[usize] = &[
 
 /// Large scale sizes (only enabled via BENCHMARK_LARGE_SCALE=1)
 /// These require significant memory and time - use only for intentional scale testing.
-const VECTOR_SIZES_LARGE: &[usize] = &[
-    100_000, 200_000, 300_000, 500_000,
-];
+const VECTOR_SIZES_LARGE: &[usize] = &[100_000, 200_000, 300_000, 500_000];
 
 /// K values for top-k search
 const K_VALUES: &[usize] = &[5, 10, 20, 50, 100];

@@ -10,9 +10,9 @@ use std::fs;
 use tempfile::TempDir;
 
 use leindex_analyzers::memory::models::{Session, SessionStatus};
-use leindex_analyzers::memory::turso_backend::{LspStatus, LspServerState, TursoStorageBackend};
-use leindex_analyzers::memory::LspType;
+use leindex_analyzers::memory::turso_backend::{LspServerState, LspStatus, TursoStorageBackend};
 use leindex_analyzers::memory::LspManager;
+use leindex_analyzers::memory::LspType;
 
 /// Integration test for FR4.1: Auto-Start by Language Detection
 ///
@@ -24,8 +24,11 @@ async fn test_autostart_by_language_detection_rust() {
     let project_path = temp_dir.path();
 
     // Create a Rust project with main.rs
-    fs::write(project_path.join("main.rs"), "fn main() { println!(\"Hello\"); }")
-        .expect("Failed to create main.rs");
+    fs::write(
+        project_path.join("main.rs"),
+        "fn main() { println!(\"Hello\"); }",
+    )
+    .expect("Failed to create main.rs");
 
     // Create storage and LSP manager
     let storage = TursoStorageBackend::new(Some(temp_dir.path().join("test.db")), None)
@@ -64,8 +67,7 @@ async fn test_autostart_by_language_detection_python() {
     let project_path = temp_dir.path();
 
     // Create a Python project
-    fs::write(project_path.join("app.py"), "print('Hello')")
-        .expect("Failed to create app.py");
+    fs::write(project_path.join("app.py"), "print('Hello')").expect("Failed to create app.py");
     fs::write(project_path.join("utils.py"), "def helper(): pass")
         .expect("Failed to create utils.py");
 
@@ -106,8 +108,11 @@ async fn test_autostart_by_language_detection_typescript() {
     // Create a TypeScript project
     fs::write(project_path.join("index.ts"), "console.log('test');")
         .expect("Failed to create index.ts");
-    fs::write(project_path.join("app.tsx"), "const App = () => <div>Test</div>;")
-        .expect("Failed to create app.tsx");
+    fs::write(
+        project_path.join("app.tsx"),
+        "const App = () => <div>Test</div>;",
+    )
+    .expect("Failed to create app.tsx");
 
     let storage = TursoStorageBackend::new(Some(temp_dir.path().join("test.db")), None)
         .await
@@ -148,8 +153,7 @@ async fn test_graceful_degradation_missing_lsp_binary() {
     let project_path = temp_dir.path();
 
     // Create a project with Rust files
-    fs::write(project_path.join("main.rs"), "fn main() {}")
-        .expect("Failed to create main.rs");
+    fs::write(project_path.join("main.rs"), "fn main() {}").expect("Failed to create main.rs");
 
     // Create storage and initialize
     let storage = TursoStorageBackend::new(Some(temp_dir.path().join("test.db")), None)
@@ -218,7 +222,7 @@ async fn test_lsp_state_persistence_roundtrip() {
         status: LspStatus::Running,
         pid: Some(12345),
         port: None,
-        auto_start: true,  // Requirement: auto_start BOOLEAN DEFAULT TRUE
+        auto_start: true, // Requirement: auto_start BOOLEAN DEFAULT TRUE
         use_proxy: false,
         last_started: Some(chrono::Utc::now().to_rfc3339()),
         last_error: None,
@@ -269,8 +273,7 @@ async fn test_complete_autostart_flow() {
     let project_path = temp_dir.path();
 
     // Setup: Create a multi-language project (Rust + Python)
-    fs::write(project_path.join("main.rs"), "fn main() {}")
-        .expect("Failed to create main.rs");
+    fs::write(project_path.join("main.rs"), "fn main() {}").expect("Failed to create main.rs");
     fs::write(project_path.join("script.py"), "print('hello')")
         .expect("Failed to create script.py");
 
@@ -313,14 +316,8 @@ async fn test_complete_autostart_flow() {
         .expect("Failed to detect languages");
 
     // Requirement: Should detect both Rust and Python
-    assert!(
-        detected.contains(&LspType::Rust),
-        "Should detect Rust"
-    );
-    assert!(
-        detected.contains(&LspType::Python),
-        "Should detect Python"
-    );
+    assert!(detected.contains(&LspType::Rust), "Should detect Rust");
+    assert!(detected.contains(&LspType::Python), "Should detect Python");
 
     // Step 3: Get recommended LSPs
     let recommended = lsp_manager
@@ -399,11 +396,7 @@ async fn test_multiple_lsps_per_session_tracking() {
         .expect("Failed to get session LSP states");
 
     // Requirement: Should have all 3 LSPs tracked
-    assert_eq!(
-        session_lsps.len(),
-        3,
-        "Should track 3 LSPs for the session"
-    );
+    assert_eq!(session_lsps.len(), 3, "Should track 3 LSPs for the session");
 
     // Verify each LSP is present with correct attributes
     let lsp_names: Vec<&str> = session_lsps.iter().map(|s| s.lsp_name.as_str()).collect();
@@ -581,7 +574,7 @@ async fn test_auto_start_flag_persistence() {
         status: LspStatus::Stopped,
         pid: None,
         port: None,
-        auto_start: true,  // Requirement: DEFAULT TRUE per FR5.2
+        auto_start: true, // Requirement: DEFAULT TRUE per FR5.2
         use_proxy: false,
         last_started: None,
         last_error: None,
@@ -603,7 +596,7 @@ async fn test_auto_start_flag_persistence() {
 
     // Test 2: Set auto_start to false (manual override per FR4.2)
     let manual_state = LspServerState {
-        auto_start: false,  // User manually disabled
+        auto_start: false, // User manually disabled
         status: LspStatus::Stopped,
         ..default_state
     };
@@ -728,7 +721,11 @@ async fn test_session_lsp_cleanup_on_deletion() {
         .await
         .expect("Failed to get session LSPs after deletion");
 
-    assert_eq!(session_lsps.len(), 0, "LSP states should be cascade deleted");
+    assert_eq!(
+        session_lsps.len(),
+        0,
+        "LSP states should be cascade deleted"
+    );
 }
 
 /// Integration test for LSP configuration scenarios (FR1.2 + FR1.3)
@@ -748,10 +745,8 @@ async fn test_lsp_availability_detection() {
     let project_path = temp_dir.path();
 
     // Create a project with multiple languages
-    fs::write(project_path.join("main.rs"), "fn main() {}")
-        .expect("Failed to create main.rs");
-    fs::write(project_path.join("app.py"), "print('test')")
-        .expect("Failed to create app.py");
+    fs::write(project_path.join("main.rs"), "fn main() {}").expect("Failed to create main.rs");
+    fs::write(project_path.join("app.py"), "print('test')").expect("Failed to create app.py");
 
     let storage = TursoStorageBackend::new(Some(temp_dir.path().join("test.db")), None)
         .await

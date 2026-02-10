@@ -1,8 +1,7 @@
 // Test program to verify workflow API
 use maestro_pi_mono::{
-    WorkflowMode, WorkflowStep, WorkflowPreset,
-    default_presets, get_preset, preset_names,
-    AgentRole, PiAgentType,
+    default_presets, get_preset, preset_names, AgentRole, PiAgentType, WorkflowMode,
+    WorkflowPreset, WorkflowStep,
 };
 
 fn main() {
@@ -31,7 +30,12 @@ fn main() {
     let implement = get_preset("implement").unwrap();
     println!("  /implement workflow:");
     for (i, step) in implement.steps.iter().enumerate() {
-        println!("    Step {}: {:?} -> {:?}", i + 1, step.role, step.pi_agent_type);
+        println!(
+            "    Step {}: {:?} -> {:?}",
+            i + 1,
+            step.role,
+            step.pi_agent_type
+        );
         println!("      Depends on previous: {}", step.depends_on_previous);
     }
     println!();
@@ -39,7 +43,12 @@ fn main() {
     let implement_review = get_preset("implement-and-review").unwrap();
     println!("  /implement-and-review workflow:");
     for (i, step) in implement_review.steps.iter().enumerate() {
-        println!("    Step {}: {:?} -> {:?}", i + 1, step.role, step.pi_agent_type);
+        println!(
+            "    Step {}: {:?} -> {:?}",
+            i + 1,
+            step.role,
+            step.pi_agent_type
+        );
         println!("      Depends on previous: {}", step.depends_on_previous);
     }
     println!();
@@ -47,7 +56,12 @@ fn main() {
     let parallel_review = get_preset("parallel-review").unwrap();
     println!("  /parallel-review workflow:");
     for (i, step) in parallel_review.steps.iter().enumerate() {
-        println!("    Step {}: {:?} -> {:?}", i + 1, step.role, step.pi_agent_type);
+        println!(
+            "    Step {}: {:?} -> {:?}",
+            i + 1,
+            step.role,
+            step.pi_agent_type
+        );
         println!("      Depends on previous: {}", step.depends_on_previous);
     }
     println!();
@@ -55,17 +69,26 @@ fn main() {
     // Test WorkflowStep helper methods
     println!("WorkflowStep creation helpers:");
     let chained = WorkflowStep::chained(AgentRole::Scout, PiAgentType::Scout);
-    println!("  Chained step: depends_on_previous = {}", chained.depends_on_previous);
+    println!(
+        "  Chained step: depends_on_previous = {}",
+        chained.depends_on_previous
+    );
 
     let independent = WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer);
-    println!("  Independent step: depends_on_previous = {}", independent.depends_on_previous);
+    println!(
+        "  Independent step: depends_on_previous = {}",
+        independent.depends_on_previous
+    );
     println!();
 
     // Test WorkflowPreset helper methods
     println!("WorkflowPreset helper methods:");
     println!("  implement.is_chained(): {}", implement.is_chained());
     println!("  implement.is_parallel(): {}", implement.is_parallel());
-    println!("  parallel_review.is_parallel(): {}", parallel_review.is_parallel());
+    println!(
+        "  parallel_review.is_parallel(): {}",
+        parallel_review.is_parallel()
+    );
 
     println!("\n=== All tests passed! ===");
 }

@@ -1,7 +1,6 @@
 // Example demonstrating the config I/O API
 use maestro_pi_mono::{
-    config_dir, config_path, ensure_config_dir,
-    default_config, validate_config_basic
+    config_dir, config_path, default_config, ensure_config_dir, validate_config_basic,
 };
 
 fn main() {

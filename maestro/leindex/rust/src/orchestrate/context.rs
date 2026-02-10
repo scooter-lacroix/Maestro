@@ -3,11 +3,11 @@
 //! Encapsulates LeIndex-powered codebase analysis and pruning logic
 //! to provide high-quality context within token budgets.
 
-use crate::orchestrate::model::TrackPlan;
 use crate::five_phase::{
     phase1_structural_scan, phase2_dependency_map, phase3_logic_flow, phase4_critical_path,
     phase5_optimization_report, PhaseOptions,
 };
+use crate::orchestrate::model::TrackPlan;
 use crate::token_format::FormatMode;
 use anyhow::Result;
 use std::path::PathBuf;
@@ -64,7 +64,7 @@ impl ContextEngine {
         // Critical Path: 30%
         // Optimization: 10%
         let weights = [25, 25, 10, 30, 10];
-        
+
         let mut context = String::new();
         context.push_str("## Codebase Context (LeIndex 5-Phase Analysis)\n\n");
 
