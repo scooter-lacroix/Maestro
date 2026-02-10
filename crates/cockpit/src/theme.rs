@@ -54,7 +54,6 @@ pub fn theme_from_name(name: &str) -> Theme {
             highlight_fg: Color::Reset,
             transparent: true,
         },
-
         // ===== POPULAR DARK THEMES =====
 
         // Dracula - https://draculatheme.com/
@@ -72,7 +71,6 @@ pub fn theme_from_name(name: &str) -> Theme {
             highlight_fg: Color::Rgb(248, 248, 242),
             transparent: false,
         },
-
         // Tokyo Night - https://github.com/folke/tokyonight.nvim
         "tokyo-night" | "tokyonight" => Theme {
             bg: Color::Rgb(26, 27, 38),
