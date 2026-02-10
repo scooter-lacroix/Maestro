@@ -4,9 +4,17 @@
 //! from detection through configuration, execution, and CLI commands.
 
 use maestro_pi_mono::{
-    detection::PiDetection, discovery::ModelDiscovery, config::PiMonoConfig,
-    agents::mapping::{AgentRegistry, PiAgentType, AgentRole, ToolAccess, TaskComplexity, AgentMapping, role_to_pi_agent_type},
-    execution::{SubagentRunner, Executor, ExecutorConfig, ExecutionResult, StreamEvent, StreamEventType, UsageMetrics, SubagentResult},
+    agents::mapping::{
+        role_to_pi_agent_type, AgentMapping, AgentRegistry, AgentRole, PiAgentType, TaskComplexity,
+        ToolAccess,
+    },
+    config::PiMonoConfig,
+    detection::PiDetection,
+    discovery::ModelDiscovery,
+    execution::{
+        ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType, SubagentResult,
+        SubagentRunner, UsageMetrics,
+    },
 };
 use std::time::Duration;
 
@@ -26,11 +34,13 @@ async fn e2e_detection_workflow() {
     assert!(!detection.executable_path.as_os_str().is_empty());
 
     // Verify capabilities were detected
-    println!("Capabilities: subagent={}, streaming={}, parallel={}, chain={}",
+    println!(
+        "Capabilities: subagent={}, streaming={}, parallel={}, chain={}",
         detection.capabilities.subagent,
         detection.capabilities.streaming,
         detection.capabilities.parallel,
-        detection.capabilities.chain);
+        detection.capabilities.chain
+    );
 
     assert!(detection.capabilities.subagent);
 }
@@ -56,7 +66,8 @@ async fn e2e_model_discovery_workflow() {
 
             assert!(!result.providers.is_empty());
 
-            let cache_duration = result.cache_expires
+            let cache_duration = result
+                .cache_expires
                 .duration_since(result.discovered_at)
                 .unwrap_or_default();
             assert_eq!(cache_duration.as_secs(), 86400);
@@ -180,10 +191,10 @@ async fn e2e_provider_authentication_workflow() {
             env_var: env_var.to_string(),
         };
 
-        println!("Provider: {} (env: {}, configured: {})",
-            status.provider,
-            status.env_var,
-            status.is_configured);
+        println!(
+            "Provider: {} (env: {}, configured: {})",
+            status.provider, status.env_var, status.is_configured
+        );
 
         assert_eq!(status.provider, provider_name);
         assert_eq!(status.env_var, env_var);
@@ -218,21 +229,21 @@ async fn e2e_agent_mapping_workflow() {
 
     assert_eq!(scout_mapping.maestro_role, AgentRole::Scout);
     assert_eq!(scout_mapping.pi_agent_type, PiAgentType::Scout);
-    assert_eq!(scout_mapping.complexity_range, (TaskComplexity::Trivial, TaskComplexity::Simple));
+    assert_eq!(
+        scout_mapping.complexity_range,
+        (TaskComplexity::Trivial, TaskComplexity::Simple)
+    );
 
-    println!("Scout mapping: role={:?}, agent_type={:?}, complexity={:?}",
-        scout_mapping.maestro_role, scout_mapping.pi_agent_type, scout_mapping.complexity_range);
+    println!(
+        "Scout mapping: role={:?}, agent_type={:?}, complexity={:?}",
+        scout_mapping.maestro_role, scout_mapping.pi_agent_type, scout_mapping.complexity_range
+    );
 }
 
 /// Test 8: End-to-end usage metrics workflow
 #[tokio::test]
 async fn e2e_usage_metrics_workflow() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(10),
-    );
+    let metrics = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(10));
 
     assert_eq!(metrics.tokens_input, 1000);
     assert_eq!(metrics.tokens_output, 500);
@@ -246,9 +257,7 @@ async fn e2e_usage_metrics_workflow() {
     let tps = metrics.tokens_per_second();
     assert_eq!(tps, 150.0);
 
-    let zero_duration_metrics = UsageMetrics::new(
-        1000, 500, None, Duration::from_secs(0)
-    );
+    let zero_duration_metrics = UsageMetrics::new(1000, 500, None, Duration::from_secs(0));
     assert_eq!(zero_duration_metrics.tokens_per_second(), 0.0);
 }
 

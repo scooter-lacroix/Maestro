@@ -41,8 +41,8 @@
 use crate::{
     config::models::{ModelTier, PiMonoConfig, RoleAssignment},
     detection::PiDetection,
-    discovery::{ModelDiscovery, DiscoveryResult},
-    error::{Result, Error},
+    discovery::{DiscoveryResult, ModelDiscovery},
+    error::{Error, Result},
 };
 use std::collections::HashMap;
 
@@ -407,7 +407,9 @@ impl ConfigWizard {
         }
 
         // Add to selected models
-        self.state.selected_models.insert(tier.to_string(), model_id.to_string());
+        self.state
+            .selected_models
+            .insert(tier.to_string(), model_id.to_string());
 
         Ok(())
     }
@@ -462,10 +464,7 @@ impl ConfigWizard {
                     .map(|m| m.provider.clone())
             })
             .ok_or_else(|| {
-                Error::Other(format!(
-                    "Cannot find provider for model '{}'",
-                    model_id
-                ))
+                Error::Other(format!("Cannot find provider for model '{}'", model_id))
             })?;
 
         // Add to role assignments
@@ -529,7 +528,8 @@ impl ConfigWizard {
         self.state.config.model_preferences.clear();
         for (tier_name, model_id) in &self.state.selected_models {
             if let Some(discovery) = &self.state.discovery_result {
-                if let Some(model_info) = discovery.models.iter().find(|m| &m.model_id == model_id) {
+                if let Some(model_info) = discovery.models.iter().find(|m| &m.model_id == model_id)
+                {
                     let tier = Self::parse_tier(tier_name)?;
                     self.state.config.model_preferences.push(
                         crate::config::models::ModelPreference {
@@ -677,9 +677,7 @@ impl ConfigWizard {
                 let mut chars = provider.chars();
                 match chars.next() {
                     None => String::new(),
-                    Some(first) => {
-                        first.to_uppercase().collect::<String>() + chars.as_str()
-                    }
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
                 }
             }
         }
@@ -871,12 +869,14 @@ mod tests {
         #[test]
         fn test_wizard_state_from_config_with_preferences() {
             let mut config = PiMonoConfig::default();
-            config.model_preferences.push(crate::config::models::ModelPreference {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                tier: ModelTier::Balanced,
-                is_default: true,
-            });
+            config
+                .model_preferences
+                .push(crate::config::models::ModelPreference {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    tier: ModelTier::Balanced,
+                    is_default: true,
+                });
 
             let state = WizardState::from_config(config);
             assert_eq!(
@@ -1096,8 +1096,12 @@ mod tests {
             let mut wizard = ConfigWizard::new();
             wizard.state.discovery_result = Some(mock_discovery_result());
 
-            wizard.step3_select_model("Fast", "claude-haiku-4-5").unwrap();
-            wizard.step3_select_model("Balanced", "claude-sonnet-4-5").unwrap();
+            wizard
+                .step3_select_model("Fast", "claude-haiku-4-5")
+                .unwrap();
+            wizard
+                .step3_select_model("Balanced", "claude-sonnet-4-5")
+                .unwrap();
 
             assert_eq!(wizard.state.selected_models.len(), 2);
             assert_eq!(
@@ -1181,9 +1185,15 @@ mod tests {
                 .step3_select_model("Balanced", "claude-sonnet-4-5")
                 .unwrap();
 
-            wizard.step4_assign_role("architect", "claude-sonnet-4-5").unwrap();
+            wizard
+                .step4_assign_role("architect", "claude-sonnet-4-5")
+                .unwrap();
 
-            assert!(wizard.state.config.role_assignments.contains_key("architect"));
+            assert!(wizard
+                .state
+                .config
+                .role_assignments
+                .contains_key("architect"));
             let assignment = &wizard.state.config.role_assignments["architect"];
             assert_eq!(assignment.model_id, "claude-sonnet-4-5");
             assert_eq!(assignment.provider, "anthropic");
@@ -1200,7 +1210,9 @@ mod tests {
                 .step3_select_model("Balanced", "claude-sonnet-4-5")
                 .unwrap();
 
-            wizard.step4_assign_role("scout", "claude-haiku-4-5").unwrap();
+            wizard
+                .step4_assign_role("scout", "claude-haiku-4-5")
+                .unwrap();
             wizard
                 .step4_assign_role("architect", "claude-sonnet-4-5")
                 .unwrap();
@@ -1451,10 +1463,7 @@ mod tests {
 
         #[test]
         fn test_provider_display_name_unknown() {
-            assert_eq!(
-                ConfigWizard::provider_display_name("unknown"),
-                "Unknown"
-            );
+            assert_eq!(ConfigWizard::provider_display_name("unknown"), "Unknown");
         }
 
         #[test]
@@ -1467,10 +1476,7 @@ mod tests {
 
         #[test]
         fn test_parse_tier_fast() {
-            assert_eq!(
-                ConfigWizard::parse_tier("Fast").unwrap(),
-                ModelTier::Fast
-            );
+            assert_eq!(ConfigWizard::parse_tier("Fast").unwrap(), ModelTier::Fast);
         }
 
         #[test]
@@ -1533,7 +1539,9 @@ mod tests {
             assert_eq!(wizard.state.selected_models.len(), 2);
 
             // Assign roles
-            wizard.step4_assign_role("scout", "claude-haiku-4-5").unwrap();
+            wizard
+                .step4_assign_role("scout", "claude-haiku-4-5")
+                .unwrap();
             wizard
                 .step4_assign_role("architect", "claude-sonnet-4-5")
                 .unwrap();

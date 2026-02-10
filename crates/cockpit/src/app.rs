@@ -24,20 +24,22 @@ use std::{
 
 use leindex_core::config::Config;
 use leindex_core::memory::lsp_manager::LspType;
-use leindex_core::memory::models::McpStatus;
 use leindex_core::memory::LspStatus;
 use leindex_core::memory::McpPool;
 use leindex_core::memory::MemoryService;
 use leindex_core::memory::TursoStorageBackend;
 use leindex_core::multiplexer::TmuxMultiplexer;
 
-use crate::state::{
-    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption,
-    MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
-};
-use crate::tabs::{render_analysis, render_dashboard, render_lsps, render_memory, render_projects, render_sessions, render_settings, session_log_tail};
-use crate::theme::{theme_from_name, Theme, THEMES};
 use crate::modals;
+use crate::state::{
+    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
+    ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+};
+use crate::tabs::{
+    render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
+    render_sessions, render_settings, session_log_tail,
+};
+use crate::theme::{theme_from_name, Theme, THEMES};
 
 pub async fn run() -> Result<()> {
     // Setup terminal
@@ -52,10 +54,7 @@ pub async fn run() -> Result<()> {
     let storage_backend = match TursoStorageBackend::new(None, None).await {
         Ok(backend) => {
             if let Err(e) = backend.initialize().await {
-                eprintln!(
-                    "Warning: Failed to initialize LSP storage backend: {}",
-                    e
-                );
+                eprintln!("Warning: Failed to initialize LSP storage backend: {}", e);
             }
             Some(Arc::new(backend))
         }
@@ -190,6 +189,8 @@ pub struct App {
     pub lsp_autostarted_sessions: HashSet<String>,
     // Conductor pane state (formerly Orchestrate)
     pub conductor: crate::conductor::ConductorPane,
+    // MCP status refresh task
+    mcp_refresh_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -242,7 +243,7 @@ impl App {
             preview_scroll: 0,
             hub_search_buffer: String::new(),
             hub_focus: HubFocus::Rename,
-            mcp_menu_option: McpOption::StartStop,
+            mcp_menu_option: McpOption::Start,
             target_mcp_name: None,
             mcp_pool,
             mcp_log_lines: Vec::new(),
@@ -275,11 +276,27 @@ impl App {
             lsp_availability: HashMap::new(),
             storage_backend: storage_backend.clone(),
             pending_lsp_refresh: false,
-            lsp_manager: storage_backend.map(|s| leindex_core::memory::lsp_manager::LspManager::new((*s).clone())),
+            lsp_manager: storage_backend
+                .map(|s| leindex_core::memory::lsp_manager::LspManager::new((*s).clone())),
             lsp_autostarted_sessions: HashSet::new(),
             conductor: crate::conductor::ConductorPane::auto_discover(),
+            mcp_refresh_task: None,
         };
-        
+
+        // Start MCP status refresh background task
+        if let Some(ref mcp_pool) = app.mcp_pool {
+            let pool = mcp_pool.clone();
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+            app.mcp_refresh_task = Some(tokio::spawn(async move {
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = pool.refresh_all_statuses().await {
+                        eprintln!("Failed to refresh MCP statuses: {}", e);
+                    }
+                }
+            }));
+        }
+
         // Restore running LSPs (if any were running in a previous instance or should be running)
         if let Some(ref lsp_manager) = app.lsp_manager {
             let manager = lsp_manager.clone();
@@ -515,7 +532,6 @@ impl App {
         }
     }
 
-
     fn refresh_from_service(&mut self, service: &Option<MemoryService>) {
         if let Some(svc) = service {
             if let Ok(projects) = svc.list_projects() {
@@ -565,6 +581,7 @@ impl App {
             }
 
             if let Ok(mcp_servers) = svc.list_mcp_servers() {
+                // Update MCP servers list
                 self.mcp_servers = mcp_servers;
             }
             if let Ok(stats) = svc.stats() {
@@ -946,7 +963,9 @@ impl App {
                 }
                 LspStatus::Running | LspStatus::Starting => {
                     // Stop the LSP and MCP bridge
-                    lsp_manager.stop_lsp_with_mcp_bridge(&session_id, lsp_type, 0).await
+                    lsp_manager
+                        .stop_lsp_with_mcp_bridge(&session_id, lsp_type, 0)
+                        .await
                 }
             };
 
@@ -1113,6 +1132,14 @@ async fn run_app<B: Backend>(
     loop {
         terminal.draw(|frame| ui(frame, &mut app))?;
 
+        // Handle MCP refresh task shutdown on quit
+        if app.should_quit {
+            if let Some(ref task) = app.mcp_refresh_task {
+                task.abort();
+            }
+            break;
+        }
+
         // Handle pending LSP refresh (async operation)
         if app.pending_lsp_refresh {
             app.do_refresh_lsp_status().await;
@@ -1190,16 +1217,18 @@ async fn run_app<B: Backend>(
                                             ) {
                                                 Ok(session) => {
                                                     // Ensure project is registered in memory pipeline
-                                                    let project_name = std::path::Path::new(&session.project_path)
-                                                        .file_name()
-                                                        .and_then(|name| name.to_str())
-                                                        .unwrap_or(&session.title)
-                                                        .to_string();
+                                                    let project_name =
+                                                        std::path::Path::new(&session.project_path)
+                                                            .file_name()
+                                                            .and_then(|name| name.to_str())
+                                                            .unwrap_or(&session.title)
+                                                            .to_string();
                                                     let _ = svc.get_or_create_project(
                                                         &session.project_path,
                                                         &project_name,
                                                     );
-                                                    let _ = svc.update_last_accessed(&session.session_id);
+                                                    let _ = svc
+                                                        .update_last_accessed(&session.session_id);
                                                     let _ = svc.sync_mcp_servers_from_system();
                                                     let _ = svc.sync_memories_from_system();
 
@@ -1723,7 +1752,7 @@ async fn run_app<B: Backend>(
                                             .cloned();
 
                                         match app.mcp_menu_option {
-                                            McpOption::StartStop => {
+                                            McpOption::Start => {
                                                 let Some(pool) = app.mcp_pool.clone() else {
                                                     app.status_message =
                                                         "MCP pool not available".to_string();
@@ -1739,26 +1768,46 @@ async fn run_app<B: Backend>(
                                                     continue;
                                                 };
 
-                                                if server.status == McpStatus::Running {
-                                                    if let Err(e) = pool.stop_server(&name).await {
-                                                        app.status_message =
-                                                            format!("Stop failed: {}", e);
-                                                    } else {
-                                                        app.status_message =
-                                                            format!("Stopped MCP '{}'", name);
+                                                match pool.start_server_record(&server).await {
+                                                    Ok(socket) => {
+                                                        app.status_message = format!(
+                                                            "Started MCP '{}' at {}",
+                                                            name, socket
+                                                        );
+                                                        // Refresh MCP list to show updated status
+                                                        if let Ok(mcp_list) = svc.list_mcp_servers()
+                                                        {
+                                                            app.mcp_servers = mcp_list;
+                                                        }
                                                     }
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Start failed: {}", e);
+                                                        // Refresh MCP list to show updated status
+                                                        if let Ok(mcp_list) = svc.list_mcp_servers()
+                                                        {
+                                                            app.mcp_servers = mcp_list;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            McpOption::Stop => {
+                                                let Some(pool) = app.mcp_pool.clone() else {
+                                                    app.status_message =
+                                                        "MCP pool not available".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+                                                if let Err(e) = pool.stop_server(&name).await {
+                                                    app.status_message =
+                                                        format!("Stop failed: {}", e);
                                                 } else {
-                                                    match pool.start_server_record(&server).await {
-                                                        Ok(socket) => {
-                                                            app.status_message = format!(
-                                                                "Started MCP '{}' at {}",
-                                                                name, socket
-                                                            );
-                                                        }
-                                                        Err(e) => {
-                                                            app.status_message =
-                                                                format!("Start failed: {}", e);
-                                                        }
+                                                    app.status_message =
+                                                        format!("Stopped MCP '{}'", name);
+                                                    // Refresh MCP list to show updated status
+                                                    if let Ok(mcp_list) = svc.list_mcp_servers() {
+                                                        app.mcp_servers = mcp_list;
                                                     }
                                                 }
                                             }
@@ -1785,12 +1834,20 @@ async fn run_app<B: Backend>(
                                             }
                                             McpOption::Add => {
                                                 match svc.sync_mcp_servers_from_system() {
-                                                    Ok(n) => app.status_message = format!(
-                                                        "Discovered {} MCP server(s) from system configs",
-                                                        n
-                                                    ),
-                                                    Err(e) => app.status_message =
-                                                        format!("Discovery failed: {}", e),
+                                                    Ok(n) => {
+                                                        // Also start all discovered servers
+                                                        if let Some(pool) = app.mcp_pool.clone() {
+                                                            let _ = pool.start_all_from_db().await;
+                                                        }
+                                                        app.status_message = format!(
+                                                            "Discovered & synced {} MCP server(s) from system configs",
+                                                            n
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Discovery failed: {}", e)
+                                                    }
                                                 }
                                             }
                                             McpOption::Remove => {
@@ -1800,17 +1857,6 @@ async fn run_app<B: Backend>(
                                                 let _ = svc.delete_mcp_server(&name);
                                                 app.status_message =
                                                     format!("Removed MCP '{}' from pool", name);
-                                            }
-                                            McpOption::Install => {
-                                                let discovered =
-                                                    svc.sync_mcp_servers_from_system().unwrap_or(0);
-                                                if let Some(pool) = app.mcp_pool.clone() {
-                                                    let _ = pool.start_all_from_db().await;
-                                                }
-                                                app.status_message = format!(
-                                                    "MCP pool synced ({} discovered)",
-                                                    discovered
-                                                );
                                             }
                                         }
 
@@ -1898,15 +1944,16 @@ async fn run_app<B: Backend>(
                                                     };
 
                                                 // Ensure group exists
-                                                let group = leindex_core::memory::models::SessionGroup {
-                                                    id: 0,
-                                                    name: clean_name.to_string(),
-                                                    path: path.clone(),
-                                                    category: category,
-                                                    is_expanded: true,
-                                                    sort_order: 0,
-                                                    parent_id: None,
-                                                };
+                                                let group =
+                                                    leindex_core::memory::models::SessionGroup {
+                                                        id: 0,
+                                                        name: clean_name.to_string(),
+                                                        path: path.clone(),
+                                                        category: category,
+                                                        is_expanded: true,
+                                                        sort_order: 0,
+                                                        parent_id: None,
+                                                    };
                                                 let _ = svc.get_or_create_session_group(group);
                                                 app.status_message =
                                                     format!("Group '{}' ready", clean_name);
@@ -2309,12 +2356,12 @@ async fn run_app<B: Backend>(
                                     app.settings_menu_state.select(Some(i));
                                 } else if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::StartStop => McpOption::Pause,
+                                        McpOption::Start => McpOption::Stop,
+                                        McpOption::Stop => McpOption::Pause,
                                         McpOption::Pause => McpOption::Logs,
                                         McpOption::Logs => McpOption::Add,
                                         McpOption::Add => McpOption::Remove,
-                                        McpOption::Remove => McpOption::Install,
-                                        McpOption::Install => McpOption::StartStop,
+                                        McpOption::Remove => McpOption::Start,
                                     };
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
@@ -2402,12 +2449,12 @@ async fn run_app<B: Backend>(
                             KeyCode::Up if app.tab_index != 4 => {
                                 if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::StartStop => McpOption::Install,
-                                        McpOption::Pause => McpOption::StartStop,
+                                        McpOption::Start => McpOption::Remove,
+                                        McpOption::Stop => McpOption::Start,
+                                        McpOption::Pause => McpOption::Stop,
                                         McpOption::Logs => McpOption::Pause,
                                         McpOption::Add => McpOption::Logs,
                                         McpOption::Remove => McpOption::Add,
-                                        McpOption::Install => McpOption::Remove,
                                     };
                                 } else if app.input_mode == InputMode::McpLogs {
                                     if app.lsp_log_source.is_some() {
@@ -2516,7 +2563,8 @@ async fn run_app<B: Backend>(
                             _ => {}
                         }
                     } else if app.show_help {
-                        let max_scroll = modals::build_help_text(&app).len().saturating_sub(1) as u16;
+                        let max_scroll =
+                            modals::build_help_text(&app).len().saturating_sub(1) as u16;
 
                         match key.code {
                             KeyCode::Esc | KeyCode::Char('/') | KeyCode::Char('?') => {
@@ -2584,13 +2632,16 @@ async fn run_app<B: Backend>(
 
                             // 3. Conductor Specific Alt Keys
                             (KeyModifiers::ALT, KeyCode::Char('1')) if app.tab_index == 4 => {
-                                app.conductor.details_mode = crate::conductor::model::DetailsViewMode::Details;
+                                app.conductor.details_mode =
+                                    crate::conductor::model::DetailsViewMode::Details;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('2')) if app.tab_index == 4 => {
-                                app.conductor.details_mode = crate::conductor::model::DetailsViewMode::Output;
+                                app.conductor.details_mode =
+                                    crate::conductor::model::DetailsViewMode::Output;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('3')) if app.tab_index == 4 => {
-                                app.conductor.details_mode = crate::conductor::model::DetailsViewMode::Prompt;
+                                app.conductor.details_mode =
+                                    crate::conductor::model::DetailsViewMode::Prompt;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 4 => {
                                 app.conductor.output_focused = !app.conductor.output_focused;
@@ -2614,7 +2665,9 @@ async fn run_app<B: Backend>(
 
                             // 5. Conductor Catch-All
                             _ if app.tab_index == 4 => {
-                                use crate::conductor::keybindings::{handle_key_event, ConductorAction};
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
                                     ConductorAction::StatusMessage(msg) => {
@@ -2649,7 +2702,9 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Up)
-                            | (KeyModifiers::ALT, KeyCode::Down) if app.tab_index != 4 => {
+                            | (KeyModifiers::ALT, KeyCode::Down)
+                                if app.tab_index != 4 =>
+                            {
                                 if app.tab_index == 1 {
                                     let Some(svc) = service.as_ref() else {
                                         app.status_message =
@@ -2874,9 +2929,9 @@ async fn run_app<B: Backend>(
                                                     app.target_session_id =
                                                         Some(s.session_id.clone());
                                                     app.status_message = format!(
-                                                         "Confirm DELETE session '{}'? (y/n)",
-                                                         s.title
-                                                     );
+                                                        "Confirm DELETE session '{}'? (y/n)",
+                                                        s.title
+                                                    );
                                                     app.input_mode = InputMode::DeleteConfirm;
                                                 }
                                                 SessionEntry::Group(g) => {
@@ -2893,12 +2948,13 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == 0
                                     && app.dash_focus == DashFocus::Sessions
                                 {
-                                    if let Some((sid, title)) = app.dash_selected_session().map(|s| (s.session_id.clone(), s.title.clone())) {
+                                    if let Some((sid, title)) = app
+                                        .dash_selected_session()
+                                        .map(|s| (s.session_id.clone(), s.title.clone()))
+                                    {
                                         app.target_session_id = Some(sid);
-                                        app.status_message = format!(
-                                            "Confirm DELETE session '{}'? (y/n)",
-                                            title
-                                        );
+                                        app.status_message =
+                                            format!("Confirm DELETE session '{}'? (y/n)", title);
                                         app.input_mode = InputMode::DeleteConfirm;
                                     }
                                 }
@@ -2997,7 +3053,9 @@ async fn run_app<B: Backend>(
                             }
                             (KeyModifiers::ALT, KeyCode::Char('d'))
                             | (KeyModifiers::ALT, KeyCode::Char('D'))
-                            | (KeyModifiers::NONE, KeyCode::Char('d')) if app.tab_index != 4 => {
+                            | (KeyModifiers::NONE, KeyCode::Char('d'))
+                                if app.tab_index != 4 =>
+                            {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i) {
@@ -3057,12 +3115,12 @@ async fn run_app<B: Backend>(
                             (_, KeyCode::Down) => {
                                 if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::StartStop => McpOption::Pause,
+                                        McpOption::Start => McpOption::Stop,
+                                        McpOption::Stop => McpOption::Pause,
                                         McpOption::Pause => McpOption::Logs,
                                         McpOption::Logs => McpOption::Add,
                                         McpOption::Add => McpOption::Remove,
-                                        McpOption::Remove => McpOption::Install,
-                                        McpOption::Install => McpOption::StartStop,
+                                        McpOption::Remove => McpOption::Start,
                                     };
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
@@ -3169,12 +3227,12 @@ async fn run_app<B: Backend>(
                             (_, KeyCode::Up) => {
                                 if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::StartStop => McpOption::Install,
-                                        McpOption::Pause => McpOption::StartStop,
+                                        McpOption::Start => McpOption::Remove,
+                                        McpOption::Stop => McpOption::Start,
+                                        McpOption::Pause => McpOption::Stop,
                                         McpOption::Logs => McpOption::Pause,
                                         McpOption::Add => McpOption::Logs,
                                         McpOption::Remove => McpOption::Add,
-                                        McpOption::Install => McpOption::Remove,
                                     };
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
@@ -3444,7 +3502,7 @@ async fn run_app<B: Backend>(
                                                 if let Some(mcp) = app.mcp_servers.get(i) {
                                                     app.target_mcp_name = Some(mcp.name.clone());
                                                     app.input_mode = InputMode::McpMenu;
-                                                    app.mcp_menu_option = McpOption::StartStop;
+                                                    app.mcp_menu_option = McpOption::Start;
                                                 }
                                             }
                                         }
@@ -3465,6 +3523,17 @@ async fn run_app<B: Backend>(
                                         }
                                         SettingsOption::Transparent => {
                                             app.config.transparent = !app.config.transparent;
+                                            // Auto-save config when transparency is toggled
+                                            if let Err(e) = app.config.save() {
+                                                app.status_message =
+                                                    format!("Failed to save config: {}", e);
+                                            } else {
+                                                app.status_message = if app.config.transparent {
+                                                    "Transparency enabled".to_string()
+                                                } else {
+                                                    "Transparency disabled".to_string()
+                                                };
+                                            }
                                         }
                                         SettingsOption::Save => {
                                             let _ = app.config.save();
@@ -3620,7 +3689,7 @@ async fn run_app<B: Backend>(
                                         if let Some(mcp) = app.mcp_servers.get(i) {
                                             app.target_mcp_name = Some(mcp.name.clone());
                                             app.input_mode = InputMode::McpMenu;
-                                            app.mcp_menu_option = McpOption::StartStop;
+                                            app.mcp_menu_option = McpOption::Start;
                                         }
                                     }
                                 } else if app.tab_index == 6 {
@@ -3633,11 +3702,9 @@ async fn run_app<B: Backend>(
                                     } else {
                                         let scheduled = app.queue_lsp_autostart_for_sessions();
                                         app.status_message = if scheduled {
-                                            "Queued LSP auto-detect for active sessions"
-                                                .to_string()
+                                            "Queued LSP auto-detect for active sessions".to_string()
                                         } else {
-                                            "No LSPs detected yet. Press 'r' to rescan."
-                                                .to_string()
+                                            "No LSPs detected yet. Press 'r' to rescan.".to_string()
                                         };
                                     }
                                 } else {
@@ -3847,7 +3914,10 @@ fn ui(frame: &mut Frame, app: &mut App) {
             Style::default().bg(Color::Cyan).fg(Color::Black),
         ),
         Span::raw(" Scroll  "),
-        Span::styled(" Alt+1-8 ", Style::default().bg(Color::Cyan).fg(Color::Black)),
+        Span::styled(
+            " Alt+1-8 ",
+            Style::default().bg(Color::Cyan).fg(Color::Black),
+        ),
         Span::raw(" Tabs  "),
         Span::styled(" n ", Style::default().bg(Color::Green).fg(Color::Black)),
         Span::raw(" New  "),

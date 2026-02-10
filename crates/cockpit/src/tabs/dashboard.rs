@@ -2,11 +2,11 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    prelude::*,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
-    prelude::*,
 };
 
 use crate::app::App;
@@ -360,8 +360,7 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .mcp_servers
         .iter()
         .map(|s| {
-            let status_color = if s.status == leindex_core::memory::models::McpStatus::Running
-            {
+            let status_color = if s.status == leindex_core::memory::models::McpStatus::Running {
                 Color::Green
             } else {
                 Color::Red

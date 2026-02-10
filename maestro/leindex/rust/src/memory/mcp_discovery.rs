@@ -76,9 +76,89 @@ pub fn discover_system_mcp_servers() -> Vec<DiscoveredMcpServer> {
         }
     }
 
+    // Built-in fallbacks: add well-known local servers when installed even if no config exists.
+    // This keeps the pool portable across fresh installs and avoids relying on user-specific
+    // config files for common utilities.
+    add_if_missing(
+        &mut out,
+        detect_stdio_server(
+            "agent-browser",
+            "agent-browser",
+            vec!["server".to_string()],
+            None,
+            "builtin",
+        ),
+    );
+
+    add_if_missing(
+        &mut out,
+        detect_stdio_server(
+            "brave-search",
+            "npx",
+            vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-brave-search".to_string(),
+            ],
+            None,
+            "builtin",
+        ),
+    );
+
     let mut list: Vec<_> = out.into_values().collect();
     list.sort_by(|a, b| a.name.cmp(&b.name));
     list
+}
+
+fn add_if_missing(
+    map: &mut HashMap<String, DiscoveredMcpServer>,
+    candidate: Option<DiscoveredMcpServer>,
+) {
+    if let Some(server) = candidate {
+        map.entry(server.name.clone()).or_insert(server);
+    }
+}
+
+fn detect_stdio_server(
+    name: &str,
+    command: &str,
+    args: Vec<String>,
+    cwd: Option<String>,
+    source: &str,
+) -> Option<DiscoveredMcpServer> {
+    // Only add if the command is resolvable on PATH to avoid broken defaults.
+    if !command_exists(command) {
+        return None;
+    }
+
+    Some(DiscoveredMcpServer {
+        name: name.to_string(),
+        transport: McpTransport::Stdio,
+        command: command.to_string(),
+        args,
+        env: serde_json::json!({}),
+        cwd,
+        url: None,
+        headers: None,
+        source: source.to_string(),
+    })
+}
+
+fn command_exists(cmd: &str) -> bool {
+    // If cmd includes a path separator, treat it as a path.
+    if cmd.contains(std::path::MAIN_SEPARATOR) {
+        return std::path::Path::new(cmd).exists();
+    }
+
+    // Otherwise, search PATH
+    if let Some(paths) = std::env::var_os("PATH") {
+        for p in std::env::split_paths(&paths) {
+            let candidate = p.join(cmd);
+            if candidate.exists() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn discover_from_json_file(label: &str, path: &Path) -> Result<Vec<DiscoveredMcpServer>> {

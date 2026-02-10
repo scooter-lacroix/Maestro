@@ -11,8 +11,8 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use crate::memory::{McpPool, MemoryService};
 use crate::memory::models::McpServer;
+use crate::memory::{McpPool, MemoryService};
 
 pub async fn serve() -> Result<()> {
     let service = MemoryService::new(None)?;
@@ -63,7 +63,11 @@ pub async fn proxy(server_name: String) -> Result<()> {
             if n == 0 {
                 break;
             }
-            <tokio::net::unix::OwnedWriteHalf as tokio::io::AsyncWriteExt>::write_all(&mut sock_w, &buf[..n]).await?;
+            <tokio::net::unix::OwnedWriteHalf as tokio::io::AsyncWriteExt>::write_all(
+                &mut sock_w,
+                &buf[..n],
+            )
+            .await?;
         }
         Result::<()>::Ok(())
     });
@@ -71,11 +75,16 @@ pub async fn proxy(server_name: String) -> Result<()> {
     let from_socket = tokio::spawn(async move {
         let mut buf = [0u8; 16 * 1024];
         loop {
-            let n = <tokio::net::unix::OwnedReadHalf as tokio::io::AsyncReadExt>::read(&mut sock_r, &mut buf).await?;
+            let n = <tokio::net::unix::OwnedReadHalf as tokio::io::AsyncReadExt>::read(
+                &mut sock_r,
+                &mut buf,
+            )
+            .await?;
             if n == 0 {
                 break;
             }
-            <tokio::io::Stdout as tokio::io::AsyncWriteExt>::write_all(&mut stdout_w, &buf[..n]).await?;
+            <tokio::io::Stdout as tokio::io::AsyncWriteExt>::write_all(&mut stdout_w, &buf[..n])
+                .await?;
             <tokio::io::Stdout as tokio::io::AsyncWriteExt>::flush(&mut stdout_w).await?;
         }
         Result::<()>::Ok(())
@@ -447,12 +456,14 @@ impl UnixMcpClient {
                     .to_string()
             });
 
-        let stream = tokio::net::UnixStream::connect(&socket_path).await.with_context(|| {
-            format!(
-                "Failed to connect to pooled server '{}' at {}",
-                server_name, socket_path
-            )
-        })?;
+        let stream = tokio::net::UnixStream::connect(&socket_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to connect to pooled server '{}' at {}",
+                    server_name, socket_path
+                )
+            })?;
 
         let (r, w) = stream.into_split();
         Ok(Self {

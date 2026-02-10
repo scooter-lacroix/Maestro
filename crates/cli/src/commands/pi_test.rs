@@ -4,12 +4,10 @@
 //! test subagent tasks using the SubagentRunner and displays results.
 
 use anyhow::Result;
-use maestro_pi_mono::{
-    load_config, PiDetection, SubagentRunner,
-};
 use maestro_pi_mono::agents::mapping::PiAgentType;
-use tracing::debug;
+use maestro_pi_mono::{load_config, PiDetection, SubagentRunner};
 use std::time::Duration;
+use tracing::debug;
 
 /// Run the pi-test command
 ///
@@ -38,7 +36,9 @@ pub async fn run(
 
     // Validate providers are configured
     if config.providers.is_empty() {
-        anyhow::bail!("No providers configured. Run 'maestro configure --pi-mono' to set up providers.");
+        anyhow::bail!(
+            "No providers configured. Run 'maestro configure --pi-mono' to set up providers."
+        );
     }
     if !config.providers.values().any(|p| p.is_configured) {
         anyhow::bail!("No providers have valid credentials. Run 'maestro configure --pi-mono' to configure providers.");
@@ -141,7 +141,10 @@ fn parse_agent_type(agent_type: Option<String>) -> Result<PiAgentType> {
         Some("planner") | Some("architect") => Ok(PiAgentType::Planner),
         Some("reviewer") | Some("critic") => Ok(PiAgentType::Reviewer),
         Some("worker") | Some("kraken") => Ok(PiAgentType::Worker),
-        Some(other) => anyhow::bail!("Unknown agent type: {}. Valid options: scout, planner, reviewer, worker", other),
+        Some(other) => anyhow::bail!(
+            "Unknown agent type: {}. Valid options: scout, planner, reviewer, worker",
+            other
+        ),
     }
 }
 
@@ -192,29 +195,50 @@ mod tests {
     /// Test parsing agent type from string
     #[test]
     fn test_parse_agent_type_scout() {
-        assert_eq!(parse_agent_type(Some("scout".to_string())).unwrap(), PiAgentType::Scout);
+        assert_eq!(
+            parse_agent_type(Some("scout".to_string())).unwrap(),
+            PiAgentType::Scout
+        );
         assert_eq!(parse_agent_type(None).unwrap(), PiAgentType::Scout);
     }
 
     /// Test parsing agent type - planner
     #[test]
     fn test_parse_agent_type_planner() {
-        assert_eq!(parse_agent_type(Some("planner".to_string())).unwrap(), PiAgentType::Planner);
-        assert_eq!(parse_agent_type(Some("architect".to_string())).unwrap(), PiAgentType::Planner);
+        assert_eq!(
+            parse_agent_type(Some("planner".to_string())).unwrap(),
+            PiAgentType::Planner
+        );
+        assert_eq!(
+            parse_agent_type(Some("architect".to_string())).unwrap(),
+            PiAgentType::Planner
+        );
     }
 
     /// Test parsing agent type - reviewer
     #[test]
     fn test_parse_agent_type_reviewer() {
-        assert_eq!(parse_agent_type(Some("reviewer".to_string())).unwrap(), PiAgentType::Reviewer);
-        assert_eq!(parse_agent_type(Some("critic".to_string())).unwrap(), PiAgentType::Reviewer);
+        assert_eq!(
+            parse_agent_type(Some("reviewer".to_string())).unwrap(),
+            PiAgentType::Reviewer
+        );
+        assert_eq!(
+            parse_agent_type(Some("critic".to_string())).unwrap(),
+            PiAgentType::Reviewer
+        );
     }
 
     /// Test parsing agent type - worker
     #[test]
     fn test_parse_agent_type_worker() {
-        assert_eq!(parse_agent_type(Some("worker".to_string())).unwrap(), PiAgentType::Worker);
-        assert_eq!(parse_agent_type(Some("kraken".to_string())).unwrap(), PiAgentType::Worker);
+        assert_eq!(
+            parse_agent_type(Some("worker".to_string())).unwrap(),
+            PiAgentType::Worker
+        );
+        assert_eq!(
+            parse_agent_type(Some("kraken".to_string())).unwrap(),
+            PiAgentType::Worker
+        );
     }
 
     /// Test parsing agent type - invalid

@@ -14,7 +14,9 @@ pub const CURRENT_MIGRATION_VERSION: i32 = 2;
 
 /// Run all pending migrations
 pub async fn run_migrations(database: &libsql::Database) -> Result<bool> {
-    let conn = database.connect().context("Failed to get connection for migration check")?;
+    let conn = database
+        .connect()
+        .context("Failed to get connection for migration check")?;
 
     // Check if this is an in-memory database - if so, skip migrations
     // In-memory databases are created fresh each time with the correct schema
@@ -32,9 +34,14 @@ pub async fn run_migrations(database: &libsql::Database) -> Result<bool> {
             let name: String = row.get(1).unwrap_or_default();
             let file: String = row.get(2).unwrap_or_default();
             // Check for in-memory indicators: empty file, contains :memory:, or starts with file::
-            if name == "main" && (file.is_empty() || file.contains(":memory:") || file.starts_with("file::")) {
+            if name == "main"
+                && (file.is_empty() || file.contains(":memory:") || file.starts_with("file::"))
+            {
                 in_memory = true;
-                info!("Detected in-memory database (file={:?}), skipping migrations", file);
+                info!(
+                    "Detected in-memory database (file={:?}), skipping migrations",
+                    file
+                );
                 break;
             }
         }
@@ -152,7 +159,7 @@ pub async fn migrate_chunk_type_to_integer(database: &Database) -> Result<bool> 
         let file_path: String = row.get(2)?;
         let chunk_index: i64 = row.get(3)?;
         let start_line: Option<i64> = row.get(4)?; // May be NULL
-        let end_line: Option<i64> = row.get(5)?;   // May be NULL
+        let end_line: Option<i64> = row.get(5)?; // May be NULL
         let chunk_type_text: String = row.get(6)?;
         let parent_context: Option<String> = row.get(7)?;
         let content: Option<String> = row.get(8)?;
@@ -173,28 +180,30 @@ pub async fn migrate_chunk_type_to_integer(database: &Database) -> Result<bool> 
              embedding_model, created_at, updated_at)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
-            libsql::params_from_iter([
-                libsql::Value::Integer(id),
-                libsql::Value::Text(vector_id),
-                libsql::Value::Text(file_path),
-                libsql::Value::Integer(chunk_index),
-                start_line
-                    .map(|v| libsql::Value::Integer(v))
-                    .unwrap_or(libsql::Value::Null),
-                end_line
-                    .map(|v| libsql::Value::Integer(v))
-                    .unwrap_or(libsql::Value::Null),
-                libsql::Value::Integer(chunk_type_int),
-                libsql::Value::Text(parent_context.unwrap_or_default()),
-                libsql::Value::Text(content.unwrap_or_default()),
-                libsql::Value::Text(embedding),
-                libsql::Value::Text(embedding_model),
-                libsql::Value::Text(created_at),
-                updated_at
-                    .map(|v| libsql::Value::Text(v))
-                    .unwrap_or(libsql::Value::Null),
-            ]
-            .into_iter()),
+            libsql::params_from_iter(
+                [
+                    libsql::Value::Integer(id),
+                    libsql::Value::Text(vector_id),
+                    libsql::Value::Text(file_path),
+                    libsql::Value::Integer(chunk_index),
+                    start_line
+                        .map(|v| libsql::Value::Integer(v))
+                        .unwrap_or(libsql::Value::Null),
+                    end_line
+                        .map(|v| libsql::Value::Integer(v))
+                        .unwrap_or(libsql::Value::Null),
+                    libsql::Value::Integer(chunk_type_int),
+                    libsql::Value::Text(parent_context.unwrap_or_default()),
+                    libsql::Value::Text(content.unwrap_or_default()),
+                    libsql::Value::Text(embedding),
+                    libsql::Value::Text(embedding_model),
+                    libsql::Value::Text(created_at),
+                    updated_at
+                        .map(|v| libsql::Value::Text(v))
+                        .unwrap_or(libsql::Value::Null),
+                ]
+                .into_iter(),
+            ),
         )
         .await
         .context("Failed to insert migrated row")?;
@@ -202,7 +211,10 @@ pub async fn migrate_chunk_type_to_integer(database: &Database) -> Result<bool> 
         migrated_count += 1;
     }
 
-    info!("Migrated {} vectors from TEXT to INTEGER schema", migrated_count);
+    info!(
+        "Migrated {} vectors from TEXT to INTEGER schema",
+        migrated_count
+    );
 
     // Step 5: Drop old table and rename new table
     conn.execute(
@@ -305,7 +317,7 @@ pub async fn migrate_add_embedding_vector_column(database: &libsql::Database) ->
     info!("Backfilled {} vectors with base64 embeddings", backfilled);
 
     // Step 4: Create DiskANN index
-    // Note: We use execute instead of a prepared statement because 'USING' might 
+    // Note: We use execute instead of a prepared statement because 'USING' might
     // be rejected by some parsers if not supported, but we want to try it.
     let result = conn.execute(
         "CREATE INDEX IF NOT EXISTS vectors_diskann_idx ON vectors USING libsql_vector_idx(embedding_vector)",
@@ -329,19 +341,27 @@ pub async fn migrate_add_embedding_vector_column(database: &libsql::Database) ->
 
 /// Migration: backfill embedding_vector column for existing rows
 pub async fn backfill_embedding_vectors(database: &libsql::Database) -> Result<usize> {
-    let conn = database.connect()
+    let conn = database
+        .connect()
         .context("Failed to get connection for backfill")?;
 
     // Get all vectors without embedding_vector
-    let stmt = conn.prepare(
-        "SELECT id, embedding FROM vectors WHERE embedding_vector IS NULL"
-    ).await.context("Failed to prepare backfill query")?;
+    let stmt = conn
+        .prepare("SELECT id, embedding FROM vectors WHERE embedding_vector IS NULL")
+        .await
+        .context("Failed to prepare backfill query")?;
 
-    let mut rows = stmt.query(libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await?;
+    let mut rows = stmt
+        .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
+        .await?;
     let mut migrated = 0;
 
     // Use a transaction for efficiency if there are many rows
-    conn.execute("BEGIN TRANSACTION", libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await?;
+    conn.execute(
+        "BEGIN TRANSACTION",
+        libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+    )
+    .await?;
 
     while let Some(row) = rows.next().await? {
         let id: i64 = row.get(0)?;
@@ -349,7 +369,7 @@ pub async fn backfill_embedding_vectors(database: &libsql::Database) -> Result<u
 
         let embedding: Vec<f32> = serde_json::from_str(&embedding_json)
             .context("Failed to parse embedding JSON for backfill")?;
-        
+
         // PERF: Store raw bytes in BLOB (Task 8.7)
         let mut embedding_bytes = Vec::with_capacity(embedding.len() * 4);
         for &f in &embedding {
@@ -358,16 +378,25 @@ pub async fn backfill_embedding_vectors(database: &libsql::Database) -> Result<u
 
         conn.execute(
             "UPDATE vectors SET embedding_vector = ?1 WHERE id = ?2",
-            libsql::params_from_iter([
-                libsql::Value::Blob(embedding_bytes),
-                libsql::Value::Integer(id),
-            ].into_iter())
-        ).await.context("Failed to update row during backfill")?;
+            libsql::params_from_iter(
+                [
+                    libsql::Value::Blob(embedding_bytes),
+                    libsql::Value::Integer(id),
+                ]
+                .into_iter(),
+            ),
+        )
+        .await
+        .context("Failed to update row during backfill")?;
 
         migrated += 1;
     }
 
-    conn.execute("COMMIT", libsql::params_from_iter(std::iter::empty::<libsql::Value>())).await?;
+    conn.execute(
+        "COMMIT",
+        libsql::params_from_iter(std::iter::empty::<libsql::Value>()),
+    )
+    .await?;
 
     Ok(migrated)
 }
@@ -387,7 +416,10 @@ fn chunk_type_from_text(text: &str) -> ChunkType {
         "other" => ChunkType::Other,
         // Fallback for unknown values
         _ => {
-            warn!("Unknown chunk_type value in database: {}, using Other", text);
+            warn!(
+                "Unknown chunk_type value in database: {}, using Other",
+                text
+            );
             ChunkType::Other
         }
     }
@@ -422,9 +454,7 @@ async fn check_chunk_type_is_text(conn: &libsql::Connection) -> Result<bool> {
 async fn check_migration_version(conn: &libsql::Connection) -> Result<i32> {
     // Check if migration_info table exists
     let mut rows = conn
-        .prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='migration_info'",
-        )
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_info'")
         .await
         .context("Failed to prepare migration_info check")?
         .query(libsql::params_from_iter(std::iter::empty::<libsql::Value>()))
@@ -475,10 +505,7 @@ async fn check_migration_version(conn: &libsql::Connection) -> Result<i32> {
 }
 
 /// Update migration version
-async fn update_migration_version(
-    conn: &libsql::Connection,
-    version: i32,
-) -> Result<()> {
+async fn update_migration_version(conn: &libsql::Connection, version: i32) -> Result<()> {
     conn.execute(
         "UPDATE migration_info SET version = ?1",
         libsql::params_from_iter([libsql::Value::Integer(version as i64)].into_iter()),

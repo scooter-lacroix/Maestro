@@ -73,7 +73,9 @@ fn main() {
 
         println!("  Inserting {} vectors...", size);
         // OPTIMIZATION: Use batch insert for HNSW (100x faster than individual inserts)
-        let items: Vec<(String, Vec<f32>, VectorMetadata)> = embeddings.iter().enumerate()
+        let items: Vec<(String, Vec<f32>, VectorMetadata)> = embeddings
+            .iter()
+            .enumerate()
             .map(|(i, embedding)| {
                 let metadata = VectorMetadata::new(&format!("file_{}.rs", i / 1000), i as i32);
                 (format!("content {}", i), embedding.clone(), metadata)
@@ -109,7 +111,9 @@ fn main() {
 
         println!("  Inserting {} vectors...", size);
         // OPTIMIZATION: Use batch insert for Turso (1000x faster than individual inserts)
-        let items: Vec<(String, Vec<f32>, VectorMetadata)> = embeddings.iter().enumerate()
+        let items: Vec<(String, Vec<f32>, VectorMetadata)> = embeddings
+            .iter()
+            .enumerate()
             .map(|(i, embedding)| {
                 let metadata = VectorMetadata::new(&format!("file_{}.rs", i / 1000), i as i32);
                 (format!("content {}", i), embedding.clone(), metadata)

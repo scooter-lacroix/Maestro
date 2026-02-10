@@ -135,6 +135,15 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
 CREATE INDEX IF NOT EXISTS idx_mcp_status ON mcp_servers(status);
 CREATE INDEX IF NOT EXISTS idx_mcp_transport ON mcp_servers(transport);
 
+-- MCP Servers Blocklist (explicitly removed by user)
+CREATE TABLE IF NOT EXISTS mcp_servers_blocklist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    source TEXT,  -- Where it was discovered from
+    removed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_blocklist_name ON mcp_servers_blocklist(name);
+
 -- Agent Namespaces
 CREATE TABLE IF NOT EXISTS agent_namespaces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,6 +261,18 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         );
         CREATE INDEX IF NOT EXISTS idx_lsp_session ON lsp_servers(session_id);
         CREATE INDEX IF NOT EXISTS idx_lsp_status ON lsp_servers(status);
+    "#,
+    ),
+    (
+        "009_mcp_blocklist",
+        r#"
+        CREATE TABLE IF NOT EXISTS mcp_servers_blocklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            source TEXT,
+            removed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_mcp_blocklist_name ON mcp_servers_blocklist(name);
     "#,
     ),
 ];

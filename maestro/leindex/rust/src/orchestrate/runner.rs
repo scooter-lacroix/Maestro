@@ -2,8 +2,10 @@
 //!
 //! Supports running agents via CLI, tmux, or directly.
 //! Includes sandbox mode support using bubblewrap (bwrap) for isolation.
+//! Includes LSP diagnostic validation after agent edits.
 
-use crate::orchestrate::model::{AgentConfig, Task};
+use crate::orchestrate::diagnostics::{validate_diagnostics_batch, EditTracker};
+use crate::orchestrate::model::{AgentConfig, LspDiagnosticConfig, Task};
 use anyhow::{anyhow, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -13,15 +15,10 @@ use tokio::time::timeout;
 
 /// Allowed tools for execution (security allowlist)
 const ALLOWED_TOOLS: &[&str] = &[
-    "claude",
-    "gemini",
-    "qwen",
-    "opencode",
-    "maestro",
-    "pi",        // Pi-Mono CLI
-    "amp",       // Amp CLI - first-class integration
-    "codex",     // Codex CLI - first-class integration
-    "droid",     // Droid CLI - first-class integration
+    "claude", "gemini", "qwen", "opencode", "maestro", "pi",    // Pi-Mono CLI
+    "amp",   // Amp CLI - first-class integration
+    "codex", // Codex CLI - first-class integration
+    "droid", // Droid CLI - first-class integration
 ];
 
 /// Result of running an agent
@@ -30,43 +27,9 @@ pub struct RunResult {
     pub success: bool,
     pub completed: bool,
     pub output: String,
+    pub stderr: String,
     pub error_message: Option<String>,
     pub exit_code: Option<i32>,
-    /// Rate limit detected (HTTP 429, "rate limit" in message, etc.)
-    pub rate_limited: bool,
-}
-
-/// Detect rate limit patterns in output and error messages
-pub fn detect_rate_limit(output: &str, error_message: &Option<String>) -> bool {
-    // Check for HTTP 429 status codes
-    if output.contains("429") || output.contains("HTTP 429") {
-        return true;
-    }
-
-    // Check for rate limit error messages
-    let rate_limit_patterns = [
-        "rate limit",
-        "rate-limit",
-        "too many requests",
-        "quota exceeded",
-        "throttled",
-        "retry after",
-    ];
-
-    let output_lower = output.to_lowercase();
-    if rate_limit_patterns.iter().any(|p| output_lower.contains(p)) {
-        return true;
-    }
-
-    // Check error messages
-    if let Some(msg) = error_message {
-        let msg_lower = msg.to_lowercase();
-        if rate_limit_patterns.iter().any(|p| msg_lower.contains(p)) {
-            return true;
-        }
-    }
-
-    false
 }
 
 /// Check if bubblewrap (bwrap) is available for sandbox mode
@@ -107,20 +70,26 @@ fn build_bwrap_wrapper(working_dir: &Path) -> Result<Vec<String>> {
         "--ro-bind".to_string(),
         work_dir.to_string_lossy().to_string(),
         work_dir.to_string_lossy().to_string(),
-        "--bind".to_string(), "/usr".to_string(),  // Bind /usr for tool binaries
-        "--ro-bind".to_string(), "/bin".to_string(),   // Bind /bin for shell
-        "--ro-bind".to_string(), "/lib".to_string(),   // Bind /lib for libraries
-        "--ro-bind".to_string(), "/lib64".to_string(), // Bind /lib64 on some systems
-        "--proc".to_string(), "/proc".to_string(),      // Bind /proc for process info
-        "--dev".to_string(), "/dev".to_string(),        // Bind /dev for device access
+        "--bind".to_string(),
+        "/usr".to_string(), // Bind /usr for tool binaries
+        "--ro-bind".to_string(),
+        "/bin".to_string(), // Bind /bin for shell
+        "--ro-bind".to_string(),
+        "/lib".to_string(), // Bind /lib for libraries
+        "--ro-bind".to_string(),
+        "/lib64".to_string(), // Bind /lib64 on some systems
+        "--proc".to_string(),
+        "/proc".to_string(), // Bind /proc for process info
+        "--dev".to_string(),
+        "/dev".to_string(), // Bind /dev for device access
         "--tmpfs".to_string(),
         "/tmp".to_string(),
         "--tmpfs".to_string(),
-        "/home".to_string(),  // Isolated home directory
-        "--unshare-all".to_string(),  // Unshare all namespaces (except net implied below)
-        "--share-net".to_string(),   // Re-share network for API access
-        "--die-with-parent".to_string(),  // Exit when parent exits
-        "--new-session".to_string(),  // Create new session
+        "/home".to_string(),             // Isolated home directory
+        "--unshare-all".to_string(),     // Unshare all namespaces (except net implied below)
+        "--share-net".to_string(),       // Re-share network for API access
+        "--die-with-parent".to_string(), // Exit when parent exits
+        "--new-session".to_string(),     // Create new session
     ];
 
     Ok(args)
@@ -138,11 +107,40 @@ pub struct CliRunner {
     config: AgentConfig,
     working_dir: PathBuf,
     iteration_timeout_secs: u64,
+    /// LSP diagnostic configuration
+    lsp_diagnostics: LspDiagnosticConfig,
+    /// Session ID for LSP communication
+    session_id: Option<String>,
 }
 
 impl CliRunner {
-    pub fn new(config: AgentConfig, working_dir: PathBuf, iteration_timeout_secs: u64) -> Self {
-        Self { config, working_dir, iteration_timeout_secs }
+    pub fn new(
+        config: AgentConfig,
+        working_dir: PathBuf,
+        iteration_timeout_secs: u64,
+    ) -> Self {
+        Self {
+            config,
+            working_dir,
+            iteration_timeout_secs,
+            lsp_diagnostics: LspDiagnosticConfig::default(),
+            session_id: None,
+        }
+    }
+
+    /// Set LSP diagnostic configuration
+    pub fn with_lsp_diagnostics(
+        mut self,
+        diagnostics: LspDiagnosticConfig,
+    ) -> Self {
+        self.lsp_diagnostics = diagnostics;
+        self
+    }
+
+    /// Set session ID for LSP communication
+    pub fn with_session_id(mut self, session_id: String) -> Self {
+        self.session_id = Some(session_id);
+        self
     }
 
     async fn run_internal(&self, prompt: &str, task: &Task) -> Result<RunResult> {
@@ -157,7 +155,17 @@ impl CliRunner {
             ));
         }
 
-        // Create a unique secure prompt file using task ID and timestamp
+        // Step 1: Capture file state before agent runs (for edit detection)
+        let mut edit_tracker = if self.lsp_diagnostics.enabled {
+            let mut tracker = EditTracker::new(self.working_dir.clone());
+            // Ignore capture errors - non-critical for operation
+            let _ = tracker.capture_before(&self.lsp_diagnostics);
+            Some(tracker)
+        } else {
+            None
+        };
+
+        // Step 2: Create a unique secure prompt file using task ID and timestamp
         // This prevents race conditions when multiple orchestrate sessions run concurrently
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -165,7 +173,8 @@ impl CliRunner {
             .as_micros();
         let prompt_filename = format!(".maestro-prompt-{}-{}.txt", task.id, timestamp);
         let prompt_file = self.working_dir.join(&prompt_filename);
-        tokio::fs::write(&prompt_file, prompt).await
+        tokio::fs::write(&prompt_file, prompt)
+            .await
             .with_context(|| format!("Failed to write prompt file: {:?}", prompt_file))?;
 
         // Build command (with optional sandbox wrapper)
@@ -179,26 +188,62 @@ impl CliRunner {
         cmd.stderr(Stdio::piped());
 
         // Spawn process
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("Failed to spawn agent process: {}", self.config.tool))?;
 
-        // Read stdout
-        let stdout = if let Some(stdout) = child.stdout.take() {
-            let reader = BufReader::new(stdout);
-            let mut lines = Vec::new();
-            let mut reader_lines = reader.lines();
-            while let Ok(Some(line)) = reader_lines.next_line().await {
-                lines.push(line);
-            }
-            lines.join("\n")
+        // Read stdout/stderr concurrently
+        let stdout_task = if let Some(stdout) = child.stdout.take() {
+            Some(tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = Vec::new();
+                let mut reader_lines = reader.lines();
+                while let Ok(Some(line)) = reader_lines.next_line().await {
+                    lines.push(line);
+                }
+                lines.join("\n")
+            }))
         } else {
-            String::new()
+            None
+        };
+
+        let stderr_task = if let Some(stderr) = child.stderr.take() {
+            Some(tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = Vec::new();
+                let mut reader_lines = reader.lines();
+                while let Ok(Some(line)) = reader_lines.next_line().await {
+                    lines.push(line);
+                }
+                lines.join("\n")
+            }))
+        } else {
+            None
         };
 
         // Wait for completion with configured timeout (not hardcoded 300s)
-        let output = timeout(Duration::from_secs(self.iteration_timeout_secs), child.wait()).await
-            .map_err(|_| anyhow!("Agent execution timeout after {} seconds", self.iteration_timeout_secs))?
-            .context("Failed to wait for agent process")?;
+        let output = timeout(
+            Duration::from_secs(self.iteration_timeout_secs),
+            child.wait(),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Agent execution timeout after {} seconds",
+                self.iteration_timeout_secs
+            )
+        })?
+        .context("Failed to wait for agent process")?;
+
+        let stdout = match stdout_task {
+            Some(handle) => handle.await.unwrap_or_else(|_| String::new()),
+            None => String::new(),
+        };
+
+        let stderr = match stderr_task {
+            Some(handle) => handle.await.unwrap_or_else(|_| String::new()),
+            None => String::new(),
+        };
 
         // Clean up prompt file
         let _ = tokio::fs::remove_file(&prompt_file).await;
@@ -207,21 +252,95 @@ impl CliRunner {
         let success = output.success();
         let completed = Self::detect_completion(&stdout);
         let error_message = if !success {
-            Some(format!("Process failed with exit code: {:?}", output.code()))
+            if stderr.trim().is_empty() {
+                Some(format!(
+                    "Process failed with exit code: {:?}",
+                    output.code()
+                ))
+            } else {
+                Some(format!(
+                    "Process failed with exit code: {:?}. stderr: {}",
+                    output.code(),
+                    stderr.trim()
+                ))
+            }
         } else {
             None
         };
 
-        // Detect rate limiting
-        let rate_limited = detect_rate_limit(&stdout, &error_message);
+        // Step 3: Detect edits and run LSP diagnostics if enabled
+        let mut diagnostics_error = None;
+        if let Some(ref mut tracker) = edit_tracker {
+            if let Ok(modified_files) = tracker.detect_edits(&self.lsp_diagnostics) {
+                if !modified_files.is_empty() {
+                    tracing::info!(
+                        "Detected {} modified files, running LSP diagnostics",
+                        modified_files.len()
+                    );
+
+                    // Get session ID for LSP communication
+                    let session_id = self.session_id.as_deref().unwrap_or("default");
+
+                    // Run diagnostics on modified files
+                    match validate_diagnostics_batch(
+                        session_id,
+                        &modified_files,
+                        &self.lsp_diagnostics,
+                    )
+                    .await
+                    {
+                        Ok(validation) if !validation.passed => {
+                            // Diagnostics failed
+                            let diag_msg = validation.error_message.unwrap_or_else(|| {
+                                format!(
+                                    "LSP validation failed for {} file(s)",
+                                    modified_files.len()
+                                )
+                            });
+
+                            tracing::warn!("LSP diagnostics failed:\n{}", diag_msg);
+
+                            // Mark as failed if errors are present
+                            diagnostics_error = Some(diag_msg);
+
+                            // Override success to force retry
+                        }
+                        Ok(_) => {
+                            tracing::debug!(
+                                "LSP diagnostics passed for {} file(s)",
+                                modified_files.len()
+                            );
+                        }
+                        Err(e) => {
+                            // Don't fail on diagnostic errors, just log
+                            tracing::warn!("LSP diagnostic check failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If diagnostics found errors, mark result as failed
+        let final_success = if diagnostics_error.is_some() {
+            false
+        } else {
+            success
+        };
+
+        let final_error_message = match (error_message, diagnostics_error) {
+            (Some(proc_err), Some(diag_err)) => Some(format!("{}\n\n{}", proc_err, diag_err)),
+            (Some(proc_err), None) => Some(proc_err),
+            (None, Some(diag_err)) => Some(diag_err),
+            (None, None) => None,
+        };
 
         Ok(RunResult {
-            success,
+            success: final_success,
             completed,
             output: stdout,
-            error_message,
+            stderr,
+            error_message: final_error_message,
             exit_code: output.code(),
-            rate_limited,
         })
     }
 
@@ -233,7 +352,8 @@ impl CliRunner {
             return Err(anyhow!(
                 "Tool '{}' is not in the allowlist. Allowed tools: {:?}. \
                  Set dangerous_mode=true to override (not recommended).",
-                self.config.tool, ALLOWED_TOOLS
+                self.config.tool,
+                ALLOWED_TOOLS
             ));
         }
 
@@ -275,7 +395,13 @@ impl CliRunner {
             "gemini" => vec!["chat".to_string(), "--prompt-file".to_string(), prompt_str],
             "qwen" => vec!["chat".to_string(), "-f".to_string(), prompt_str],
             "opencode" => vec!["chat".to_string(), "--prompt".to_string(), prompt_str],
-            "pi" => vec!["-p".to_string(), "subagent".to_string(), "worker".to_string(), "--".to_string(), std::fs::read_to_string(prompt_file)?],
+            "pi" => vec![
+                "-p".to_string(),
+                "subagent".to_string(),
+                "worker".to_string(),
+                "--".to_string(),
+                std::fs::read_to_string(prompt_file)?,
+            ],
             _ => vec![prompt_str], // Default: just pass the prompt file
         };
 
@@ -313,15 +439,47 @@ pub struct AgentRunnerFactory {
     config: AgentConfig,
     working_dir: PathBuf,
     iteration_timeout_secs: u64,
+    /// LSP diagnostic configuration
+    lsp_diagnostics: LspDiagnosticConfig,
+    /// Session ID for LSP communication
+    session_id: Option<String>,
 }
 
 impl AgentRunnerFactory {
     pub fn new(config: AgentConfig, working_dir: PathBuf, iteration_timeout_secs: u64) -> Self {
-        Self { config, working_dir, iteration_timeout_secs }
+        Self {
+            config,
+            working_dir,
+            iteration_timeout_secs,
+            lsp_diagnostics: LspDiagnosticConfig::default(),
+            session_id: None,
+        }
+    }
+
+    /// Set LSP diagnostic configuration
+    pub fn with_lsp_diagnostics(mut self, diagnostics: LspDiagnosticConfig) -> Self {
+        self.lsp_diagnostics = diagnostics;
+        self
+    }
+
+    /// Set session ID for LSP communication
+    pub fn with_session_id(mut self, session_id: String) -> Self {
+        self.session_id = Some(session_id);
+        self
     }
 
     pub fn create_runner(&self) -> CliRunner {
-        CliRunner::new(self.config.clone(), self.working_dir.clone(), self.iteration_timeout_secs)
+        CliRunner::new(
+            self.config.clone(),
+            self.working_dir.clone(),
+            self.iteration_timeout_secs,
+        )
+        .with_lsp_diagnostics(self.lsp_diagnostics.clone())
+        .with_session_id(
+            self.session_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        )
     }
 }
 
@@ -352,7 +510,9 @@ mod tests {
 
     #[test]
     fn test_completion_detection() {
-        assert!(CliRunner::detect_completion("Some output\n<promise>COMPLETE</promise>\n"));
+        assert!(CliRunner::detect_completion(
+            "Some output\n<promise>COMPLETE</promise>\n"
+        ));
         assert!(CliRunner::detect_completion("Task complete: done\n"));
         assert!(!CliRunner::detect_completion("Some output without promise"));
     }

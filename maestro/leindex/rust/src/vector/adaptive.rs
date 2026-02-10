@@ -222,7 +222,7 @@ impl AdaptiveVectorStore {
         // Generate unified IDs for all (Task 7.6.12)
         let mut items_with_ids = Vec::with_capacity(items.len());
         let mut unified_ids = Vec::with_capacity(items.len());
-        
+
         for (content, embedding, metadata) in items {
             let unified_id = format!("vec_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
             unified_ids.push(unified_id.clone());
@@ -231,7 +231,9 @@ impl AdaptiveVectorStore {
 
         // Always add to Turso for persistence (Task 7.6.29)
         if let Some(ref turso) = self.turso {
-            turso.add_vectors_batch_with_ids(items_with_ids.clone()).await?;
+            turso
+                .add_vectors_batch_with_ids(items_with_ids.clone())
+                .await?;
         }
 
         // Add to active in-memory store in batch (Task 8.7)
@@ -462,7 +464,10 @@ impl AdaptiveVectorStore {
                     .context("Failed to add vector to HNSW store during migration")?;
             }
 
-            info!("Data migration completed: {} vectors migrated", vector_count);
+            info!(
+                "Data migration completed: {} vectors migrated",
+                vector_count
+            );
         } else if let Some(old_store) = old_linear_store {
             warn!("No Turso store available, migrating from Linear store (may lose unsaved data)");
             // Fallback: persist old store to disk first
@@ -537,7 +542,10 @@ impl AdaptiveVectorStore {
                     .context("Failed to add vector to Linear store during migration")?;
             }
 
-            info!("Data migration completed: {} vectors migrated", vector_count);
+            info!(
+                "Data migration completed: {} vectors migrated",
+                vector_count
+            );
         } else if let Some(old_store) = old_hnsw_store {
             warn!("No Turso store available, migrating from HNSW store (may lose unsaved data)");
             // Fallback: persist old store to disk first

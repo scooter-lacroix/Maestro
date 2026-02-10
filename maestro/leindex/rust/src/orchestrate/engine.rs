@@ -1,18 +1,25 @@
 //! Orchestrate execution engine
 //!
 //! Core iteration loop: select → prompt → run → detect completion → update
+//!
+//! Bidirectional communication with Conductor TUI via control.json (commands)
+//! and events.jsonl (structured events).
 
+use crate::orchestrate::control::{ControlCommand, ControlManager, EngineEvent};
 use crate::orchestrate::model::*;
 use crate::orchestrate::parser::{parse_plan_md, write_plan_md};
+use crate::orchestrate::prompts::PromptBuilder;
+use crate::orchestrate::rate_limit_detector::{
+    RateLimitDetectionInput, RateLimitDetectionResult, RateLimitDetector,
+};
 use crate::orchestrate::runner::{AgentRunner, RunResult};
 use crate::orchestrate::state::{LockGuard, StateManager};
-use crate::orchestrate::prompts::PromptBuilder;
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Orchestrate engine
 pub struct OrchestrateEngine {
@@ -20,7 +27,8 @@ pub struct OrchestrateEngine {
     state_manager: StateManager,
     tracks_dir: PathBuf,
     memory_service: Option<crate::memory::MemoryService>,
-    rate_limit_detector: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitDetector>>,
+    rate_limit_detector: RateLimitDetector,
+    rate_limit_backoff: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitBackoff>>,
 }
 
 impl OrchestrateEngine {
@@ -28,27 +36,43 @@ impl OrchestrateEngine {
     pub fn new(config: OrchestrateConfig, tracks_dir: PathBuf) -> Result<Self> {
         let state_manager = StateManager::new(config.data_dir.clone())
             .context("Failed to initialize state manager")?;
-        
+
         let memory_service = crate::memory::MemoryService::new(None).ok();
 
-        let rate_limit_detector = std::sync::Arc::new(tokio::sync::Mutex::new(
-            crate::rate_limit::RateLimitDetector::new(
-                config.rate_limit_max_retries,
-                config.rate_limit_backoff_base_secs,
-            )
+        let rate_limit_detector = RateLimitDetector::new();
+        let rate_limit_backoff = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::rate_limit::RateLimitBackoff::new(),
         ));
+
         Ok(Self {
             config,
             state_manager,
             tracks_dir,
             memory_service,
             rate_limit_detector,
+            rate_limit_backoff,
         })
+    }
+
+    /// Emit an event to the conductor
+    fn emit_event(&self, track_id: &str, event: &EngineEvent) {
+        let manager = ControlManager::new(track_id.to_string(), self.config.data_dir.clone());
+        if let Err(e) = manager.emit_event(event) {
+            warn!("Failed to emit event: {}", e);
+        }
+    }
+
+    /// Check for pending control commands from conductor
+    fn check_control_commands(&self, track_id: &str) -> Result<Option<ControlCommand>> {
+        let manager = ControlManager::new(track_id.to_string(), self.config.data_dir.clone());
+        manager
+            .pop_command()
+            .context("Failed to read control commands")
     }
 
     /// Start orchestrate loop for a track
     pub async fn start(
-        &self,
+        &mut self,
         track_id: &str,
         mode: LoopMode,
         agent_config: AgentConfig,
@@ -71,27 +95,135 @@ impl OrchestrateEngine {
             track_id, mode
         );
 
+        // Truncate events file for this session (clean slate)
+        let manager = ControlManager::new(track_id.to_string(), self.config.data_dir.clone());
+        let _ = manager.truncate_events();
+
+        // Emit session start event
+        self.emit_event(
+            track_id,
+            &EngineEvent::Progress {
+                iteration: session.current_iteration,
+                task_id: track_id.to_string(),
+                message: format!("Session started in {:?} mode", mode),
+                timestamp: Utc::now().to_rfc3339(),
+            },
+        );
+
         // Main loop
         loop {
-            // Check for pause/interrupt
+            // Check for pausing/paused states (Ralph TUI pattern)
+            if session.status == SessionStatus::Pausing {
+                // Transition to paused state
+                session.status = SessionStatus::Paused;
+                session.updated_at = Utc::now().to_rfc3339();
+                self.state_manager.save_session(&session)?;
+                self.emit_event(
+                    track_id,
+                    &EngineEvent::Progress {
+                        iteration: session.current_iteration,
+                        task_id: track_id.to_string(),
+                        message: "Session paused".to_string(),
+                        timestamp: Utc::now().to_rfc3339(),
+                    },
+                );
+                info!("Session transitioned to Paused state");
+                continue;
+            }
+
             if session.status == SessionStatus::Paused {
                 info!("Session paused, sleeping...");
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 continue;
             }
 
+            // Check max iterations limit (Ralph TUI pattern)
+            if session.max_iterations > 0 && session.current_iteration >= session.max_iterations {
+                info!("Max iterations ({}) reached", session.max_iterations);
+                session.status = SessionStatus::Idle;
+                session.updated_at = Utc::now().to_rfc3339();
+                self.state_manager.save_session(&session)?;
+                self.emit_event(
+                    track_id,
+                    &EngineEvent::Progress {
+                        iteration: session.current_iteration,
+                        task_id: track_id.to_string(),
+                        message: format!("Max iterations ({}) reached", session.max_iterations),
+                        timestamp: Utc::now().to_rfc3339(),
+                    },
+                );
+                break;
+            }
+
+            // Check for control commands from conductor
+            if let Ok(Some(cmd)) = self.check_control_commands(track_id) {
+                match cmd {
+                    ControlCommand::Abort { reason } => {
+                        info!("Abort command received from conductor: {:?}", reason);
+                        session.status = SessionStatus::Interrupted;
+                        self.state_manager.save_session(&session)?;
+                        break;
+                    }
+                    ControlCommand::Retry {
+                        task_id: cmd_task_id,
+                        iteration,
+                    } => {
+                        info!(
+                            "Retry command from conductor for task {} iteration {}",
+                            cmd_task_id, iteration
+                        );
+                        // Will be handled in the error handling section
+                    }
+                    ControlCommand::Skip {
+                        task_id: cmd_task_id,
+                        ..
+                    } => {
+                        info!("Skip command from conductor for task {}", cmd_task_id);
+                        // Mark task as completed (skip)
+                        let task_ref = self.find_task_mut(&mut plan.tasks, &cmd_task_id);
+                        if let Ok(t) = task_ref {
+                            t.status = TrackStatus::Completed;
+                            t.notes = Some(format!("SKIPPED via conductor control"));
+                            self.state_manager.save_session(&session)?;
+                        }
+                    }
+                    ControlCommand::SetErrorStrategy { strategy } => {
+                        info!("Error strategy changed to {:?}", strategy);
+                        // Note: This would need to be stored in the session/config
+                        // For now, we log it
+                    }
+                }
+            }
+
             if session.status != SessionStatus::Running {
                 break;
             }
 
+            // Emit selecting event
+            self.emit_event(
+                track_id,
+                &EngineEvent::Selecting {
+                    iteration: session.current_iteration + 1,
+                    timestamp: Utc::now().to_rfc3339(),
+                },
+            );
+
             // Select next actionable task
-            let (task_id, task_title, task_description) = match self.select_next_task(&plan, &session)? {
+            let (task_id, task_title, task_description) = match self
+                .select_next_task(&plan, &session)?
+            {
                 Some(t) => (t.id.clone(), t.title.clone(), t.description.clone()),
                 None => {
                     // All tasks marked complete. Perform final Track Verification.
-                    info!("All tasks in track {} marked as complete. Verifying integrity...", track_id);
+                    info!(
+                        "All tasks in track {} marked as complete. Verifying integrity...",
+                        track_id
+                    );
                     if let Err(e) = self.verify_track_integrity(track_id, &plan, &session).await {
-                        warn!("Track verification failed: {}. Re-opening relevant tasks.", e);
+                        warn!(
+                            "Track verification failed: {}. Re-opening relevant tasks.",
+                            e
+                        );
                         // logic to re-open tasks would go here
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         continue;
@@ -106,7 +238,10 @@ impl OrchestrateEngine {
                             track_id,
                             Utc::now().to_rfc3339()
                         );
-                        let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
+                        let _ = svc.store_memory(
+                            &content,
+                            crate::memory::models::MemoryCategory::Decision,
+                        );
                     }
 
                     session.status = SessionStatus::Completed;
@@ -121,6 +256,17 @@ impl OrchestrateEngine {
             session.current_iteration += 1;
             session.updated_at = Utc::now().to_rfc3339();
             self.state_manager.save_session(&session)?;
+
+            // Emit executing event
+            self.emit_event(
+                track_id,
+                &EngineEvent::Executing {
+                    iteration: session.current_iteration,
+                    task_id: task_id.clone(),
+                    task_title: task_title.clone(),
+                    timestamp: Utc::now().to_rfc3339(),
+                },
+            );
 
             // Create a temporary task for the iteration
             let temp_task = Task {
@@ -143,18 +289,48 @@ impl OrchestrateEngine {
                 match result {
                     Ok(iter_res) => {
                         // Check for rate limiting
-                        if iter_res.rate_limited && self.config.enable_rate_limit_detection {
-                            let mut detector = self.rate_limit_detector.lock().await;
-                            detector.record_hit();
-                            let detector_state = detector.state.clone();
-                            drop(detector);
+                        let rate_limit_result = if self.config.enable_rate_limit_detection {
+                            self.rate_limit_detector.detect(RateLimitDetectionInput {
+                                stderr: iter_res.stderr.clone(),
+                                stdout: iter_res.output.clone(),
+                                exit_code: iter_res.exit_code,
+                                agent_id: Some(session.agent_config.tool.clone()),
+                            })
+                        } else {
+                            RateLimitDetectionResult::not_limited()
+                        };
+
+                        if self.config.enable_rate_limit_detection
+                            && rate_limit_result.is_rate_limit
+                        {
+                            let mut backoff = self.rate_limit_backoff.lock().await;
+                            let outcome = backoff.record_hit(
+                                rate_limit_result.message.clone(),
+                                rate_limit_result.retry_after,
+                                self.config.rate_limit_max_retries,
+                                self.config.rate_limit_backoff_base_secs,
+                                self.config.rate_limit_backoff_max_secs,
+                            );
+                            let detector_state = backoff.state.clone();
+                            drop(backoff);
+
+                            // Emit rate limit event for conductor
+                            self.emit_event(
+                                track_id,
+                                &EngineEvent::RateLimited {
+                                    task_id: task_id.clone(),
+                                    retry_count: detector_state.consecutive_hits,
+                                    backoff_until: detector_state.backoff_until,
+                                    timestamp: Utc::now().to_rfc3339(),
+                                },
+                            );
 
                             // Update session with rate limit state for TUI polling
                             session.rate_limit = Some(detector_state.clone());
                             session.updated_at = Utc::now().to_rfc3339();
                             self.state_manager.save_session(&session)?;
 
-                            if detector_state.consecutive_hits > self.config.rate_limit_max_retries {
+                            if outcome.exceeded_max {
                                 error!(
                                     "Rate limit exceeded after {} hits, task {} requires manual intervention",
                                     detector_state.consecutive_hits, task_id
@@ -167,44 +343,45 @@ impl OrchestrateEngine {
                                 ));
                                 break Err(anyhow!(
                                     "Task {} rate-limited after {} hits",
-                                    task_id, detector_state.consecutive_hits
+                                    task_id,
+                                    detector_state.consecutive_hits
                                 ));
                             }
 
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            
-                            let backoff_secs = detector_state.backoff_until.unwrap_or(now) - now;
+                            let backoff_secs = outcome.delay_secs.max(1);
 
                             warn!(
-                                "Rate limit detected on task {} (hit {}/{}), backing off {}s",
+                                "Rate limit detected on task {} (hit {}/{}), backing off {}s (retry_after={}, message={})",
                                 task_id,
                                 detector_state.consecutive_hits,
                                 self.config.rate_limit_max_retries,
-                                backoff_secs
+                                backoff_secs,
+                                outcome.used_retry_after,
+                                rate_limit_result
+                                    .message
+                                    .clone()
+                                    .unwrap_or_else(|| "n/a".to_string())
                             );
 
                             // Sleep for backoff period
                             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                            
+
                             // Re-load session in case it was modified (e.g. paused)
                             if let Some(s) = self.state_manager.load_session(track_id)? {
                                 session = s;
                             }
-                            
+
                             // Continue loop to retry
                             continue;
                         }
 
                         // No rate limit, reset detector and clear rate limit state in session
-                        let mut detector = self.rate_limit_detector.lock().await;
-                        detector.reset();
-                        drop(detector);
-                        
+                        let mut backoff = self.rate_limit_backoff.lock().await;
+                        backoff.reset();
+                        drop(backoff);
+
                         session.rate_limit = None;
-                        
+
                         // Exit with result
                         break Ok(iter_res);
                     }
@@ -217,29 +394,46 @@ impl OrchestrateEngine {
 
             match iteration_result {
                 Ok(iteration_result) => {
-                    // Only mark task complete if agent explicitly completed the task
-                    // (success + completed flag means the agent signaled completion)
-                    if iteration_result.success && iteration_result.completed {
-                        // Mark task complete
-                        self.mark_task_complete(&mut plan, &task_id)?;
-                        info!(
-                            "Iteration {} completed: task {} (detected <promise>COMPLETE</promise>)",
-                            session.current_iteration, task_id
-                        );
-                    } else if iteration_result.success {
-                        // Process succeeded but task wasn't completed (partial progress)
-                        info!(
-                            "Iteration {} made progress but task not yet complete: {}",
-                            session.current_iteration, task_id
-                        );
+                    if iteration_result.success {
+                        // Clear retry counter on success
+                        session.retry_counts.remove(&task_id);
+                        // Only mark task complete if agent explicitly completed the task
+                        if iteration_result.completed {
+                            self.mark_task_complete(&mut plan, &task_id)?;
+                            info!(
+                                "Iteration {} completed: task {} (detected <promise>COMPLETE</promise>)",
+                                session.current_iteration, task_id
+                            );
+                        } else {
+                            info!(
+                                "Iteration {} made progress but task not yet complete: {}",
+                                session.current_iteration, task_id
+                            );
+                        }
                     } else {
                         // Handle failure based on error strategy
-                        self.handle_task_failure(&mut plan, &temp_task, &iteration_result.error_message)?;
+                        self.handle_task_failure(
+                            track_id,
+                            session.current_iteration,
+                            &mut plan,
+                            &temp_task,
+                            &iteration_result.error_message,
+                            &mut session,
+                        )
+                        .await?;
                     }
                 }
                 Err(e) => {
                     error!("Iteration failed: {}", e);
-                    self.handle_task_failure(&mut plan, &temp_task, &Some(e.to_string()))?;
+                    self.handle_task_failure(
+                        track_id,
+                        session.current_iteration,
+                        &mut plan,
+                        &temp_task,
+                        &Some(e.to_string()),
+                        &mut session,
+                    )
+                    .await?;
                 }
             }
 
@@ -254,18 +448,31 @@ impl OrchestrateEngine {
         Ok(())
     }
 
-    /// Pause the orchestrate loop
+    /// Pause the orchestrate loop (sets to Pausing state, loop will transition to Paused)
     pub fn pause(&self, track_id: &str) -> Result<()> {
         let mut session = self
             .state_manager
             .load_session(track_id)?
             .ok_or_else(|| anyhow!("No active session for track: {}", track_id))?;
 
-        session.status = SessionStatus::Paused;
+        // Ralph TUI pattern: set to Pausing, loop transitions to Paused
+        // This allows canceling a pending pause by calling resume()
+        match session.status {
+            SessionStatus::Running => {
+                session.status = SessionStatus::Pausing;
+            }
+            SessionStatus::Pausing => {
+                // Already pausing, this is a no-op
+                return Ok(());
+            }
+            _ => {
+                session.status = SessionStatus::Paused;
+            }
+        }
         session.updated_at = Utc::now().to_rfc3339();
         self.state_manager.save_session(&session)?;
 
-        info!("Paused orchestrate loop for track {}", track_id);
+        info!("Pause requested for track {}", track_id);
         Ok(())
     }
 
@@ -276,7 +483,16 @@ impl OrchestrateEngine {
             .load_session(track_id)?
             .ok_or_else(|| anyhow!("No active session for track: {}", track_id))?;
 
-        session.status = SessionStatus::Running;
+        // Ralph TUI pattern: resume from Pausing cancels the pending pause
+        match session.status {
+            SessionStatus::Pausing | SessionStatus::Paused => {
+                session.status = SessionStatus::Running;
+            }
+            _ => {
+                // Not paused, no-op
+                return Ok(());
+            }
+        }
         session.updated_at = Utc::now().to_rfc3339();
         self.state_manager.save_session(&session)?;
 
@@ -296,6 +512,79 @@ impl OrchestrateEngine {
         self.state_manager.save_session(&session)?;
 
         info!("Aborted orchestrate loop for track {}", track_id);
+        Ok(())
+    }
+
+    /// Add iterations to max_iterations at runtime (Ralph TUI pattern)
+    pub fn add_iterations(&self, track_id: &str, count: u64) -> Result<bool> {
+        let mut session = self
+            .state_manager
+            .load_session(track_id)?
+            .ok_or_else(|| anyhow!("No active session for track: {}", track_id))?;
+
+        let previous_max = session.max_iterations;
+        session.max_iterations += count;
+        session.updated_at = Utc::now().to_rfc3339();
+        self.state_manager.save_session(&session)?;
+
+        info!(
+            "Added {} iterations to track {}: {} -> {}",
+            count, track_id, previous_max, session.max_iterations
+        );
+
+        // Return true if engine should be restarted (was idle after hitting max)
+        let should_restart = previous_max > 0 && session.status == SessionStatus::Idle;
+        Ok(should_restart)
+    }
+
+    /// Remove iterations from max_iterations at runtime (Ralph TUI pattern)
+    pub fn remove_iterations(&self, track_id: &str, count: u64) -> Result<bool> {
+        let mut session = self
+            .state_manager
+            .load_session(track_id)?
+            .ok_or_else(|| anyhow!("No active session for track: {}", track_id))?;
+
+        let previous_max = session.max_iterations;
+        // Don't go below current iteration
+        let min_allowed = std::cmp::max(1, session.current_iteration);
+        session.max_iterations =
+            std::cmp::max(min_allowed, session.max_iterations.saturating_sub(count));
+        session.updated_at = Utc::now().to_rfc3339();
+        self.state_manager.save_session(&session)?;
+
+        info!(
+            "Removed {} iterations from track {}: {} -> {}",
+            count, track_id, previous_max, session.max_iterations
+        );
+
+        Ok(session.max_iterations != previous_max)
+    }
+
+    /// Continue execution after adding more iterations (Ralph TUI pattern)
+    pub async fn continue_execution(&mut self, track_id: &str) -> Result<()> {
+        let mut session = self
+            .state_manager
+            .load_session(track_id)?
+            .ok_or_else(|| anyhow!("No active session for track: {}", track_id))?;
+
+        if session.status != SessionStatus::Idle {
+            return Ok(()); // Only continue from idle state
+        }
+
+        session.status = SessionStatus::Running;
+        self.state_manager.save_session(&session)?;
+
+        self.emit_event(
+            track_id,
+            &EngineEvent::Progress {
+                iteration: session.current_iteration,
+                task_id: track_id.to_string(),
+                message: "Continuing execution".to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+            },
+        );
+
+        info!("Continuing execution for track {}", track_id);
         Ok(())
     }
 
@@ -331,6 +620,8 @@ impl OrchestrateEngine {
                     updated_at: now,
                     status: SessionStatus::Running,
                     rate_limit: None,
+                    retry_counts: std::collections::HashMap::new(),
+                    max_iterations: 0, // 0 = unlimited
                 })
             }
         }
@@ -344,7 +635,11 @@ impl OrchestrateEngine {
         match session.mode {
             LoopMode::Planning => {
                 // In planning mode, select the first pending task
-                Ok(plan.all_tasks().iter().find(|t| t.status == TrackStatus::Pending).copied())
+                Ok(plan
+                    .all_tasks()
+                    .iter()
+                    .find(|t| t.status == TrackStatus::Pending)
+                    .copied())
             }
             LoopMode::Building => {
                 // In building mode, select the highest priority actionable task
@@ -393,7 +688,10 @@ impl OrchestrateEngine {
                 task.status = status;
                 return Ok(());
             }
-            if self.update_task_status_recursive(&mut task.subtasks, task_id, status).is_ok() {
+            if self
+                .update_task_status_recursive(&mut task.subtasks, task_id, status)
+                .is_ok()
+            {
                 return Ok(());
             }
         }
@@ -426,7 +724,12 @@ impl OrchestrateEngine {
             runner.run(&prompt, task),
         )
         .await
-        .map_err(|_| anyhow!("Iteration timeout after {} seconds", self.config.iteration_timeout_secs))??;
+        .map_err(|_| {
+            anyhow!(
+                "Iteration timeout after {} seconds",
+                self.config.iteration_timeout_secs
+            )
+        })??;
 
         // Log iteration
         let log = IterationLog {
@@ -448,7 +751,12 @@ impl OrchestrateEngine {
         Ok(run_result)
     }
 
-    fn build_prompt(&self, task: &Task, session: &SessionState, plan: &TrackPlan) -> Result<String> {
+    fn build_prompt(
+        &self,
+        task: &Task,
+        session: &SessionState,
+        plan: &TrackPlan,
+    ) -> Result<String> {
         let builder = PromptBuilder::new(self.config.context_budget);
 
         // Get recent iterations
@@ -459,30 +767,28 @@ impl OrchestrateEngine {
 
         // Get LeIndex context if enabled
         let leindex_context = if self.config.enable_leindex {
-            let engine = crate::orchestrate::context::ContextEngine::new(self.config.context_budget);
+            let engine =
+                crate::orchestrate::context::ContextEngine::new(self.config.context_budget);
             Some(engine.build_context(&self.tracks_dir, plan)?)
         } else {
             None
         };
 
-        let memory_context = self
-            .memory_service
-            .as_ref()
-            .and_then(|svc| {
-                let project_path = self.resolve_project_path();
-                match svc.list_lsp_memories_for_project(&project_path, 5) {
-                    Ok(memories) if !memories.is_empty() => {
-                        let content = memories
-                            .iter()
-                            .take(5)
-                            .map(|m| m.content.clone())
-                            .collect::<Vec<_>>()
-                            .join("\n\n");
-                        Some(content)
-                    }
-                    _ => None,
+        let memory_context = self.memory_service.as_ref().and_then(|svc| {
+            let project_path = self.resolve_project_path();
+            match svc.list_lsp_memories_for_project(&project_path, 5) {
+                Ok(memories) if !memories.is_empty() => {
+                    let content = memories
+                        .iter()
+                        .take(5)
+                        .map(|m| m.content.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
+                    Some(content)
                 }
-            });
+                _ => None,
+            }
+        });
 
         builder.build_prompt(
             task,
@@ -508,21 +814,35 @@ impl OrchestrateEngine {
         tracks_dir.to_string_lossy().to_string()
     }
 
-    fn handle_task_failure(
+    async fn handle_task_failure(
         &self,
+        track_id: &str,
+        iteration: u64,
         plan: &mut TrackPlan,
         task: &Task,
         error: &Option<String>,
+        session: &mut SessionState,
     ) -> Result<()> {
+        // Track retry count per task in session state
+        let retry_count = *session.retry_counts.get(&task.id).unwrap_or(&0);
+
+        // Emit TaskFailed event for conductor UI
+        self.emit_event(
+            track_id,
+            &EngineEvent::TaskFailed {
+                iteration,
+                task_id: task.id.clone(),
+                error: error.clone().unwrap_or_else(|| "Unknown error".to_string()),
+                can_retry: retry_count < self.config.max_retries,
+                can_skip: matches!(self.config.error_strategy, ErrorStrategy::Skip),
+                retry_count,
+                max_retries: self.config.max_retries,
+                timestamp: Utc::now().to_rfc3339(),
+            },
+        );
+
         match self.config.error_strategy {
             ErrorStrategy::Retry => {
-                // Parse retry count from task notes (format: "retries: N")
-                let retry_count = task.notes
-                    .as_ref()
-                    .and_then(|n| n.split("retries:").nth(1))
-                    .and_then(|s| s.trim().parse::<u32>().ok())
-                    .unwrap_or(0);
-
                 if retry_count >= self.config.max_retries {
                     error!(
                         "Task {} failed after {} retries, aborting: {:?}",
@@ -530,19 +850,47 @@ impl OrchestrateEngine {
                     );
                     return Err(anyhow!(
                         "Task {} failed after {} retries (max: {})",
-                        task.id, retry_count, self.config.max_retries
+                        task.id,
+                        retry_count,
+                        self.config.max_retries
                     ));
                 }
+                // Next retry attempt (1-indexed)
+                let next_attempt = retry_count + 1;
 
-                // Increment retry counter
+                // Exponential backoff: base * 3^attempt_index (attempt_index starts at 0)
+                let backoff_ms = self
+                    .config
+                    .retry_backoff_base_ms
+                    .saturating_mul(3u64.saturating_pow(retry_count));
+
                 warn!(
-                    "Task {} failed (attempt {}/{}), will retry: {:?}",
-                    task.id, retry_count + 1, self.config.max_retries, error
+                    "Task {} failed (attempt {}/{}), retrying after {}ms: {:?}",
+                    task.id, next_attempt, self.config.max_retries, backoff_ms, error
                 );
 
-                // Update task notes with incremented retry count
-                let task_ref = self.find_task_mut(&mut plan.tasks, &task.id)?;
-                task_ref.notes = Some(format!("retries: {}", retry_count + 1));
+                // Emit retry event for conductor (Ralph TUI pattern)
+                self.emit_event(
+                    track_id,
+                    &EngineEvent::TaskRetrying {
+                        iteration,
+                        task_id: task.id.clone(),
+                        retry_attempt: next_attempt,
+                        max_retries: self.config.max_retries,
+                        delay_ms: backoff_ms,
+                        error: error.clone().unwrap_or_else(|| "Unknown error".to_string()),
+                        timestamp: Utc::now().to_rfc3339(),
+                    },
+                );
+
+                // Update retry count in session state
+                session.retry_counts.insert(task.id.clone(), next_attempt);
+                session.updated_at = Utc::now().to_rfc3339();
+
+                // Wait for backoff before retrying
+                if backoff_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                }
             }
             ErrorStrategy::Skip => {
                 warn!("Task {} failed, skipping: {:?}", task.id, error);
@@ -553,11 +901,18 @@ impl OrchestrateEngine {
                     "SKIPPED due to error: {}",
                     error.as_deref().unwrap_or("unknown")
                 ));
+
+                // Clear retry counter when skipping
+                session.retry_counts.remove(&task.id);
             }
             ErrorStrategy::Abort => {
                 error!("Task {} failed, aborting: {:?}", task.id, error);
-                return Err(anyhow!("Task {} failed, aborting track: {}", task.id,
-                    error.as_deref().unwrap_or("unknown")));
+                session.retry_counts.remove(&task.id);
+                return Err(anyhow!(
+                    "Task {} failed, aborting track: {}",
+                    task.id,
+                    error.as_deref().unwrap_or("unknown")
+                ));
             }
         }
         Ok(())
@@ -601,7 +956,11 @@ impl OrchestrateEngine {
         Ok(None)
     }
 
-    fn find_subtask_mut<'a>(&'a self, subtasks: &'a mut [Task], task_id: &str) -> Result<Option<&'a mut Task>> {
+    fn find_subtask_mut<'a>(
+        &'a self,
+        subtasks: &'a mut [Task],
+        task_id: &str,
+    ) -> Result<Option<&'a mut Task>> {
         for subtask in subtasks {
             if subtask.id == task_id {
                 return Ok(Some(subtask));
@@ -613,9 +972,17 @@ impl OrchestrateEngine {
         Ok(None)
     }
 
-    async fn verify_track_integrity(&self, track_id: &str, plan: &TrackPlan, session: &SessionState) -> Result<()> {
-        info!("Running final autonomous verification for track: {}", track_id);
-        
+    async fn verify_track_integrity(
+        &self,
+        track_id: &str,
+        plan: &TrackPlan,
+        session: &SessionState,
+    ) -> Result<()> {
+        info!(
+            "Running final autonomous verification for track: {}",
+            track_id
+        );
+
         // Create a verification task
         let verify_task = Task {
             id: "track-verification".to_string(),
@@ -628,13 +995,17 @@ impl OrchestrateEngine {
             line_number: 0,
         };
 
-        let result = self.run_iteration(track_id, &verify_task, session, plan).await?;
-        
+        let result = self
+            .run_iteration(track_id, &verify_task, session, plan)
+            .await?;
+
         if result.success && result.completed {
             Ok(())
         } else {
-            Err(anyhow!("Verification failed: {}", result.error_message.unwrap_or_default()))
+            Err(anyhow!(
+                "Verification failed: {}",
+                result.error_message.unwrap_or_default()
+            ))
         }
     }
 }
-

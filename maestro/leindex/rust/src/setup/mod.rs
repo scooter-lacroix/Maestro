@@ -142,7 +142,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         ));
 
                         // Skill pack (Agent Skills standard)
-                        let src_skill = repo_root.join("claude-code").join("skills").join("maestro");
+                        let src_skill =
+                            repo_root.join("claude-code").join("skills").join("maestro");
                         let dst_skill = home_dir()?.join(".claude").join("skills").join("maestro");
                         copy_dir_recursive(&src_skill, &dst_skill)?;
                         logs.push(format!(
@@ -208,10 +209,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         let src_skill = repo_root.join("gemini-cli").join("skills").join("maestro");
                         let dst_skill = home_dir()?.join(".gemini").join("skills").join("maestro");
                         copy_dir_recursive(&src_skill, &dst_skill)?;
-                        logs.push(format!(
-                            "Installed Gemini skill to {}",
-                            dst_skill.display()
-                        ));
+                        logs.push(format!("Installed Gemini skill to {}", dst_skill.display()));
 
                         // MCP server config in ~/.gemini/settings.json under mcpServers.leindex
                         let cfg_path = home_dir()?.join(".gemini").join("settings.json");
@@ -375,10 +373,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             .join("skills")
                             .join("maestro");
                         copy_dir_recursive(&src_skill, &dst_skill)?;
-                        logs.push(format!(
-                            "Installed Amp skill to {}",
-                            dst_skill.display()
-                        ));
+                        logs.push(format!("Installed Amp skill to {}", dst_skill.display()));
 
                         let cfg_path = home_dir()?
                             .join(".config")
@@ -424,7 +419,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 let _install_path = config.install_path.clone();
                 steps.push(Step {
                     name: "Strings - pi-mono".to_string(),
-                    description: "Integrating Maestro into pi-mono (Multi-Model CLI)...".to_string(),
+                    description: "Integrating Maestro into pi-mono (Multi-Model CLI)..."
+                        .to_string(),
                     action: StepAction::Internal(Box::new(move || {
                         let repo_root = find_repo_root()?;
                         let mut logs = Vec::new();
@@ -432,7 +428,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // Create extension directory and symlink
                         let pi_extensions = home_dir()?.join(".pi").join("extensions");
                         std::fs::create_dir_all(&pi_extensions)?;
-                        logs.push(format!("Created pi-mono extensions directory: {}", pi_extensions.display()));
+                        logs.push(format!(
+                            "Created pi-mono extensions directory: {}",
+                            pi_extensions.display()
+                        ));
 
                         let ext_src = repo_root.join("pi-maestro");
                         let ext_dst = pi_extensions.join("pi-maestro");
@@ -477,7 +476,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         match build_output {
                             Ok(out) => {
                                 if out.status.success() {
-                                    logs.push("  TypeScript extension built successfully".to_string());
+                                    logs.push(
+                                        "  TypeScript extension built successfully".to_string(),
+                                    );
                                 } else {
                                     let stderr = String::from_utf8_lossy(&out.stderr);
                                     logs.push(format!("  Build warning: {}", stderr.trim()));
@@ -494,7 +495,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         logs.push("To install from npm (when published):".to_string());
                         logs.push("  pi install npm:@<username>/pi-maestro".to_string());
                         logs.push("".to_string());
-                        logs.push("Local extension active at: ~/.pi/extensions/pi-maestro".to_string());
+                        logs.push(
+                            "Local extension active at: ~/.pi/extensions/pi-maestro".to_string(),
+                        );
 
                         Ok(logs)
                     })),
@@ -529,7 +532,11 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             action: StepAction::Internal(Box::new(move || {
                 let repo_root = find_repo_root()?;
                 let maestro_home = expand_user_path(&install_path)?;
-                let src_resources = repo_root.join("maestro").join("leindex").join("rust").join("resources");
+                let src_resources = repo_root
+                    .join("maestro")
+                    .join("leindex")
+                    .join("rust")
+                    .join("resources");
                 let dst_resources = maestro_home.join("resources");
 
                 let mut logs = Vec::new();
@@ -549,7 +556,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         }
                     }
                 } else {
-                    logs.push("  [WARN] No resources directory found in repo (development build?)".to_string());
+                    logs.push(
+                        "  [WARN] No resources directory found in repo (development build?)"
+                            .to_string(),
+                    );
                 }
 
                 Ok(logs)
@@ -599,7 +609,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             } else {
                                 let _ = tx.send(SetupEvent::Error(format!(
                                     "Step '{}' failed with exit code: {:?}",
-                                    step.name, status.code()
+                                    step.name,
+                                    status.code()
                                 )));
                                 return;
                             }

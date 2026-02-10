@@ -2,9 +2,9 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
-    widgets::{Block, Borders, BorderType, Paragraph},
-    Frame,
     prelude::*,
+    widgets::{Block, BorderType, Borders, Paragraph},
+    Frame,
 };
 
 use crate::app::App;
@@ -67,11 +67,12 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(theme_field, chunks[1]);
 
-    let transparent_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Transparent {
-        ratatui::style::Style::default().fg(theme.warning).bold()
-    } else {
-        ratatui::style::Style::default()
-    };
+    let transparent_style =
+        if app.tab_index == 7 && app.settings_option == SettingsOption::Transparent {
+            ratatui::style::Style::default().fg(theme.warning).bold()
+        } else {
+            ratatui::style::Style::default()
+        };
     let transparent_text = if app.config.transparent {
         "ON (terminal background visible)"
     } else {
@@ -99,7 +100,10 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     frame.render_widget(path, chunks[3]);
 
     let save_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Save {
-        ratatui::style::Style::default().bg(theme.success).fg(ratatui::style::Color::Black).bold()
+        ratatui::style::Style::default()
+            .bg(theme.success)
+            .fg(ratatui::style::Color::Black)
+            .bold()
     } else {
         ratatui::style::Style::default().fg(theme.success)
     };

@@ -30,7 +30,8 @@ pub fn render_project_selector(f: &mut Frame, area: Rect, state: &ConductorState
         return;
     }
 
-    let items: Vec<ListItem> = state.available_projects
+    let items: Vec<ListItem> = state
+        .available_projects
         .iter()
         .enumerate()
         .map(|(i, p)| {
@@ -39,12 +40,15 @@ pub fn render_project_selector(f: &mut Frame, area: Rect, state: &ConductorState
             } else {
                 Style::default()
             };
-            
+
             let root_path = p.root_dir.to_string_lossy();
             let tracks_path = p.tracks_path.to_string_lossy();
-            
+
             ListItem::new(vec![
-                Line::from(Span::styled(format!(" {} ", p.name()), style.add_modifier(Modifier::BOLD))),
+                Line::from(Span::styled(
+                    format!(" {} ", p.name()),
+                    style.add_modifier(Modifier::BOLD),
+                )),
                 Line::from(format!("   Root:   {}", root_path)),
                 Line::from(format!("   Tracks: {}", tracks_path)),
                 Line::from(""),
@@ -52,17 +56,16 @@ pub fn render_project_selector(f: &mut Frame, area: Rect, state: &ConductorState
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block);
+    let list = List::new(items).block(block);
 
     f.render_widget(list, selector_area);
-    
+
     // Help message at the bottom of the selector
     let help_area = Rect::new(
         selector_area.x + 1,
         selector_area.y + selector_area.height - 2,
         selector_area.width - 2,
-        1
+        1,
     );
     let help_text = Paragraph::new("↑/↓: Navigate • Enter: Switch • Esc/P: Close")
         .style(Style::default().fg(Color::DarkGray))

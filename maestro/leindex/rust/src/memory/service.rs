@@ -375,8 +375,7 @@ impl MemoryService {
             None
         };
 
-        let metadata_json = metadata
-            .map(|m| serde_json::to_string(&m).unwrap_or_default());
+        let metadata_json = metadata.map(|m| serde_json::to_string(&m).unwrap_or_default());
 
         let id = self.db.with_connection(|conn| {
             conn.execute(
@@ -533,7 +532,9 @@ impl MemoryService {
 
             let track_pattern = format!("%{}%", track_id);
             let memories = stmt
-                .query_map(params![track_id, track_pattern, limit as i32], |row| self.map_memory(row))?
+                .query_map(params![track_id, track_pattern, limit as i32], |row| {
+                    self.map_memory(row)
+                })?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .context("Failed to collect track memories")?;
 
@@ -564,7 +565,9 @@ impl MemoryService {
             )?;
 
             let memories = stmt
-                .query_map(params![project.id, limit as i32], |row| self.map_memory(row))?
+                .query_map(params![project.id, limit as i32], |row| {
+                    self.map_memory(row)
+                })?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .context("Failed to collect LSP memories")?;
 
@@ -774,9 +777,21 @@ impl MemoryService {
             }
         }
 
-        // De-dupe by server name (first win).
+        // Get the list of blocklisted server names to skip during sync
+        let blocklist: std::collections::HashSet<String> = self
+            .db
+            .with_connection(|conn| {
+                let mut stmt = conn.prepare("SELECT name FROM mcp_servers_blocklist")?;
+                let names = stmt
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(names.into_iter().collect())
+            })
+            .unwrap_or_default();
+
+        // De-dupe by server name (first win) and filter out blocklisted servers.
         let mut seen = std::collections::HashSet::<String>::new();
-        discovered.retain(|s| seen.insert(s.name.clone()));
+        discovered.retain(|s| !blocklist.contains(&s.name) && seen.insert(s.name.clone()));
         let mut upserted = 0usize;
 
         for s in discovered {
@@ -1288,11 +1303,48 @@ impl MemoryService {
         })
     }
 
-    /// Delete an MCP server from pool
+    /// Delete an MCP server from pool and add to blocklist
     pub fn delete_mcp_server(&self, name: &str) -> Result<()> {
         self.db.with_connection(|conn| {
+            // First, get the server info before deleting (for blocklist source tracking)
+            let source: Option<String> = conn
+                .query_row(
+                    "SELECT 'discovered' FROM mcp_servers WHERE name = ?",
+                    [name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let source = source.unwrap_or_else(|| "manual".to_string());
+
+            // Delete from mcp_servers table
             conn.execute("DELETE FROM mcp_servers WHERE name = ?", [name])?;
+
+            // Add to blocklist to prevent re-discovery
+            conn.execute(
+                "INSERT OR REPLACE INTO mcp_servers_blocklist (name, source) VALUES (?, ?)",
+                params![name, source],
+            )?;
+
             Ok(())
+        })
+    }
+
+    /// Remove an MCP server from the blocklist (allows re-discovery)
+    pub fn unblock_mcp_server(&self, name: &str) -> Result<()> {
+        self.db.with_connection(|conn| {
+            conn.execute("DELETE FROM mcp_servers_blocklist WHERE name = ?", [name])?;
+            Ok(())
+        })
+    }
+
+    /// List all blocklisted MCP server names
+    pub fn list_blocked_mcp_servers(&self) -> Result<Vec<String>> {
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare("SELECT name FROM mcp_servers_blocklist ORDER BY name")?;
+            let names = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(names)
         })
     }
 }

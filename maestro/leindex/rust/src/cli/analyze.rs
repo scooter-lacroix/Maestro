@@ -6,12 +6,12 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::language::ProgrammingLanguage;
 use crate::multi_lang_ast::MultiLangASTAnalyzer;
-use crate::multi_lang_cfg::MultiLangCFGAnalyzer;
 use crate::multi_lang_callgraph::MultiLangCallGraphAnalyzer;
+use crate::multi_lang_cfg::MultiLangCFGAnalyzer;
 use crate::multi_lang_dfg::MultiLangDFGAnalyzer;
 use crate::multi_lang_slicing::MultiLangSlicingAnalyzer;
-use crate::language::ProgrammingLanguage;
 
 pub async fn run(
     path: PathBuf,

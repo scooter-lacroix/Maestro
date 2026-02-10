@@ -1,0 +1,18 @@
+{
+  "project_id": "maestro",
+  "generation": "6f409c1b1b08c51e65ffb1aac4d4959ff1511085ffb48fb43831f1b54cc66ef7",
+  "phase": 1,
+  "options_hash": null,
+  "payload": {
+    "total_files": 200,
+    "parsed_files": 0,
+    "parse_failures": 0,
+    "signatures": 0,
+    "language_distribution": {
+      "Python": 32,
+      "Rust": 4858,
+      "external": 749
+    },
+    "parser_completeness": []
+  }
+}

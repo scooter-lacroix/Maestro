@@ -2,7 +2,7 @@
 //!
 //! This test module follows TDD principles to test the detection functionality.
 
-use maestro_pi_mono::detection::{PiDetection, Capabilities};
+use maestro_pi_mono::detection::{Capabilities, PiDetection};
 use std::path::PathBuf;
 
 #[test]
@@ -36,7 +36,10 @@ fn test_detection_struct_creation() {
         capabilities: Capabilities::default(),
     };
 
-    assert_eq!(detection.executable_path, PathBuf::from("/usr/local/bin/pi"));
+    assert_eq!(
+        detection.executable_path,
+        PathBuf::from("/usr/local/bin/pi")
+    );
     assert_eq!(detection.version, Some("0.49.3".to_string()));
     assert!(detection.capabilities.streaming);
 }
@@ -57,10 +60,7 @@ fn test_version_parse_success() {
 fn test_version_parse_with_prefix() {
     let version_str = "pi version 0.49.3";
     // Extract version from output
-    let version_part = version_str
-        .split_whitespace()
-        .last()
-        .unwrap_or("0.0.0");
+    let version_part = version_str.split_whitespace().last().unwrap_or("0.0.0");
 
     let version = version_part.parse::<semver::Version>();
     assert!(version.is_ok());
@@ -145,7 +145,7 @@ async fn test_detect_capabilities_default() {
 
 #[test]
 fn test_error_detection_not_found() {
-    use maestro_pi_mono::error::{Error, DetectionError};
+    use maestro_pi_mono::error::{DetectionError, Error};
 
     let error = Error::Detection(DetectionError::NotFound);
     assert!(error.is_detection());
@@ -154,7 +154,7 @@ fn test_error_detection_not_found() {
 
 #[test]
 fn test_error_version_parse_failed() {
-    use maestro_pi_mono::error::{Error, DetectionError};
+    use maestro_pi_mono::error::{DetectionError, Error};
 
     let error = Error::Detection(DetectionError::VersionParseFailed {
         output: "bad version".to_string(),
@@ -165,7 +165,7 @@ fn test_error_version_parse_failed() {
 
 #[test]
 fn test_error_execution_failed() {
-    use maestro_pi_mono::error::{Error, DetectionError};
+    use maestro_pi_mono::error::{DetectionError, Error};
 
     let error = Error::Detection(DetectionError::ExecutionFailed {
         command: "pi --version".to_string(),

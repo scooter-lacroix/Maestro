@@ -7,11 +7,11 @@
 //! - FR6.2: Replace DuckDB (OLAP) with Turso native SQL
 //! - FR6.3: Replace Tantivy with Turso's FTS5 extension
 
-use tempfile::TempDir;
 use chrono::Utc;
+use tempfile::TempDir;
 
-use leindex_analyzers::memory::models::{Session, SessionStatus, MemoryCategory, MemoryImportance};
-use leindex_analyzers::memory::turso_backend::{TursoStorageBackend, TursoConfig};
+use leindex_analyzers::memory::models::{MemoryCategory, MemoryImportance, Session, SessionStatus};
+use leindex_analyzers::memory::turso_backend::{TursoConfig, TursoStorageBackend};
 
 /// Migration test for FR6.1: SQLite → Turso OLTP migration
 ///
@@ -298,7 +298,10 @@ async fn test_tantivy_to_fts5_migration() {
 
     // Test 1: Create memory entries for FTS5 indexing
     for i in 0..10 {
-        let content = format!("Test memory content number {} with keywords rust python typescript", i);
+        let content = format!(
+            "Test memory content number {} with keywords rust python typescript",
+            i
+        );
         let memory = leindex_analyzers::memory::models::Memory {
             id: 0,
             content: content.clone(),
@@ -430,7 +433,10 @@ async fn test_migration_rollback() {
     let storage_reopened = TursoStorageBackend::new(Some(db_path), None)
         .await
         .expect("Failed to reopen Turso backend");
-    storage_reopened.initialize().await.expect("Failed to initialize reopened");
+    storage_reopened
+        .initialize()
+        .await
+        .expect("Failed to initialize reopened");
 
     // Requirement: Data should be preserved across migration (rollback not needed)
     let preserved = storage_reopened
@@ -474,7 +480,10 @@ async fn test_migration_idempotency() {
     let storage2 = TursoStorageBackend::new(Some(db_path.clone()), None)
         .await
         .expect("Failed to create Turso backend");
-    storage2.initialize().await.expect("Failed to re-initialize");
+    storage2
+        .initialize()
+        .await
+        .expect("Failed to re-initialize");
 
     // Requirement: Data should still be accessible
     let project = storage2
@@ -490,7 +499,10 @@ async fn test_migration_idempotency() {
     let storage3 = TursoStorageBackend::new(Some(db_path), None)
         .await
         .expect("Failed to create Turso backend");
-    storage3.initialize().await.expect("Failed to initialize third time");
+    storage3
+        .initialize()
+        .await
+        .expect("Failed to initialize third time");
 
     // Requirement: Should still work without data corruption
     let project = storage3
@@ -535,7 +547,10 @@ async fn test_read_only_mode() {
     let storage = TursoStorageBackend::new(Some(db_path), Some(config))
         .await
         .expect("Failed to open read-only Turso backend");
-    storage.initialize().await.expect("Failed to initialize read-only");
+    storage
+        .initialize()
+        .await
+        .expect("Failed to initialize read-only");
 
     // Requirement: Read operations should work
     let project = storage
@@ -546,12 +561,13 @@ async fn test_read_only_mode() {
     assert!(project.is_some());
 
     // Requirement: Write operations should fail
-    let write_result = storage
-        .get_or_create_project("/test2", "Test2")
-        .await;
+    let write_result = storage.get_or_create_project("/test2", "Test2").await;
 
     // The write should fail in read-only mode
-    assert!(write_result.is_err(), "Write operation should fail in read-only mode");
+    assert!(
+        write_result.is_err(),
+        "Write operation should fail in read-only mode"
+    );
 }
 
 /// Migration test: Foreign key constraints

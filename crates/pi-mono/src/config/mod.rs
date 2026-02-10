@@ -17,11 +17,11 @@
 //! config.work_dir = Some("/workspace".to_string());
 //! ```
 
-pub mod models;
 pub mod io;
+pub mod models;
 pub mod selection;
-pub mod wizard;
 pub mod validation;
+pub mod wizard;
 
 use serde::{Deserialize, Serialize};
 
@@ -89,25 +89,18 @@ impl Default for PiMonoConfig {
 
 // Re-exports from models module
 pub use models::{
-    ModelTier,
-    ModelPreference,
-    ProviderConfig,
+    ExecutionSettings, ModelPreference, ModelTier, PiMonoConfig as ModelConfig, ProviderConfig,
     RoleAssignment,
-    ExecutionSettings,
-    PiMonoConfig as ModelConfig,
 };
 
 // Re-exports from selection module
 pub use selection::ModelSelector;
 
 // Re-exports from wizard module
-pub use wizard::{WizardStep, WizardState, ConfigWizard};
+pub use wizard::{ConfigWizard, WizardState, WizardStep};
 
 // Re-exports from validation module
 pub use validation::{
-    validate_pi_path,
-    validate_model_assignments,
-    validate_config_ext,
+    validate_config_ext, validate_model_assignments, validate_pi_path, ValidationSeverity,
     ValidationWarning,
-    ValidationSeverity,
 };

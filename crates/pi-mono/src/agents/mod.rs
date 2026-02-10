@@ -22,9 +22,8 @@ pub mod workflows;
 
 // Re-export mapping types for convenience
 pub use mapping::{
-    AgentRole, PiAgentType, ToolAccess, TaskComplexity, AgentMapping,
-    RegisteredAgent, AgentRegistry,
-    default_mappings, role_to_pi_agent_type,
+    default_mappings, role_to_pi_agent_type, AgentMapping, AgentRegistry, AgentRole, PiAgentType,
+    RegisteredAgent, TaskComplexity, ToolAccess,
 };
 
 use serde::{Deserialize, Serialize};

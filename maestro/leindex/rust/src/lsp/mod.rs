@@ -1,57 +1,39 @@
 //! LSP Integration Module
 //!
-//! This module provides Language Server Protocol (LSP) integration for Maestro,
-//! including the MCP bridge that translates LSP capabilities to MCP tools/events.
+//! This module provides Language Server Protocol (LSP) integration for Maestro.
 //!
 //! ## Architecture
 //!
 //! The LSP integration consists of:
 //!
-//! - **MCP Bridge**: Translates LSP diagnostics/symbols to MCP protocol
 //! - **LSP Manager**: Manages LSP server lifecycle (in memory module)
-//! - **Binary Entry**: `maestro-lsp-mcp-bridge` for standalone operation
+//! - **MCP Bridge**: Protocol translation (extracted to `maestro-lsp-mcp-bridge` crate)
 //!
-//! ## Protocol Translation
+//! ## MCP Bridge
 //!
-//! ### LSP → MCP Events
-//!
-//! LSP diagnostics are translated to MCP events for real-time notifications:
+//! The LSP to MCP bridge has been extracted to the `maestro-lsp-mcp-bridge` crate.
 //!
 //! ```text
-//! LSP PublishDiagnosticsParams → MCP Event "diagnostics/published"
-//! {
-//!   "uri": "file:///path/to/file.rs",
-//!   "diagnostics": [...]
-//! }
+//! ┌─────────────┐     JSON-RPC      ┌─────────────┐     JSON-RPC      ┌─────────────┐
+//! │   MCP       │  ─────────────▶   │   Bridge    │  ─────────────▶   │   LSP       │
+//! │   Client    │                    │   (crate)   │                    │   Server    │
+//! │             │  ◀─────────────    │             │  ◀─────────────    │             │
+//! └─────────────┘                    └─────────────┘                    └─────────────┘
 //! ```
 //!
-//! ### LSP → MCP Tools
-//!
-//! LSP capabilities are exposed as MCP tools:
-//!
-//! - `lsp/document_symbols` - Query symbols in a document
-//! - `lsp/workspace_symbols` - Search symbols across workspace
-//! - `lsp/definition` - Go to definition
-//! - `lsp/references` - Find references
-//! - `lsp/diagnostics` - Get current diagnostics
-//!
-//! ## Usage
+//! To use the bridge, depend on `maestro-lsp-mcp-bridge`:
 //!
 //! ```no_run
-//! use leindex_analyzers::lsp::McpBridge;
-//! use leindex_analyzers::memory::lsp_manager::LspType;
+//! use maestro_lsp_mcp_bridge::McpBridge;
+//! use leindex_core::memory::lsp_manager::LspType;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     // Create a bridge for rust-analyzer
 //!     let bridge = McpBridge::new(LspType::Rust, "/path/to/project");
-//!     // Bridge communicates via stdio
 //!     Ok(())
 //! }
 //! ```
 
-pub mod mcp_bridge;
+// Stdio proxy remains in leindex-core for internal use by LspManager
 pub mod stdio_proxy;
-
-pub use mcp_bridge::*;
 pub use stdio_proxy::*;

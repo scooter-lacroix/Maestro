@@ -4,7 +4,8 @@
 //! following TDD principles.
 
 use maestro_pi_mono::execution::{
-    ExecutionResult, Executor, ExecutorConfig, UsageMetrics, StreamEvent, StreamEventType, SubagentResult,
+    ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType, SubagentResult,
+    UsageMetrics,
 };
 use std::time::Duration;
 
@@ -27,12 +28,7 @@ fn test_usage_metrics_creation() {
 
 #[test]
 fn test_usage_metrics_new() {
-    let metrics = UsageMetrics::new(
-        2000,
-        1000,
-        Some(0.006),
-        Duration::from_secs(20),
-    );
+    let metrics = UsageMetrics::new(2000, 1000, Some(0.006), Duration::from_secs(20));
 
     assert_eq!(metrics.tokens_input, 2000);
     assert_eq!(metrics.tokens_output, 1000);
@@ -43,12 +39,7 @@ fn test_usage_metrics_new() {
 
 #[test]
 fn test_usage_metrics_cost_per_million_tokens() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(10),
-    );
+    let metrics = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(10));
 
     // Cost per million = (0.003 / 1500) * 1,000,000 = 2.0
     let cost_per_million = metrics.cost_per_million_tokens();
@@ -57,24 +48,14 @@ fn test_usage_metrics_cost_per_million_tokens() {
 
 #[test]
 fn test_usage_metrics_cost_per_million_tokens_no_cost() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        None,
-        Duration::from_secs(10),
-    );
+    let metrics = UsageMetrics::new(1000, 500, None, Duration::from_secs(10));
 
     assert_eq!(metrics.cost_per_million_tokens(), None);
 }
 
 #[test]
 fn test_usage_metrics_tokens_per_second() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(10),
-    );
+    let metrics = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(10));
 
     // 1500 tokens / 10 seconds = 150 tokens per second
     let tps = metrics.tokens_per_second();
@@ -83,12 +64,7 @@ fn test_usage_metrics_tokens_per_second() {
 
 #[test]
 fn test_usage_metrics_tokens_per_second_zero_duration() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(0),
-    );
+    let metrics = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(0));
 
     // Should return 0.0 when duration is 0 to avoid division by zero
     let tps = metrics.tokens_per_second();
@@ -97,12 +73,7 @@ fn test_usage_metrics_tokens_per_second_zero_duration() {
 
 #[test]
 fn test_usage_metrics_serialization() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(10),
-    );
+    let metrics = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(10));
 
     // Test serialization to JSON
     let json = serde_json::to_string(&metrics).unwrap();
@@ -289,12 +260,7 @@ fn test_subagent_result_failure() {
 
 #[test]
 fn test_subagent_result_with_usage() {
-    let usage = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(5),
-    );
+    let usage = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(5));
 
     let result = SubagentResult::success(
         "Task".to_string(),
@@ -302,7 +268,8 @@ fn test_subagent_result_with_usage() {
         "analyzer".to_string(),
         "Done".to_string(),
         Duration::from_secs(5),
-    ).with_usage(usage.clone());
+    )
+    .with_usage(usage.clone());
 
     assert!(result.usage.is_some());
     let result_usage = result.usage.as_ref().unwrap();
@@ -321,7 +288,8 @@ fn test_subagent_result_with_event() {
         "analyzer".to_string(),
         "Done".to_string(),
         Duration::from_secs(5),
-    ).with_event(event.clone());
+    )
+    .with_event(event.clone());
 
     assert_eq!(result.events.len(), 1);
     assert_eq!(result.events[0].event_type, StreamEventType::Start);
@@ -338,7 +306,10 @@ fn test_subagent_result_with_multiple_events() {
         Duration::from_secs(5),
     )
     .with_event(StreamEvent::start("Starting".to_string()))
-    .with_event(StreamEvent::progress("50%".to_string(), Some("50".to_string())))
+    .with_event(StreamEvent::progress(
+        "50%".to_string(),
+        Some("50".to_string()),
+    ))
     .with_event(StreamEvent::complete("Done".to_string()));
 
     assert_eq!(result.events.len(), 3);
@@ -510,12 +481,7 @@ fn test_subagent_result_serialization() {
 
 #[test]
 fn test_subagent_result_builder_pattern() {
-    let usage = UsageMetrics::new(
-        2000,
-        1000,
-        Some(0.006),
-        Duration::from_secs(10),
-    );
+    let usage = UsageMetrics::new(2000, 1000, Some(0.006), Duration::from_secs(10));
 
     let result = SubagentResult::success(
         "Complex task".to_string(),
@@ -526,7 +492,10 @@ fn test_subagent_result_builder_pattern() {
     )
     .with_usage(usage)
     .with_event(StreamEvent::start("Starting review".to_string()))
-    .with_event(StreamEvent::progress("50%".to_string(), Some("50".to_string())))
+    .with_event(StreamEvent::progress(
+        "50%".to_string(),
+        Some("50".to_string()),
+    ))
     .with_event(StreamEvent::complete("Review done".to_string()));
 
     assert!(result.is_success());
@@ -604,12 +573,7 @@ fn test_subagent_result_clone() {
 
 #[test]
 fn test_usage_metrics_clone() {
-    let metrics = UsageMetrics::new(
-        1000,
-        500,
-        Some(0.003),
-        Duration::from_secs(10),
-    );
+    let metrics = UsageMetrics::new(1000, 500, Some(0.003), Duration::from_secs(10));
 
     let cloned = metrics.clone();
 

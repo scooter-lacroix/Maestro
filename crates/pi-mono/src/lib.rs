@@ -38,39 +38,47 @@
 //! println!("Maestro Pi-Mono version: {}", version);
 //! ```
 
-pub mod config;
 pub mod agents;
-pub mod execution;
-pub mod error;
+pub mod config;
 pub mod detection;
 pub mod discovery;
+pub mod error;
+pub mod execution;
 
 // Public re-exports for convenience
 pub use config::{
-    PiMonoConfig, ModelTier, ModelPreference, ProviderConfig, RoleAssignment, ExecutionSettings, ModelSelector,
-    io::{config_dir, config_path, ensure_config_dir, load_config, load_config_from_path, save_config, save_config_to_path, default_config, validate_config as validate_config_basic},
-    wizard::{WizardStep, WizardState, ConfigWizard},
-    validation::{validate_pi_path, validate_model_assignments, validate_config_ext, ValidationWarning, ValidationSeverity},
+    io::{
+        config_dir, config_path, default_config, ensure_config_dir, load_config,
+        load_config_from_path, save_config, save_config_to_path,
+        validate_config as validate_config_basic,
+    },
+    validation::{
+        validate_config_ext, validate_model_assignments, validate_pi_path, ValidationSeverity,
+        ValidationWarning,
+    },
+    wizard::{ConfigWizard, WizardState, WizardStep},
+    ExecutionSettings, ModelPreference, ModelSelector, ModelTier, PiMonoConfig, ProviderConfig,
+    RoleAssignment,
 };
 // ModelConfig is the PiMonoConfig from the models module (with role_assignments)
-pub use config::models::PiMonoConfig as ModelConfig;
-pub use agents::{PiMonoAgent, AgentError};
 pub use agents::mapping::{
-    AgentRole, PiAgentType, ToolAccess, TaskComplexity, AgentMapping,
-    RegisteredAgent, AgentRegistry,
-    default_mappings, role_to_pi_agent_type,
+    default_mappings, role_to_pi_agent_type, AgentMapping, AgentRegistry, AgentRole, PiAgentType,
+    RegisteredAgent, TaskComplexity, ToolAccess,
 };
 pub use agents::workflows::{
-    WorkflowMode, WorkflowStep, WorkflowPreset,
-    default_presets, get_preset, preset_names,
+    default_presets, get_preset, preset_names, WorkflowMode, WorkflowPreset, WorkflowStep,
+};
+pub use agents::{AgentError, PiMonoAgent};
+pub use config::models::PiMonoConfig as ModelConfig;
+pub use detection::{Capabilities, PiDetection};
+pub use discovery::{
+    DiscoveryResult, ModelDiscovery, ModelInfo, ProviderStatus, DEFAULT_CACHE_DURATION_SECS,
 };
 pub use execution::{
-    Executor, ExecutorConfig, ExecutionResult,
-    UsageMetrics, StreamEvent, StreamEventType, SubagentResult,
-    runner::{SubagentRunner, RunnerConfig, ParallelTask, ParallelResult, ChainStep, ChainResult},
+    runner::{ChainResult, ChainStep, ParallelResult, ParallelTask, RunnerConfig, SubagentRunner},
+    ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType, SubagentResult,
+    UsageMetrics,
 };
-pub use detection::{PiDetection, Capabilities};
-pub use discovery::{ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS};
 
 /// Returns the version of the maestro-pi-mono crate.
 ///

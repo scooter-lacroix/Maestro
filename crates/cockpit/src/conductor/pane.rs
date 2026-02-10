@@ -10,12 +10,14 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};
 
-use leindex_core::orchestrate::{
-    model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode, IterationLog, IterationStatus},
-    parser::{parse_tracks_md, parse_plan_md},
-    setup::{SetupStatus, detect_setup_status, AgentTool},
-};
 use leindex_core::multiplexer::TmuxMultiplexer;
+use leindex_core::orchestrate::{
+    model::{
+        IterationLog, IterationStatus, LoopMode, SessionStatus, Task, Track, TrackPlan, TrackStatus,
+    },
+    parser::{parse_plan_md, parse_tracks_md},
+    setup::{detect_setup_status, AgentTool, SetupStatus},
+};
 
 use super::model::ConductorState;
 use crate::maestro_paths::MaestroProject;
@@ -90,6 +92,8 @@ pub struct ConductorPane {
     pub show_dashboard: bool,
     /// Current Maestro project info
     pub current_project: Option<MaestroProject>,
+    /// Last byte offset read from events.jsonl
+    pub last_events_poll_offset: u64,
 }
 
 impl Default for ConductorPane {
@@ -117,6 +121,7 @@ impl Default for ConductorPane {
             setup: Default::default(),
             show_dashboard: false,
             current_project: None,
+            last_events_poll_offset: 0,
         }
     }
 }
@@ -137,10 +142,11 @@ impl ConductorPane {
     /// and active tmux panes.
     pub fn auto_discover() -> Self {
         let projects = crate::maestro_paths::discover_all_projects();
-        
+
         // Prefer the project matching current working directory, or first available
         let project = if let Ok(cwd) = std::env::current_dir() {
-            projects.iter()
+            projects
+                .iter()
                 .find(|p| cwd.starts_with(&p.root_dir))
                 .or_else(|| projects.first())
                 .cloned()
@@ -148,7 +154,10 @@ impl ConductorPane {
             projects.first().cloned()
         };
 
-        let tracks_dir = project.as_ref().map(|p| p.tracks_dir.clone()).unwrap_or_else(|| PathBuf::from("."));
+        let tracks_dir = project
+            .as_ref()
+            .map(|p| p.tracks_dir.clone())
+            .unwrap_or_else(|| PathBuf::from("."));
         let mut pane = Self::new(tracks_dir);
         pane.current_project = project;
         pane
@@ -157,7 +166,7 @@ impl ConductorPane {
     /// Load tracks from tracks.md
     pub fn load_tracks(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let tracks_path = self.tracks_dir.join("tracks.md");
-        
+
         let mut loaded_tracks = if tracks_path.exists() {
             match parse_tracks_md(&tracks_path) {
                 Ok(tracks) => tracks,
@@ -173,13 +182,10 @@ impl ConductorPane {
         // Discover external sessions from ~/.maestro/orchestrate
         let mut external_ids = std::collections::HashSet::new();
         self.discover_external_sessions(&mut loaded_tracks, &mut external_ids);
-        
+
         self.tracks = loaded_tracks;
         self.external_track_ids = external_ids;
-        self.last_tracks_mtime = tracks_path
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok();
+        self.last_tracks_mtime = tracks_path.metadata().and_then(|m| m.modified()).ok();
         self.last_external_scan = std::time::Instant::now();
         Ok(())
     }
@@ -191,20 +197,22 @@ impl ConductorPane {
     ) {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
-        
+
         if let Ok(entries) = std::fs::read_dir(orchestrate_base) {
             for entry in entries.flatten() {
                 if let Ok(file_type) = entry.file_type() {
                     if file_type.is_dir() {
                         let track_id = entry.file_name().to_string_lossy().to_string();
-                        
+
                         // If not already in tracks, add it as an external track
                         if !tracks.iter().any(|t| t.id == track_id) {
                             let session_path = entry.path().join("session.json");
                             if session_path.exists() {
                                 if let Ok(content) = std::fs::read_to_string(&session_path) {
                                     if let Ok(session) =
-                                        serde_json::from_str::<leindex_core::orchestrate::model::SessionState>(&content)
+                                        serde_json::from_str::<
+                                            leindex_core::orchestrate::model::SessionState,
+                                        >(&content)
                                     {
                                         // Skip completed/failed sessions to avoid stale phantom entries.
                                         if matches!(
@@ -239,9 +247,13 @@ impl ConductorPane {
                                         };
 
                                         // Synthesize a virtual plan from iterations if possible
-                                        if let Ok(logs) = self.load_iterations_for_track(&track_id) {
+                                        if let Ok(logs) = self.load_iterations_for_track(&track_id)
+                                        {
                                             if !logs.is_empty() {
-                                                track.plan = Some(self.synthesize_plan_from_logs(&track_id, &logs));
+                                                track.plan =
+                                                    Some(self.synthesize_plan_from_logs(
+                                                        &track_id, &logs,
+                                                    ));
                                             }
                                         }
 
@@ -257,10 +269,17 @@ impl ConductorPane {
         }
     }
 
-    fn load_iterations_for_track(&self, track_id: &str) -> Result<Vec<IterationLog>, Box<dyn std::error::Error>> {
+    fn load_iterations_for_track(
+        &self,
+        track_id: &str,
+    ) -> Result<Vec<IterationLog>, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let log_path = PathBuf::from(home).join(".maestro").join("orchestrate").join(track_id).join("iterations.jsonl");
-        
+        let log_path = PathBuf::from(home)
+            .join(".maestro")
+            .join("orchestrate")
+            .join(track_id)
+            .join("iterations.jsonl");
+
         if !log_path.exists() {
             return Ok(Vec::new());
         }
@@ -287,8 +306,12 @@ impl ConductorPane {
                     id: log.task_id.clone(),
                     title: log.task_id.clone(), // Use ID as title for virtual tasks
                     status: match log.status {
-                        IterationStatus::Completed => leindex_core::orchestrate::model::TrackStatus::Completed,
-                        IterationStatus::Running => leindex_core::orchestrate::model::TrackStatus::InProgress,
+                        IterationStatus::Completed => {
+                            leindex_core::orchestrate::model::TrackStatus::Completed
+                        }
+                        IterationStatus::Running => {
+                            leindex_core::orchestrate::model::TrackStatus::InProgress
+                        }
                         _ => leindex_core::orchestrate::model::TrackStatus::Pending,
                     },
                     dependencies: Vec::new(),
@@ -300,8 +323,12 @@ impl ConductorPane {
             } else if let Some(t) = tasks.iter_mut().find(|t| t.id == log.task_id) {
                 // Update status to latest
                 t.status = match log.status {
-                    IterationStatus::Completed => leindex_core::orchestrate::model::TrackStatus::Completed,
-                    IterationStatus::Running => leindex_core::orchestrate::model::TrackStatus::InProgress,
+                    IterationStatus::Completed => {
+                        leindex_core::orchestrate::model::TrackStatus::Completed
+                    }
+                    IterationStatus::Running => {
+                        leindex_core::orchestrate::model::TrackStatus::InProgress
+                    }
                     _ => t.status,
                 };
             }
@@ -313,7 +340,7 @@ impl ConductorPane {
             phases: Vec::new(),
         }
     }
-    
+
     /// Reload tracks (call when tracks_dir changes or to refresh)
     pub fn reload(&mut self) {
         self.invalidate_plan_cache();
@@ -324,7 +351,7 @@ impl ConductorPane {
         self.selected_index = 0;
         let _ = self.load_tracks();
     }
-    
+
     /// Set the tracks directory and reload
     pub fn set_tracks_dir(&mut self, tracks_dir: PathBuf) {
         self.tracks_dir = tracks_dir;
@@ -343,7 +370,9 @@ impl ConductorPane {
             return false;
         };
 
-        let Some(project) = crate::maestro_paths::resolve_maestro_project(Some(Path::new(&active_path))) else {
+        let Some(project) =
+            crate::maestro_paths::resolve_maestro_project(Some(Path::new(&active_path)))
+        else {
             return false;
         };
 
@@ -416,11 +445,21 @@ impl ConductorPane {
         // Drop expansion state for removed tracks
         let track_ids: std::collections::HashSet<String> =
             self.tracks.iter().map(|t| t.id.clone()).collect();
-        self.expanded_tasks
-            .retain(|id| track_ids.contains(id));
+        self.expanded_tasks.retain(|id| track_ids.contains(id));
         self.state
             .track_runtime_statuses
             .retain(|id, _| track_ids.contains(id));
+
+        // Reset current_track if it was removed (will cause re-poll on next frame)
+        if let Some(current_id) = &self.state.current_track {
+            if !track_ids.contains(current_id) {
+                self.state.current_track = None;
+                self.state.current_task = None;
+                self.state.session_id = None;
+                self.state.current_iteration = 0;
+                self.state.status = super::model::ConductorStatus::Ready;
+            }
+        }
     }
 
     /// Open the project selector
@@ -456,10 +495,10 @@ impl ConductorPane {
     /// Get the flat list of selectable items for the tree
     pub fn get_selectable_items(&mut self) -> Vec<crate::conductor::model::SelectableItem> {
         let mut items = Vec::new();
-        
+
         // We need to work with a clone of tracks to avoid borrowing issues while we might need to load plans
         let tracks_clone = self.tracks.clone();
-        
+
         for (idx, track) in tracks_clone.iter().enumerate() {
             let is_master = track.id.contains("master") || track.is_master();
             let is_external = track.description == "CLI/External Session";
@@ -470,7 +509,7 @@ impl ConductorPane {
                 is_master,
                 is_external,
             });
-            
+
             // If the track is expanded, show its tasks.
             // A track is expanded if it's in expanded_tasks.
             if self.expanded_tasks.contains(&track.id) {
@@ -488,11 +527,11 @@ impl ConductorPane {
         &self,
         task: &Task,
         depth: usize,
-        items: &mut Vec<crate::conductor::model::SelectableItem>
+        items: &mut Vec<crate::conductor::model::SelectableItem>,
     ) {
         let is_expanded = self.expanded_tasks.contains(&task.id);
         let has_children = !task.subtasks.is_empty();
-        
+
         items.push(crate::conductor::model::SelectableItem::Task {
             id: task.id.clone(),
             title: task.title.clone(),
@@ -501,7 +540,7 @@ impl ConductorPane {
             has_children,
             is_expanded,
         });
-        
+
         if is_expanded {
             for subtask in &task.subtasks {
                 self.add_tasks_to_selectable_items(subtask, depth + 1, items);
@@ -510,7 +549,10 @@ impl ConductorPane {
     }
 
     /// Internal helper to load plan without borrowing self.tracks
-    fn load_track_plan_internal(&mut self, track_idx: usize) -> Result<Option<TrackPlan>, Box<dyn std::error::Error>> {
+    fn load_track_plan_internal(
+        &mut self,
+        track_idx: usize,
+    ) -> Result<Option<TrackPlan>, Box<dyn std::error::Error>> {
         if track_idx >= self.tracks.len() {
             return Ok(None);
         }
@@ -587,8 +629,10 @@ impl ConductorPane {
     /// Get currently selected track index
     pub fn get_selected_track_index(&mut self) -> Option<usize> {
         let items = self.get_selectable_items();
-        if items.is_empty() { return None; }
-        
+        if items.is_empty() {
+            return None;
+        }
+
         let idx = self.selected_index.min(items.len() - 1);
         for i in (0..=idx).rev() {
             if let crate::conductor::model::SelectableItem::Track { index, .. } = items[i] {
@@ -600,11 +644,13 @@ impl ConductorPane {
 
     /// Select next track
     pub fn next_track(&mut self) {
-        if self.tracks.is_empty() { return; }
-        
+        if self.tracks.is_empty() {
+            return;
+        }
+
         let current_track_idx = self.get_selected_track_index().unwrap_or(0);
         let next_idx = (current_track_idx + 1) % self.tracks.len();
-        
+
         // Find the index of the next track in the flattened list
         let items = self.get_selectable_items();
         for (i, item) in items.iter().enumerate() {
@@ -619,15 +665,17 @@ impl ConductorPane {
 
     /// Select previous track
     pub fn prev_track(&mut self) {
-        if self.tracks.is_empty() { return; }
-        
+        if self.tracks.is_empty() {
+            return;
+        }
+
         let current_track_idx = self.get_selected_track_index().unwrap_or(0);
         let prev_idx = if current_track_idx == 0 {
             self.tracks.len() - 1
         } else {
             current_track_idx - 1
         };
-        
+
         // Find the index of the previous track in the flattened list
         let items = self.get_selectable_items();
         for (i, item) in items.iter().enumerate() {
@@ -645,7 +693,8 @@ impl ConductorPane {
         self.iteration_output.push(line);
         // Keep only last 1000 lines
         if self.iteration_output.len() > 1000 {
-            self.iteration_output = self.iteration_output
+            self.iteration_output = self
+                .iteration_output
                 .iter()
                 .skip(self.iteration_output.len() - 1000)
                 .cloned()
@@ -709,7 +758,12 @@ impl ConductorPane {
     }
 
     /// Get the recommended start command for the current track
-    pub fn get_start_command(&mut self, tool: Option<&str>, dangerous: bool, sandbox: bool) -> String {
+    pub fn get_start_command(
+        &mut self,
+        tool: Option<&str>,
+        dangerous: bool,
+        sandbox: bool,
+    ) -> String {
         let track_idx = match self.get_selected_track_index() {
             Some(idx) => idx,
             None => return "// No track selected".to_string(),
@@ -797,7 +851,12 @@ impl ConductorPane {
 }
 
 /// Render the Conductor pane
-pub fn render_conductor(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, theme: &crate::theme::Theme) {
+pub fn render_conductor(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &mut ConductorPane,
+    theme: &crate::theme::Theme,
+) {
     // 3-tier vertical layout: Header, Main, Footer
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -812,19 +871,22 @@ pub fn render_conductor(frame: &mut Frame, area: Rect, pane: &mut ConductorPane,
     let items = pane.get_selectable_items();
     if !items.is_empty() {
         let selected_idx = pane.selected_index.min(items.len() - 1);
-        
+
         // Update total/completed tasks based on selected track
         if let Some(track_idx) = pane.get_selected_track_index() {
-             if let Ok(Some(plan)) = pane.load_track_plan_internal(track_idx) {
-                  let (total, completed) = count_tasks_recursive(&plan.tasks);
-                  pane.state.total_tasks = total;
-                  pane.state.tasks_completed = completed;
-             }
+            if let Ok(Some(plan)) = pane.load_track_plan_internal(track_idx) {
+                let (total, completed) = count_tasks_recursive(&plan.tasks);
+                pane.state.total_tasks = total;
+                pane.state.tasks_completed = completed;
+            }
         }
 
         // If not running, we can show selection in header.
         // If running, polling.rs will handle current_task.
-        if matches!(pane.state.status, super::model::ConductorStatus::Ready | super::model::ConductorStatus::Idle) {
+        if matches!(
+            pane.state.status,
+            super::model::ConductorStatus::Ready | super::model::ConductorStatus::Idle
+        ) {
             match &items[selected_idx] {
                 crate::conductor::model::SelectableItem::Track { id, .. } => {
                     pane.state.current_track = Some(id.clone());
@@ -839,7 +901,7 @@ pub fn render_conductor(frame: &mut Frame, area: Rect, pane: &mut ConductorPane,
             }
         }
     }
-    
+
     pane.state.current_iteration = pane.current_iteration;
 
     // Render Header
@@ -881,13 +943,20 @@ pub fn render_conductor(frame: &mut Frame, area: Rect, pane: &mut ConductorPane,
 
     if pane.details_mode == crate::conductor::model::DetailsViewMode::Details {
         crate::conductor::details_panel::render_details_panel(frame, right_chunks[0], pane, theme);
-        crate::conductor::iteration_history::render_iteration_history(frame, right_chunks[1], pane, theme);
+        crate::conductor::iteration_history::render_iteration_history(
+            frame,
+            right_chunks[1],
+            pane,
+            theme,
+        );
     } else {
         crate::conductor::details_panel::render_details_panel(frame, right_chunks[0], pane, theme);
     }
 
     // Render Subagent Tree as a floating or secondary pane if there are active subagents
-    if !pane.state.subagents.is_empty() && pane.details_mode == crate::conductor::model::DetailsViewMode::Details {
+    if !pane.state.subagents.is_empty()
+        && pane.details_mode == crate::conductor::model::DetailsViewMode::Details
+    {
         // Overlay it or put it in another chunk. For now, we've replaced it with logs in the bottom-left.
         // Let's stick with the spec: bottom-left is for logs.
     }
@@ -921,7 +990,12 @@ fn count_tasks_recursive(tasks: &[Task]) -> (usize, usize) {
     (total, completed)
 }
 
-fn render_logs_pane(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, theme: &crate::theme::Theme) {
+fn render_logs_pane(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &mut ConductorPane,
+    theme: &crate::theme::Theme,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
@@ -936,7 +1010,8 @@ fn render_logs_pane(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, the
     frame.render_widget(block, area);
 
     // Filter out common metadata lines to keep logs clean
-    let filtered_logs: Vec<&String> = pane.iteration_output
+    let filtered_logs: Vec<&String> = pane
+        .iteration_output
         .iter()
         .rev()
         .filter(|line| !line.starts_with("--- Iteration"))

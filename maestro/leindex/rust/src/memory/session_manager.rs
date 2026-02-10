@@ -4,13 +4,14 @@
 //!
 //! ## LSP Proxy Integration
 //!
-//! The LSP stdio proxy (src/lsp/stdio_proxy.rs) is currently NOT integrated.
-//! This is intentional design - proxy requires:
+//! The LSP stdio proxy (src/lsp/stdio_proxy.rs) is fully integrated.
+//! It provides:
 //! - Session lifecycle management
-//! - Configuration option to enable/disable
-//! - Production testing
+//! - Configuration option to enable/disable via `use_proxy` parameter
+//! - Production-ready socket multiplexing for multiple LSP clients
 //!
-//! TODO: Add use_proxy: bool parameter to build_lsp_entry() when ready
+//! Proxy entries are included in MCP config when `use_proxy=true`
+//! and the LSP process has an active proxy socket.
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -84,7 +85,9 @@ impl SessionManager {
         // Check if we're already in a tokio runtime
         if Handle::try_current().is_ok() {
             // We're inside a runtime - don't create a new one to avoid panic
-            tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
+            tracing::debug!(
+                "Skipping lazy LSP manager init in async context to avoid nested runtime panic"
+            );
             tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
             return Ok(guard);
         }
@@ -794,7 +797,9 @@ impl SessionManager {
             // We're inside a runtime. Synchronous block_on is dangerous here.
             // Ideally callers should use regenerate_mcp_config_async.
             // For now, return error to avoid panic.
-            return Err(anyhow::anyhow!("regenerate_mcp_config_blocking called from within a runtime"));
+            return Err(anyhow::anyhow!(
+                "regenerate_mcp_config_blocking called from within a runtime"
+            ));
         }
 
         // Create a new runtime for blocking execution

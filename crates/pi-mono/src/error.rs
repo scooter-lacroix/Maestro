@@ -15,13 +15,15 @@
 //! }
 //! ```
 //!
-//! # TODO
+//! ## Error Categories
 //!
-//! This is a skeleton error module. The full implementation should:
-//! - Add more specific error variants for different failure modes
-//! - Implement proper error conversion from underlying dependencies (tokio, serde, etc.)
-//! - Add helpful context and suggestions for error recovery
-//! - Consider adding error codes for programmatic error handling
+//! - `ExecutionError`: Command execution failures (timeout, retry exhausted, non-zero exit, validation)
+//! - `ConfigError`: Configuration loading and validation errors (invalid path, load failed, missing field)
+//! - `DetectionError`: CLI detection and discovery errors (not found, version parse failed, execution failed)
+//! - `SerializationError`: JSON/YAML parsing errors (via serde_json::Error, serde_yaml::Error)
+//! - `IoError`: Standard I/O errors (via std::io::Error)
+//!
+//! All errors implement `std::error::Error` and provide context for debugging.
 
 use thiserror::Error;
 
@@ -42,13 +44,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// This enum represents all possible errors that can occur when using
 /// the maestro-pi-mono crate.
-///
-/// # TODO
-///
-/// Add additional error variants as needed:
-/// - `Config(ConfigError)` for configuration-related errors
-/// - `Agent(AgentError)` for agent-related errors
-/// - `Io(std::io::Error)` wrapper for I/O errors
 ///
 /// # Examples
 ///
@@ -211,13 +206,6 @@ pub enum DetectionError {
 }
 
 /// Errors that can occur during Pi-Mono command execution.
-///
-/// # TODO
-///
-/// Add more specific error variants:
-/// - `CommandNotFound { command: String }` - when the pi-mono executable cannot be found
-/// - `ProcessSpawnFailed { source: std::io::Error }` - when process spawning fails
-/// - `SignalDeliveryFailed { pid: u32, signal: String }` - for signal-related failures
 #[derive(Error, Debug)]
 pub enum ExecutionError {
     /// Command execution exceeded the configured timeout.
@@ -244,10 +232,6 @@ pub enum ExecutionError {
     },
 
     /// Command execution failed after all retries.
-    ///
-    /// # TODO
-    ///
-    /// Include details about the attempt count and the last error.
     ///
     /// # Example
     ///
@@ -324,12 +308,6 @@ pub enum ExecutionError {
 }
 
 /// Errors that can occur during configuration management.
-///
-/// # TODO
-///
-/// Add more specific error variants:
-/// - `ValidationError { field: String, message: String }` - for config validation errors
-/// - `ParseError { source: Box<dyn std::error::Error> }` - for parsing errors
 #[derive(Error, Debug)]
 pub enum ConfigError {
     /// The specified configuration path is invalid.

@@ -57,8 +57,7 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
     let mut track_id = String::new();
 
     // Get the parent directory of the tracks.md file, not the file itself
-    let tracks_parent = base_path.parent()
-        .unwrap_or(base_path);
+    let tracks_parent = base_path.parent().unwrap_or(base_path);
 
     for line in &lines {
         if line.contains("*Link:") {
@@ -68,14 +67,17 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     let path_str = &line[start + 2..start + end];
                     // Join against parent directory of tracks.md, not the file itself
                     let relative_path = path_str.trim_start_matches("./").trim_start_matches(".");
-                    
+
                     // Intelligent path resolution:
                     // If the path starts with the same directory name as tracks_parent,
                     // it's likely relative to the project root, not the maestro/ directory.
                     let resolved_path = if let Some(dir_name) = tracks_parent.file_name() {
                         if relative_path.starts_with(dir_name.to_str().unwrap_or("")) {
                             // Relative to project root (parent of tracks_parent)
-                            tracks_parent.parent().unwrap_or(tracks_parent).join(relative_path)
+                            tracks_parent
+                                .parent()
+                                .unwrap_or(tracks_parent)
+                                .join(relative_path)
                         } else {
                             // Relative to tracks_parent (maestro/ directory)
                             tracks_parent.join(relative_path)
@@ -87,27 +89,35 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     // SECURITY: Canonicalize and validate path to prevent traversal attacks
                     // If canonicalize fails (file doesn't exist), we still want to keep it
                     // but we should make it absolute if possible to make starts_with reliable.
-                    let canonical_path = resolved_path.canonicalize()
-                        .unwrap_or_else(|_| {
-                            if resolved_path.is_relative() {
-                                std::env::current_dir().unwrap_or_default().join(&resolved_path)
-                            } else {
-                                resolved_path.clone()
-                            }
-                        });
-                    
-                    let canonical_base = tracks_parent.canonicalize()
-                        .unwrap_or_else(|_| {
-                            if tracks_parent.is_relative() {
-                                std::env::current_dir().unwrap_or_default().join(tracks_parent)
-                            } else {
-                                tracks_parent.to_path_buf()
-                            }
-                        });
+                    let canonical_path = resolved_path.canonicalize().unwrap_or_else(|_| {
+                        if resolved_path.is_relative() {
+                            std::env::current_dir()
+                                .unwrap_or_default()
+                                .join(&resolved_path)
+                        } else {
+                            resolved_path.clone()
+                        }
+                    });
+
+                    let canonical_base = tracks_parent.canonicalize().unwrap_or_else(|_| {
+                        if tracks_parent.is_relative() {
+                            std::env::current_dir()
+                                .unwrap_or_default()
+                                .join(tracks_parent)
+                        } else {
+                            tracks_parent.to_path_buf()
+                        }
+                    });
 
                     // For the check, we use the root (parent of maestro/ if named maestro)
-                    let check_base_owned = if canonical_base.file_name().map_or(false, |n| n == "maestro" || n == ".maestro") {
-                        canonical_base.parent().unwrap_or(&canonical_base).to_path_buf()
+                    let check_base_owned = if canonical_base
+                        .file_name()
+                        .map_or(false, |n| n == "maestro" || n == ".maestro")
+                    {
+                        canonical_base
+                            .parent()
+                            .unwrap_or(&canonical_base)
+                            .to_path_buf()
                     } else {
                         canonical_base.clone()
                     };
@@ -198,10 +208,7 @@ fn parse_plan_content(content: &str, path: &Path) -> Result<TrackPlan> {
             }
 
             in_phase = true;
-            current_phase_name = trimmed
-                .strip_prefix("## ")
-                .unwrap_or(trimmed)
-                .to_string();
+            current_phase_name = trimmed.strip_prefix("## ").unwrap_or(trimmed).to_string();
             line_number += 1;
             continue;
         }
@@ -308,7 +315,9 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
         }
 
         // Check for subtasks (more indented)
-        if next_trimmed.starts_with("- [") && next_line.len() - next_line.trim_start().len() > indent_level {
+        if next_trimmed.starts_with("- [")
+            && next_line.len() - next_line.trim_start().len() > indent_level
+        {
             // Parse subtask recursively
             *line_num = i;
             if let Some(subtask) = parse_task_line(next_line, all_lines, line_num) {
@@ -434,8 +443,14 @@ mod tests {
     #[test]
     fn test_parse_status_marker() {
         assert_eq!(TrackStatus::from_marker("[ ]"), Some(TrackStatus::Pending));
-        assert_eq!(TrackStatus::from_marker("[~]"), Some(TrackStatus::InProgress));
-        assert_eq!(TrackStatus::from_marker("[x]"), Some(TrackStatus::Completed));
+        assert_eq!(
+            TrackStatus::from_marker("[~]"),
+            Some(TrackStatus::InProgress)
+        );
+        assert_eq!(
+            TrackStatus::from_marker("[x]"),
+            Some(TrackStatus::Completed)
+        );
         assert_eq!(TrackStatus::from_marker("[?]"), None);
     }
 

@@ -222,8 +222,9 @@ impl LspStdioProxy {
                 .with_context(|| format!("Failed to get socket metadata: {:?}", self.socket_path))?
                 .permissions();
             perms.set_mode(0o777); // rwxrwxrwx - allow all users to connect
-            std::fs::set_permissions(&self.socket_path, perms)
-                .with_context(|| format!("Failed to set socket permissions: {:?}", self.socket_path))?;
+            std::fs::set_permissions(&self.socket_path, perms).with_context(|| {
+                format!("Failed to set socket permissions: {:?}", self.socket_path)
+            })?;
         }
 
         info!(
@@ -279,7 +280,10 @@ impl LspStdioProxy {
             let pending_clone = Arc::clone(&pending);
             let pending_count_clone = Arc::clone(&pending_count);
             let status_clone = Arc::clone(&self.status);
-            let lsp_stdout_reader = self.lsp_stdout_reader.take().expect("LSP stdout reader not initialized");
+            let lsp_stdout_reader = self
+                .lsp_stdout_reader
+                .take()
+                .expect("LSP stdout reader not initialized");
             tokio::spawn(async move {
                 if let Err(e) = Self::route_lsp_output(
                     lsp_stdout_reader,
@@ -525,7 +529,9 @@ impl LspStdioProxy {
     }
 
     /// Read next LSP message from a BufReader
-    async fn read_next_lsp_message_from_reader(reader: &mut BufReader<tokio::process::ChildStdout>) -> Result<Value> {
+    async fn read_next_lsp_message_from_reader(
+        reader: &mut BufReader<tokio::process::ChildStdout>,
+    ) -> Result<Value> {
         const MAX_HEADER_SIZE: usize = 100;
         const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024; // 16MB
 

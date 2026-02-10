@@ -5,8 +5,8 @@
 
 use anyhow::Result;
 use dialoguer::{theme::ColorfulTheme, Confirm, Select};
-use maestro_pi_mono::config::wizard::ConfigWizard;
 use maestro_pi_mono::config::io;
+use maestro_pi_mono::config::wizard::ConfigWizard;
 use tracing::debug;
 
 /// Run the configure command
@@ -28,10 +28,7 @@ pub async fn run(pi_mono: bool) -> Result<()> {
 async fn run_configure_menu() -> Result<()> {
     let theme = ColorfulTheme::default();
 
-    let items = vec![
-        "Pi-Mono - Multi-provider AI orchestration",
-        "Cancel",
-    ];
+    let items = vec!["Pi-Mono - Multi-provider AI orchestration", "Cancel"];
 
     let selection = Select::with_theme(&theme)
         .with_prompt("What would you like to configure?")
@@ -94,20 +91,23 @@ async fn run_pi_mono_wizard() -> Result<()> {
     println!("Checking for pi-mono installation...");
 
     match wizard.step1_detection().await {
-        Ok(()) => {
-            match wizard.state().pi_detection.as_ref() {
-                Some(detection) => {
-                    println!("  ✓ Found pi-mono at: {}", detection.executable_path.display());
-                    if let Some(version) = &detection.version {
-                        println!("  ✓ Version: {}", version);
-                    }
-                }
-                None => {
-                    println!("  ⚠ Detection completed but no information available");
-                    return Err(anyhow::anyhow!("Pi-Mono detection succeeded but returned no results"));
+        Ok(()) => match wizard.state().pi_detection.as_ref() {
+            Some(detection) => {
+                println!(
+                    "  ✓ Found pi-mono at: {}",
+                    detection.executable_path.display()
+                );
+                if let Some(version) = &detection.version {
+                    println!("  ✓ Version: {}", version);
                 }
             }
-        }
+            None => {
+                println!("  ⚠ Detection completed but no information available");
+                return Err(anyhow::anyhow!(
+                    "Pi-Mono detection succeeded but returned no results"
+                ));
+            }
+        },
         Err(e) => {
             println!("  ✗ Detection failed: {}", e);
             println!();
@@ -134,11 +134,12 @@ async fn run_pi_mono_wizard() -> Result<()> {
         if let Some(discovery) = wizard.state().discovery_result.as_ref() {
             for provider in &discovery.providers {
                 if provider.is_configured {
-                    println!("  ✓ {}: {} (configured)",
-                        provider.provider, provider.env_var);
+                    println!(
+                        "  ✓ {}: {} (configured)",
+                        provider.provider, provider.env_var
+                    );
                 } else {
-                    println!("  ✗ {}: {} (not set)",
-                        provider.provider, provider.env_var);
+                    println!("  ✗ {}: {} (not set)", provider.provider, provider.env_var);
                 }
             }
         }
@@ -154,7 +155,10 @@ async fn run_pi_mono_wizard() -> Result<()> {
             return Ok(());
         }
     } else {
-        println!("  ✓ Configured providers: {}", configured_providers.join(", "));
+        println!(
+            "  ✓ Configured providers: {}",
+            configured_providers.join(", ")
+        );
     }
 
     // Step 3: Model Selection
@@ -192,7 +196,10 @@ async fn run_pi_mono_wizard() -> Result<()> {
                     println!("  → Selected: {} for {}", selected, tier);
                 }
                 Err(e) => {
-                    println!("  ⚠ Failed to select model '{}' for tier {}: {}", selected, tier, e);
+                    println!(
+                        "  ⚠ Failed to select model '{}' for tier {}: {}",
+                        selected, tier, e
+                    );
                     println!("  → Continuing with model selection...");
                 }
             }
@@ -212,7 +219,10 @@ async fn run_pi_mono_wizard() -> Result<()> {
         }
     } else {
         println!();
-        println!("  ✓ Selected {} model(s)", wizard.state().selected_models.len());
+        println!(
+            "  ✓ Selected {} model(s)",
+            wizard.state().selected_models.len()
+        );
     }
 
     // Step 4: Role Assignment
@@ -222,7 +232,10 @@ async fn run_pi_mono_wizard() -> Result<()> {
 
     let roles = wizard.state().get_roles();
     // Clone the default model to avoid borrow issues
-    let default_model_id = wizard.state().selected_models.get("Balanced")
+    let default_model_id = wizard
+        .state()
+        .selected_models
+        .get("Balanced")
         .or_else(|| wizard.state().selected_models.values().next())
         .cloned();
 
@@ -250,7 +263,11 @@ async fn run_pi_mono_wizard() -> Result<()> {
         }
 
         if !failed_roles.is_empty() {
-            println!("  ⚠ Failed to assign {} role(s): {}", failed_roles.len(), failed_roles.join(", "));
+            println!(
+                "  ⚠ Failed to assign {} role(s): {}",
+                failed_roles.len(),
+                failed_roles.join(", ")
+            );
         }
     }
 
@@ -263,15 +280,32 @@ async fn run_pi_mono_wizard() -> Result<()> {
     let config = wizard.config();
     println!("Configuration Summary:");
     println!("  Enabled: {}", config.enabled);
-    println!("  Pi-Mono Path: {}", config.path.as_ref().map(|p| p.as_str()).unwrap_or("Not detected"));
-    println!("  Version: {}", config.version_info.as_ref().map(|v| v.as_str()).unwrap_or("Unknown"));
+    println!(
+        "  Pi-Mono Path: {}",
+        config
+            .path
+            .as_ref()
+            .map(|p| p.as_str())
+            .unwrap_or("Not detected")
+    );
+    println!(
+        "  Version: {}",
+        config
+            .version_info
+            .as_ref()
+            .map(|v| v.as_str())
+            .unwrap_or("Unknown")
+    );
     println!();
 
     if !config.providers.is_empty() {
         println!("  Providers:");
         for (_name, provider) in &config.providers {
             let status = if provider.is_configured { "✓" } else { "✗" };
-            println!("    {} {} ({})", status, provider.display_name, provider.env_var);
+            println!(
+                "    {} {} ({})",
+                status, provider.display_name, provider.env_var
+            );
         }
         println!();
     }
@@ -279,9 +313,17 @@ async fn run_pi_mono_wizard() -> Result<()> {
     if !config.model_preferences.is_empty() {
         println!("  Model Preferences:");
         for pref in &config.model_preferences {
-            println!("    {} [{}] - {:?} ({})",
-                pref.model_id, pref.provider, pref.tier,
-                if pref.is_default { "default" } else { "optional" });
+            println!(
+                "    {} [{}] - {:?} ({})",
+                pref.model_id,
+                pref.provider,
+                pref.tier,
+                if pref.is_default {
+                    "default"
+                } else {
+                    "optional"
+                }
+            );
         }
         println!();
     }
@@ -289,7 +331,10 @@ async fn run_pi_mono_wizard() -> Result<()> {
     if !config.role_assignments.is_empty() {
         println!("  Role Assignments:");
         for (role, assignment) in &config.role_assignments {
-            println!("    {}: {} ({})", role, assignment.model_id, assignment.provider);
+            println!(
+                "    {}: {} ({})",
+                role, assignment.model_id, assignment.provider
+            );
         }
         println!();
     }
@@ -325,8 +370,8 @@ async fn run_pi_mono_wizard() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use maestro_pi_mono::config::models::PiMonoConfig;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     /// Test that the configure command module exists and compiles
     #[test]
@@ -364,16 +409,14 @@ mod tests {
         };
 
         // Write config
-        let yaml_content = serde_yaml::to_string(&original_config)
-            .expect("Failed to serialize config");
-        fs::write(&config_path, yaml_content)
-            .expect("Failed to write config");
+        let yaml_content =
+            serde_yaml::to_string(&original_config).expect("Failed to serialize config");
+        fs::write(&config_path, yaml_content).expect("Failed to write config");
 
         // Read config back
-        let read_content = fs::read_to_string(&config_path)
-            .expect("Failed to read config");
-        let loaded_config: PiMonoConfig = serde_yaml::from_str(&read_content)
-            .expect("Failed to deserialize config");
+        let read_content = fs::read_to_string(&config_path).expect("Failed to read config");
+        let loaded_config: PiMonoConfig =
+            serde_yaml::from_str(&read_content).expect("Failed to deserialize config");
 
         assert_eq!(loaded_config.enabled, original_config.enabled);
         assert_eq!(loaded_config.path, original_config.path);
@@ -400,8 +443,8 @@ mod tests {
     "streaming": true
   }
 }"#;
-        let config: PiMonoConfig = serde_yaml::from_str(yaml)
-            .expect("Failed to deserialize minimal config");
+        let config: PiMonoConfig =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize minimal config");
 
         assert_eq!(config.enabled, true);
         assert!(config.path.is_none());
@@ -432,8 +475,8 @@ mod tests {
     "streaming": true
   }
 }"#;
-        let config: PiMonoConfig = serde_yaml::from_str(yaml)
-            .expect("Failed to deserialize partial config");
+        let config: PiMonoConfig =
+            serde_yaml::from_str(yaml).expect("Failed to deserialize partial config");
 
         assert_eq!(config.enabled, true);
         assert_eq!(config.path, Some("/usr/local/bin/pi-mono".to_string()));
@@ -452,10 +495,8 @@ mod tests {
             ..Default::default()
         };
 
-        let yaml = serde_yaml::to_string(&original)
-            .expect("Failed to serialize");
-        let restored: PiMonoConfig = serde_yaml::from_str(&yaml)
-            .expect("Failed to deserialize");
+        let yaml = serde_yaml::to_string(&original).expect("Failed to serialize");
+        let restored: PiMonoConfig = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
 
         assert_eq!(restored.enabled, original.enabled);
         assert_eq!(restored.path, original.path);
@@ -470,12 +511,15 @@ mod tests {
         use std::collections::HashMap;
 
         let mut role_assignments = HashMap::new();
-        role_assignments.insert("Scout".to_string(), RoleAssignment {
-            model_id: "gpt-4".to_string(),
-            provider: "OpenAI".to_string(),
-            fallback_models: None,
-            use_reasoning: Some(true),
-        });
+        role_assignments.insert(
+            "Scout".to_string(),
+            RoleAssignment {
+                model_id: "gpt-4".to_string(),
+                provider: "OpenAI".to_string(),
+                fallback_models: None,
+                use_reasoning: Some(true),
+            },
+        );
 
         assert_eq!(role_assignments.len(), 1);
         assert!(role_assignments.contains_key("Scout"));

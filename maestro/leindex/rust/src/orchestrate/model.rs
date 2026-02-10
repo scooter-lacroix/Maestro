@@ -48,8 +48,8 @@ pub struct TaskDependency {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskDependencyType {
-    Hard,   // Must complete before this task can start
-    Soft,   // Should complete, but not blocking
+    Hard, // Must complete before this task can start
+    Soft, // Should complete, but not blocking
 }
 
 /// A single task in a track plan
@@ -267,6 +267,12 @@ pub struct SessionState {
     pub updated_at: String,
     pub status: SessionStatus,
     pub rate_limit: Option<crate::rate_limit::RateLimitState>,
+    /// Per-task retry counts (task_id -> retry_count)
+    #[serde(default)]
+    pub retry_counts: std::collections::HashMap<String, u32>,
+    /// Maximum iterations (0 = unlimited)
+    #[serde(default)]
+    pub max_iterations: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,10 +280,14 @@ pub struct SessionState {
 pub enum SessionStatus {
     Idle,
     Running,
+    /// Transition state before pausing - allows canceling pending pause
+    Pausing,
     Paused,
     Completed,
     Failed,
     Interrupted,
+    /// Engine is stopping (graceful shutdown in progress)
+    Stopping,
 }
 
 /// Iteration log entry
@@ -321,6 +331,9 @@ impl Default for ErrorStrategy {
 pub struct OrchestrateConfig {
     pub max_retries: u32,
     pub error_strategy: ErrorStrategy,
+    /// Base backoff in milliseconds for task-level retries (exponential)
+    #[serde(default = "default_retry_backoff_base_ms")]
+    pub retry_backoff_base_ms: u64,
     pub context_budget: usize, // Max tokens for context
     pub iteration_timeout_secs: u64,
     pub enable_leindex: bool,
@@ -330,6 +343,95 @@ pub struct OrchestrateConfig {
     pub rate_limit_max_retries: u32,
     pub rate_limit_backoff_base_secs: u64,
     pub rate_limit_backoff_max_secs: u64,
+    /// LSP diagnostic validation after agent edits
+    #[serde(default)]
+    pub lsp_diagnostics: LspDiagnosticConfig,
+}
+
+/// LSP diagnostic configuration for post-edit validation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspDiagnosticConfig {
+    /// Enable LSP diagnostic checking after agent edits
+    #[serde(default)]
+    pub enabled: bool,
+    /// Fail iteration if LSP errors are found
+    #[serde(default = "default_fail_on_errors")]
+    pub fail_on_errors: bool,
+    /// Fail iteration if LSP warnings are found
+    #[serde(default)]
+    pub fail_on_warnings: bool,
+    /// Maximum number of diagnostics to display
+    #[serde(default = "default_max_diagnostics")]
+    pub max_diagnostics: usize,
+    /// Timeout in seconds for LSP diagnostic requests
+    #[serde(default = "default_diagnostic_timeout_secs")]
+    pub timeout_secs: u64,
+    /// File patterns to include in diagnostic checks
+    #[serde(default)]
+    pub include_patterns: Vec<String>,
+    /// File patterns to exclude from diagnostic checks
+    #[serde(default = "default_exclude_patterns")]
+    pub exclude_patterns: Vec<String>,
+    /// Directories to skip (e.g., "target", "node_modules")
+    #[serde(default)]
+    pub exclude_dirs: Vec<String>,
+}
+
+impl Default for LspDiagnosticConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            fail_on_errors: true,
+            fail_on_warnings: false,
+            max_diagnostics: 50,
+            timeout_secs: 10,
+            include_patterns: vec![
+                "**/*.rs".to_string(),
+                "**/*.py".to_string(),
+                "**/*.ts".to_string(),
+                "**/*.tsx".to_string(),
+                "**/*.js".to_string(),
+                "**/*.jsx".to_string(),
+                "**/*.go".to_string(),
+                "**/*.java".to_string(),
+            ],
+            exclude_patterns: vec![
+                "**/.*".to_string(),
+                "**/*.generated.rs".to_string(),
+            ],
+            exclude_dirs: vec![
+                "target".to_string(),
+                "node_modules".to_string(),
+                ".git".to_string(),
+                "vendor".to_string(),
+                "dist".to_string(),
+                "build".to_string(),
+                "__pycache__".to_string(),
+                ".venv".to_string(),
+                "venv".to_string(),
+                ".cargo".to_string(),
+            ],
+        }
+    }
+}
+
+fn default_fail_on_errors() -> bool {
+    true
+}
+
+fn default_max_diagnostics() -> usize {
+    50
+}
+
+fn default_diagnostic_timeout_secs() -> u64 {
+    10
+}
+
+fn default_exclude_patterns() -> Vec<String> {
+    vec![
+        "**/.*".to_string(),
+        "**/*.generated.rs".to_string(),
+    ]
 }
 
 impl Default for OrchestrateConfig {
@@ -338,6 +440,7 @@ impl Default for OrchestrateConfig {
         Self {
             max_retries: 3,
             error_strategy: ErrorStrategy::Retry,
+            retry_backoff_base_ms: 5_000,
             context_budget: 50000,
             iteration_timeout_secs: 300, // 5 minutes
             enable_leindex: true,
@@ -346,6 +449,11 @@ impl Default for OrchestrateConfig {
             rate_limit_max_retries: 5,
             rate_limit_backoff_base_secs: 1,
             rate_limit_backoff_max_secs: 300,
+            lsp_diagnostics: LspDiagnosticConfig::default(),
         }
     }
+}
+
+fn default_retry_backoff_base_ms() -> u64 {
+    5_000
 }

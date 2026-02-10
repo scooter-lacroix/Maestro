@@ -4,10 +4,10 @@
 //! models based on configuration, authentication status, and role requirements.
 
 use crate::{
-    config::models::{PiMonoConfig as ModelConfig, ModelTier, ModelPreference},
+    config::models::{ModelPreference, ModelTier, PiMonoConfig as ModelConfig},
     discovery::{ModelInfo, ProviderStatus},
-    error::{Result, Error},
     error::ConfigError,
+    error::{Error, Result},
 };
 
 /// Model selector for choosing appropriate models based on criteria
@@ -309,8 +309,9 @@ impl<'a> ModelSelector<'a> {
         }
 
         // Try to find the model in model_preferences to get tier info
-        let model_pref = self.config.model_preferences.iter()
-            .find(|m| m.model_id == role_assignment.model_id && m.provider == role_assignment.provider);
+        let model_pref = self.config.model_preferences.iter().find(|m| {
+            m.model_id == role_assignment.model_id && m.provider == role_assignment.provider
+        });
 
         if let Some(pref) = model_pref {
             // Verify auth status
@@ -374,11 +375,12 @@ impl<'a> ModelSelector<'a> {
     /// let model = selector.select_for_role_with_fallback("architect").unwrap();
     /// ```
     pub fn select_for_role_with_fallback(&self, role: &str) -> Result<ModelPreference> {
-        let role_assignment = self.config.role_assignments.get(role)
-            .ok_or_else(|| Error::Config(ConfigError::LoadFailed {
+        let role_assignment = self.config.role_assignments.get(role).ok_or_else(|| {
+            Error::Config(ConfigError::LoadFailed {
                 location: "role assignment".to_string(),
                 reason: format!("role '{}' not found in configuration", role),
-            }))?;
+            })
+        })?;
 
         // Try primary model
         if let Some(model) = self.select_for_role(role)? {
@@ -389,7 +391,10 @@ impl<'a> ModelSelector<'a> {
         if let Some(fallbacks) = &role_assignment.fallback_models {
             for fallback_id in fallbacks {
                 // Try to find the fallback model in preferences
-                if let Some(pref) = self.config.model_preferences.iter()
+                if let Some(pref) = self
+                    .config
+                    .model_preferences
+                    .iter()
                     .find(|m| m.model_id == *fallback_id)
                 {
                     if self.is_provider_configured(&pref.provider) {
@@ -474,7 +479,10 @@ impl<'a> ModelSelector<'a> {
     pub fn is_provider_configured(&self, provider: &str) -> bool {
         // Check discovered status first (most up-to-date)
         if let Some(status_list) = &self.provider_status {
-            if let Some(status) = status_list.iter().find(|s| s.provider.eq_ignore_ascii_case(provider)) {
+            if let Some(status) = status_list
+                .iter()
+                .find(|s| s.provider.eq_ignore_ascii_case(provider))
+            {
                 return status.is_configured;
             }
         }
@@ -544,16 +552,22 @@ mod tests {
     // Helper function to create a test config
     fn create_test_config() -> ModelConfig {
         let mut providers = HashMap::new();
-        providers.insert("anthropic".to_string(), ProviderConfig {
-            display_name: "Anthropic".to_string(),
-            is_configured: true,
-            env_var: "ANTHROPIC_API_KEY".to_string(),
-        });
-        providers.insert("openai".to_string(), ProviderConfig {
-            display_name: "OpenAI".to_string(),
-            is_configured: false,
-            env_var: "OPENAI_API_KEY".to_string(),
-        });
+        providers.insert(
+            "anthropic".to_string(),
+            ProviderConfig {
+                display_name: "Anthropic".to_string(),
+                is_configured: true,
+                env_var: "ANTHROPIC_API_KEY".to_string(),
+            },
+        );
+        providers.insert(
+            "openai".to_string(),
+            ProviderConfig {
+                display_name: "OpenAI".to_string(),
+                is_configured: false,
+                env_var: "OPENAI_API_KEY".to_string(),
+            },
+        );
 
         let model_preferences = vec![
             ModelPreference {
@@ -583,18 +597,24 @@ mod tests {
         ];
 
         let mut role_assignments = HashMap::new();
-        role_assignments.insert("architect".to_string(), RoleAssignment {
-            model_id: "claude-sonnet-4-5".to_string(),
-            provider: "anthropic".to_string(),
-            fallback_models: Some(vec!["claude-haiku-4-5".to_string()]),
-            use_reasoning: Some(true),
-        });
-        role_assignments.insert("scout".to_string(), RoleAssignment {
-            model_id: "claude-haiku-4-5".to_string(),
-            provider: "anthropic".to_string(),
-            fallback_models: None,
-            use_reasoning: None,
-        });
+        role_assignments.insert(
+            "architect".to_string(),
+            RoleAssignment {
+                model_id: "claude-sonnet-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                fallback_models: Some(vec!["claude-haiku-4-5".to_string()]),
+                use_reasoning: Some(true),
+            },
+        );
+        role_assignments.insert(
+            "scout".to_string(),
+            RoleAssignment {
+                model_id: "claude-haiku-4-5".to_string(),
+                provider: "anthropic".to_string(),
+                fallback_models: None,
+                use_reasoning: None,
+            },
+        );
 
         ModelConfig {
             providers,
@@ -619,16 +639,14 @@ mod tests {
     #[test]
     fn test_with_available_models() {
         let config = create_test_config();
-        let models = vec![
-            ModelInfo {
-                provider: "anthropic".to_string(),
-                model_id: "claude-sonnet-4-5".to_string(),
-                context_window: "200k".to_string(),
-                max_output: "8k".to_string(),
-                supports_thinking: false,
-                supports_images: true,
-            },
-        ];
+        let models = vec![ModelInfo {
+            provider: "anthropic".to_string(),
+            model_id: "claude-sonnet-4-5".to_string(),
+            context_window: "200k".to_string(),
+            max_output: "8k".to_string(),
+            supports_thinking: false,
+            supports_images: true,
+        }];
 
         let selector = ModelSelector::new(&config).with_available_models(models.clone());
 
@@ -640,13 +658,11 @@ mod tests {
     #[test]
     fn test_with_provider_status() {
         let config = create_test_config();
-        let status = vec![
-            ProviderStatus {
-                provider: "anthropic".to_string(),
-                is_configured: true,
-                env_var: "ANTHROPIC_API_KEY".to_string(),
-            },
-        ];
+        let status = vec![ProviderStatus {
+            provider: "anthropic".to_string(),
+            is_configured: true,
+            env_var: "ANTHROPIC_API_KEY".to_string(),
+        }];
 
         let selector = ModelSelector::new(&config).with_provider_status(status.clone());
 
@@ -712,7 +728,8 @@ mod tests {
     fn test_select_by_tier_with_fallback_lower_tier() {
         let mut config = create_test_config();
         // Remove Vision tier models so we test fallback
-        config.model_preferences = config.model_preferences
+        config.model_preferences = config
+            .model_preferences
             .into_iter()
             .filter(|m| m.tier != ModelTier::Vision)
             .collect();
@@ -757,14 +774,12 @@ mod tests {
     #[test]
     fn test_select_default_for_tier_no_default() {
         let mut config = create_test_config();
-        config.model_preferences = vec![
-            ModelPreference {
-                model_id: "gpt-4".to_string(),
-                provider: "openai".to_string(),
-                tier: ModelTier::Reasoning,
-                is_default: false,
-            },
-        ];
+        config.model_preferences = vec![ModelPreference {
+            model_id: "gpt-4".to_string(),
+            provider: "openai".to_string(),
+            tier: ModelTier::Reasoning,
+            is_default: false,
+        }];
 
         let selector = ModelSelector::new(&config);
 
@@ -863,13 +878,11 @@ mod tests {
     #[test]
     fn test_is_provider_configured_from_discovered() {
         let config = create_test_config();
-        let status = vec![
-            ProviderStatus {
-                provider: "anthropic".to_string(),
-                is_configured: false, // Override config
-                env_var: "ANTHROPIC_API_KEY".to_string(),
-            },
-        ];
+        let status = vec![ProviderStatus {
+            provider: "anthropic".to_string(),
+            is_configured: false, // Override config
+            env_var: "ANTHROPIC_API_KEY".to_string(),
+        }];
 
         let selector = ModelSelector::new(&config).with_provider_status(status);
 
@@ -992,13 +1005,11 @@ mod tests {
     #[test]
     fn test_case_insensitive_provider_matching() {
         let config = create_test_config();
-        let status = vec![
-            ProviderStatus {
-                provider: "AntHrOpIc".to_string(), // Mixed case
-                is_configured: true,
-                env_var: "ANTHROPIC_API_KEY".to_string(),
-            },
-        ];
+        let status = vec![ProviderStatus {
+            provider: "AntHrOpIc".to_string(), // Mixed case
+            is_configured: true,
+            env_var: "ANTHROPIC_API_KEY".to_string(),
+        }];
 
         let selector = ModelSelector::new(&config).with_provider_status(status);
 
@@ -1041,7 +1052,8 @@ mod tests {
     fn test_fallback_chain_reasoning_to_fast() {
         let mut config = create_test_config();
         // Remove Reasoning tier models
-        config.model_preferences = config.model_preferences
+        config.model_preferences = config
+            .model_preferences
             .into_iter()
             .filter(|m| m.tier != ModelTier::Reasoning)
             .collect();
@@ -1062,12 +1074,15 @@ mod tests {
         let mut config = create_test_config();
         // Role assignment points to unconfigured provider
         let mut role_assignments = HashMap::new();
-        role_assignments.insert("architect".to_string(), RoleAssignment {
-            model_id: "gpt-4".to_string(),
-            provider: "openai".to_string(), // Not configured
-            fallback_models: None,
-            use_reasoning: None,
-        });
+        role_assignments.insert(
+            "architect".to_string(),
+            RoleAssignment {
+                model_id: "gpt-4".to_string(),
+                provider: "openai".to_string(), // Not configured
+                fallback_models: None,
+                use_reasoning: None,
+            },
+        );
         config.role_assignments = role_assignments;
 
         let selector = ModelSelector::new(&config);

@@ -406,10 +406,7 @@ impl TursoStorageBackend {
                 }
                 Ok(None) => false,
                 Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to check schema: {}",
-                        e
-                    ));
+                    return Err(anyhow::anyhow!("Failed to check schema: {}", e));
                 }
             };
 
@@ -2398,9 +2395,9 @@ mod tests {
         let backend = TursoStorageBackend::in_memory(Some(config))
             .await
             .expect("Failed to create in-memory backend");
-        
+
         assert_eq!(backend.config().max_connections, 20);
-        
+
         assert_eq!(backend.config().connection_timeout_secs, 60);
         assert!(backend.is_read_only());
     }
@@ -2411,9 +2408,9 @@ mod tests {
         let backend = TursoStorageBackend::in_memory(None)
             .await
             .expect("Failed to create in-memory backend");
-        
+
         assert_eq!(backend.config().max_connections, 10);
-        
+
         assert_eq!(backend.config().connection_timeout_secs, 30);
         assert!(!backend.is_read_only());
     }
@@ -2448,6 +2445,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)]
     async fn test_turso_backend_with_defaults() {
         let backend = TursoStorageBackend::with_defaults()
             .await
@@ -2455,7 +2453,7 @@ mod tests {
         backend.initialize().await.expect("Failed to initialize");
         assert!(!backend.is_shutdown());
         assert!(!backend.is_read_only());
-        
+
         assert_eq!(backend.config().max_connections, 10);
     }
 
@@ -2463,9 +2461,9 @@ mod tests {
     #[allow(deprecated)]
     async fn test_turso_config_default() {
         let config = TursoConfig::default();
-        
+
         assert_eq!(config.max_connections, 10);
-        
+
         assert_eq!(config.connection_timeout_secs, 30);
         assert!(!config.read_only);
     }
@@ -3136,7 +3134,6 @@ mod tests {
     /// by concurrent initialization, causing cascading test failures.
     #[tokio::test]
     async fn test_threading_safety_concurrent_creation() {
-
         use tokio::task::JoinSet;
 
         // Create multiple backends concurrently from multiple threads
@@ -3187,7 +3184,6 @@ mod tests {
     /// the risk of triggering this issue.
     #[tokio::test]
     async fn test_multiple_concurrent_backend_instances() {
-
         use tokio::task::JoinSet;
 
         // Create multiple backend instances and perform concurrent operations

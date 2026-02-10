@@ -6,9 +6,9 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem};
 
+use crate::app::App;
 use crate::state::SettingsMenuKind;
 use crate::theme::theme_from_name;
-use crate::app::App;
 
 /// Renders the settings menu modal.
 ///

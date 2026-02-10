@@ -14,8 +14,8 @@
 //! - `implement-and-review`: Chain mode - kraken -> critic -> kraken
 //! - `parallel-review`: Parallel mode - multiple critics
 
-use serde::{Deserialize, Serialize};
 use crate::agents::mapping::{AgentRole, PiAgentType};
+use serde::{Deserialize, Serialize};
 
 /// Workflow execution mode
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -169,9 +169,7 @@ pub fn default_presets() -> Vec<WorkflowPreset> {
 
 /// Get a preset by name
 pub fn get_preset(name: &str) -> Option<WorkflowPreset> {
-    default_presets()
-        .into_iter()
-        .find(|p| p.name == name)
+    default_presets().into_iter().find(|p| p.name == name)
 }
 
 /// Available preset names
@@ -430,7 +428,10 @@ mod tests {
         assert!(implement_review.steps[0].depends_on_previous);
 
         assert_eq!(implement_review.steps[1].role, AgentRole::Critic);
-        assert_eq!(implement_review.steps[1].pi_agent_type, PiAgentType::Reviewer);
+        assert_eq!(
+            implement_review.steps[1].pi_agent_type,
+            PiAgentType::Reviewer
+        );
         assert!(implement_review.steps[1].depends_on_previous);
 
         assert_eq!(implement_review.steps[2].role, AgentRole::Kraken);

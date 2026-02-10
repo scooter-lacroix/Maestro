@@ -4,7 +4,7 @@
 
 use maestro_pi_mono::detection::PiDetection;
 use maestro_pi_mono::discovery::{
-    ModelDiscovery, ModelInfo, ProviderStatus, DiscoveryResult, DEFAULT_CACHE_DURATION_SECS,
+    DiscoveryResult, ModelDiscovery, ModelInfo, ProviderStatus, DEFAULT_CACHE_DURATION_SECS,
 };
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -157,7 +157,10 @@ fn test_determine_provider_status() {
     assert_eq!(providers.len(), 5); // All 5 providers should be in the list
 
     // Check that anthropic and openai are configured
-    let anthropic = providers.iter().find(|p| p.provider == "anthropic").unwrap();
+    let anthropic = providers
+        .iter()
+        .find(|p| p.provider == "anthropic")
+        .unwrap();
     assert!(anthropic.is_configured);
     assert_eq!(anthropic.env_var, "ANTHROPIC_API_KEY");
 
@@ -174,7 +177,10 @@ fn test_determine_provider_status() {
     assert!(!groq.is_configured);
     assert_eq!(groq.env_var, "GROQ_API_KEY");
 
-    let openrouter = providers.iter().find(|p| p.provider == "openrouter").unwrap();
+    let openrouter = providers
+        .iter()
+        .find(|p| p.provider == "openrouter")
+        .unwrap();
     assert!(!openrouter.is_configured);
     assert_eq!(openrouter.env_var, "OPENROUTER_API_KEY");
 }
@@ -252,13 +258,14 @@ async fn test_discover_models_with_mock() {
 
     // Check first model
     assert_eq!(discovery_result.models[0].provider, "anthropic");
-    assert_eq!(discovery_result.models[0].model_id, "claude-3-5-sonnet-20241022");
+    assert_eq!(
+        discovery_result.models[0].model_id,
+        "claude-3-5-sonnet-20241022"
+    );
 
     // Check cache timing
     let now = SystemTime::now();
-    let time_since_discovery = now
-        .duration_since(discovery_result.discovered_at)
-        .unwrap();
+    let time_since_discovery = now.duration_since(discovery_result.discovered_at).unwrap();
     assert!(time_since_discovery.as_secs() < 5); // Should be very recent (5 second tolerance)
 
     let cache_duration = discovery_result
@@ -331,7 +338,7 @@ async fn test_discover_models_cache_expired() {
         }],
         providers: vec![],
         discovered_at: now - Duration::from_secs(DEFAULT_CACHE_DURATION_SECS), // 24 hours ago
-        cache_expires: now - Duration::from_secs(3600), // Expired 1 hour ago
+        cache_expires: now - Duration::from_secs(3600),                        // Expired 1 hour ago
     };
 
     discovery.set_cache(Some(cached_result));
@@ -458,7 +465,10 @@ fn test_env_var_mapping() {
 
     let providers = ModelDiscovery::determine_provider_status(&models);
 
-    let anthropic = providers.iter().find(|p| p.provider == "anthropic").unwrap();
+    let anthropic = providers
+        .iter()
+        .find(|p| p.provider == "anthropic")
+        .unwrap();
     assert_eq!(anthropic.env_var, "ANTHROPIC_API_KEY");
 
     let openai = providers.iter().find(|p| p.provider == "openai").unwrap();
@@ -470,7 +480,10 @@ fn test_env_var_mapping() {
     let groq = providers.iter().find(|p| p.provider == "groq").unwrap();
     assert_eq!(groq.env_var, "GROQ_API_KEY");
 
-    let openrouter = providers.iter().find(|p| p.provider == "openrouter").unwrap();
+    let openrouter = providers
+        .iter()
+        .find(|p| p.provider == "openrouter")
+        .unwrap();
     assert_eq!(openrouter.env_var, "OPENROUTER_API_KEY");
 }
 

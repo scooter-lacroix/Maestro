@@ -1,14 +1,18 @@
 //! Engine state polling and synchronization
 //!
 //! Monitor session.json and iterations.jsonl for background updates.
+//! Read events.jsonl for structured events from orchestrate engine.
 
+use super::model::{ActiveAgentState, AgentReason, ConductorEvent, ConductorStatus, OutputStream};
+use super::pane::ConductorPane;
+use chrono::TimeZone;
+use leindex_core::orchestrate::control::EngineEvent as ControlEngineEvent;
+use leindex_core::orchestrate::model::{
+    IterationLog, IterationStatus, SessionState, SessionStatus,
+};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use chrono::TimeZone;
-use leindex_core::orchestrate::model::{SessionState, IterationLog, SessionStatus, IterationStatus};
-use super::pane::ConductorPane;
-use super::model::{ConductorStatus, ConductorEvent, OutputStream, ActiveAgentState, AgentReason};
 
 impl ConductorPane {
     /// Poll the orchestrate engine state for all tracks to find active ones
@@ -17,7 +21,7 @@ impl ConductorPane {
         // to minimize blocking I/O in the main loop.
         use std::sync::atomic::{AtomicU32, Ordering};
         static POLL_COUNTER: AtomicU32 = AtomicU32::new(0);
-        
+
         let count = POLL_COUNTER.fetch_add(1, Ordering::SeqCst);
         let should_poll_all = (count % 4) == 0;
 
@@ -27,7 +31,10 @@ impl ConductorPane {
         if should_poll_all {
             self.refresh_tracks_if_needed();
 
-            let tracks_to_poll: Vec<(usize, String)> = self.tracks.iter().enumerate()
+            let tracks_to_poll: Vec<(usize, String)> = self
+                .tracks
+                .iter()
+                .enumerate()
                 .map(|(idx, t)| (idx, t.id.clone()))
                 .collect();
 
@@ -43,7 +50,9 @@ impl ConductorPane {
                     if let Ok(content) = std::fs::read_to_string(&session_path) {
                         if let Ok(session) = serde_json::from_str::<SessionState>(&content) {
                             let runtime_status = map_session_status(session.status);
-                            self.state.track_runtime_statuses.insert(track_id.clone(), runtime_status);
+                            self.state
+                                .track_runtime_statuses
+                                .insert(track_id.clone(), runtime_status);
                         }
                     }
                 }
@@ -51,7 +60,10 @@ impl ConductorPane {
         }
 
         // Always poll the selected track for detailed live updates
-        let active_track_id = self.state.track_runtime_statuses.iter()
+        let active_track_id = self
+            .state
+            .track_runtime_statuses
+            .iter()
             .find(|(_, status)| **status == ConductorStatus::Running)
             .map(|(id, _)| id.clone());
 
@@ -68,28 +80,22 @@ impl ConductorPane {
 
     fn poll_track_detailed_state(&mut self, track_id: &str, orchestrate_base: &Path) {
         let track_id = track_id.to_string();
-        // If track changed, reset polling state and clear output
+        // If track changed, reset polling state and clear all stale data
         if self.state.current_track.as_ref() != Some(&track_id) {
-            self.state.current_track = Some(track_id.clone());
-            self.state.last_poll_iteration = 0;
-            self.state.last_poll_offset = 0;
-            self.clear_output();
-            self.state.status = ConductorStatus::Ready; // Reset status until polled
-            self.state.iteration_logs.clear();
+            self.reset_track_state(&track_id);
         }
 
         let orchestrate_dir = orchestrate_base.join(&track_id);
-        
+
         if !orchestrate_dir.exists() {
-            // Reset status to Ready if no session exists for this track
-            if self.state.status != ConductorStatus::Ready {
-                self.state.status = ConductorStatus::Ready;
-            }
+            // No session directory exists for this track - reset to clean state
+            self.reset_to_ready_state();
             return;
         }
 
         self.poll_session_json(&orchestrate_dir);
         self.poll_iterations_jsonl(&orchestrate_dir);
+        self.poll_events_jsonl(&orchestrate_dir);
 
         // Update Git info using project root
         let git_dir = if let Some(project) = &self.current_project {
@@ -121,8 +127,12 @@ impl ConductorPane {
                 let new_status = map_session_status(session.status);
                 if self.session_status != session.status {
                     match new_status {
-                        ConductorStatus::Running => crate::conductor::telemetry::BUS.broadcast(ConductorEvent::Resumed),
-                        ConductorStatus::Paused => crate::conductor::telemetry::BUS.broadcast(ConductorEvent::Paused),
+                        ConductorStatus::Running => {
+                            crate::conductor::telemetry::BUS.broadcast(ConductorEvent::Resumed)
+                        }
+                        ConductorStatus::Paused => {
+                            crate::conductor::telemetry::BUS.broadcast(ConductorEvent::Paused)
+                        }
                         _ => {}
                     }
                 }
@@ -141,43 +151,53 @@ impl ConductorPane {
 
                 // Update state based on session
                 let new_status = map_session_status(session.status);
-                
+
                 // Preserve granular states (Selecting/Executing) if the session is still Running
                 if new_status == ConductorStatus::Running {
-                    if !matches!(self.state.status, ConductorStatus::Selecting | ConductorStatus::Executing | ConductorStatus::Pausing) {
+                    if !matches!(
+                        self.state.status,
+                        ConductorStatus::Selecting
+                            | ConductorStatus::Executing
+                            | ConductorStatus::Pausing
+                    ) {
                         self.state.status = new_status;
                     }
                 } else {
                     self.state.status = new_status;
                 }
-                
+
                 self.state.current_iteration = session.current_iteration;
                 self.state.session_id = Some(session.session_id.clone());
                 self.state.current_task = session.current_task_id.clone();
                 self.state.loop_mode = session.mode;
                 self.state.sandbox_enabled = session.agent_config.sandbox;
                 self.state.dangerous_mode = session.agent_config.dangerous_mode;
-                
+
                 // Map RateLimitState if present
                 if let Some(rl) = session.rate_limit {
                     self.state.rate_limit = Some(crate::conductor::model::RateLimitState {
                         primary_agent: session.agent_config.tool.clone(),
-                        limited_at: rl.last_hit_at.and_then(|ts| {
-                            chrono::Utc.timestamp_opt(ts as i64, 0).single()
-                        }),
+                        limited_at: rl
+                            .last_hit_at
+                            .and_then(|ts| chrono::Utc.timestamp_opt(ts as i64, 0).single()),
                         fallback_agent: None, // Engine currently doesn't support automatic fallback agents
                         retry_count: rl.consecutive_hits,
-                        backoff_until: rl.backoff_until.and_then(|ts| {
-                            chrono::Utc.timestamp_opt(ts as i64, 0).single()
-                        }),
-                        last_message: if rl.is_limited { Some("Rate limit hit".to_string()) } else { None },
+                        backoff_until: rl
+                            .backoff_until
+                            .and_then(|ts| chrono::Utc.timestamp_opt(ts as i64, 0).single()),
+                        last_message: rl
+                            .last_message
+                            .clone()
+                            .or_else(|| rl.is_limited.then_some("Rate limit hit".to_string())),
                     });
                 } else {
                     self.state.rate_limit = None;
                 }
 
                 // Active agent info
-                if self.state.active_agent.is_none() || self.state.active_agent.as_ref().unwrap().tool != session.agent_config.tool {
+                if self.state.active_agent.is_none()
+                    || self.state.active_agent.as_ref().unwrap().tool != session.agent_config.tool
+                {
                     self.state.active_agent = Some(ActiveAgentState {
                         tool: session.agent_config.tool.clone(),
                         model: session.agent_config.model.clone(),
@@ -185,7 +205,7 @@ impl ConductorPane {
                         since: chrono::Utc::now(),
                     });
                 }
-                
+
                 // Synchronize legacy pane fields
                 self.session_status = session.status;
                 self.loop_mode = session.mode;
@@ -213,16 +233,19 @@ impl ConductorPane {
                 self.clear_output();
             }
 
-            if file.seek(SeekFrom::Start(self.state.last_poll_offset)).is_ok() {
+            if file
+                .seek(SeekFrom::Start(self.state.last_poll_offset))
+                .is_ok()
+            {
                 let mut reader = BufReader::new(file);
                 let mut line = String::new();
                 let is_initial_read = self.state.last_poll_offset == 0;
-                
+
                 while let Ok(bytes_read) = reader.read_line(&mut line) {
                     if bytes_read == 0 {
                         break;
                     }
-                    
+
                     // If the line doesn't end with a newline, it might be a partial write
                     if !line.ends_with('\n') {
                         break;
@@ -247,29 +270,42 @@ impl ConductorPane {
 
     pub fn process_iteration_log(&mut self, log: IterationLog, suppress_output: bool) {
         // Update history list
-        if !self.state.iteration_logs.iter().any(|l| l.iteration == log.iteration) {
+        if !self
+            .state
+            .iteration_logs
+            .iter()
+            .any(|l| l.iteration == log.iteration)
+        {
             self.state.iteration_logs.push(log.clone());
             if self.state.iteration_logs.len() > 50 {
                 self.state.iteration_logs.remove(0);
             }
         } else {
             // Update existing entry if status changed
-            if let Some(existing) = self.state.iteration_logs.iter_mut().find(|l| l.iteration == log.iteration) {
+            if let Some(existing) = self
+                .state
+                .iteration_logs
+                .iter_mut()
+                .find(|l| l.iteration == log.iteration)
+            {
                 *existing = log.clone();
             }
         }
 
         // Add output to pane if not suppressed
         if !suppress_output {
-            self.add_output(format!("--- Iteration {} ({}) ---", log.iteration, log.task_id));
+            self.add_output(format!(
+                "--- Iteration {} ({}) ---",
+                log.iteration, log.task_id
+            ));
         }
-        
+
         // Use events to update state
-        let started_event = ConductorEvent::IterationStarted { 
-            iteration: log.iteration, 
-            task_id: log.task_id.clone() 
+        let started_event = ConductorEvent::IterationStarted {
+            iteration: log.iteration,
+            task_id: log.task_id.clone(),
         };
-        
+
         // Only broadcast and transition on new events (not during history catch-up)
         if !suppress_output {
             self.state.transition(&started_event);
@@ -277,15 +313,15 @@ impl ConductorPane {
         }
 
         if !log.output.is_empty() {
-            let output_event = ConductorEvent::AgentOutput { 
-                stream: OutputStream::Stdout, 
-                data: log.output.clone() 
+            let output_event = ConductorEvent::AgentOutput {
+                stream: OutputStream::Stdout,
+                data: log.output.clone(),
             };
-            
+
             if !suppress_output {
                 self.state.transition(&output_event);
                 crate::conductor::telemetry::BUS.broadcast(output_event);
-                
+
                 for out_line in log.output.lines() {
                     self.add_output(out_line.to_string());
                 }
@@ -293,22 +329,22 @@ impl ConductorPane {
         }
 
         if let Some(err) = log.error {
-            let error_event = ConductorEvent::AgentOutput { 
-                stream: OutputStream::Stderr, 
-                data: err.clone() 
+            let error_event = ConductorEvent::AgentOutput {
+                stream: OutputStream::Stderr,
+                data: err.clone(),
             };
-            
+
             if !suppress_output {
                 self.state.transition(&error_event);
                 crate::conductor::telemetry::BUS.broadcast(error_event);
                 self.add_output(format!("ERROR: {}", err));
             }
-            
+
             let failed_event = ConductorEvent::IterationFailed {
                 iteration: log.iteration,
                 error: err,
             };
-            
+
             if !suppress_output {
                 self.state.transition(&failed_event);
                 crate::conductor::telemetry::BUS.broadcast(failed_event);
@@ -319,7 +355,7 @@ impl ConductorPane {
                     let comp_event = ConductorEvent::IterationCompleted {
                         iteration: log.iteration,
                         task_completed: true, // We don't know for sure from IterationLog alone if task is fully complete
-                        duration_ms: 0, // Not in IterationLog
+                        duration_ms: 0,       // Not in IterationLog
                     };
                     if !suppress_output {
                         self.state.transition(&comp_event);
@@ -341,15 +377,227 @@ impl ConductorPane {
             }
         }
     }
+
+    /// Poll events.jsonl for structured events from the orchestrate engine
+    fn poll_events_jsonl(&mut self, dir: &Path) {
+        let events_path = dir.join("events.jsonl");
+        if !events_path.exists() {
+            return;
+        }
+
+        if let Ok(mut file) = File::open(&events_path) {
+            let metadata = file.metadata().ok();
+            let file_len = metadata.map(|m| m.len()).unwrap_or(0);
+
+            // Handle file truncation
+            if self.last_events_poll_offset > file_len {
+                // Events file was truncated (new session), reset offset
+                self.last_events_poll_offset = 0;
+                return;
+            }
+
+            if file
+                .seek(SeekFrom::Start(self.last_events_poll_offset))
+                .is_ok()
+            {
+                let reader = BufReader::new(file);
+                let mut current_offset = self.last_events_poll_offset;
+
+                for line in reader.lines() {
+                    match line {
+                        Ok(l) if l.ends_with('\n') || !l.is_empty() => {
+                            let bytes = l.len() + 1; // +1 for newline
+                            current_offset += bytes as u64;
+
+                            // Try to parse as ControlEngineEvent
+                            if let Ok(event) = serde_json::from_str::<ControlEngineEvent>(&l) {
+                                self.process_engine_event(event);
+                            }
+                        }
+                        Ok(_) => {
+                            // Line without newline might be partial, skip
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+
+                // Update offset
+                self.last_events_poll_offset = current_offset;
+            }
+        }
+    }
+
+    /// Process a structured engine event
+    fn process_engine_event(&mut self, event: ControlEngineEvent) {
+        match event {
+            ControlEngineEvent::Selecting { iteration, .. } => {
+                let conductor_event = ConductorEvent::IterationStarted {
+                    iteration,
+                    task_id: self
+                        .state
+                        .current_task
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                };
+                self.state.transition(&conductor_event);
+                crate::conductor::telemetry::BUS.broadcast(conductor_event);
+            }
+            ControlEngineEvent::Executing {
+                iteration: _,
+                task_id,
+                task_title: _,
+                ..
+            } => {
+                self.state.current_task = Some(task_id.clone());
+                let conductor_event = ConductorEvent::TaskActivated { task_id };
+                self.state.transition(&conductor_event);
+                crate::conductor::telemetry::BUS.broadcast(conductor_event);
+            }
+            ControlEngineEvent::TaskFailed {
+                iteration,
+                task_id: _,
+                error,
+                can_retry,
+                can_skip,
+                ..
+            } => {
+                let error_event = ConductorEvent::IterationFailed {
+                    iteration,
+                    error: error.clone(),
+                };
+                self.state.transition(&error_event);
+                crate::conductor::telemetry::BUS.broadcast(error_event);
+
+                // Add info about available actions
+                if can_retry || can_skip {
+                    let msg = format!(
+                        "Task failed: {}. Actions available: {}",
+                        error,
+                        if can_retry { "[R]etry " } else { "" }
+                    );
+                    self.add_output(format!("TASK FAILED: {}", msg));
+                }
+            }
+            ControlEngineEvent::TaskRetrying {
+                iteration: _,
+                task_id,
+                retry_attempt,
+                max_retries,
+                delay_ms,
+                error,
+                ..
+            } => {
+                let msg = format!(
+                    "Retrying task {} (attempt {}/{}) after {}ms: {}",
+                    task_id, retry_attempt, max_retries, delay_ms, error
+                );
+                self.add_output(format!("RETRY: {}", msg));
+            }
+            ControlEngineEvent::RateLimited {
+                task_id,
+                retry_count,
+                backoff_until,
+                ..
+            } => {
+                let event = ConductorEvent::IterationRateLimited {
+                    task_id,
+                    retry_attempt: retry_count,
+                    delay_ms: backoff_until.unwrap_or(0) * 1000,
+                };
+                crate::conductor::telemetry::BUS.broadcast(event);
+                self.add_output(format!("RATE LIMIT: Retry {}/{}", retry_count, 5));
+            }
+            ControlEngineEvent::Progress {
+                iteration: _,
+                task_id: _,
+                message,
+                ..
+            } => {
+                let event = ConductorEvent::AgentOutput {
+                    stream: OutputStream::Stdout,
+                    data: message.clone(),
+                };
+                self.state.transition(&event);
+                crate::conductor::telemetry::BUS.broadcast(event);
+                self.add_output(format!("PROGRESS: {}", message));
+            }
+        }
+    }
+
+    /// Reset state when switching to a different track
+    fn reset_track_state(&mut self, track_id: &str) {
+        self.state.current_track = Some(track_id.to_string());
+        self.state.last_poll_iteration = 0;
+        self.state.last_poll_offset = 0;
+        self.last_events_poll_offset = 0; // Reset events offset too
+        self.clear_output();
+        self.state.status = ConductorStatus::Ready;
+        self.state.iteration_logs.clear();
+
+        // Clear stale git info (will be refreshed for new track/project)
+        self.state.git_info = None;
+
+        // Clear stale session-specific data
+        self.state.session_id = None;
+        self.state.current_task = None;
+        self.state.current_iteration = 0;
+        self.state.current_output.clear();
+        self.state.current_stderr.clear();
+        self.state.subagents.clear();
+        self.state.active_agent = None;
+        self.state.rate_limit = None;
+        self.state.started_at = None;
+        self.state.elapsed_secs = 0;
+        self.state.tasks_completed = 0;
+        self.state.total_tasks = 0;
+        self.state.sandbox_enabled = false;
+        self.state.dangerous_mode = false;
+        self.state.loop_mode = leindex_core::orchestrate::model::LoopMode::Building;
+
+        // Sync legacy fields
+        self.session_status = leindex_core::orchestrate::model::SessionStatus::Idle;
+        self.loop_mode = leindex_core::orchestrate::model::LoopMode::Building;
+        self.current_iteration = 0;
+    }
+
+    /// Reset state to Ready when track has no active session
+    fn reset_to_ready_state(&mut self) {
+        self.state.status = ConductorStatus::Ready;
+
+        // Clear stale git info (will be refreshed for new track/project)
+        self.state.git_info = None;
+
+        self.state.session_id = None;
+        self.state.current_task = None;
+        self.state.current_iteration = 0;
+        self.state.current_output.clear();
+        self.state.current_stderr.clear();
+        self.state.subagents.clear();
+        self.state.active_agent = None;
+        self.state.rate_limit = None;
+        self.state.started_at = None;
+        self.state.elapsed_secs = 0;
+        self.state.loop_mode = leindex_core::orchestrate::model::LoopMode::Building;
+        self.state.sandbox_enabled = false;
+        self.state.dangerous_mode = false;
+
+        // Sync legacy fields
+        self.session_status = leindex_core::orchestrate::model::SessionStatus::Idle;
+        self.loop_mode = leindex_core::orchestrate::model::LoopMode::Building;
+        self.current_iteration = 0;
+    }
 }
 
 fn map_session_status(status: SessionStatus) -> ConductorStatus {
     match status {
         SessionStatus::Idle => ConductorStatus::Idle,
         SessionStatus::Running => ConductorStatus::Running,
+        SessionStatus::Pausing => ConductorStatus::Running, // Pausing is still running
         SessionStatus::Paused => ConductorStatus::Paused,
         SessionStatus::Completed => ConductorStatus::Completed,
         SessionStatus::Failed => ConductorStatus::Failed,
         SessionStatus::Interrupted => ConductorStatus::Stopping,
+        SessionStatus::Stopping => ConductorStatus::Stopping,
     }
 }

@@ -53,4 +53,6 @@ pub use mcp::{render_mcp_logs_modal, render_mcp_menu};
 pub use overlay::render_spawning_overlay;
 pub use sessions::{render_session_hub_modal, render_switcher_modal};
 pub use settings::render_settings_menu_modal;
-pub use wizards::{render_group_modal, render_input_modal, render_new_project_modal, render_new_track_modal};
+pub use wizards::{
+    render_group_modal, render_input_modal, render_new_project_modal, render_new_track_modal,
+};
