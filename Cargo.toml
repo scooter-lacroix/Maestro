@@ -5,6 +5,7 @@ members = [
     "crates/cli",
     "crates/lsp-bridge",
     "crates/pi-mono",
+    "crates/ktop_collectors",
 ]
 resolver = "2"
 

@@ -47,7 +47,7 @@ pub fn render_action_modal(frame: &mut Frame, app: &App) {
             Some(&app.new_session_title),
         ),
         InputMode::NewGroupTitle => (" New Group ", "Group Name:", Some(&app.rename_buffer)),
-        InputMode::MoveToGroup => (" Move to Group ", "Target Path:", Some(&app.rename_buffer)),
+        InputMode::MoveToGroup => (" Move to Group ", "Group Name:", Some(&app.rename_buffer)),
         _ => ("", "", None),
     };
 

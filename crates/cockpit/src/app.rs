@@ -39,6 +39,9 @@ use crate::tabs::{
     render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
     render_sessions, render_settings, session_log_tail,
 };
+
+// Re-export for use in tabs
+pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
 pub async fn run() -> Result<()> {
@@ -179,6 +182,18 @@ pub struct App {
     pub lsp_log_source: Option<(String, String)>, // (session_id, lsp_name)
     // LSP installation guidance - tracks which LSPs are available on the system
     pub lsp_availability: HashMap<String, bool>, // lsp_name -> is_available
+    // LSP diagnostic summaries for all sessions
+    pub lsp_diagnostic_summaries: Vec<crate::state::LspDiagnosticSummary>,
+    // LSP aggregated status summary
+    pub lsp_status_summary: crate::state::LspStatusSummary,
+    // Detected LSPs per session (regardless of running state)
+    pub lsp_detected_cache: HashMap<String, Vec<String>>, // session_id -> [lsp_name, ...]
+    // LSP installer modal state
+    pub lsp_installer: crate::state::LspInstallerState,
+    // Diagnostic detail view state
+    pub diagnostic_view: crate::state::DiagnosticViewState,
+    // Cached diagnostic details from LSP
+    pub lsp_diagnostics_cache: Vec<crate::state::LspDiagnosticDetail>,
     // Storage backend for LSP operations (sync access)
     pub storage_backend: Option<Arc<TursoStorageBackend>>,
     // Flag to trigger async LSP refresh
@@ -191,6 +206,8 @@ pub struct App {
     pub conductor: crate::conductor::ConductorPane,
     // MCP status refresh task
     mcp_refresh_task: Option<tokio::task::JoinHandle<()>>,
+    // Ktop tab state (system resource monitoring)
+    pub ktop_state: Option<crate::tabs::ktop::KtopState>,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -274,6 +291,12 @@ impl App {
             lsp_log_scroll: 0,
             lsp_log_source: None,
             lsp_availability: HashMap::new(),
+            lsp_diagnostic_summaries: Vec::new(),
+            lsp_status_summary: crate::state::LspStatusSummary::default(),
+            lsp_detected_cache: HashMap::new(),
+            lsp_installer: crate::state::LspInstallerState::default(),
+            diagnostic_view: crate::state::DiagnosticViewState::default(),
+            lsp_diagnostics_cache: Vec::new(),
             storage_backend: storage_backend.clone(),
             pending_lsp_refresh: false,
             lsp_manager: storage_backend
@@ -281,6 +304,7 @@ impl App {
             lsp_autostarted_sessions: HashSet::new(),
             conductor: crate::conductor::ConductorPane::auto_discover(),
             mcp_refresh_task: None,
+            ktop_state: None,
         };
 
         // Start MCP status refresh background task
@@ -610,6 +634,9 @@ impl App {
             // Auto-start LSPs for newly discovered sessions (best-effort)
             let _ = self.queue_lsp_autostart_for_sessions();
 
+            // Detect LSPs for sessions based on project file types
+            self.detect_session_lsps();
+
             self.refresh_session_entries();
             self.refresh_dash_session_entries();
 
@@ -840,6 +867,112 @@ impl App {
         }
 
         self.pending_lsp_refresh = false;
+
+        // Update the aggregated status summary
+        self.compute_lsp_status_summary();
+    }
+
+    /// Compute aggregated LSP status summary from cache
+    fn compute_lsp_status_summary(&mut self) {
+        let mut summary = crate::state::LspStatusSummary::default();
+
+        for lsp_states in self.lsp_status_cache.values() {
+            for (_lsp_name, status) in lsp_states {
+                summary.total_lsps += 1;
+                match status {
+                    LspStatus::Running => summary.running += 1,
+                    LspStatus::Stopped => summary.stopped += 1,
+                    LspStatus::Error => summary.errors += 1,
+                    LspStatus::Starting => summary.starting += 1,
+                }
+            }
+        }
+
+        // Count total errors/warnings from diagnostic summaries
+        for diag in &self.lsp_diagnostic_summaries {
+            summary.total_errors += diag.counts.errors;
+            summary.total_warnings += diag.counts.warnings;
+        }
+
+        self.lsp_status_summary = summary;
+    }
+
+    /// Detect LSPs for all sessions based on project file types (doesn't start them)
+    fn detect_session_lsps(&mut self) {
+        self.lsp_detected_cache.clear();
+
+        for session in &self.sessions {
+            if session.project_path.trim().is_empty() {
+                continue;
+            }
+
+            let path = std::path::Path::new(&session.project_path);
+            if !path.exists() {
+                continue;
+            }
+
+            let mut detected: Vec<String> = Vec::new();
+
+            // Quick scan for file extensions (depth-limited)
+            let max_depth = 2;
+            let mut dirs_to_visit: Vec<(std::path::PathBuf, usize)> =
+                vec![(path.to_path_buf(), 0)];
+
+            while let Some((current_dir, depth)) = dirs_to_visit.pop() {
+                if depth > max_depth {
+                    continue;
+                }
+
+                let Ok(entries) = std::fs::read_dir(&current_dir) else {
+                    continue;
+                };
+
+                for entry in entries.flatten() {
+                    let Ok(ft) = entry.file_type() else {
+                        continue;
+                    };
+
+                    if ft.is_dir() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if !name.starts_with('.')
+                                && name != "node_modules"
+                                && name != "target"
+                                && name != "build"
+                                && name != "dist"
+                            {
+                                dirs_to_visit.push((entry.path(), depth + 1));
+                            }
+                        }
+                    } else if ft.is_file() {
+                        if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
+                            match ext {
+                                "rs" => {
+                                    if !detected.contains(&"rust-analyzer".to_string()) {
+                                        detected.push("rust-analyzer".to_string());
+                                    }
+                                }
+                                "py" => {
+                                    if !detected.contains(&"ruff".to_string()) {
+                                        detected.push("ruff".to_string());
+                                    }
+                                }
+                                "ts" | "tsx" | "js" | "jsx" => {
+                                    if !detected.contains(&"typescript-language-server".to_string()) {
+                                        detected.push("typescript-language-server".to_string());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sort for consistent ordering
+            detected.sort();
+            self.lsp_detected_cache
+                .insert(session.session_id.clone(), detected);
+        }
     }
 
     /// Auto-start LSPs for sessions that haven't been scanned yet.
@@ -1928,6 +2061,20 @@ async fn run_app<B: Backend>(
                                         app.settings_menu_state.select(Some(0));
                                         app.input_mode = InputMode::Normal;
                                     }
+                                    InputMode::LspInstaller => {
+                                        let available_lsps = crate::tabs::lsp_registry::get_available_lsps();
+                                        if let Some(selected_lsp) = available_lsps.get(app.lsp_installer.selected_index) {
+                                            let install_cmd = crate::tabs::lsp_registry::get_install_command(selected_lsp);
+                                            app.status_message = format!("Install: {}", install_cmd);
+                                            app.lsp_installer.is_open = false;
+                                            app.input_mode = InputMode::Normal;
+                                            app.check_lsp_availability();
+                                        }
+                                    }
+                                    InputMode::DiagnosticView => {
+                                        app.diagnostic_view.is_open = false;
+                                        app.input_mode = InputMode::Normal;
+                                    }
                                     InputMode::NewGroupCategory => {
                                         if let Some(svc) = service.as_ref() {
                                             let clean_name = app.rename_buffer.trim();
@@ -1974,14 +2121,37 @@ async fn run_app<B: Backend>(
                                                 let target = if app.rename_buffer.is_empty() {
                                                     None
                                                 } else {
-                                                    Some(app.rename_buffer.clone())
+                                                    // Ensure the group exists before moving the session
+                                                    let clean_name = app.rename_buffer.trim();
+                                                    let path = format!(
+                                                        "/{}",
+                                                        clean_name.to_lowercase().replace(' ', "_")
+                                                    );
+                                                    let group =
+                                                        leindex_core::memory::models::SessionGroup {
+                                                            id: 0,
+                                                            name: clean_name.to_string(),
+                                                            path: path.clone(),
+                                                            category: None,
+                                                            is_expanded: true,
+                                                            sort_order: 0,
+                                                            parent_id: None,
+                                                        };
+                                                    // Create the group if it doesn't exist
+                                                    let _ = svc.get_or_create_session_group(group);
+                                                    Some(path)
                                                 };
+
                                                 let _ = svc.update_session_group(&id, target);
-                                                app.status_message =
-                                                    format!("Session moved to group");
+                                                // Refresh groups to include any newly created groups
+                                                if let Ok(groups) = svc.list_session_groups() {
+                                                    app.groups = groups;
+                                                }
                                                 if let Ok(sessions) = svc.list_sessions() {
                                                     app.sessions = sessions;
                                                 }
+                                                app.status_message =
+                                                    format!("Session moved to group");
                                                 app.refresh_session_entries();
                                                 app.refresh_dash_session_entries();
                                             }
@@ -2095,6 +2265,12 @@ async fn run_app<B: Backend>(
                                         app.settings_menu_items.clear();
                                         app.settings_menu_state.select(Some(0));
                                     }
+                                    InputMode::LspInstaller => {
+                                        app.lsp_installer.is_open = false;
+                                    }
+                                    InputMode::DiagnosticView => {
+                                        app.diagnostic_view.is_open = false;
+                                    }
                                     _ => {}
                                 }
                                 app.input_mode = InputMode::Normal;
@@ -2109,6 +2285,7 @@ async fn run_app<B: Backend>(
                                 InputMode::RenameGroup
                                 | InputMode::ForkSession
                                 | InputMode::NewGroupTitle
+                                | InputMode::MoveToGroup
                                 | InputMode::SettingsEditor
                                 | InputMode::SettingsInstallPath => {
                                     app.rename_buffer.pop();
@@ -2116,7 +2293,7 @@ async fn run_app<B: Backend>(
                                 InputMode::RenameGroupCategory | InputMode::NewGroupCategory => {
                                     app.new_group_category.pop();
                                 }
-                                InputMode::KillConfirm => {
+                                InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                     app.target_session_id = None;
                                     app.input_mode = InputMode::Normal;
                                 }
@@ -2363,6 +2540,20 @@ async fn run_app<B: Backend>(
                                         McpOption::Add => McpOption::Remove,
                                         McpOption::Remove => McpOption::Start,
                                     };
+                                } else if app.input_mode == InputMode::LspInstaller {
+                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    if app.lsp_installer.selected_index < count.saturating_sub(1) {
+                                        app.lsp_installer.selected_index += 1;
+                                    } else {
+                                        app.lsp_installer.selected_index = 0;
+                                    }
+                                } else if app.input_mode == InputMode::DiagnosticView {
+                                    let count = app.lsp_diagnostics_cache.len();
+                                    if count > 0 && app.diagnostic_view.selected_index < count.saturating_sub(1) {
+                                        app.diagnostic_view.selected_index += 1;
+                                    } else {
+                                        app.diagnostic_view.selected_index = 0;
+                                    }
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
                                 } else if app.tab_index == 0 {
@@ -2475,6 +2666,20 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.settings_menu_state.select(Some(i));
+                                } else if app.input_mode == InputMode::LspInstaller {
+                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    if app.lsp_installer.selected_index > 0 {
+                                        app.lsp_installer.selected_index -= 1;
+                                    } else {
+                                        app.lsp_installer.selected_index = count.saturating_sub(1);
+                                    }
+                                } else if app.input_mode == InputMode::DiagnosticView {
+                                    let count = app.lsp_diagnostics_cache.len();
+                                    if count > 0 && app.diagnostic_view.selected_index > 0 {
+                                        app.diagnostic_view.selected_index -= 1;
+                                    } else if count > 0 {
+                                        app.diagnostic_view.selected_index = count.saturating_sub(1);
+                                    }
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
                                 } else if app.tab_index == 0 {
@@ -2600,11 +2805,11 @@ async fn run_app<B: Backend>(
                                     app.preview_focused = false;
                                 }
                             }
-                            (KeyModifiers::SHIFT, KeyCode::BackTab) | (_, KeyCode::BackTab) => {
+                            (KeyModifiers::SHIFT, KeyCode::BackTab) | (_, KeyCode::BackTab) if app.tab_index != 6 => {
                                 if app.tab_index == 0 {
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
-                                            app.tab_index = 6;
+                                            app.tab_index = 7;  // Now Settings (was 6)
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
@@ -2612,7 +2817,7 @@ async fn run_app<B: Backend>(
                                     };
                                 } else {
                                     app.tab_index = if app.tab_index == 0 {
-                                        6
+                                        8  // Wrap to last tab (Settings)
                                     } else {
                                         app.tab_index - 1
                                     };
@@ -2629,6 +2834,7 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::NONE, KeyCode::Char('6')) => app.tab_index = 5,
                             (KeyModifiers::NONE, KeyCode::Char('7')) => app.tab_index = 6,
                             (KeyModifiers::NONE, KeyCode::Char('8')) => app.tab_index = 7,
+                            (KeyModifiers::NONE, KeyCode::Char('9')) => app.tab_index = 8,
 
                             // 3. Conductor Specific Alt Keys
                             (KeyModifiers::ALT, KeyCode::Char('1')) if app.tab_index == 4 => {
@@ -2662,6 +2868,7 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('6')) => app.tab_index = 5,
                             (KeyModifiers::ALT, KeyCode::Char('7')) => app.tab_index = 6,
                             (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = 7,
+                            (KeyModifiers::ALT, KeyCode::Char('9')) => app.tab_index = 8,
 
                             // 5. Conductor Catch-All
                             _ if app.tab_index == 4 => {
@@ -2690,16 +2897,14 @@ async fn run_app<B: Backend>(
                                     app.refresh_from_service(&service);
                                 }
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
-                                if app.tab_index == 1 {
-                                    app.preview_focused = !app.preview_focused;
-                                    app.status_message = if app.preview_focused {
-                                        "Preview focused. Scroll with Arrows/PgUp/PgDn."
-                                    } else {
-                                        "List focused."
-                                    }
-                                    .to_string();
+                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 1 => {
+                                app.preview_focused = !app.preview_focused;
+                                app.status_message = if app.preview_focused {
+                                    "Preview focused. Scroll with Arrows/PgUp/PgDn."
+                                } else {
+                                    "List focused."
                                 }
+                                .to_string();
                             }
                             (KeyModifiers::ALT, KeyCode::Up)
                             | (KeyModifiers::ALT, KeyCode::Down)
@@ -2884,6 +3089,12 @@ async fn run_app<B: Backend>(
                                         app.refresh_from_service(&service);
                                     }
                                 } else if app.tab_index == 6 {
+                                    // Ktop tab - manual refresh
+                                    if app.ktop_state.is_some() {
+                                        app.ktop_state.as_mut().unwrap().mark_refreshed();
+                                        app.status_message = "Krustop refreshed".to_string();
+                                    }
+                                } else if app.tab_index == 7 {
                                     // LSPs tab
                                     let scheduled = app.queue_lsp_autostart_for_sessions();
                                     // Use force=true for manual refresh to bypass throttle
@@ -2920,7 +3131,7 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('D') | KeyCode::Char('d')) if app.tab_index != 4 => {
+                            (_, KeyCode::Char('D') | KeyCode::Char('d')) if app.tab_index != 4 && app.tab_index != 6 && app.tab_index != 7 => {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i) {
@@ -2973,7 +3184,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('l')) => {
-                                if app.tab_index == 6 {
+                                if app.tab_index == 7 {
                                     // LSPs tab - view logs
                                     if let Some((session_id, lsp_name, _status)) =
                                         app.get_selected_lsp()
@@ -2987,6 +3198,107 @@ async fn run_app<B: Backend>(
                                     } else {
                                         app.status_message = "No LSP selected".to_string();
                                     }
+                                }
+                            }
+                            (_, KeyCode::Char('i')) if app.tab_index == 7 => {
+                                // LSPs tab - open installer modal
+                                app.lsp_installer.is_open = true;
+                                app.lsp_installer.selected_index = 0;
+                                app.input_mode = InputMode::LspInstaller;
+                                app.status_message = "LSP Installer - Select an LSP to install".to_string();
+                            }
+                            // Ktop-specific keybindings (use Alt to avoid conflicts)
+                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
+                                if app.tab_index == 6 {
+                                    // Ktop tab - pause/resume
+                                    if let Some(ref mut ktop) = app.ktop_state {
+                                        ktop.toggle_pause();
+                                        app.status_message = if ktop.paused {
+                                            "Krustop paused".to_string()
+                                        } else {
+                                            "Krustop resumed".to_string()
+                                        };
+                                    }
+                                }
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('+') | KeyCode::Char('=')) => {
+                                if app.tab_index == 6 {
+                                    // Ktop tab - increase refresh rate
+                                    if let Some(ref mut ktop) = app.ktop_state {
+                                        ktop.set_refresh_interval(ktop.refresh_interval_secs + 1);
+                                        app.status_message = format!(
+                                            "Refresh interval: {}s",
+                                            ktop.refresh_interval_secs
+                                        );
+                                    }
+                                }
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('-') | KeyCode::Char('_')) => {
+                                if app.tab_index == 6 {
+                                    // Ktop tab - decrease refresh rate
+                                    if let Some(ref mut ktop) = app.ktop_state {
+                                        ktop.set_refresh_interval(ktop.refresh_interval_secs.saturating_sub(1).max(1));
+                                        app.status_message = format!(
+                                            "Refresh interval: {}s",
+                                            ktop.refresh_interval_secs
+                                        );
+                                    }
+                                }
+                            }
+                            (KeyModifiers::ALT, KeyCode::Tab) => {
+                                if app.tab_index == 6 {
+                                    // Ktop tab - cycle section focus
+                                    if let Some(ref mut ktop) = app.ktop_state {
+                                        use crate::tabs::ktop::KtopFocus;
+                                        ktop.focus = match ktop.focus {
+                                            KtopFocus::Cpu => KtopFocus::Memory,
+                                            KtopFocus::Memory => KtopFocus::Processes,
+                                            KtopFocus::Processes => KtopFocus::Network,
+                                            KtopFocus::Network => KtopFocus::Disk,
+                                            KtopFocus::Disk => KtopFocus::Maestro,
+                                            KtopFocus::Maestro => KtopFocus::Cpu,
+                                        };
+                                    }
+                                }
+                            }
+                            (KeyModifiers::ALT | KeyModifiers::SHIFT, KeyCode::BackTab) => {
+                                if app.tab_index == 6 {
+                                    // Ktop tab - reverse cycle section focus
+                                    if let Some(ref mut ktop) = app.ktop_state {
+                                        use crate::tabs::ktop::KtopFocus;
+                                        ktop.focus = match ktop.focus {
+                                            KtopFocus::Cpu => KtopFocus::Maestro,
+                                            KtopFocus::Memory => KtopFocus::Cpu,
+                                            KtopFocus::Processes => KtopFocus::Memory,
+                                            KtopFocus::Network => KtopFocus::Processes,
+                                            KtopFocus::Disk => KtopFocus::Network,
+                                            KtopFocus::Maestro => KtopFocus::Disk,
+                                        };
+                                    }
+                                }
+                            }
+                            (_, KeyCode::Char('d')) if app.tab_index == 7 || app.tab_index == 6 => {
+                                if app.tab_index == 7 {
+                                    // LSPs tab - open diagnostic detail view
+                                    app.diagnostic_view.is_open = true;
+                                    app.diagnostic_view.selected_index = 0;
+                                    app.input_mode = InputMode::DiagnosticView;
+                                    app.status_message = "Diagnostic Details - Press 'S' to send to agent".to_string();
+                                }
+                            }
+                            (_, KeyCode::Char('S')) => {
+                                if app.tab_index == 6 && app.diagnostic_view.is_open {
+                                    // Send diagnostics to agent
+                                    let project_path = app.sessions.first()
+                                        .map(|s| s.project_path.clone())
+                                        .unwrap_or_else(|| ".".to_string());
+                                    let prompt = crate::tabs::lsps::generate_agent_prompt(
+                                        &app.lsp_diagnostics_cache,
+                                        &project_path
+                                    );
+                                    // Copy to clipboard
+                                    let _ = cli_clipboard::set_contents(prompt.clone());
+                                    app.status_message = "Diagnostics copied to clipboard! Paste in your agent session.".to_string();
                                 }
                             }
                             (_, KeyCode::Char('u') | KeyCode::Char('U')) => {
@@ -3054,7 +3366,7 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('d'))
                             | (KeyModifiers::ALT, KeyCode::Char('D'))
                             | (KeyModifiers::NONE, KeyCode::Char('d'))
-                                if app.tab_index != 4 =>
+                                if app.tab_index != 4 && app.tab_index != 6 && app.tab_index != 7 =>
                             {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
@@ -3113,7 +3425,21 @@ async fn run_app<B: Backend>(
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
-                                if app.input_mode == InputMode::McpMenu {
+                                if app.input_mode == InputMode::LspInstaller {
+                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    if app.lsp_installer.selected_index < count.saturating_sub(1) {
+                                        app.lsp_installer.selected_index += 1;
+                                    } else {
+                                        app.lsp_installer.selected_index = 0;
+                                    }
+                                } else if app.input_mode == InputMode::DiagnosticView {
+                                    let count = app.lsp_diagnostics_cache.len();
+                                    if count > 0 && app.diagnostic_view.selected_index < count.saturating_sub(1) {
+                                        app.diagnostic_view.selected_index += 1;
+                                    } else {
+                                        app.diagnostic_view.selected_index = 0;
+                                    }
+                                } else if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
                                         McpOption::Start => McpOption::Stop,
                                         McpOption::Stop => McpOption::Pause,
@@ -3225,7 +3551,21 @@ async fn run_app<B: Backend>(
                                 app.scroll = app.scroll.saturating_add(1);
                             }
                             (_, KeyCode::Up) => {
-                                if app.input_mode == InputMode::McpMenu {
+                                if app.input_mode == InputMode::LspInstaller {
+                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    if app.lsp_installer.selected_index > 0 {
+                                        app.lsp_installer.selected_index -= 1;
+                                    } else {
+                                        app.lsp_installer.selected_index = count.saturating_sub(1);
+                                    }
+                                } else if app.input_mode == InputMode::DiagnosticView {
+                                    let count = app.lsp_diagnostics_cache.len();
+                                    if count > 0 && app.diagnostic_view.selected_index > 0 {
+                                        app.diagnostic_view.selected_index -= 1;
+                                    } else if count > 0 {
+                                        app.diagnostic_view.selected_index = count.saturating_sub(1);
+                                    }
+                                } else if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
                                         McpOption::Start => McpOption::Remove,
                                         McpOption::Stop => McpOption::Start,
@@ -3338,6 +3678,13 @@ async fn run_app<B: Backend>(
                                 app.scroll = app.scroll.saturating_sub(1);
                             }
                             (_, KeyCode::Char('G')) => {
+                                if app.tab_index == 1 {
+                                    app.input_mode = InputMode::NewGroupTitle;
+                                    app.rename_buffer.clear();
+                                    app.new_group_category.clear();
+                                }
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('c')) => {
                                 if app.tab_index == 1 {
                                     app.input_mode = InputMode::NewGroupTitle;
                                     app.rename_buffer.clear();
@@ -3868,6 +4215,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         "Analysis",
         "Conductor",
         "Memory",
+        "Ktop",
         "LSPs",
         "Settings",
     ])
@@ -3901,8 +4249,9 @@ fn ui(frame: &mut Frame, app: &mut App) {
             crate::conductor::render_conductor(frame, chunks[1], &mut app.conductor, &theme);
         }
         5 => render_memory(frame, chunks[1], app),
-        6 => render_lsps(frame, chunks[1], app),
-        7 => render_settings(frame, app),
+        6 => crate::tabs::ktop::render_ktop(frame, chunks[1], app),
+        7 => render_lsps(frame, chunks[1], app),
+        8 => render_settings(frame, app),
         _ => {}
     }
     // Footer

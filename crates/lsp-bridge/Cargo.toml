@@ -13,6 +13,10 @@ path = "src/lib.rs"
 name = "maestro-lsp-mcp-bridge"
 path = "src/main.rs"
 
+[features]
+# Enable rusqlite integration for persisting LSP diagnostics to memory
+rusqlite = ["leindex-core/rusqlite"]
+
 [dependencies]
 # Core library - provides LSP type definitions and LspManager
 leindex-core = { path = "../../maestro/leindex/rust" }

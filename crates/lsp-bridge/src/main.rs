@@ -35,9 +35,8 @@ use clap::Parser;
 use leindex_core::memory::lsp_manager::LspType;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, BufReader, Write};
-use std::process::Stdio;
 use tokio::process::{ChildStdin, ChildStdout};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Re-export the bridge library for use by the binary
 pub use maestro_lsp_mcp_bridge::mcp_bridge::{McpBridge, McpEvent, McpTool};
@@ -131,13 +130,17 @@ async fn main() -> Result<()> {
 /// 3. Emits LSP notifications as MCP events
 async fn run_mcp_server(
     mut bridge: McpBridge,
-    project_path: &str,
-    session_id: Option<String>,
+    _project_path: &str,
+    _session_id: Option<String>,
 ) -> Result<()> {
     let mut initialized = false;
 
     // Start the LSP process
-    let (mut lsp_stdin, mut lsp_stdout, lsp_child) = bridge
+    let (mut lsp_stdin, mut lsp_stdout, lsp_child): (
+        ChildStdin,
+        ChildStdout,
+        tokio::process::Child,
+    ) = bridge
         .start_lsp_process()
         .await
         .context("Failed to start LSP process")?;
@@ -156,7 +159,7 @@ async fn run_mcp_server(
     let mut lines = reader.lines();
 
     // Spawn background task to read LSP notifications
-    let (_event_tx, mut event_rx) = tokio::sync::mpsc::channel::<McpEvent>(100);
+    let (_event_tx, event_rx) = tokio::sync::mpsc::channel::<McpEvent>(100);
     let lsp_stdout_reader = tokio::spawn(async move {
         // Note: We can't easily split stdout for concurrent reading in the current architecture
         // For now, LSP notifications will be handled inline with request responses

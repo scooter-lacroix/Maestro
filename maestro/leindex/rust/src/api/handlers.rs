@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::memory::{MemoryCategory, MemoryService};
+// Use shared ApiResponse from the response module
+use super::response::ApiResponse;
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -21,37 +23,6 @@ pub struct AppState {
 // ============================================================================
 // Response Types
 // ============================================================================
-
-#[derive(Debug, Serialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub error: Option<String>,
-}
-
-impl<T: Serialize> ApiResponse<T> {
-    pub fn ok(data: T) -> (StatusCode, Json<Self>) {
-        (
-            StatusCode::OK,
-            Json(Self {
-                success: true,
-                data: Some(data),
-                error: None,
-            }),
-        )
-    }
-
-    pub fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<Self>) {
-        (
-            status,
-            Json(Self {
-                success: false,
-                data: None,
-                error: Some(msg.to_string()),
-            }),
-        )
-    }
-}
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {

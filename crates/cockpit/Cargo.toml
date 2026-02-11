@@ -13,6 +13,9 @@ crate-type = ["rlib"]
 # Core library (shared data layer)
 leindex-core = { path = "../../maestro/leindex/rust" }
 
+# Ktop collectors for system metrics
+ktop_collectors = { path = "../ktop_collectors" }
+
 # TUI framework
 ratatui = "0.29"
 crossterm = "0.28"
@@ -34,6 +37,8 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2"
 lazy_static = "1.4"
+which = "6.0"
+cli-clipboard = "0.4"
 
 [dev-dependencies]
 tempfile = "3.10"

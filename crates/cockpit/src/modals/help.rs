@@ -129,6 +129,13 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::raw(" Focus Preview Pane (for scrolling history)"),
         ]),
         Line::from(vec![
+            Span::styled(
+                "   Alt + c       ",
+                Style::default().fg(Color::Green).bold(),
+            ),
+            Span::raw(" Create New Group"),
+        ]),
+        Line::from(vec![
             Span::styled("   Alt + ↑/↓     ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Reorder group/session (persists to DB)"),
         ]),
@@ -137,7 +144,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
                 "   m             ",
                 Style::default().fg(Color::Magenta).bold(),
             ),
-            Span::raw(" Move Session to Group / Create New Group"),
+            Span::raw(" Move Session to Existing Group"),
         ]),
         Line::from(vec![
             Span::styled(
@@ -285,7 +292,28 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " LSPs (Tab 7):",
+            " KRUSTOP (Tab 7):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Force refresh metrics"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Pause/Resume updates"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + + / -   ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Adjust refresh rate (1-10s)"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + Tab     ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Cycle section focus"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " LSPs (Tab 8):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -302,7 +330,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " SETTINGS (Tab 8):",
+            " SETTINGS (Tab 9):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
