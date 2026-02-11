@@ -36,6 +36,10 @@ pub enum InputMode {
     SettingsEditor,
     SettingsInstallPath,
     SettingsMenu,
+    // LSP Installer
+    LspInstaller,
+    // Diagnostic Detail View
+    DiagnosticView,
 }
 
 /// Focus areas within the Session Hub
@@ -141,4 +145,75 @@ pub struct AnalysisHistoryEntry {
     pub command: String,
     pub result_summary: String,
     pub mode: AnalysisMode,
+}
+
+/// LSP diagnostic severity counts
+#[derive(Clone, Debug, Default)]
+pub struct LspDiagnosticCounts {
+    pub errors: usize,
+    pub warnings: usize,
+    pub infos: usize,
+    pub hints: usize,
+}
+
+/// LSP diagnostic summary for a session
+#[derive(Clone, Debug)]
+pub struct LspDiagnosticSummary {
+    pub session_id: String,
+    pub session_title: String,
+    pub lsp_name: String,
+    pub counts: LspDiagnosticCounts,
+    pub last_updated: Option<String>,
+}
+
+/// Aggregated LSP status across all sessions
+#[derive(Clone, Debug, Default)]
+pub struct LspStatusSummary {
+    pub total_lsps: usize,
+    pub running: usize,
+    pub stopped: usize,
+    pub errors: usize,
+    pub starting: usize,
+    pub total_errors: usize,
+    pub total_warnings: usize,
+}
+
+/// LSP diagnostic detail for display
+#[derive(Clone, Debug)]
+pub struct LspDiagnosticDetail {
+    pub file_path: String,
+    pub line: u32,
+    pub column: u32,
+    pub severity: DiagnosticSeverity,
+    pub message: String,
+    pub source: Option<String>,
+    pub code: Option<String>,
+}
+
+/// Diagnostic severity for display
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+/// LSP installer modal state
+#[derive(Clone, Debug, Default)]
+pub struct LspInstallerState {
+    pub is_open: bool,
+    pub selected_index: usize,
+    pub install_output: Option<String>,
+    pub is_installing: bool,
+    pub filter_language: Option<String>,
+}
+
+/// Diagnostic detail view state
+#[derive(Clone, Debug, Default)]
+pub struct DiagnosticViewState {
+    pub is_open: bool,
+    pub selected_index: usize,
+    pub expanded_files: std::collections::HashSet<String>,
+    pub show_send_prompt: bool,
 }

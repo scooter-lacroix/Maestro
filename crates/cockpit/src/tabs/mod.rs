@@ -5,6 +5,8 @@
 
 pub mod analysis;
 pub mod dashboard;
+pub mod ktop;
+pub mod lsp_registry;
 pub mod lsps;
 pub mod memory;
 pub mod projects;
@@ -14,7 +16,8 @@ pub mod settings;
 // Re-export commonly used functions for convenience
 pub use analysis::render_analysis;
 pub use dashboard::render_dashboard;
-pub use lsps::{get_lsp_install_command, render_lsps};
+pub use ktop::{handle_ktop_input, KtopState};
+pub use lsps::{generate_agent_prompt, render_lsps};
 pub use memory::render_memory;
 pub use projects::render_projects;
 pub use sessions::{render_sessions, session_log_tail};

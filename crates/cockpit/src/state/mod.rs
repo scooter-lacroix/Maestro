@@ -7,6 +7,8 @@ pub mod types;
 
 // Re-export commonly used types
 pub use types::{
-    AnalysisHistoryEntry, AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode,
-    McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+    AnalysisHistoryEntry, AnalysisMode, DashFocus, DashSessionEntry, DiagnosticSeverity,
+    DiagnosticViewState, HubFocus, InputMode, LspDiagnosticCounts, LspDiagnosticDetail,
+    LspDiagnosticSummary, LspInstallerState, LspStatusSummary, McpOption, MemoryInfo, ProjectInfo,
+    SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };

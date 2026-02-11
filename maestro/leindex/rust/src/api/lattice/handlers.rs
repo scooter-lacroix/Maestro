@@ -3,6 +3,8 @@
 //! Request handlers for lattice API endpoints.
 
 use super::models::*;
+// Use shared ApiResponse from the parent api module
+use crate::api::response::ApiResponse;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -77,41 +79,6 @@ impl LatticeService {
 
     pub fn is_supported_extension(&self, _ext: &str) -> bool {
         false
-    }
-}
-
-// ============================================================================
-// Response Wrappers
-// ============================================================================
-
-#[derive(Debug, serde::Serialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub data: Option<T>,
-    pub error: Option<String>,
-}
-
-impl<T: serde::Serialize> ApiResponse<T> {
-    pub fn ok(data: T) -> (StatusCode, Json<Self>) {
-        (
-            StatusCode::OK,
-            Json(Self {
-                success: true,
-                data: Some(data),
-                error: None,
-            }),
-        )
-    }
-
-    pub fn err(status: StatusCode, msg: &str) -> (StatusCode, Json<Self>) {
-        (
-            status,
-            Json(Self {
-                success: false,
-                data: None,
-                error: Some(msg.to_string()),
-            }),
-        )
     }
 }
 

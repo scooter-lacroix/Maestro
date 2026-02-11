@@ -4,6 +4,7 @@
 //! Provides database, scanner, and service functionality.
 
 pub mod lsp_manager;
+pub mod lsp_pool;
 pub mod mcp_discovery;
 pub mod models;
 pub mod scanner;
@@ -24,6 +25,7 @@ pub mod service;
 pub mod session_manager;
 
 pub use lsp_manager::*;
+pub use lsp_pool::*;
 pub use mcp_discovery::*;
 pub use models::*;
 pub use scanner::*;

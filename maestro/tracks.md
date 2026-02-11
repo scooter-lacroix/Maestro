@@ -272,3 +272,25 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ## [ ] Track: Cockpit Conductor loop & telemetry bug fix
 *Link: [./maestro/tracks/conductor-loop-telemetry_20260127/](./maestro/tracks/conductor-loop-telemetry_20260127/)*
+
+---
+
+## [ ] Track: Ktop Resource Tab Integration
+*Link: [./maestro/tracks/krustop-integration_20260210/](./maestro/tracks/krustop-integration_20260210/)*
+
+**Description**: Clone Ktop repository and use LeIndex for comprehensive analysis, then implement a 1:1 Rust port as a resource tab in Maestro TUI with full integration and extended metrics
+
+**Type**: Feature
+
+**Status**: NEW
+
+**Phases**:
+- Phase 1: Repository Analysis and Documentation (7 tasks)
+- Phase 2: Data Collection Layer (9 tasks)
+- Phase 3: TUI Resource Tab Integration (7 tasks)
+- Phase 4: User Interface Implementation (8 tasks)
+- Phase 5: Testing, Performance, and Documentation (6 tasks)
+
+**Total Tasks**: 37
+
+**Execution**: `/maestro:implement krustop-integration_20260210`

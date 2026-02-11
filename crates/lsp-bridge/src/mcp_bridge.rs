@@ -761,18 +761,19 @@ impl McpBridge {
     }
 
     /// Persist diagnostics into the memory pipeline (best-effort)
+    #[allow(unused_variables)]
     async fn persist_diagnostics(&self, uri: &str, diagnostics: &[Diagnostic]) {
         #[cfg(feature = "rusqlite")]
         if let Some(service) = self.memory_service.clone() {
             let lsp_name = self.lsp_name.clone();
             let session_id = self.session_id.clone();
             let project_path = self.project_path.clone();
-            let uri = uri.to_string();
-            let diagnostics = diagnostics.to_vec();
+            let uri_str = uri.to_string();
+            let diagnostics_vec = diagnostics.to_vec();
 
             tokio::task::spawn_blocking(move || {
                 let (errors, warnings, infos, hints) =
-                    diagnostics
+                    diagnostics_vec
                         .iter()
                         .fold((0usize, 0usize, 0usize, 0usize), |mut acc, diag| {
                             match diag.severity {
@@ -788,13 +789,13 @@ impl McpBridge {
                             acc
                         });
 
-                let file_path = uri
+                let file_path = uri_str
                     .strip_prefix("file://")
                     .and_then(|p| urlencoding::decode(p).ok())
                     .map(|p| p.to_string())
-                    .unwrap_or_else(|| uri.clone());
+                    .unwrap_or_else(|| uri_str.clone());
 
-                let summary = if diagnostics.is_empty() {
+                let summary = if diagnostics_vec.is_empty() {
                     "No diagnostics reported".to_string()
                 } else {
                     format!(
@@ -804,7 +805,7 @@ impl McpBridge {
                 };
 
                 let mut details = Vec::new();
-                for diag in diagnostics.iter().take(10) {
+                for diag in diagnostics_vec.iter().take(10) {
                     let severity = match diag.severity {
                         Some(sev) => match sev {
                             lsp_types::DiagnosticSeverity::ERROR => "E",
@@ -834,12 +835,12 @@ impl McpBridge {
 
                 let metadata = serde_json::json!({
                     "lsp": lsp_name,
-                    "uri": uri,
+                    "uri": uri_str,
                     "errors": errors,
                     "warnings": warnings,
                     "info": infos,
                     "hints": hints,
-                    "diagnostics": diagnostics.iter().take(10).map(|diag| {
+                    "diagnostics": diagnostics_vec.iter().take(10).map(|diag| {
                         serde_json::json!({
                             "message": diag.message,
                             "severity": diag.severity.map(|s| format!("{:?}", s).to_lowercase()),

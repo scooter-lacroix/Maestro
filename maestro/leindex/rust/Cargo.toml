@@ -89,6 +89,7 @@ chrono = { version = "0.4", features = ["serde"] }
 camino = "1.1"  # UTF-8 path handling
 dirs = "5"
 libc = "0.2"
+nix = { version = "0.29", features = ["signal", "process"] }  # Process management for LSP pool
 walkdir = "2"
 regex = "1"
 tempfile = "3.8"  # Secure temporary file creation for atomic writes

@@ -12,5 +12,6 @@ pub mod handlers;
 pub mod models;
 pub mod routes;
 
-pub use handlers::*;
+// Re-export models and routes, but not handlers (to avoid ApiResponse ambiguity)
 pub use models::*;
+pub use routes::*;
