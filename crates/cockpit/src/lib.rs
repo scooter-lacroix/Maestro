@@ -7,6 +7,7 @@ pub mod app;
 pub mod conductor;
 pub mod maestro_paths;
 pub mod modals;
+pub mod omp;
 pub mod orchestrate; // Deprecated: use conductor module instead
 pub mod state;
 pub mod tabs;

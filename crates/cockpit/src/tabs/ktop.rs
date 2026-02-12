@@ -531,6 +531,18 @@ fn render_cpu_section(frame: &mut Frame, area: Rect, state: &KtopState, theme: &
                 core_spans.push(Span::styled(format!("{}%", *u as u32), Style::default().fg(c)));
             }
             lines.push(Line::from(core_spans));
+
+ // Add CPU history sparkline
+ if !state.cpu_history.is_empty() {
+ let sparkline_width = area.width.saturating_sub(2) as usize;
+ let sparkline = render_sparkline(&state.cpu_history, sparkline_width);
+ if !sparkline.is_empty() {
+ lines.push(Line::from(Span::styled(
+ sparkline,
+ Style::default().fg(theme.accent),
+ )));
+ }
+ }
         }
 
         // Add top CPU consumers inline
@@ -662,6 +674,18 @@ fn render_memory_section(frame: &mut Frame, area: Rect, state: &KtopState, theme
             ]),
         ];
 
+
+ // Add memory history sparkline
+ if !state.memory_history.is_empty() {
+ let sparkline_width = area.width.saturating_sub(2) as usize;
+ let sparkline = render_sparkline(&state.memory_history, sparkline_width);
+ if !sparkline.is_empty() {
+ lines.push(Line::from(Span::styled(
+ sparkline,
+ Style::default().fg(theme.accent_alt),
+ )));
+ }
+ }
         // Add top memory consumers inline
         let top_mem: Vec<_> = state.current_metrics.top_memory_processes.iter().take(3).collect();
         if !top_mem.is_empty() {

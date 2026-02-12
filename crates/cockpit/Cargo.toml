@@ -9,6 +9,10 @@ authors = ["Maestro Project"]
 name = "maestro_cockpit"
 crate-type = ["rlib"]
 
+[[bin]]
+name = "maestro-cockpit"
+path = "src/main.rs"
+
 [dependencies]
 # Core library (shared data layer)
 leindex-core = { path = "../../maestro/leindex/rust" }
@@ -22,6 +26,9 @@ crossterm = "0.28"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# Async trait support
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
