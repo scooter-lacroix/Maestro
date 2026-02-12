@@ -2,6 +2,7 @@
 //!
 //! Port of Ralph TUI functionality into Maestro Cockpit.
 
+pub mod omp_agent;
 pub mod dashboard;
 pub mod details_panel;
 pub mod footer;

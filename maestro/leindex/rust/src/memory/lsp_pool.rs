@@ -469,7 +469,7 @@ impl LspPool {
             }
         }
         
-        let mut child = cmd.spawn()
+        let child = cmd.spawn()
             .with_context(|| format!("Failed to spawn LSP: {}", lsp_type.binary_name()))?;
         
         let pid = child.id();
