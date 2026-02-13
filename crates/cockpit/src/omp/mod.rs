@@ -22,11 +22,13 @@
 
 mod bridge;
 pub mod protocol;
-mod provider;
+pub mod provider;
 mod worker;
 
-pub use bridge::OmpBridge;
-pub use protocol::{OmpRequest, OmpResponse, OmpToolResult};
-pub use provider::OmpToolProvider;
+pub use bridge::{get_omp_bridge, is_omp_available, OmpBridge, ALL_TOOLS};
+pub use protocol::{OmpRequest, OmpResponse, OmpToolResult, OmpWorkerStatus};
+pub use provider::{
+    create_default_omp_provider, create_omp_provider, OmpToolDefinition, OmpToolProvider,
+    ToolProvider, ToolResult,
+};
 pub use worker::{OmpWorker, OmpWorkerConfig};
-pub use protocol::OmpWorkerStatus;

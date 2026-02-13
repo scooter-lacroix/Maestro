@@ -131,6 +131,8 @@ pub struct ConductorState {
     pub iteration_logs: Vec<leindex_core::orchestrate::model::IterationLog>,
     /// Memories associated with the current track
     pub track_memories: Vec<leindex_core::memory::models::Memory>,
+ /// OMP agent status for current track
+ pub omp_agent_status: Option<crate::omp::OmpWorkerStatus>,
     /// LSP diagnostic errors from last check
     pub lsp_diagnostics_errors: Vec<String>,
     /// LSP diagnostic warnings from last check
@@ -169,6 +171,7 @@ impl Default for ConductorState {
             available_projects: Vec::new(),
             selected_project_index: 0,
             track_runtime_statuses: std::collections::HashMap::new(),
+ omp_agent_status: None,
             iteration_logs: Vec::new(),
             track_memories: Vec::new(),
             lsp_diagnostics_errors: Vec::new(),

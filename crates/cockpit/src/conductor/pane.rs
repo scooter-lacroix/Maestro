@@ -6,9 +6,12 @@
 //!
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
+use super::omp_agent::{OmpAgentManager, OmpAgentConfig};
+use crate::omp::{create_omp_provider, is_omp_available, OmpBridge, OmpToolDefinition, OmpWorkerConfig, ToolProvider, ToolResult, OmpWorkerStatus};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use leindex_core::multiplexer::TmuxMultiplexer;
 use leindex_core::orchestrate::{
@@ -94,6 +97,8 @@ pub struct ConductorPane {
     pub current_project: Option<MaestroProject>,
     /// Last byte offset read from events.jsonl
     pub last_events_poll_offset: u64,
+ /// OMP agent manager for tool execution
+ pub omp_manager: Option<OmpAgentManager>,
 }
 
 impl Default for ConductorPane {
@@ -122,6 +127,7 @@ impl Default for ConductorPane {
             show_dashboard: false,
             current_project: None,
             last_events_poll_offset: 0,
+ omp_manager: if is_omp_available() { Some(OmpAgentManager::new(None)) } else { None },
         }
     }
 }
@@ -848,6 +854,112 @@ impl ConductorPane {
     pub fn get_new_track_command(&self) -> String {
         "maestro newTrack".to_string()
     }
+
+ /// Check if OMP is available
+    pub fn is_omp_available(&self) -> bool {
+        if let Some(ref manager) = self.omp_manager {
+            return manager.is_available();
+        }
+        false
+    }
+
+    /// Get the OMP agent manager
+    pub fn omp_manager(&self) -> Option<&OmpAgentManager> {
+        self.omp_manager.as_ref()
+    }
+
+    /// Get the default OMP agent configuration
+    pub fn get_omp_agent_config(&self) -> OmpAgentConfig {
+        OmpAgentConfig::default()
+    }
+
+    /// Create an OMP tool provider for the given track
+    pub fn create_tool_provider(&self, track_id: &str) -> Option<Box<dyn ToolProvider>> {
+        if !self.is_omp_available() {
+            return None;
+        }
+        // Create a bridge for the track and wrap it in a tool provider
+        let config = OmpWorkerConfig {
+            session_id: track_id.to_string(),
+            project_path: std::path::PathBuf::from("."),
+            model: "claude-3-5-sonnet".to_string(),
+            tools: vec![
+                "python".to_string(),
+                "edit".to_string(),
+                "grep".to_string(),
+                "find".to_string(),
+                "read".to_string(),
+                "write".to_string(),
+            ],
+            ..Default::default()
+        };
+        let bridge = OmpBridge::new(config);
+        Some(create_omp_provider(Arc::new(bridge)))
+    }
+
+    /// Execute an OMP tool directly via the ToolProvider trait
+    pub async fn execute_omp_tool(
+        &self,
+        track_id: &str,
+        tool_name: &str,
+        input: serde_json::Value,
+    ) -> Result<ToolResult, String> {
+        let provider = self
+            .create_tool_provider(track_id)
+            .ok_or("OMP not available")?;
+
+        provider
+            .execute(tool_name, input)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Check if a specific OMP tool is available
+    pub fn has_omp_tool(&self, tool_name: &str) -> bool {
+        if !self.is_omp_available() {
+            return false;
+        }
+        // Create a bridge to verify tool availability
+        let config = OmpWorkerConfig {
+            session_id: "default".to_string(),
+            project_path: std::path::PathBuf::from("."),
+            model: "claude-3-5-sonnet".to_string(),
+            tools: vec![
+                "python".to_string(),
+                "edit".to_string(),
+                "grep".to_string(),
+                "find".to_string(),
+                "read".to_string(),
+                "write".to_string(),
+            ],
+            ..Default::default()
+        };
+        let bridge = OmpBridge::new(config);
+        let provider = create_omp_provider(Arc::new(bridge));
+        provider.has_tool(tool_name)
+    }
+
+    /// Get OMP tool definitions for display in UI
+ pub fn get_omp_tools(&self) -> Vec<OmpToolDefinition> {
+ if !self.is_omp_available() {
+ return Vec::new();
+ }
+ vec![
+ OmpToolDefinition::new("python", "Execute Python code", serde_json::json!({})),
+ OmpToolDefinition::new("edit", "Apply patch edits", serde_json::json!({})),
+ OmpToolDefinition::new("grep", "Search with ripgrep", serde_json::json!({})),
+ OmpToolDefinition::new("find", "Find files", serde_json::json!({})),
+ ]
+ }
+
+ /// Get OMP agent status for a track
+ pub async fn get_omp_agent_status(&self, track_id: &str) -> Option<OmpWorkerStatus> {
+ let manager = self.omp_manager.as_ref()?;
+ if let Ok(status) = manager.get_agent_status(track_id).await {
+ return Some(status);
+ }
+ None
+ }
 }
 
 /// Render the Conductor pane
