@@ -112,6 +112,8 @@ pub struct App {
     pub memories: Vec<MemoryInfo>,
     pub memory_state: ratatui::widgets::ListState,
     pub memory_query: String,
+    pub new_memory_content: String,
+    pub new_memory_category: String,
     pub sessions: Vec<leindex_core::memory::models::Session>,
     pub session_entries: Vec<SessionEntry>,
     pub session_state: ratatui::widgets::ListState,
@@ -239,6 +241,8 @@ impl App {
             memories: Vec::new(),
             memory_state: ratatui::widgets::ListState::default(),
             memory_query: String::new(),
+            new_memory_content: String::new(),
+            new_memory_category: String::new(),
             sessions: Vec::new(),
             session_entries: Vec::new(),
             session_state: ratatui::widgets::ListState::default(),
@@ -376,9 +380,6 @@ impl App {
                 ("hx".to_string(), "Helix (hx)".to_string()),
                 ("nvim".to_string(), "Neovim (nvim)".to_string()),
                 ("vim".to_string(), "Vim (vim)".to_string()),
-                ("emacs".to_string(), "Emacs (emacs)".to_string()),
-                ("nano".to_string(), "Nano (nano)".to_string()),
-                ("micro".to_string(), "Micro (micro)".to_string()),
                 ("code".to_string(), "VS Code (code)".to_string()),
                 ("zed".to_string(), "Zed (zed)".to_string()),
                 ("custom".to_string(), "Custom...".to_string()),
@@ -1901,6 +1902,59 @@ async fn run_app<B: Backend>(
                                         app.refresh_from_service(&service);
                                     }
 
+                                    InputMode::NewMemoryContent => {
+                                        // Move to category input
+                                        if app.new_memory_content.trim().is_empty() {
+                                            app.status_message = "Memory content cannot be empty".to_string();
+                                        } else {
+                                            app.input_mode = InputMode::NewMemoryCategory;
+                                            app.status_message = "Enter category (or press Enter for 'general')".to_string();
+                                        }
+                                    }
+
+                                    InputMode::NewMemoryCategory => {
+                                        // Create the memory
+                                        let Some(svc) = service.as_ref() else {
+                                            app.status_message = "Error: Memory service not available".to_string();
+                                            app.input_mode = InputMode::Normal;
+                                            continue;
+                                        };
+
+                                        let category = if app.new_memory_category.trim().is_empty() {
+                                            "general".to_string()
+                                        } else {
+                                            app.new_memory_category.trim().to_string()
+                                        };
+
+                                        // Parse category to MemoryCategory enum
+                                        let mem_category = match category.to_lowercase().as_str() {
+                                            "knowledge" => leindex_core::memory::models::MemoryCategory::Knowledge,
+                                            "preference" | "preferences" => leindex_core::memory::models::MemoryCategory::Preference,
+                                            "specification" | "spec" | "specs" => leindex_core::memory::models::MemoryCategory::Specification,
+                                            "fact" => leindex_core::memory::models::MemoryCategory::Fact,
+                                            "pattern" => leindex_core::memory::models::MemoryCategory::Pattern,
+                                            "decision" => leindex_core::memory::models::MemoryCategory::Decision,
+                                            "context" => leindex_core::memory::models::MemoryCategory::Context,
+                                            "temporary" | "temp" => leindex_core::memory::models::MemoryCategory::Temporary,
+                                            "observation" => leindex_core::memory::models::MemoryCategory::Observation,
+                                            _ => leindex_core::memory::models::MemoryCategory::General,
+                                        };
+
+                                        match svc.store_memory(app.new_memory_content.trim(), mem_category) {
+                                            Ok(_) => {
+                                                app.status_message = format!("Memory created with category '{}'", category);
+                                                app.refresh_from_service(&service);
+                                            }
+                                            Err(e) => {
+                                                app.status_message = format!("Failed to create memory: {}", e);
+                                            }
+                                        }
+
+                                        app.new_memory_content.clear();
+                                        app.new_memory_category.clear();
+                                        app.input_mode = InputMode::Normal;
+                                    }
+
                                     InputMode::McpMenu => {
                                         let Some(svc) = service.as_ref() else {
                                             app.status_message =
@@ -2340,6 +2394,11 @@ async fn run_app<B: Backend>(
                                     InputMode::DiagnosticView => {
                                         app.diagnostic_view.is_open = false;
                                     }
+                                    InputMode::NewMemoryContent | InputMode::NewMemoryCategory => {
+                                        app.new_memory_content.clear();
+                                        app.new_memory_category.clear();
+                                        app.status_message = "Memory creation cancelled".to_string();
+                                    }
                                     _ => {}
                                 }
                                 app.input_mode = InputMode::Normal;
@@ -2371,6 +2430,12 @@ async fn run_app<B: Backend>(
                                 }
                                 InputMode::MemorySearch => {
                                     app.memory_query.pop();
+                                }
+                                InputMode::NewMemoryContent => {
+                                    app.new_memory_content.pop();
+                                }
+                                InputMode::NewMemoryCategory => {
+                                    app.new_memory_category.pop();
                                 }
                                 InputMode::NewProjectName => {
                                     app.new_project_name.pop();
@@ -2443,6 +2508,12 @@ async fn run_app<B: Backend>(
                                     }
                                     InputMode::MemorySearch => {
                                         app.memory_query.push(c);
+                                    }
+                                    InputMode::NewMemoryContent => {
+                                        app.new_memory_content.push(c);
+                                    }
+                                    InputMode::NewMemoryCategory => {
+                                        app.new_memory_category.push(c);
                                     }
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if c == 'y' || c == 'Y' {
@@ -2964,6 +3035,15 @@ async fn run_app<B: Backend>(
                                 if app.tab_index == 5 {
                                     app.memory_query.clear();
                                     app.refresh_from_service(&service);
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('n')) => {
+                                if app.tab_index == 5 {
+                                    // Start new memory creation
+                                    app.new_memory_content.clear();
+                                    app.new_memory_category.clear();
+                                    app.input_mode = InputMode::NewMemoryContent;
+                                    app.status_message = "Creating new memory - enter content".to_string();
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 1 => {

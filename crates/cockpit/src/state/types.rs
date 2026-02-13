@@ -40,6 +40,9 @@ pub enum InputMode {
     LspInstaller,
     // Diagnostic Detail View
     DiagnosticView,
+    // Memory creation
+    NewMemoryContent,
+    NewMemoryCategory,
 }
 
 /// Focus areas within the Session Hub

@@ -51,7 +51,8 @@ pub fn render_settings_menu_modal(frame: &mut Frame, app: &mut App) {
             Style::default()
                 .bg(theme.highlight_bg)
                 .fg(theme.highlight_fg)
-                .bold(),
+                .bold()
+                .add_modifier(ratatui::style::Modifier::UNDERLINED),
         )
         .highlight_symbol(">> ");
 

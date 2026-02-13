@@ -75,6 +75,7 @@ pub fn render_track_tree(
                     id,
                     is_master,
                     is_external,
+                    is_expanded,
                     ..
                 } => {
                     let runtime_status = pane.state.track_runtime_statuses.get(id);
@@ -115,10 +116,16 @@ pub fn render_track_tree(
                         Style::default().fg(conductor_theme.fg_primary)
                     };
 
-                    let mut spans = vec![Span::styled(
-                        format!(" {} ", status_symbol),
-                        Style::default().fg(status_color),
-                    )];
+                    // Expand/collapse icon for tracks (always show ▶ or ▼)
+                    let expand_symbol = if *is_expanded { "▼ " } else { "▶ " };
+
+                    let mut spans = vec![
+                        Span::styled(
+                            format!(" {} ", status_symbol),
+                            Style::default().fg(status_color),
+                        ),
+                        Span::styled(expand_symbol, style),
+                    ];
 
                     if *is_master {
                         spans.push(Span::styled("👑 ", Style::default().fg(theme.warning)));

@@ -541,12 +541,14 @@ impl ConductorPane {
         for (idx, track) in tracks_clone.iter().enumerate() {
             let is_master = track.id.contains("master") || track.is_master();
             let is_external = track.description == "CLI/External Session";
+            let is_expanded = self.expanded_tasks.contains(&track.id);
 
             items.push(crate::conductor::model::SelectableItem::Track {
                 index: idx,
                 id: track.id.clone(),
                 is_master,
                 is_external,
+                is_expanded,
             });
 
             // If the track is expanded, show its tasks.
