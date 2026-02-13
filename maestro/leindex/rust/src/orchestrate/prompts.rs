@@ -8,11 +8,13 @@ use anyhow::Result;
 /// Prompt template builder
 pub struct PromptBuilder {
     context_budget: usize,
+    /// Optional steering message from conductor
+    steering: Option<String>,
 }
 
 impl PromptBuilder {
     pub fn new(context_budget: usize) -> Self {
-        Self { context_budget }
+        Self { context_budget, steering: None }
     }
 
     /// Build a prompt for the current iteration
@@ -66,6 +68,13 @@ impl PromptBuilder {
                 }
                 prompt.push('\n');
             }
+        }
+
+        // Add steering message if provided
+        if let Some(ref steering) = self.steering {
+            prompt.push_str("## User Steering Message\n\n");
+            prompt.push_str(&format!("> {}\n\n", steering));
+            prompt.push_str("**Follow this guidance for this iteration.**\n\n");
         }
 
         // Add current task details
@@ -248,6 +257,16 @@ Your work is COMPLETE when ALL of the following are true:
 "#,
             task.title, task.id, task.title
         )
+    }
+
+    /// Set the steering message for the next build_prompt call
+    pub fn set_steering(&mut self, steering: String) {
+        self.steering = Some(steering);
+    }
+
+    /// Clear the steering message after it has been used
+    pub fn clear_steering(&mut self) {
+        self.steering = None;
     }
 }
 

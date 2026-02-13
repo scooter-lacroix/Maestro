@@ -11,6 +11,18 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
+/// Orchestrate execution mode
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Auto-pilot mode (agent runs autonomously)
+    Auto,
+    /// Interactive mode (requires user confirmation for major actions)
+    Interactive,
+    /// Dry run mode (show what would happen without executing)
+    DryRun,
+}
+
 /// Control command from conductor to engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -23,6 +35,18 @@ pub enum ControlCommand {
     Abort { reason: Option<String> },
     /// Override error strategy for a task
     SetErrorStrategy { strategy: ErrorStrategyValue },
+    /// Inject steering text into the next prompt
+    Steer(String),
+    /// Update the maximum iteration limit
+    SetMaxIterations(usize),
+    /// Toggle between execution modes (Auto, Interactive, DryRun)
+    SetMode(Mode),
+    /// Change the active agent by name
+    SwitchAgent(String),
+    /// Enable/disable sandbox mode
+    ToggleSandbox,
+    /// Enable/disable dangerous mode (bypass safety)
+    ToggleDangerous,
 }
 
 /// Error strategy values (subset of full ErrorStrategy for JSON)

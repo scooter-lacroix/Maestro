@@ -1,0 +1,13 @@
+{
+  "track_id": "02-conductor-phase2-task-display",
+  "parent_track": "conductor-ralph-parity_20260213",
+  "type": "subtrack",
+  "status": "new",
+  "created_at": "2026-02-13T17:00:00Z",
+  "updated_at": "2026-02-13T17:00:00Z",
+  "name": "Task Display & Details",
+  "description": "Blocked/actionable indicators, task dependencies display, real prompt preview, task breakdown",
+  "phase": 2,
+  "dependencies": ["01-conductor-phase1-ui-primitives"],
+  "blocks": []
+}

@@ -239,7 +239,7 @@ pub enum LoopMode {
 pub struct AgentConfig {
     pub tool: String,
     pub model: Option<String>,
-    pub dangerous_mode: bool,
+    pub dangerous_mode: bool,  // CORRECTED: was "dangerous"
     pub sandbox: bool,
 }
 

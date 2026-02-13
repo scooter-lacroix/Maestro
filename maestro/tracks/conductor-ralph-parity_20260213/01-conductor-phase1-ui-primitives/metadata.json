@@ -1,0 +1,13 @@
+{
+  "track_id": "01-conductor-phase1-ui-primitives",
+  "parent_track": "conductor-ralph-parity_20260213",
+  "type": "subtrack",
+  "status": "new",
+  "created_at": "2026-02-13T17:00:00Z",
+  "updated_at": "2026-02-13T17:00:00Z",
+  "name": "UI Primitives + Steering",
+  "description": "Input/selector modals, ControlCommand extensions, steering integration, keybindings",
+  "phase": 1,
+  "dependencies": [],
+  "blocks": ["02-conductor-phase2-task-display", "03-conductor-phase3-memory-integration", "04-conductor-phase4-parallel-ui", "07-conductor-phase7-themes-toast"]
+}
