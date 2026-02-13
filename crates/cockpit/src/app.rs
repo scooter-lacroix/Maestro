@@ -382,6 +382,7 @@ impl App {
                 ("vim".to_string(), "Vim (vim)".to_string()),
                 ("code".to_string(), "VS Code (code)".to_string()),
                 ("zed".to_string(), "Zed (zed)".to_string()),
+                ("fresh".to_string(), "Fresh (fresh)".to_string()),
                 ("custom".to_string(), "Custom...".to_string()),
             ],
             SettingsMenuKind::Theme => THEMES
@@ -3026,6 +3027,64 @@ async fn run_app<B: Backend>(
                                 // Fall through for global keys like 'q'
                             }
 
+                            // 5b. Ralph Loop Keys for Conductor (explicit handling for s, p, r, ?)
+                            (KeyModifiers::NONE, KeyCode::Char('s')) if app.tab_index == 4 => {
+                                // Start/Run track
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == 4 => {
+                                // Pause track
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == 4 => {
+                                // Resume track
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == 4 => {
+                                // Show status/help
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::StatusMessage(msg) => {
+                                        app.status_message = msg;
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+
                             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
                                 if app.tab_index == 5 {
                                     app.input_mode = InputMode::MemorySearch;
@@ -3038,12 +3097,25 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::NONE, KeyCode::Char('n')) => {
-                                if app.tab_index == 5 {
-                                    // Start new memory creation
+                                // Memory tab: Start new memory creation
+                                // Handle both tab 5 and 6 (both are memory tabs)
+                                if app.tab_index == 5 || app.tab_index == 6 {
                                     app.new_memory_content.clear();
                                     app.new_memory_category.clear();
                                     app.input_mode = InputMode::NewMemoryContent;
                                     app.status_message = "Creating new memory - enter content".to_string();
+                                } else {
+                                    // New session wizard for other tabs
+                                    app.input_mode = InputMode::NewSessionTitle;
+                                    // Auto-fill path if a project is selected
+                                    if app.tab_index == 2 {
+                                        // Projects Tab
+                                        if let Some(i) = app.project_state.selected() {
+                                            app.new_session_path = app.projects[i].path.clone();
+                                            app.new_session_title =
+                                                format!("Chat: {}", app.projects[i].name);
+                                        }
+                                    }
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 1 => {
@@ -4217,18 +4289,6 @@ async fn run_app<B: Backend>(
                                                 app.mcp_servers = mcp_list;
                                             }
                                         }
-                                    }
-                                }
-                            }
-                            (_, KeyCode::Char('n')) => {
-                                app.input_mode = InputMode::NewSessionTitle;
-                                // Auto-fill path if a project is selected
-                                if app.tab_index == 2 {
-                                    // Projects Tab
-                                    if let Some(i) = app.project_state.selected() {
-                                        app.new_session_path = app.projects[i].path.clone();
-                                        app.new_session_title =
-                                            format!("Chat: {}", app.projects[i].name);
                                     }
                                 }
                             }
