@@ -1,5 +1,7 @@
 use crate::conductor::pane::ConductorPane;
+use crate::conductor::model::ConductorStatus;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use leindex_core::orchestrate::model::LoopMode;
 
 /// Result of a key event handling
 pub enum ConductorAction {
@@ -13,6 +15,73 @@ pub enum ConductorAction {
 
 /// Handle Conductor-specific key events
 pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAction {
+    // 0. Handle modals first (they absorb all input when visible)
+    if pane.steering_modal.visible {
+        match pane.steering_modal.handle_key(key) {
+            super::input_modal::InputAction::Submit(text) => {
+                if !text.trim().is_empty() {
+                    if let Some(track_id) = pane.state.current_track.clone() {
+                        let _ = send_control_command(
+                            &track_id,
+                            ControlCommandType::Steer { message: text },
+                        );
+                        return ConductorAction::StatusMessage("Steering message sent".to_string());
+                    }
+                }
+                return ConductorAction::Handled;
+            }
+            super::input_modal::InputAction::Cancel => return ConductorAction::Handled,
+            super::input_modal::InputAction::Handled => return ConductorAction::Handled,
+            super::input_modal::InputAction::None => return ConductorAction::Handled,
+        }
+    }
+
+    if pane.iter_modal.visible {
+        match pane.iter_modal.handle_key(key) {
+            super::input_modal::InputAction::Submit(text) => {
+                if let Ok(max) = text.trim().parse::<u64>() {
+                    if let Some(track_id) = pane.state.current_track.clone() {
+                        let _ = send_control_command(
+                            &track_id,
+                            ControlCommandType::SetMaxIterations { max },
+                        );
+                        return ConductorAction::StatusMessage(format!("Max iterations set to {}", max));
+                    }
+                }
+                return ConductorAction::Handled;
+            }
+            super::input_modal::InputAction::Cancel => return ConductorAction::Handled,
+            super::input_modal::InputAction::Handled => return ConductorAction::Handled,
+            super::input_modal::InputAction::None => return ConductorAction::Handled,
+        }
+    }
+
+    if pane.selector_modal.visible {
+        match pane.selector_modal.handle_key(key) {
+            super::selector_modal::SelectorAction::Selected(value) => {
+                let title = pane.selector_modal.title.clone();
+                if let Some(track_id) = pane.state.current_track.clone() {
+                    if title.contains("Error Strategy") {
+                        let _ = send_control_command(
+                            &track_id,
+                            ControlCommandType::SetErrorStrategy { strategy: value },
+                        );
+                        return ConductorAction::StatusMessage("Error strategy updated".to_string());
+                    } else if title.contains("Agent") {
+                        let _ = send_control_command(
+                            &track_id,
+                            ControlCommandType::SwitchAgent { tool: value, model: None },
+                        );
+                        return ConductorAction::StatusMessage("Agent switched".to_string());
+                    }
+                }
+                return ConductorAction::Handled;
+            }
+            super::selector_modal::SelectorAction::Cancel => return ConductorAction::Handled,
+            super::selector_modal::SelectorAction::None => return ConductorAction::Handled,
+        }
+    }
+
     // 1. Handle Project Selector if open
     if pane.state.show_project_selector {
         match (key.modifiers, key.code) {
@@ -175,6 +244,68 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         (KeyModifiers::SHIFT, KeyCode::Char('P')) => {
             pane.open_project_selector();
             ConductorAction::Handled
+        }
+
+        // Steering message modal (Ctrl+M)
+        (KeyModifiers::CONTROL, KeyCode::Char('m')) => {
+            pane.steering_modal.title = "Steering Message".to_string();
+            pane.steering_modal.prompt_text = "Enter guidance for the next iteration:".to_string();
+            pane.steering_modal.visible = true;
+            ConductorAction::Handled
+        }
+
+        // Error strategy selector (e) - only when running
+        (KeyModifiers::NONE, KeyCode::Char('e')) if pane.state.status != ConductorStatus::Ready => {
+            pane.selector_modal = super::selector_modal::SelectorModal::new_with_descriptions(
+                "Error Strategy",
+                vec![
+                    ("Retry", "retry", "Retry the task"),
+                    ("Skip", "skip", "Skip this task"),
+                    ("Abort", "abort", "Abort the track"),
+                ],
+            );
+            pane.selector_modal.visible = true;
+            ConductorAction::Handled
+        }
+
+        // Max iterations modal (i) - only when running
+        (KeyModifiers::NONE, KeyCode::Char('i')) if pane.state.status != ConductorStatus::Ready => {
+            pane.iter_modal.title = "Max Iterations".to_string();
+            pane.iter_modal.prompt_text = "Enter max iterations (0 = unlimited):".to_string();
+            pane.iter_modal.visible = true;
+            ConductorAction::Handled
+        }
+
+        // Agent switch selector (a) - only when running
+        (KeyModifiers::NONE, KeyCode::Char('a')) if pane.state.status != ConductorStatus::Ready => {
+            pane.selector_modal = super::selector_modal::SelectorModal::new_with_descriptions(
+                "Select Agent",
+                vec![
+                    ("Claude", "claude", "Anthropic's Claude"),
+                    ("Gemini", "gemini", "Google's Gemini"),
+                    ("Qwen", "qwen", "Alibaba's Qwen"),
+                    ("OpenAI", "openai", "OpenAI's GPT"),
+                ],
+            );
+            pane.selector_modal.visible = true;
+            ConductorAction::Handled
+        }
+
+        // Mode toggle (m) - only when running
+        (KeyModifiers::NONE, KeyCode::Char('m')) if pane.state.status != ConductorStatus::Ready => {
+            let new_mode = if pane.state.loop_mode == LoopMode::Building {
+                "planning"
+            } else {
+                "building"
+            };
+            if let Some(track_id) = pane.state.current_track.clone() {
+                let _ = send_control_command(
+                    &track_id,
+                    ControlCommandType::SetMode { mode: new_mode.to_string() },
+                );
+                return ConductorAction::StatusMessage(format!("Mode switched to {}", new_mode))
+            }
+            ConductorAction::StatusMessage("No track active".to_string())
         }
 
         // Focus toggle
@@ -362,6 +493,11 @@ enum ControlCommandType {
     Retry { task_id: String, iteration: u64 },
     Skip { task_id: String, iteration: u64 },
     Abort { reason: Option<String> },
+    Steer { message: String },
+    SetMaxIterations { max: u64 },
+    SetErrorStrategy { strategy: String },
+    SwitchAgent { tool: String, model: Option<String> },
+    SetMode { mode: String },
 }
 
 /// Send a control command to the orchestrate engine via control.json
@@ -393,6 +529,32 @@ fn send_control_command(track_id: &str, cmd: ControlCommandType) -> anyhow::Resu
             ControlCommand::Skip { task_id, iteration }
         }
         ControlCommandType::Abort { reason } => ControlCommand::Abort { reason },
+        ControlCommandType::Steer { message } => ControlCommand::Steer(message),
+        ControlCommandType::SetMaxIterations { max } => ControlCommand::SetMaxIterations(max as usize),
+        ControlCommandType::SetErrorStrategy { strategy } => {
+            use leindex_core::orchestrate::control::ErrorStrategyValue;
+            let strategy_value = match strategy.as_str() {
+                "retry" => ErrorStrategyValue::Retry,
+                "skip" => ErrorStrategyValue::Skip,
+                "abort" => ErrorStrategyValue::Abort,
+                _ => ErrorStrategyValue::Retry, // Default to retry
+            };
+            ControlCommand::SetErrorStrategy { strategy: strategy_value }
+        }
+        ControlCommandType::SwitchAgent { tool, model } => {
+            // Note: model is ignored for now as ControlCommand::SwitchAgent only takes tool
+            ControlCommand::SwitchAgent(tool)
+        }
+        ControlCommandType::SetMode { mode } => {
+            use leindex_core::orchestrate::control::Mode;
+            let mode_value = match mode.as_str() {
+                "auto" => Mode::Auto,
+                "interactive" => Mode::Interactive,
+                "dry_run" | "dryrun" => Mode::DryRun,
+                _ => Mode::Auto, // Default to Auto
+            };
+            ControlCommand::SetMode(mode_value)
+        }
     };
 
     // Add command to the control file

@@ -1,0 +1,13 @@
+{
+  "track_id": "07-conductor-phase7-themes-toast",
+  "parent_track": "conductor-ralph-parity_20260213",
+  "type": "subtrack",
+  "status": "new",
+  "created_at": "2026-02-13T17:00:00Z",
+  "updated_at": "2026-02-13T17:00:00Z",
+  "name": "Theme System + Toast",
+  "description": "4 additional themes, Theme::from_name(), selector modal, ToastQueue, render overlay",
+  "phase": 7,
+  "dependencies": ["01-conductor-phase1-ui-primitives"],
+  "blocks": []
+}

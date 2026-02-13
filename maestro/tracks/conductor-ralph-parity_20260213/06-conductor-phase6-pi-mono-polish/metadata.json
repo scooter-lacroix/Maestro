@@ -1,0 +1,13 @@
+{
+  "track_id": "06-conductor-phase6-pi-mono-polish",
+  "parent_track": "conductor-ralph-parity_20260213",
+  "type": "subtrack",
+  "status": "new",
+  "created_at": "2026-02-13T17:00:00Z",
+  "updated_at": "2026-02-13T17:00:00Z",
+  "name": "Pi-Mono Deep Integration + Polish",
+  "description": "Pi-Mono start options, detection status, memory stats, iteration timing, implement launcher",
+  "phase": 6,
+  "dependencies": ["01-conductor-phase1-ui-primitives", "02-conductor-phase2-task-display", "03-conductor-phase3-memory-integration"],
+  "blocks": []
+}

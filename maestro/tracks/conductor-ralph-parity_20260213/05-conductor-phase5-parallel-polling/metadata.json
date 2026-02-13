@@ -1,0 +1,13 @@
+{
+  "track_id": "05-conductor-phase5-parallel-polling",
+  "parent_track": "conductor-ralph-parity_20260213",
+  "type": "subtrack",
+  "status": "new",
+  "created_at": "2026-02-13T17:00:00Z",
+  "updated_at": "2026-02-13T17:00:00Z",
+  "name": "Parallel Event Polling",
+  "description": "9 EngineEvent variants, 3 ControlCommand variants, polling.rs extension",
+  "phase": 5,
+  "dependencies": ["04-conductor-phase4-parallel-ui"],
+  "blocks": []
+}

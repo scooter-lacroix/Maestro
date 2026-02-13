@@ -99,6 +99,12 @@ pub struct ConductorPane {
     pub last_events_poll_offset: u64,
  /// OMP agent manager for tool execution
  pub omp_manager: Option<OmpAgentManager>,
+    /// Steering message input modal (Ctrl+M)
+    pub steering_modal: super::input_modal::InputModal,
+    /// Max iterations input modal (i key)
+    pub iter_modal: super::input_modal::InputModal,
+    /// Generic selector modal for error strategy, agents, etc.
+    pub selector_modal: super::selector_modal::SelectorModal,
 }
 
 impl Default for ConductorPane {
@@ -128,6 +134,14 @@ impl Default for ConductorPane {
             current_project: None,
             last_events_poll_offset: 0,
  omp_manager: if is_omp_available() { Some(OmpAgentManager::new(None)) } else { None },
+            steering_modal: super::input_modal::InputModal::new("Steering Message", "Enter guidance for the next iteration:"),
+            iter_modal: super::input_modal::InputModal::new("Max Iterations", "Enter max iterations (0 = unlimited):"),
+            selector_modal: super::selector_modal::SelectorModal {
+                title: String::new(),
+                items: Vec::new(),
+                selected: 0,
+                visible: false,
+            },
         }
     }
 }

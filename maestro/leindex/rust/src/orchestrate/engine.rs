@@ -5,7 +5,7 @@
 //! Bidirectional communication with Conductor TUI via control.json (commands)
 //! and events.jsonl (structured events).
 
-use crate::orchestrate::control::{ControlCommand, ControlManager, EngineEvent};
+use crate::orchestrate::control::{ControlCommand, ControlManager, EngineEvent, Mode};
 use crate::orchestrate::model::*;
 use crate::orchestrate::parser::{parse_plan_md, write_plan_md};
 use crate::orchestrate::prompts::PromptBuilder;
@@ -29,6 +29,8 @@ pub struct OrchestrateEngine {
     memory_service: Option<crate::memory::MemoryService>,
     rate_limit_detector: RateLimitDetector,
     rate_limit_backoff: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitBackoff>>,
+    /// Pending steering message from conductor (single-use, cleared after injection)
+    pending_steering: Option<String>,
 }
 
 impl OrchestrateEngine {
@@ -51,6 +53,7 @@ impl OrchestrateEngine {
             memory_service,
             rate_limit_detector,
             rate_limit_backoff,
+            pending_steering: None,
         })
     }
 
@@ -191,6 +194,46 @@ impl OrchestrateEngine {
                         info!("Error strategy changed to {:?}", strategy);
                         // Note: This would need to be stored in the session/config
                         // For now, we log it
+                    }
+                    ControlCommand::Steer(message) => {
+                        info!("Steering message from conductor: {}", message);
+                        self.pending_steering = Some(message);
+                    }
+                    ControlCommand::SetMaxIterations(max) => {
+                        info!("Max iterations set to {} via conductor", max);
+                        session.max_iterations = max as u64;
+                        session.updated_at = Utc::now().to_rfc3339();
+                        self.state_manager.save_session(&session)?;
+                    }
+                    ControlCommand::SetMode(mode) => {
+                        info!("Mode set to {:?} via conductor", mode);
+                        // TODO: Add Mode field to SessionState when needed
+                        // For now, we just log the mode change
+                        match mode {
+                            Mode::Auto => info!("Auto mode enabled"),
+                            Mode::Interactive => info!("Interactive mode enabled"),
+                            Mode::DryRun => info!("DryRun mode enabled"),
+                        }
+                    }
+                    ControlCommand::SwitchAgent(tool) => {
+                        info!("Agent switched to {} via conductor", tool);
+                        session.agent_config.tool = tool;
+                        // Note: model field is now None when switching via this command
+                        session.agent_config.model = None;
+                        session.updated_at = Utc::now().to_rfc3339();
+                        self.state_manager.save_session(&session)?;
+                    }
+                    ControlCommand::ToggleSandbox => {
+                        session.agent_config.sandbox = !session.agent_config.sandbox;
+                        info!("Sandbox toggled to {} via conductor", session.agent_config.sandbox);
+                        session.updated_at = Utc::now().to_rfc3339();
+                        self.state_manager.save_session(&session)?;
+                    }
+                    ControlCommand::ToggleDangerous => {
+                        session.agent_config.dangerous_mode = !session.agent_config.dangerous_mode;
+                        info!("Dangerous mode toggled to {} via conductor", session.agent_config.dangerous_mode);
+                        session.updated_at = Utc::now().to_rfc3339();
+                        self.state_manager.save_session(&session)?;
                     }
                 }
             }
@@ -699,7 +742,7 @@ impl OrchestrateEngine {
     }
 
     async fn run_iteration(
-        &self,
+        &mut self,
         track_id: &str,
         task: &Task,
         session: &SessionState,
@@ -752,12 +795,17 @@ impl OrchestrateEngine {
     }
 
     fn build_prompt(
-        &self,
+        &mut self,
         task: &Task,
         session: &SessionState,
         plan: &TrackPlan,
     ) -> Result<String> {
-        let builder = PromptBuilder::new(self.config.context_budget);
+        let mut builder = PromptBuilder::new(self.config.context_budget);
+
+        // Set steering message if pending
+        if let Some(ref steering) = self.pending_steering {
+            builder.set_steering(steering.clone());
+        }
 
         // Get recent iterations
         let recent = self
@@ -790,14 +838,19 @@ impl OrchestrateEngine {
             }
         });
 
-        builder.build_prompt(
+        let prompt_result = builder.build_prompt(
             task,
             session,
             plan,
             &recent,
             leindex_context.as_deref(),
             memory_context.as_deref(),
-        )
+        )?;
+
+        // Clear steering after use (single-use)
+        self.pending_steering = None;
+
+        Ok(prompt_result)
     }
 
     fn resolve_project_path(&self) -> String {
@@ -973,7 +1026,7 @@ impl OrchestrateEngine {
     }
 
     async fn verify_track_integrity(
-        &self,
+        &mut self,
         track_id: &str,
         plan: &TrackPlan,
         session: &SessionState,
