@@ -337,24 +337,24 @@ impl ConductorPane {
         &mut self,
         sessions: &[leindex_core::memory::models::Session],
     ) {
+        use leindex_core::memory::models::SessionStatus;
+
         for session in sessions {
             // Skip if already tracked
             if self.tracks.iter().any(|t| t.id == session.session_id) {
                 continue;
             }
 
-            // Only add active/running sessions
-            let track_status = match session.status.as_str() {
-                "running" | "active" => TrackStatus::InProgress,
-                "completed" => TrackStatus::Completed,
-                "paused" => TrackStatus::InProgress,
-                _ => TrackStatus::Pending,
-            };
+            // Only add RUNNING sessions - filter out Terminated, Waiting, etc.
+            // Use direct enum comparison instead of string matching
+            if session.status != SessionStatus::Running {
+                continue;
+            }
 
             let track = Track {
                 id: session.session_id.clone(),
                 description: format!("Tmux Session: {}", session.title),
-                status: track_status,
+                status: TrackStatus::InProgress,
                 link_path: PathBuf::from(&session.project_path),
                 metadata: None,
                 plan: None,
@@ -432,18 +432,85 @@ impl ConductorPane {
         let mut external_ids = std::collections::HashSet::new();
         self.discover_external_sessions(&mut loaded_tracks, &mut external_ids);
 
+        // Filter out tracks that don't have a running tmux session
+        // This removes stale phantom tracks and old sessions
+        loaded_tracks.retain(|track| {
+            // Keep external tracks (they're already filtered by status in discover_external_sessions)
+            if external_ids.contains(&track.id) {
+                return true;
+            }
+            // For tracks.md tracks, check if there's a live tmux session
+            // by checking if session.json exists and shows Running status
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let orchestrate_dir = PathBuf::from(home)
+                .join(".maestro")
+                .join("orchestrate")
+                .join(&track.id);
+            if orchestrate_dir.exists() {
+                let session_path = orchestrate_dir.join("session.json");
+                if session_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&session_path) {
+                        if let Ok(session) =
+                            serde_json::from_str::<leindex_core::orchestrate::model::SessionState>(&content)
+                        {
+                            // Only keep tracks with Running or Paused status
+                            return matches!(
+                                session.status,
+                                leindex_core::orchestrate::model::SessionStatus::Running
+                                    | leindex_core::orchestrate::model::SessionStatus::Paused
+                            );
+                        }
+                    }
+                }
+            }
+            // No session.json found - could be a planned track not yet started
+            // Keep it but don't mark as external
+            false
+        });
+
         self.tracks = loaded_tracks;
-        self.external_track_ids = external_ids;
+        
+        // Update external_track_ids to only include tracks that survived filtering
+        self.external_track_ids = self.tracks
+            .iter()
+            .filter(|t| external_ids.contains(&t.id))
+            .map(|t| t.id.clone())
+            .collect();
+        
         self.last_tracks_mtime = tracks_mtime;
         self.last_external_scan = std::time::Instant::now();
         self.invalidate_plan_cache();
 
-        // Clamp selection to available items
+        // Get current selected item before adjusting selection
+        let current_selection = self.get_current_selection_id();
+        
+        // Only change selection if the previously selected item no longer exists
+        // This prevents focus jumping on every refresh
         let items = self.get_selectable_items();
-        if items.is_empty() {
-            self.selected_index = 0;
-        } else if self.selected_index >= items.len() {
-            self.selected_index = items.len() - 1;
+        if let Some(current_id) = current_selection {
+            let current_still_exists = items.iter().any(|item| {
+                match item {
+                    crate::conductor::model::SelectableItem::Track { id, .. } => id == &current_id,
+                    crate::conductor::model::SelectableItem::Task { id, .. } => id == &current_id,
+                }
+            });
+            
+            if !current_still_exists {
+                // Current selection was removed, clamp to valid range
+                if items.is_empty() {
+                    self.selected_index = 0;
+                } else if self.selected_index >= items.len() {
+                    self.selected_index = items.len() - 1;
+                }
+            }
+            // If current selection still exists, don't change selected_index
+        } else {
+            // No previous selection, ensure valid range
+            if items.is_empty() {
+                self.selected_index = 0;
+            } else if self.selected_index >= items.len() {
+                self.selected_index = items.len() - 1;
+            }
         }
 
         // Drop expansion state for removed tracks
@@ -495,7 +562,8 @@ impl ConductorPane {
         
         for (idx, track) in tracks_clone.iter().enumerate() {
             let is_master = track.id.contains("master") || track.is_master();
-            let is_external = track.description == "CLI/External Session";
+            // Check external_track_ids set for reliable identification
+            let is_external = self.external_track_ids.contains(&track.id);
             let is_expanded = self.expanded_tasks.contains(&track.id);
 
             items.push(crate::conductor::model::SelectableItem::Track {
@@ -631,6 +699,21 @@ impl ConductorPane {
             }
         }
         None
+    }
+
+    /// Get the ID of the currently selected item (track or task)
+    /// Used to preserve selection after refreshing tracks
+    pub fn get_current_selection_id(&mut self) -> Option<String> {
+        let items = self.get_selectable_items();
+        if items.is_empty() {
+            return None;
+        }
+
+        let idx = self.selected_index.min(items.len() - 1);
+        match &items[idx] {
+            crate::conductor::model::SelectableItem::Track { id, .. } => Some(id.clone()),
+            crate::conductor::model::SelectableItem::Task { id, .. } => Some(id.clone()),
+        }
     }
 
     /// Select next track
