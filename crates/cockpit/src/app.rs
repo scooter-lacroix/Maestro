@@ -2694,7 +2694,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 7 {
+                                } else if app.tab_index == 8 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -2822,7 +2822,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 7 {
+                                } else if app.tab_index == 8 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -3605,7 +3605,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 7 {
+                                } else if app.tab_index == 8 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -3732,7 +3732,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 7 {
+                                } else if app.tab_index == 8 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -3881,7 +3881,7 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('/') | KeyCode::Char('?')) if app.tab_index != 4 => {
+                            (_, KeyCode::Char('/') | KeyCode::Char('h') | KeyCode::Char('?')) => {
                                 app.show_help = true;
                                 app.help_scroll = 0;
                             }
@@ -3922,7 +3922,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 7 {
+                                } else if app.tab_index == 8 {
                                     // Settings
                                     match app.settings_option {
                                         SettingsOption::Editor => {
@@ -4313,6 +4313,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
         3 => render_analysis(frame, chunks[1], app),
         4 => {
             let theme = app.theme();
+            // Sync active sessions from Sessions tab into conductor tracks
+            app.conductor.sync_sessions_as_tracks(&app.sessions);
             crate::conductor::render_conductor(frame, chunks[1], &mut app.conductor, &theme);
         }
         5 => render_memory(frame, chunks[1], app),

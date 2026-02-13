@@ -331,6 +331,39 @@ impl ConductorPane {
         self.reload();
     }
 
+    /// Sync active tmux sessions from the Sessions tab as tracks
+    /// This adds running tmux sessions that aren't already tracked
+    pub fn sync_sessions_as_tracks(
+        &mut self,
+        sessions: &[leindex_core::memory::models::Session],
+    ) {
+        for session in sessions {
+            // Skip if already tracked
+            if self.tracks.iter().any(|t| t.id == session.session_id) {
+                continue;
+            }
+
+            // Only add active/running sessions
+            let track_status = match session.status.as_str() {
+                "running" | "active" => TrackStatus::InProgress,
+                "completed" => TrackStatus::Completed,
+                "paused" => TrackStatus::InProgress,
+                _ => TrackStatus::Pending,
+            };
+
+            let track = Track {
+                id: session.session_id.clone(),
+                description: format!("Tmux Session: {}", session.title),
+                status: track_status,
+                link_path: PathBuf::from(&session.project_path),
+                metadata: None,
+                plan: None,
+            };
+
+            self.tracks.push(track);
+        }
+    }
+
     /// Switch projects automatically based on the active tmux pane.
     /// Returns true if a project switch occurred.
     pub fn refresh_project_from_tmux(&mut self) -> bool {
