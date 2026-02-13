@@ -297,6 +297,46 @@ impl OmpWorker {
         }
     }
 
+    /// Check for and clean up timed-out requests
+    /// Returns the number of requests that timed out
+    pub async fn cleanup_timed_out_requests(&mut self) -> usize {
+        let mut pending_guard = self.pending.write().await;
+        let timeout = self.config.response_timeout;
+        let mut timed_out_count = 0;
+
+        // Find all timed-out requests
+        let timed_out_ids: Vec<u64> = pending_guard
+            .iter()
+            .filter(|(_, pending)| pending.is_timeout(timeout))
+            .map(|(id, _)| *id)
+            .collect();
+
+        for id in timed_out_ids {
+            if let Some(pending) = pending_guard.remove(&id) {
+                // Get elapsed time before sending (to avoid borrow after move)
+                let elapsed = pending.elapsed();
+                // Send timeout error to the waiting caller
+                let _ = pending.tx.send(Err(anyhow!("Request {} timed out after {:?}", id, elapsed)));
+                timed_out_count += 1;
+            }
+        }
+
+        if timed_out_count > 0 {
+            info!("Cleaned up {} timed-out requests", timed_out_count);
+        }
+
+        timed_out_count
+    }
+
+    /// Get count of pending requests and their ages
+    pub async fn get_pending_request_stats(&self) -> Vec<(u64, Duration)> {
+        let pending_guard = self.pending.read().await;
+        pending_guard
+            .iter()
+            .map(|(id, pending)| (*id, pending.elapsed()))
+            .collect()
+    }
+
     /// Send a request to the worker and wait for response
     pub async fn invoke(
         &mut self,
@@ -335,6 +375,9 @@ impl OmpWorker {
         stdin.write_all(request_json.as_bytes()).await?;
         stdin.write_all(b"\n").await?;
         stdin.flush().await?;
+
+        // Clean up any timed-out requests before waiting for response
+        let _ = self.cleanup_timed_out_requests().await;
 
         // Wait for response with timeout
         let response = timeout(self.config.response_timeout, rx)

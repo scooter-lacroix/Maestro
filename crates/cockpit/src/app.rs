@@ -21,6 +21,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+use tracing::debug;
 
 use leindex_core::config::Config;
 use leindex_core::memory::lsp_manager::LspType;
@@ -31,6 +32,8 @@ use leindex_core::memory::TursoStorageBackend;
 use leindex_core::multiplexer::TmuxMultiplexer;
 
 use crate::modals;
+use crate::conductor::omp_agent::OmpAgentManager;
+use crate::omp::{is_omp_available, OmpWorkerStatus};
 use crate::state::{
     AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
     ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
@@ -198,7 +201,9 @@ pub struct App {
     pub storage_backend: Option<Arc<TursoStorageBackend>>,
     // Flag to trigger async LSP refresh
     pub pending_lsp_refresh: bool,
-    // Persistent LSP Manager to keep processes alive
+    // LSP Pool for shared LSP instances (preferred)
+    pub lsp_pool: Option<Arc<leindex_core::memory::lsp_pool::LspPool>>,
+    // Persistent LSP Manager to keep processes alive (legacy, per-session)
     pub lsp_manager: Option<leindex_core::memory::lsp_manager::LspManager>,
     // Sessions that already ran LSP auto-detection
     pub lsp_autostarted_sessions: HashSet<String>,
@@ -208,6 +213,8 @@ pub struct App {
     mcp_refresh_task: Option<tokio::task::JoinHandle<()>>,
     // Ktop tab state (system resource monitoring)
     pub ktop_state: Option<crate::tabs::ktop::KtopState>,
+ // OMP agent manager for tool execution
+ pub omp_manager: Option<OmpAgentManager>,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -299,12 +306,19 @@ impl App {
             lsp_diagnostics_cache: Vec::new(),
             storage_backend: storage_backend.clone(),
             pending_lsp_refresh: false,
+            lsp_pool: storage_backend.as_ref().map(|s| {
+                Arc::new(leindex_core::memory::lsp_pool::LspPool::new(
+                    (**s).clone(),
+                    leindex_core::memory::lsp_pool::LspPoolConfig::default(),
+                ))
+            }),
             lsp_manager: storage_backend
                 .map(|s| leindex_core::memory::lsp_manager::LspManager::new((*s).clone())),
             lsp_autostarted_sessions: HashSet::new(),
             conductor: crate::conductor::ConductorPane::auto_discover(),
             mcp_refresh_task: None,
             ktop_state: None,
+ omp_manager: if is_omp_available() { Some(OmpAgentManager::new(None)) } else { None },
         };
 
         // Start MCP status refresh background task
@@ -331,6 +345,11 @@ impl App {
             });
         }
 
+        // Start LSP pool idle monitor
+        if let Some(ref lsp_pool) = app.lsp_pool {
+            lsp_pool.start_monitor();
+        }
+
         // Check LSP availability on startup
         app.check_lsp_availability();
         app.mcp_state.select(Some(0));
@@ -343,8 +362,8 @@ impl App {
     pub fn theme(&self) -> Theme {
         let mut theme = theme_from_name(&self.config.theme);
         if self.config.transparent {
-            theme.bg = Color::Reset;
-            theme.panel_bg = Color::Reset;
+            theme.bg = Color::Rgb(0, 0, 0);
+            theme.panel_bg = Color::Rgb(0, 0, 0);
             theme.transparent = true;
         }
         theme
@@ -643,6 +662,22 @@ impl App {
             // Poll Conductor engine state
             self.conductor.poll_engine_state();
 
+
+ // Poll OMP agent status for active track
+ if let Some(ref manager) = self.omp_manager {
+ if let Some(track_id) = &self.conductor.state.current_track {
+ if let Ok(status) = manager.get_agent_status_sync(track_id) {
+ // Use OmpWorkerStatus methods to check health and display status
+ let worker_status: OmpWorkerStatus = status;
+ if worker_status.is_healthy() {
+ debug!("OMP worker healthy for track {}: model={}, uptime={}s", 
+ track_id, worker_status.model, worker_status.uptime_secs);
+ }
+ // Update status in conductor state for display
+ self.conductor.state.omp_agent_status = Some(worker_status);
+ }
+ }
+ }
             // Fetch memories for the active track
             if let Some(_track_id) = &self.conductor.state.current_track {
                 if let Ok(memories) = svc.list_memories(10) {
@@ -2065,7 +2100,41 @@ async fn run_app<B: Backend>(
                                         let available_lsps = crate::tabs::lsp_registry::get_available_lsps();
                                         if let Some(selected_lsp) = available_lsps.get(app.lsp_installer.selected_index) {
                                             let install_cmd = crate::tabs::lsp_registry::get_install_command(selected_lsp);
-                                            app.status_message = format!("Install: {}", install_cmd);
+                                            
+                                            app.status_message = format!(
+                                                "Installing {}... This may take a few minutes.",
+                                                selected_lsp.display_name
+                                            );
+                                            let _ = terminal.draw(|frame| ui(frame, &mut app));
+                                            
+                                            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                                            let exec_result = std::process::Command::new(&shell)
+                                                .arg("-c")
+                                                .arg(&install_cmd)
+                                                .status();
+                                            
+                                            match exec_result {
+                                                Ok(exit_status) => {
+                                                    if exit_status.success() {
+                                                        app.status_message = format!(
+                                                            "{} installed successfully!",
+                                                            selected_lsp.display_name
+                                                        );
+                                                    } else {
+                                                        app.status_message = format!(
+                                                            "Installation of {} failed with exit code: {:?}",
+                                                            selected_lsp.display_name,
+                                                            exit_status.code()
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    app.status_message = format!(
+                                                        "Failed to start install: {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
                                             app.lsp_installer.is_open = false;
                                             app.input_mode = InputMode::Normal;
                                             app.check_lsp_availability();
@@ -3208,17 +3277,15 @@ async fn run_app<B: Backend>(
                                 app.status_message = "LSP Installer - Select an LSP to install".to_string();
                             }
                             // Ktop-specific keybindings (use Alt to avoid conflicts)
-                            (KeyModifiers::ALT, KeyCode::Char('p')) => {
-                                if app.tab_index == 6 {
-                                    // Ktop tab - pause/resume
-                                    if let Some(ref mut ktop) = app.ktop_state {
-                                        ktop.toggle_pause();
-                                        app.status_message = if ktop.paused {
-                                            "Krustop paused".to_string()
-                                        } else {
-                                            "Krustop resumed".to_string()
-                                        };
-                                    }
+                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 6 => {
+                                // Ktop tab - pause/resume
+                                if let Some(ref mut ktop) = app.ktop_state {
+                                    ktop.toggle_pause();
+                                    app.status_message = if ktop.paused {
+                                        "Krustop paused".to_string()
+                                    } else {
+                                        "Krustop resumed".to_string()
+                                    };
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('+') | KeyCode::Char('=')) => {
