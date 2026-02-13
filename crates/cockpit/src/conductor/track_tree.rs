@@ -79,15 +79,14 @@ pub fn render_track_tree(
                     ..
                 } => {
                     let runtime_status = pane.state.track_runtime_statuses.get(id);
-                    let (status_symbol, status_color) = match runtime_status {
-                        Some(ConductorStatus::Running) => {
-                            (STATUS_ACTIVE, conductor_theme.task_active)
-                        }
-                        Some(ConductorStatus::Paused) => ("[P]", theme.warning),
-                        Some(ConductorStatus::Failed) => ("[F]", theme.error),
-                        Some(ConductorStatus::Completed) => {
-                            (STATUS_DONE, conductor_theme.task_done)
-                        }
+                    
+                    // For tracks, use a simple indicator instead of STATUS_ACTIVE (which is ▶)
+                    // to avoid duplicating the expand arrow
+                    let track_indicator = match runtime_status {
+                        Some(ConductorStatus::Running) => ("●", conductor_theme.task_active),
+                        Some(ConductorStatus::Paused) => ("◐", theme.warning),
+                        Some(ConductorStatus::Failed) => ("✗", theme.error),
+                        Some(ConductorStatus::Completed) => ("✓", conductor_theme.task_done),
                         _ => ("", conductor_theme.fg_primary),
                     };
 
@@ -121,8 +120,8 @@ pub fn render_track_tree(
 
                     let mut spans = vec![
                         Span::styled(
-                            format!(" {} ", status_symbol),
-                            Style::default().fg(status_color),
+                            format!(" {} ", track_indicator.0),
+                            Style::default().fg(track_indicator.1),
                         ),
                         Span::styled(expand_symbol, style),
                     ];
