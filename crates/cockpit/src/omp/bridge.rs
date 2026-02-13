@@ -272,6 +272,53 @@ pub async fn get_omp_bridge(config: Option<OmpWorkerConfig>) -> Result<Arc<OmpBr
 
 /// Check if OMP is available globally
 pub fn is_omp_available() -> bool {
+    // Check 1: vendor/oh-my-pi/packages/coding-agent/src/worker.ts (original path)
     let worker_path = PathBuf::from("vendor/oh-my-pi/packages/coding-agent/src/worker.ts");
-    worker_path.exists()
+    if worker_path.exists() {
+        return true;
+    }
+
+    // Check 2: Check if 'pi' or 'omp' command exists in PATH
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in path_var.split(':') {
+            let pi_path = PathBuf::from(dir).join("pi");
+            let omp_path = PathBuf::from(dir).join("omp");
+            if pi_path.exists() || omp_path.exists() {
+                return true;
+            }
+        }
+    }
+
+    // Check 3: Common install locations
+    let home = std::env::var("HOME").unwrap_or_default();
+    let common_paths = vec![
+        PathBuf::from(&home).join(".local/bin/pi"),
+        PathBuf::from(&home).join(".local/bin/omp"),
+        PathBuf::from("/usr/local/bin/pi"),
+        PathBuf::from("/usr/local/bin/omp"),
+        PathBuf::from("/usr/bin/pi"),
+        PathBuf::from("/usr/bin/omp"),
+    ];
+
+    for path in common_paths {
+        if path.exists() {
+            return true;
+        }
+    }
+
+    // Check 4: Check for oh-my-pi directory in common locations
+    let omp_dir_paths = vec![
+        PathBuf::from(&home).join("oh-my-pi"),
+        PathBuf::from(&home).join(".oh-my-pi"),
+        PathBuf::from("..").join("oh-my-pi"),
+    ];
+
+    for omp_dir in omp_dir_paths {
+        let worker = omp_dir.join("packages/coding-agent/src/worker.ts");
+        if worker.exists() {
+            return true;
+        }
+    }
+
+    false
 }
