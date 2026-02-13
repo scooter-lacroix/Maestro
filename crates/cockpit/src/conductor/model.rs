@@ -133,6 +133,8 @@ pub struct ConductorState {
     pub track_memories: Vec<leindex_core::memory::models::Memory>,
  /// OMP agent status for current track
  pub omp_agent_status: Option<crate::omp::OmpWorkerStatus>,
+ /// Whether OMP is available on this system
+ pub omp_available: bool,
     /// LSP diagnostic errors from last check
     pub lsp_diagnostics_errors: Vec<String>,
     /// LSP diagnostic warnings from last check
@@ -172,6 +174,7 @@ impl Default for ConductorState {
             selected_project_index: 0,
             track_runtime_statuses: std::collections::HashMap::new(),
  omp_agent_status: None,
+ omp_available: crate::omp::is_omp_available(),
             iteration_logs: Vec::new(),
             track_memories: Vec::new(),
             lsp_diagnostics_errors: Vec::new(),

@@ -1084,7 +1084,7 @@ pub fn render_conductor(
     }
 
     // Render Footer
-    super::footer::render_footer(frame, chunks[2]);
+    super::footer::render_footer(frame, chunks[2], &pane.state);
 }
 
 fn count_tasks_recursive(tasks: &[Task]) -> (usize, usize) {

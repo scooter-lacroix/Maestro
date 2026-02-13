@@ -362,8 +362,8 @@ impl App {
     pub fn theme(&self) -> Theme {
         let mut theme = theme_from_name(&self.config.theme);
         if self.config.transparent {
-            theme.bg = Color::Rgb(0, 0, 0);
-            theme.panel_bg = Color::Rgb(0, 0, 0);
+            theme.bg = Color::Reset; // Use Reset for true transparency
+            theme.panel_bg = Color::Reset;
             theme.transparent = true;
         }
         theme
@@ -2870,7 +2870,7 @@ async fn run_app<B: Backend>(
                                         }
                                     };
                                 } else {
-                                    app.tab_index = (app.tab_index + 1) % 8;
+                                    app.tab_index = (app.tab_index + 1) % 9; // 9 tabs now (including Settings)
                                     app.preview_focused = false;
                                 }
                             }
@@ -3488,7 +3488,7 @@ async fn run_app<B: Backend>(
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 8;
+                                app.tab_index = (app.tab_index + 1) % 9; // 9 tabs now (including Settings)
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {

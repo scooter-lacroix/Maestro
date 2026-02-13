@@ -19,7 +19,6 @@ pub struct Theme {
 pub const THEMES: &[(&str, &str)] = &[
     // System theme (respects terminal transparency)
     ("system", "System Terminal (Transparent)"),
-
     // Popular dark themes
     ("dracula", "Dracula"),
     ("tokyo-night", "Tokyo Night"),
@@ -32,7 +31,6 @@ pub const THEMES: &[(&str, &str)] = &[
     ("kanagawa", "Kanagawa"),
     ("oxocarbon", "OxoCarbon"),
     ("monokai", "Monokai"),
-
     // Legacy
     ("default", "Default"),
 ];
@@ -231,10 +229,10 @@ pub fn theme_from_name(name: &str) -> Theme {
             transparent: false,
         },
 
-        // ===== DEFAULT =====
+        // ===== DEFAULT (OLED Black) =====
         _ => Theme {
-            bg: Color::Black,
-            panel_bg: Color::Rgb(15, 15, 25),
+            bg: Color::Rgb(0, 0, 0),
+            panel_bg: Color::Rgb(0, 0, 0),
             fg: Color::White,
             muted: Color::Gray,
             accent: Color::Cyan,
@@ -242,7 +240,7 @@ pub fn theme_from_name(name: &str) -> Theme {
             success: Color::Green,
             warning: Color::Yellow,
             error: Color::Red,
-            highlight_bg: Color::Rgb(40, 40, 60),
+            highlight_bg: Color::Rgb(30, 30, 40),
             highlight_fg: Color::White,
             transparent: false,
         },

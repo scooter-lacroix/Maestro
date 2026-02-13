@@ -44,6 +44,12 @@ pub fn render_header(frame: &mut Frame, area: Rect, state: &ConductorState) {
         "".to_string()
     };
 
+    let omp_indicator = if state.omp_available {
+        Span::styled(" OMP●", Style::default().fg(Color::Green).bold())
+    } else {
+        Span::styled("", Style::default())
+    };
+
     let content = Line::from(vec![
         Span::styled(
             status_text,
@@ -60,6 +66,7 @@ pub fn render_header(frame: &mut Frame, area: Rect, state: &ConductorState) {
         Span::styled(agent_info, Style::default().fg(theme.fg_muted)),
         Span::styled(iteration, Style::default().fg(theme.fg_muted).italic()),
         Span::styled(progress, Style::default().fg(theme.accent_primary)),
+        omp_indicator,
     ]);
 
     let paragraph = Paragraph::new(content).style(Style::default().bg(theme.bg_primary));
