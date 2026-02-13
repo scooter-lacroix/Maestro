@@ -283,6 +283,7 @@ pub enum SelectableItem {
         id: String,
         is_master: bool,
         is_external: bool, // Session discovered in ~/.maestro/orchestrate but not in tracks.md
+        is_expanded: bool,  // Track expansion state
     },
     Task {
         id: String,
