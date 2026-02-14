@@ -1,0 +1,130 @@
+{
+  "project_id": "maestro",
+  "generation": "a238204e30f43cb22747d91e6f486e1f073427bd2b5e6214840f545fdb95ea83",
+  "phase": 4,
+  "options_hash": "58ffc12c",
+  "payload": {
+    "hotspots": [
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/__init__.py:__module__",
+        "score": 0.47918367,
+        "complexity": 1,
+        "impact_size": 1586
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/uvicorn/main.py:main",
+        "score": 0.47056746,
+        "complexity": 49,
+        "impact_size": 2
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/__init__.py:__module__",
+        "score": 0.28397563,
+        "complexity": 1,
+        "impact_size": 898
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/orm/context.py:ORMSelectCompileState._select_statement",
+        "score": 0.26736277,
+        "complexity": 24,
+        "impact_size": 95
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/orm/__init__.py:__module__",
+        "score": 0.26695162,
+        "complexity": 1,
+        "impact_size": 838
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py:genfromtxt",
+        "score": 0.26019415,
+        "complexity": 26,
+        "impact_size": 5
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/testing/assertions.py:AssertsCompiledSQL.assert_compile",
+        "score": 0.25242916,
+        "complexity": 25,
+        "impact_size": 10
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/testing/suite/test_select.py:__module__",
+        "score": 0.24453676,
+        "complexity": 1,
+        "impact_size": 759
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/sql/__init__.py:__module__",
+        "score": 0.22524294,
+        "complexity": 1,
+        "impact_size": 691
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/dialects/mysql/base.py:__module__",
+        "score": 0.22354054,
+        "complexity": 1,
+        "impact_size": 685
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/ma/tests/test_core.py:__module__",
+        "score": 0.21900082,
+        "complexity": 1,
+        "impact_size": 669
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/sql/compiler.py:SQLCompiler._label_select_column",
+        "score": 0.21666726,
+        "complexity": 14,
+        "impact_size": 240
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/sql/elements.py:__module__",
+        "score": 0.21134003,
+        "complexity": 1,
+        "impact_size": 642
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/sqlalchemy/sql/selectable.py:__module__",
+        "score": 0.20793524,
+        "complexity": 1,
+        "impact_size": 630
+      },
+      {
+        "node_id": "/home/stan/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs:popup_display",
+        "score": 0.20509213,
+        "complexity": 20,
+        "impact_size": 5
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/_core/tests/test_regression.py:TestRegression.test_array_resize_method_system_error",
+        "score": 0.19639382,
+        "complexity": 2,
+        "impact_size": 275
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/_core/tests/test_regression.py:TestRegression.test_assign_from_sequence_error",
+        "score": 0.19639382,
+        "complexity": 2,
+        "impact_size": 275
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/_core/tests/test_regression.py:TestRegression.test_complex_conversion_error",
+        "score": 0.19639382,
+        "complexity": 2,
+        "impact_size": 275
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/_core/tests/test_regression.py:TestRegression.test_dtype_keyerrors_",
+        "score": 0.19639382,
+        "complexity": 2,
+        "impact_size": 275
+      },
+      {
+        "node_id": ".venv/lib/python3.13/site-packages/numpy/_core/tests/test_regression.py:TestRegression.test_object_casting_errors",
+        "score": 0.19639382,
+        "complexity": 2,
+        "impact_size": 275
+      }
+    ]
+  }
+}

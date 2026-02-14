@@ -8,7 +8,7 @@
 
 ## Phase 1: Input Modal Component (6 tasks)
 
-### [ ] Task 1.1: Create input_modal.rs module structure
+## Phase 1: Input Modal Component (6 tasks)
 - Create `crates/cockpit/src/conductor/input_modal.rs`
 - Define `InputModal` struct with fields: title, prompt, input, cursor_pos, visible
 - Add module to `conductor/mod.rs`

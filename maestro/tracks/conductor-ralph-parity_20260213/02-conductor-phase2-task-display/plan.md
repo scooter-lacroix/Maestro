@@ -8,39 +8,39 @@
 
 ## Phase 1: Blocked/Actionable Indicators (4 tasks)
 
-### [ ] Task 1.1: Analyze task dependency determination logic
+### [x] Task 1.1: Analyze task dependency determination logic
 - Review how dependencies are parsed from plan.md
 - Determine where blocked/actionable status is calculated
 - Document the data flow
 - **Dependencies:** None
-- **Deliverables:** Analysis document
+- **Deliverables:** Analysis document (analysis-dependency-logic.md)
 
-### [ ] Task 1.2: Wire STATUS_BLOCKED in track_tree.rs
+### [x] Task 1.2: Wire STATUS_BLOCKED in track_tree.rs
 - Add logic to determine if task is blocked
 - Use `STATUS_BLOCKED` constant from theme.rs
 - Test blocked indicator rendering
 - **Dependencies:** Task 1.1
-- **Deliverables:** Blocked indicator in tree
+- **Deliverables:** Blocked indicator in tree (IMPLEMENTED)
 
-### [ ] Task 1.3: Wire STATUS_ACTIONABLE in track_tree.rs
+### [x] Task 1.3: Wire STATUS_ACTIONABLE in track_tree.rs
 - Add logic to determine if task is actionable (deps met, not started)
 - Use `STATUS_ACTIONABLE` constant
 - Test actionable indicator rendering
 - **Dependencies:** Task 1.2
-- **Deliverables:** Actionable indicator in tree
+- **Deliverables:** Actionable indicator in tree (IMPLEMENTED)
 
-### [ ] Task 1.4: Add unit tests for status determination
+### [x] Task 1.4: Add unit tests for status determination
 - Test blocked detection with incomplete dependencies
 - Test actionable detection with completed dependencies
 - Test edge cases (no deps, circular deps)
 - **Dependencies:** Task 1.3
-- **Deliverables:** Unit tests
+- **Deliverables:** Unit tests (PASSED)
 
 ---
 
 ## Phase 2: Task Dependencies Display (4 tasks)
 
-### [ ] Task 2.1: Extend details_panel.rs for dependencies
+### [~] Task 2.1: Extend details_panel.rs for dependencies
 - Add section for task dependencies
 - Format as list with status icons
 - **Dependencies:** None

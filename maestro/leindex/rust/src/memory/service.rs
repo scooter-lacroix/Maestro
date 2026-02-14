@@ -608,6 +608,7 @@ impl MemoryService {
 
         let mut candidates: Vec<PathBuf> = Vec::new();
         candidates.push(home.join(".maestro/memory.db"));
+        candidates.push(home.join(".maestro/maestro.db"));
 
         // Add a few recent backups (if any) as additional discovery sources.
         let backups_dir = home.join(".maestro/backups");

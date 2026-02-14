@@ -1,0 +1,48 @@
+{
+  "project_id": "maestro",
+  "generation": "a238204e30f43cb22747d91e6f486e1f073427bd2b5e6214840f545fdb95ea83",
+  "phase": 1,
+  "options_hash": null,
+  "payload": {
+    "total_files": 1940,
+    "parsed_files": 1197,
+    "parse_failures": 0,
+    "signatures": 30066,
+    "language_distribution": {
+      "TypeScript": 144,
+      "Python": 33502,
+      "external": 22206,
+      "Rust": 8156,
+      "Go": 1111,
+      "JavaScript": 14,
+      "C": 577,
+      "C++": 72
+    },
+    "parser_completeness": [
+      {
+        "language": "c",
+        "signatures": 659,
+        "calls_ratio": 0.29135054,
+        "imports_ratio": 0.8664643,
+        "byte_range_ratio": 1.0,
+        "score": 0.71927166
+      },
+      {
+        "language": "c++",
+        "signatures": 124,
+        "calls_ratio": 0.2580645,
+        "imports_ratio": 1.0,
+        "byte_range_ratio": 1.0,
+        "score": 0.75268817
+      },
+      {
+        "language": "python",
+        "signatures": 29283,
+        "calls_ratio": 0.8303111,
+        "imports_ratio": 0.9978486,
+        "byte_range_ratio": 1.0,
+        "score": 0.94271994
+      }
+    ]
+  }
+}

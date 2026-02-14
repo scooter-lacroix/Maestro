@@ -1,0 +1,31 @@
+{
+  "project_id": "maestro",
+  "generation": "9aafe738f4826288175098b16c41cb22818d62e8881235ae63a56d1626e92f4f",
+  "phase": 3,
+  "options_hash": "eb38c720",
+  "payload": {
+    "entry_points": [
+      ".venv/lib/python3.13/site-packages/uvicorn/main.py:main",
+      ".venv/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py:genfromtxt",
+      ".venv/lib/python3.13/site-packages/sqlalchemy/testing/assertions.py:AssertsCompiledSQL.assert_compile",
+      ".venv/lib/python3.13/site-packages/sqlalchemy/orm/context.py:ORMSelectCompileState._select_statement",
+      "/home/stan/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs:popup_display",
+      ".venv/lib/python3.13/site-packages/numpy/f2py/_backends/_backend.py:Backend.__init__",
+      ".venv/lib/python3.13/site-packages/numpy/ma/mrecords.py:MaskedRecords.__new__",
+      ".venv/lib/python3.13/site-packages/yaml/__init__.py:dump_all",
+      ".venv/lib/python3.13/site-packages/loguru/_handler.py:Handler.__init__",
+      ".venv/lib/python3.13/site-packages/yaml/cyaml.py:CBaseDumper.__init__"
+    ],
+    "impacted_nodes": 155,
+    "focus_files": [
+      ".venv/lib/python3.13/site-packages/sqlalchemy/orm/context.py",
+      ".venv/lib/python3.13/site-packages/numpy/ma/mrecords.py",
+      ".venv/lib/python3.13/site-packages/loguru/_handler.py",
+      ".venv/lib/python3.13/site-packages/sqlalchemy/testing/assertions.py",
+      ".venv/lib/python3.13/site-packages/yaml/cyaml.py",
+      ".venv/lib/python3.13/site-packages/numpy/lib/_npyio_impl.py",
+      "/home/stan/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs",
+      ".venv/lib/python3.13/site-packages/uvicorn/main.py"
+    ]
+  }
+}
