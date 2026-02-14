@@ -342,3 +342,15 @@ pub struct ProjectScanInfo {
     pub project_type: Option<String>,
     pub track_count: usize,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryCategoryStats {
+    pub category: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CategoryBreakdown {
+    pub total: usize,
+    pub breakdown: Vec<MemoryCategoryStats>,
+}

@@ -1,8 +1,5 @@
 {
-  "track_id": "06-conductor-phase6-pi-mono-polish",
-  "parent_track": "conductor-ralph-parity_20260213",
-  "type": "subtrack",
-  "status": "new",
+  "status": "in_progress",
   "created_at": "2026-02-13T17:00:00Z",
   "updated_at": "2026-02-13T17:00:00Z",
   "name": "Pi-Mono Deep Integration + Polish",

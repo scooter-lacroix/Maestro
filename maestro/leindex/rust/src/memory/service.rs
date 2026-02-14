@@ -76,8 +76,12 @@ impl MemoryService {
         Ok(())
     }
 
-    /// Get database statistics
     pub fn stats(&self) -> Result<super::db::DbStats> {
+        self.db.stats()
+        /// Get breakdown by category
+        pub fn stats_by_category(&self) -> Result<Vec<super::models::MemoryCategoryStats>> {
+            self.db.stats_by_category()
+        }
         self.db.stats()
     }
 
