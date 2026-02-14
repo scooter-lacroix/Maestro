@@ -180,6 +180,36 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
                     ]),
                 ]
             }
+
+
+                // Dependencies section
+                if !item.dependencies.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Dependencies:",
+                        Style::default().fg(conductor_theme.accent_primary).underlined(),
+                    )));
+
+                    for (idx, dep) in item.dependencies.iter().enumerate() {
+                        let icon = match item.dependency_statuses.get(idx) {
+                            Some(crate::conductor::model::DependencyStatus::Completed) => "✓",
+                            Some(crate::conductor::model::DependencyStatus::Blocked) => "⊘",
+                            Some(crate::conductor::model::DependencyStatus::Pending) => "○",
+                            _ => "?",
+                        };
+                        details.push(Line::from(vec![
+                            Span::styled(
+                                format!("  [{}] ", icon),
+                                Style::default().fg(conductor_theme.fg_secondary),
+                            ),
+                            Span::styled(
+                                &dep.task_id,
+                                Style::default().fg(conductor_theme.fg_primary),
+                            )
+                        ]));
+                    }
+                }
+
         }
     } else {
         vec![Line::from(Span::styled("No item selected.", Style::default().fg(conductor_theme.fg_muted)))]
