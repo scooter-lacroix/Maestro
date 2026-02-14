@@ -2213,6 +2213,7 @@ name = "maestro-cockpit"
 version = "2.5.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "cli-clipboard",
  "crossterm",
