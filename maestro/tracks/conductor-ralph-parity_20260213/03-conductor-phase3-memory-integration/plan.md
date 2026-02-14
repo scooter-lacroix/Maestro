@@ -15,12 +15,12 @@
 - **Dependencies:** None
 - **Deliverables:** MemoryService field
 
-### [x] Task 1.1: Add MemoryService to ConductorPane
+### [x] Task 1.1: Add MemoryService to ConductorPane (already integrated via main app.rs)
 - Wrap memory calls in error handling
 - Display error toast on failure
 - Graceful degradation when memory unavailable
 - **Dependencies:** Task 1.1
-- **Deliverables:** Error handling
+### [x] Task 1.2: Handle connection errors (already handled in main app.rs)
 
 ### [ ] Task 1.3: Add memory polling
 - Poll memories for current track periodically
@@ -28,7 +28,7 @@
 - **Dependencies:** Task 1.2
 - **Deliverables:** Memory polling
 
----
+### [x] Task 1.3: Add memory polling (already implemented in main app.rs)
 
 ## Phase 2: Memory Browser Component (5 tasks)
 
