@@ -3,14 +3,15 @@
 //! Provides an overlay to browse, search, filter, and manage memories
 //! associated with the current track.
 
-use crate::conductor::modals::{Modal, ModalCancelled, ModalResult, TextInputModal};
-use crate::conductor::selector_modal::SelectorModal;
+use crate::conductor::input_modal::{InputModal, InputAction};
+use crate::conductor::modals::{Modal, ModalCancelled, TextInputModal};
+use crate::conductor::selector_modal::{SelectorModal, SelectorItem, SelectorAction};
 use crate::conductor::theme::ConductorTheme;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use leindex_core::memory::models::{Memory, MemoryCategory};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
@@ -35,11 +36,11 @@ pub struct MemoryBrowser {
     /// Whether search input is focused
     pub search_focused: bool,
     /// Search input modal
-    pub search_modal: TextInputModal,
+    pub search_modal: InputModal,
     /// Category selector modal
     pub category_modal: SelectorModal,
     /// Store memory modal
-    pub store_modal: TextInputModal,
+    pub store_modal: InputModal,
     /// Delete confirmation modal
     pub delete_modal: SelectorModal,
     /// Selected category for new memory
@@ -57,31 +58,31 @@ impl Default for MemoryBrowser {
             page_size: 50,
             visible: false,
             search_focused: false,
-            search_modal: TextInputModal::new("Search Memories", "Enter search query:"),
+            search_modal: InputModal::new("Search Memories", "Enter search query:"),
             category_modal: SelectorModal {
                 title: "Select Category".to_string(),
                 items: vec![
-                    "All Categories".to_string(),
-                    "General".to_string(),
-                    "Knowledge".to_string(),
-                    "Preferences".to_string(),
-                    "Specifications".to_string(),
-                    "Fact".to_string(),
-                    "Pattern".to_string(),
-                    "Decision".to_string(),
-                    "Context".to_string(),
-                    "Temporary".to_string(),
-                    "Observation".to_string(),
+                    SelectorItem { label: "All Categories".to_string(), value: "all".to_string(), description: None },
+                    SelectorItem { label: "General".to_string(), value: "general".to_string(), description: None },
+                    SelectorItem { label: "Knowledge".to_string(), value: "knowledge".to_string(), description: None },
+                    SelectorItem { label: "Preferences".to_string(), value: "preference".to_string(), description: None },
+                    SelectorItem { label: "Specifications".to_string(), value: "specification".to_string(), description: None },
+                    SelectorItem { label: "Fact".to_string(), value: "fact".to_string(), description: None },
+                    SelectorItem { label: "Pattern".to_string(), value: "pattern".to_string(), description: None },
+                    SelectorItem { label: "Decision".to_string(), value: "decision".to_string(), description: None },
+                    SelectorItem { label: "Context".to_string(), value: "context".to_string(), description: None },
+                    SelectorItem { label: "Temporary".to_string(), value: "temporary".to_string(), description: None },
+                    SelectorItem { label: "Observation".to_string(), value: "observation".to_string(), description: None },
                 ],
                 selected: 0,
                 visible: false,
             },
-            store_modal: TextInputModal::new("New Memory", "Enter memory content:"),
+            store_modal: InputModal::new("New Memory", "Enter memory content:"),
             delete_modal: SelectorModal {
                 title: "Delete Memory".to_string(),
                 items: vec![
-                    "Yes, delete this memory".to_string(),
-                    "No, cancel".to_string(),
+                    SelectorItem { label: "Yes, delete this memory".to_string(), value: "yes".to_string(), description: None },
+                    SelectorItem { label: "No, cancel".to_string(), value: "no".to_string(), description: None },
                 ],
                 selected: 0,
                 visible: false,
@@ -196,74 +197,72 @@ impl MemoryBrowser {
     /// Get currently selected memory
     pub fn selected_memory(&self) -> Option<&Memory> {
         let page_memories = self.current_page_memories();
-        page_memories.get(self.selected)
+        page_memories.get(self.selected).copied()
     }
 
     /// Handle key events for to memory browser
     pub fn handle_key(&mut self, key: KeyEvent) -> MemoryBrowserAction {
         // Handle active modals first
         if self.category_modal.is_visible() {
-            if let Some(result) = self.category_modal.handle_key(key) {
-                return match result {
-                    Ok(idx) => {
-                        if idx == 0 {
-                            self.category_filter = None;
-                        } else if let Some(cat) = self.index_to_category(idx) {
-                            self.category_filter = Some(cat);
-                        }
-                        MemoryBrowserAction::CategorySelected
+            match self.category_modal.handle_key(key) {
+                SelectorAction::Selected(value) => {
+                    if value == "all" {
+                        self.category_filter = None;
+                    } else if let Some(cat) = self.value_to_category(&value) {
+                        self.category_filter = Some(cat);
                     }
-                    Err(ModalCancelled) => MemoryBrowserAction::CategoryCancelled,
-                };
+                    return MemoryBrowserAction::CategorySelected;
+                }
+                SelectorAction::Cancel => return MemoryBrowserAction::CategoryCancelled,
+                SelectorAction::None => return MemoryBrowserAction::Handled,
             }
-            return MemoryBrowserAction::Handled;
         }
 
         if self.search_modal.is_visible() {
-            if let Some(result) = self.search_modal.handle_key(key) {
-                return match result {
-                    Ok(query) => {
-                        self.search_query = query;
-                        self.page = 0;
-                        self.selected = 0;
-                        MemoryBrowserAction::SearchSubmitted
-                    }
-                    Err(ModalCancelled) => {
-                        self.search_focused = false;
-                        MemoryBrowserAction::SearchCancelled
-                    }
-                };
+            match self.search_modal.handle_key(key) {
+                InputAction::Submit(query) => {
+                    self.search_query = query;
+                    self.page = 0;
+                    self.selected = 0;
+                    return MemoryBrowserAction::SearchSubmitted;
+                }
+                InputAction::Cancel => {
+                    self.search_focused = false;
+                    return MemoryBrowserAction::SearchCancelled;
+                }
+                InputAction::Handled | InputAction::None => return MemoryBrowserAction::Handled,
             }
-            return MemoryBrowserAction::Handled;
         }
 
         if self.store_modal.is_visible() {
-            if let Some(result) = self.store_modal.handle_key(key) {
-                return match result {
-                    Ok(content) => MemoryBrowserAction::StoreMemory {
+            match self.store_modal.handle_key(key) {
+                InputAction::Submit(content) => {
+                    return MemoryBrowserAction::StoreMemory {
                         content,
                         category: self.selected_category,
-                    },
-                    Err(ModalCancelled) => MemoryBrowserAction::StoreCancelled,
-                };
+                    };
+                }
+                InputAction::Cancel => return MemoryBrowserAction::StoreCancelled,
+                InputAction::Handled | InputAction::None => return MemoryBrowserAction::Handled,
             }
-            return MemoryBrowserAction::Handled;
         }
 
         if self.delete_modal.is_visible() {
-            if let Some(result) = self.delete_modal.handle_key(key) {
-                return match result {
-                    Ok(idx) => {
-                        if idx == 0 {
-                            MemoryBrowserAction::DeleteConfirmed
-                        } else {
-                            MemoryBrowserAction::DeleteCancelled
+            match self.delete_modal.handle_key(key) {
+                SelectorAction::Selected(value) => {
+                    if value == "yes" {
+                        // Get the selected memory ID if available
+                        if let Some(memory) = self.selected_memory() {
+                            return MemoryBrowserAction::DeleteConfirmed { id: memory.id };
                         }
+                        return MemoryBrowserAction::DeleteCancelled;
+                    } else {
+                        return MemoryBrowserAction::DeleteCancelled;
                     }
-                    Err(ModalCancelled) => MemoryBrowserAction::DeleteCancelled,
-                };
+                }
+                SelectorAction::Cancel => return MemoryBrowserAction::DeleteCancelled,
+                SelectorAction::None => return MemoryBrowserAction::Handled,
             }
-            return MemoryBrowserAction::Handled;
         }
 
         // Handle browser key events
@@ -351,20 +350,20 @@ impl MemoryBrowser {
         }
     }
 
-    /// Convert category index to MemoryCategory enum
-    fn index_to_category(&self, idx: usize) -> Option<MemoryCategory> {
-        match idx {
-            0 => None, // All Categories
-            1 => Some(MemoryCategory::General),
-            2 => Some(MemoryCategory::Knowledge),
-            3 => Some(MemoryCategory::Preference),
-            4 => Some(MemoryCategory::Specification),
-            5 => Some(MemoryCategory::Fact),
-            6 => Some(MemoryCategory::Pattern),
-            7 => Some(MemoryCategory::Decision),
-            8 => Some(MemoryCategory::Context),
-            9 => Some(MemoryCategory::Temporary),
-            10 => Some(MemoryCategory::Observation),
+    /// Convert category value string to MemoryCategory enum
+    fn value_to_category(&self, value: &str) -> Option<MemoryCategory> {
+        match value {
+            "all" => None, // All Categories
+            "general" => Some(MemoryCategory::General),
+            "knowledge" => Some(MemoryCategory::Knowledge),
+            "preference" => Some(MemoryCategory::Preference),
+            "specification" => Some(MemoryCategory::Specification),
+            "fact" => Some(MemoryCategory::Fact),
+            "pattern" => Some(MemoryCategory::Pattern),
+            "decision" => Some(MemoryCategory::Decision),
+            "context" => Some(MemoryCategory::Context),
+            "temporary" => Some(MemoryCategory::Temporary),
+            "observation" => Some(MemoryCategory::Observation),
             _ => None,
         }
     }
@@ -499,14 +498,13 @@ impl MemoryBrowser {
                 .style(Style::default().fg(theme.fg_muted))
                 .alignment(Alignment::Center);
 
-            f.render_widget(para, area.centered(|rect| {
-                Rect::new(
-                    rect.x,
-                    rect.y + 1,
-                    rect.width.saturating_sub(2),
-                    rect.height.saturating_sub(2),
-                )
-            }));
+            let centered_area = Rect::new(
+                area.x + 1,
+                area.y + 1,
+                area.width.saturating_sub(2),
+                area.height.saturating_sub(2),
+            );
+            f.render_widget(para, centered_area);
 
             return;
         }
@@ -566,12 +564,8 @@ impl MemoryBrowser {
             "[Del] Delete [Esc] Close",
         ];
 
-        let hint_lines: Vec<Line> = hints
-            .iter()
-            .map(|h| Line::from(vec![Span::styled(*h, Style::default().fg(theme.fg_secondary))]))
-            .collect();
-
-        let para = Paragraph::new(hint_lines.join("\n"))
+        let hint_text = hints.join("  ");
+        let para = Paragraph::new(hint_text)
             .style(Style::default().fg(theme.fg_secondary))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
@@ -648,8 +642,8 @@ pub enum MemoryBrowserAction {
     StoreCancelled,
     /// Delete confirmation opened
     DeleteOpened,
-    /// Delete confirmed
-    DeleteConfirmed,
+    /// Delete confirmed with memory ID
+    DeleteConfirmed { id: i64 },
     /// Delete cancelled
     DeleteCancelled,
 }

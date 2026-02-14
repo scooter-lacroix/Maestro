@@ -49,6 +49,18 @@ pub enum OrchestrateSubcommand {
         /// Error strategy: retry, skip, abort
         #[arg(long, default_value = "retry")]
         error_strategy: String,
+
+        /// Pi-Mono agent to use for execution (e.g., scout, architect, kraken)
+        #[arg(long)]
+        pi_agent: Option<String>,
+
+        /// Pi-Mono chain of agents to execute in sequence (comma-separated)
+        #[arg(long)]
+        pi_chain: Option<String>,
+
+        /// Pi-Mono parallel agent execution (comma-separated agents)
+        #[arg(long)]
+        pi_parallel: Option<String>,
     },
 
     /// Pause orchestrate loop for a track
@@ -115,6 +127,9 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
             tracks_dir,
             max_retries,
             error_strategy,
+            pi_agent,
+            pi_chain,
+            pi_parallel,
         } => {
             let tracks_dir = tracks_dir.unwrap_or_else(|| PathBuf::from("./maestro/tracks"));
 
@@ -141,9 +156,17 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
                 }
             };
 
+            // Parse Pi-Mono configuration
+            let pi_mono_config = crate::orchestrate::model::PiMonoConfig {
+                agent: pi_agent,
+                chain: pi_chain.map(|s| s.split(',').map(|s| s.trim().to_string()).collect()),
+                parallel: pi_parallel.map(|s| s.split(',').map(|s| s.trim().to_string()).collect()),
+            };
+
             let config = OrchestrateConfig {
                 max_retries,
                 error_strategy,
+                pi_mono: Some(pi_mono_config),
                 ..Default::default()
             };
 
