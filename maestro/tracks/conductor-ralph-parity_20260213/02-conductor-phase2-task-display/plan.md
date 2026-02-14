@@ -54,7 +54,7 @@
 - **Dependencies:** Task 2.1
 - **Deliverables:** Status icons
 
-### [ ] Task 2.3: Handle clickable dependency navigation
+### [x] Task 2.2: Add dependency status icons
 - Make dependencies clickable
 - Navigate to dependency task on click/Enter
 - **Dependencies:** Task 2.2
