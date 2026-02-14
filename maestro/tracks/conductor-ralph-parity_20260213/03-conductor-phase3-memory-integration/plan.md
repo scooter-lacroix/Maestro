@@ -8,7 +8,7 @@
 
 ## Phase 1: MemoryService Integration (3 tasks)
 
-### [ ] Task 1.1: Add MemoryService to ConductorPane
+### [~] Task 1.1: Add MemoryService to ConductorPane
 - Import MemoryService from memory module
 - Add `memory_service: Arc<MemoryService>` field
 - Initialize in ConductorPane constructor

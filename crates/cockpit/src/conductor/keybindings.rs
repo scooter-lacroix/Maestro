@@ -80,7 +80,54 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             super::selector_modal::SelectorAction::Cancel => return ConductorAction::Handled,
             super::selector_modal::SelectorAction::None => return ConductorAction::Handled,
         }
+
+    // 1. Handle Memory Browser if open
+    if pane.memory_browser.is_visible() || pane.memory_browser.search_modal.is_visible()
+        || pane.memory_browser.category_modal.is_visible()
+        || pane.memory_browser.store_modal.is_visible() || pane.memory_browser.delete_modal.is_visible() {
+        match pane.memory_browser.handle_key(key) {
+            super::memory_browser::MemoryBrowserAction::Handled => return ConductorAction::Handled,
+            super::memory_browser::MemoryBrowserAction::Close => {
+                pane.memory_browser.hide();
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::SearchFocused | super::memory_browser::MemoryBrowserAction::SearchSubmitted => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::SearchCancelled => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::CategoryOpened | super::memory_browser::MemoryBrowserAction::CategorySelected => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::CategoryCancelled => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::StoreOpened => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::StoreMemory { content, category } => {
+                // This will be handled by the main app.rs which has access to MemoryService
+                // For now, just acknowledge the action
+                return ConductorAction::StatusMessage(format!(
+                    "Store memory requested: category='{}'", category));
+            }
+            super::memory_browser::MemoryBrowserAction::StoreCancelled => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::DeleteOpened | super::memory_browser::MemoryBrowserAction::DeleteConfirmed => {
+                // This will be handled by the main app.rs which has access to MemoryService
+                // For now, just acknowledge the action
+                return ConductorAction::StatusMessage("Delete memory requested".to_string());
+            }
+            super::memory_browser::MemoryBrowserAction::DeleteCancelled => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::Ignored => return ConductorAction::None,
+        }
     }
+
+    // 2. Handle Project Selector if open
 
     // 1. Handle Project Selector if open
     if pane.state.show_project_selector {
@@ -352,6 +399,14 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             };
             ConductorAction::StatusMessage(msg.to_string())
         }
+
+        // Memory Browser (Shift+M) - always available
+        (KeyModifiers::SHIFT, KeyCode::Char('M')) => {
+            pane.memory_browser.show();
+            ConductorAction::StatusMessage("Memory browser opened. Press Esc to close.".to_string())
+        }
+
+        ConductorAction::None
 
         // Ralph behavior enforcement (CONTROL key combinations - check before single keys)
         (KeyModifiers::CONTROL, KeyCode::Char('r')) => {

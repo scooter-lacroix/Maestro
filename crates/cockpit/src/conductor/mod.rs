@@ -10,7 +10,8 @@ pub mod git;
 pub mod header;
 pub mod input_modal;
 pub mod iteration_history;
-pub mod keybindings;
+// pub mod mem; // Memory browser overlay
+pub mod memory_browser;
 // pub mod mem; // TODO: Implement memory integration module
 pub mod model;
 pub mod modals;

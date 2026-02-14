@@ -105,6 +105,8 @@ pub struct ConductorPane {
     pub iter_modal: super::input_modal::InputModal,
     /// Generic selector modal for error strategy, agents, etc.
     pub selector_modal: super::selector_modal::SelectorModal,
+    /// Memory browser overlay
+    pub memory_browser: super::memory_browser::MemoryBrowser,
 }
 
 impl Default for ConductorPane {
@@ -142,6 +144,7 @@ impl Default for ConductorPane {
                 selected: 0,
                 visible: false,
             },
+            memory_browser: super::memory_browser::MemoryBrowser::default(),
         }
     }
 }
@@ -1244,9 +1247,33 @@ pub fn render_conductor(
         crate::conductor::dashboard::render_dashboard(frame, area, &pane.state);
     }
 
-    // Render Project Selector if open
-    if pane.state.show_project_selector {
-        crate::conductor::project_selector::render_project_selector(frame, area, &pane.state);
+    }
+    // Render Memory Browser overlay if any modal is visible
+    if pane.memory_browser.is_visible()
+        || pane.memory_browser.search_modal.is_visible()
+        || pane.memory_browser.category_modal.is_visible()
+        || pane.memory_browser.store_modal.is_visible()
+        || pane.memory_browser.delete_modal.is_visible() {
+        let conductor_theme = super::theme::ConductorTheme::default();
+        super::memory_browser::MemoryBrowser::render(&pane.memory_browser, frame, area, &conductor_theme);
+    }
+    // Render Footer
+    super::footer::render_footer(frame, chunks[2], &pane.state);
+
+    // Render Memory Browser overlay if any modal is visible
+    if pane.memory_browser.is_visible() || pane.memory_browser.search_modal.is_visible()
+        || pane.memory_browser.category_modal.is_visible() || pane.memory_browser.store_modal.is_visible() || pane.memory_browser.delete_modal.is_visible() {
+        let conductor_theme = super::theme::ConductorTheme::default();
+        super::memory_browser::MemoryBrowser::render(&pane.memory_browser, frame, area, &conductor_theme);
+    }
+    // Render Memory Browser overlay if open
+    if pane.memory_browser.is_visible()
+        || pane.memory_browser.search_modal.is_visible()
+        || pane.memory_browser.category_modal.is_visible()
+        || pane.memory_browser.store_modal.is_visible()
+        || pane.memory_browser.delete_modal.is_visible() {
+        let conductor_theme = super::theme::ConductorTheme::default();
+        super::memory_browser::MemoryBrowser::render(&pane.memory_browser, frame, area, &conductor_theme);
     }
 
     // Render Footer
