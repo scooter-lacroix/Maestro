@@ -7,7 +7,7 @@
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
 use super::omp_agent::{OmpAgentManager, OmpAgentConfig};
-use super::model::{ConductorEvent, ConductorState, DependencyStatus, SelectableItem, ConductorStatus, OutputStream, StopReason};
+use super::super::model::{ConductorEvent, ConductorState, SelectableItem, ConductorStatus, OutputStream, StopReason};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};

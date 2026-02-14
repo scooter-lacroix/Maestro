@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::model::{SelectableItem, DependencyStatus};
+    use super::super::model::SelectableItem;
     use super::super::model::SelectableItem;
     use super::super::pane::ConductorPane;
     use std::fs;
