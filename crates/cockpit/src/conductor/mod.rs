@@ -26,6 +26,7 @@ pub mod telemetry;
 pub mod tests;
 pub mod theme;
 pub mod track_tree;
+pub mod keybindings;
 
 pub use dashboard::*;
 pub use details_panel::*;

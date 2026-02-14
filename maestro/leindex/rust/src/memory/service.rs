@@ -78,11 +78,10 @@ impl MemoryService {
 
     pub fn stats(&self) -> Result<super::db::DbStats> {
         self.db.stats()
+    }
         /// Get breakdown by category
-        pub fn stats_by_category(&self) -> Result<Vec<super::models::MemoryCategoryStats>> {
-            self.db.stats_by_category()
-        }
-        self.db.stats()
+    pub fn stats_by_category(&self) -> Result<Vec<super::models::MemoryCategoryStats>> {
+        self.db.stats_by_category()
     }
 
     // ========================================================================
@@ -470,6 +469,38 @@ impl MemoryService {
 
             Ok(memories)
         })
+    }
+
+    /// Delete a memory by ID (from both database and search index)
+    pub fn delete_memory(&self, id: i64) -> Result<bool> {
+        // Check if memory exists first
+        let exists = self.db.with_connection(|conn| {
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE id = ?",
+                params![id],
+                |row| row.get(0),
+            )?;
+            Ok(count > 0)
+        })?;
+
+        if !exists {
+            return Ok(false);
+        }
+
+        // Delete from database
+        self.db.with_connection(|conn| {
+            conn.execute("DELETE FROM memories WHERE id = ?", params![id])?;
+            Ok(())
+        })?;
+
+        // Delete from search index (best-effort)
+        if let Some(ref idx) = self.search_index {
+            if let Err(e) = idx.delete_memory(id) {
+                warn!("Failed to delete memory from search index: {}", e);
+            }
+        }
+
+        Ok(true)
     }
 
     /// Helper to map memory row

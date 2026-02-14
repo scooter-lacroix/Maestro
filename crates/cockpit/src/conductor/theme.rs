@@ -37,6 +37,9 @@ pub struct ConductorTheme {
     pub accent_primary: Color,
     pub accent_secondary: Color,
     pub accent_tertiary: Color,
+
+    // Border color
+    pub border_color: Color,
 }
 
 impl Default for ConductorTheme {
@@ -69,6 +72,8 @@ impl Default for ConductorTheme {
             accent_primary: Color::Rgb(122, 162, 247), // #7aa2f7
             accent_secondary: Color::Rgb(187, 154, 247), // #bb9af7
             accent_tertiary: Color::Rgb(125, 207, 255), // #7dcfff
+
+            border_color: Color::Rgb(86, 95, 137), // #565f89
         }
     }
 }

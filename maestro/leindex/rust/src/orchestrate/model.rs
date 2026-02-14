@@ -301,6 +301,9 @@ pub struct IterationLog {
     pub status: IterationStatus,
     pub output: String,
     pub error: Option<String>,
+    /// Duration of the iteration in milliseconds
+    #[serde(default)]
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,6 +330,17 @@ impl Default for ErrorStrategy {
     }
 }
 
+/// Pi-Mono subagent configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PiMonoConfig {
+    /// Single agent to use for execution (e.g., scout, architect, kraken)
+    pub agent: Option<String>,
+    /// Chain of agents to execute in sequence
+    pub chain: Option<Vec<String>>,
+    /// Parallel agent execution
+    pub parallel: Option<Vec<String>>,
+}
+
 /// Orchestrate configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestrateConfig {
@@ -347,6 +361,9 @@ pub struct OrchestrateConfig {
     /// LSP diagnostic validation after agent edits
     #[serde(default)]
     pub lsp_diagnostics: LspDiagnosticConfig,
+    /// Pi-Mono subagent configuration
+    #[serde(default)]
+    pub pi_mono: Option<PiMonoConfig>,
 }
 
 /// LSP diagnostic configuration for post-edit validation
@@ -451,6 +468,7 @@ impl Default for OrchestrateConfig {
             rate_limit_backoff_base_secs: 1,
             rate_limit_backoff_max_secs: 300,
             lsp_diagnostics: LspDiagnosticConfig::default(),
+            pi_mono: None,
         }
     }
 }

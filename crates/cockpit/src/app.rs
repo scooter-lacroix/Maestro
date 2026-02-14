@@ -133,6 +133,7 @@ pub struct App {
     // Status & Feedback
     pub is_spawning: bool,
     pub status_message: String,
+    pub toast_queue: crate::toast::ToastQueue,
     pub session_preview_content: String,
     // Analysis Hub state
     pub analysis_input: String,
@@ -259,6 +260,7 @@ impl App {
             target_group_path: None,
             is_spawning: false,
             status_message: String::new(),
+            toast_queue: crate::toast::ToastQueue::new(),
             session_preview_content: String::new(),
             analysis_input: String::new(),
             analysis_history: Vec::new(),
@@ -3019,7 +3021,42 @@ async fn run_app<B: Backend>(
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
                                     ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
+                                        app.toast_queue.info(msg);
+                                        continue;
+                                    }
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::DeleteMemory { id } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.delete_memory(id) {
+                                                Ok(true) => {
+                                                    app.toast_queue.success(format!("Memory {} deleted", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Ok(false) => {
+                                                    app.toast_queue.warning(format!("Memory {} not found", id));
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
                                         continue;
                                     }
                                     ConductorAction::None => {}
@@ -3036,13 +3073,49 @@ async fn run_app<B: Backend>(
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
                                     ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
+                                        app.toast_queue.info(msg);
                                         continue;
                                     }
-                                    ConductorAction::None => {}
-                                }
-                            }
-                            (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == 4 => {
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                                                        ConductorAction::DeleteMemory { id } => {
+                                                                            if let Some(svc) = service.as_ref() {
+                                                                                match svc.delete_memory(id) {
+                                                                                    Ok(true) => {
+                                                                                        app.toast_queue.success(format!("Memory {} deleted", id));
+                                                                                        app.refresh_from_service(&service);
+                                                                                    }
+                                                                                    Ok(false) => {
+                                                                                        app.toast_queue.warning(format!("Memory {} not found", id));
+                                                                                    }
+                                                                                    Err(e) => {
+                                                                                        app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                                                    }
+                                                                                }
+                                                                            } else {
+                                                                                app.toast_queue.error("Memory service not available");
+                                                                            }
+                                                                            continue;
+                                                                        }
+                                                                        ConductorAction::None => {}
+                                                                    }
+                                                                }
+                                    
+                                                                (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == 4 => {
                                 // Pause track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3050,13 +3123,49 @@ async fn run_app<B: Backend>(
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
                                     ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
+                                        app.toast_queue.info(msg);
                                         continue;
                                     }
-                                    ConductorAction::None => {}
-                                }
-                            }
-                            (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == 4 => {
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                                                        ConductorAction::DeleteMemory { id } => {
+                                                                            if let Some(svc) = service.as_ref() {
+                                                                                match svc.delete_memory(id) {
+                                                                                    Ok(true) => {
+                                                                                        app.toast_queue.success(format!("Memory {} deleted", id));
+                                                                                        app.refresh_from_service(&service);
+                                                                                    }
+                                                                                    Ok(false) => {
+                                                                                        app.toast_queue.warning(format!("Memory {} not found", id));
+                                                                                    }
+                                                                                    Err(e) => {
+                                                                                        app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                                                    }
+                                                                                }
+                                                                            } else {
+                                                                                app.toast_queue.error("Memory service not available");
+                                                                            }
+                                                                            continue;
+                                                                        }
+                                                                        ConductorAction::None => {}
+                                                                    }
+                                                                }
+                                    
+                                                                (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == 4 => {
                                 // Resume track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3064,13 +3173,49 @@ async fn run_app<B: Backend>(
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
                                     ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
+                                        app.toast_queue.info(msg);
                                         continue;
                                     }
-                                    ConductorAction::None => {}
-                                }
-                            }
-                            (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == 4 => {
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                                                        ConductorAction::DeleteMemory { id } => {
+                                                                            if let Some(svc) = service.as_ref() {
+                                                                                match svc.delete_memory(id) {
+                                                                                    Ok(true) => {
+                                                                                        app.toast_queue.success(format!("Memory {} deleted", id));
+                                                                                        app.refresh_from_service(&service);
+                                                                                    }
+                                                                                    Ok(false) => {
+                                                                                        app.toast_queue.warning(format!("Memory {} not found", id));
+                                                                                    }
+                                                                                    Err(e) => {
+                                                                                        app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                                                    }
+                                                                                }
+                                                                            } else {
+                                                                                app.toast_queue.error("Memory service not available");
+                                                                            }
+                                                                            continue;
+                                                                        }
+                                                                        ConductorAction::None => {}
+                                                                    }
+                                                                }
+                                    
+                                                                (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == 4 => {
                                 // Show status/help
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3078,7 +3223,42 @@ async fn run_app<B: Backend>(
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
                                     ConductorAction::StatusMessage(msg) => {
-                                        app.status_message = msg;
+                                        app.toast_queue.info(msg);
+                                        continue;
+                                    }
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::DeleteMemory { id } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.delete_memory(id) {
+                                                Ok(true) => {
+                                                    app.toast_queue.success(format!("Memory {} deleted", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Ok(false) => {
+                                                    app.toast_queue.warning(format!("Memory {} not found", id));
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
                                         continue;
                                     }
                                     ConductorAction::None => {}

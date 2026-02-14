@@ -7,7 +7,8 @@
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
 use super::omp_agent::{OmpAgentManager, OmpAgentConfig};
-use super::super::model::{ConductorEvent, ConductorState, SelectableItem, ConductorStatus, OutputStream, StopReason};
+use super::model::{ConductorEvent, SelectableItem, ConductorStatus, ConductorState, OutputStream, StopReason, DependencyStatus};
+use super::modals::Modal;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};
@@ -22,8 +23,8 @@ use leindex_core::orchestrate::{
     setup::{detect_setup_status, AgentTool, SetupStatus},
 };
 
-use super::model::ConductorState;
 use crate::maestro_paths::MaestroProject;
+use crate::omp::{is_omp_available, ToolProvider, OmpWorkerConfig, OmpBridge, create_omp_provider, ToolResult, OmpToolDefinition, OmpWorkerStatus};
 
 /// Setup state for the conductor pane
 #[derive(Debug, Clone)]
@@ -640,8 +641,9 @@ impl ConductorPane {
             // A track is expanded if it's in expanded_tasks.
             if self.expanded_tasks.contains(&track.id) {
                 if let Ok(Some(plan)) = self.load_track_plan_internal(idx) {
+                    let completed_tasks = self.build_completed_tasks_map(&plan.tasks);
                     for task in &plan.tasks {
-                        self.add_tasks_to_selectable_items(task, 1, &mut items);
+                        self.add_tasks_to_selectable_items(task, 1, &mut items, &completed_tasks);
                     }
                 }
             }
@@ -654,9 +656,29 @@ impl ConductorPane {
         task: &Task,
         depth: usize,
         items: &mut Vec<crate::conductor::model::SelectableItem>,
+        completed_tasks: &std::collections::HashMap<String, bool>,
     ) {
         let is_expanded = self.expanded_tasks.contains(&task.id);
         let has_children = !task.subtasks.is_empty();
+
+        // Compute status for each dependency
+        let dependency_statuses: Vec<crate::conductor::model::DependencyStatus> = task
+            .dependencies
+            .iter()
+            .map(|dep| {
+                let is_completed = completed_tasks.get(&dep.task_id).copied().unwrap_or(false);
+                if is_completed {
+                    crate::conductor::model::DependencyStatus::Completed
+                } else if dep.dependency_type == leindex_core::orchestrate::model::TaskDependencyType::Hard {
+                    crate::conductor::model::DependencyStatus::Blocked
+                } else {
+                    crate::conductor::model::DependencyStatus::Pending
+                }
+            })
+            .collect();
+
+        let is_blocked = task.is_blocked(completed_tasks);
+        let is_actionable = task.is_actionable(completed_tasks);
 
         items.push(crate::conductor::model::SelectableItem::Task {
             id: task.id.clone(),
@@ -667,44 +689,33 @@ impl ConductorPane {
             status: task.status,
             has_children,
             is_expanded,
-            // Compute status for each dependency
-            let dependency_statuses: Vec<crate::conductor::model::DependencyStatus> = task
-                .dependencies
-                .iter()
-                .map(|dep| {
-                    let is_completed = completed_tasks.get(&dep.task_id).copied().unwrap_or(false);
-                    if is_completed {
-                        crate::conductor::model::DependencyStatus::Completed
-                    } else if dep.dependency_type == leindex_core::orchestrate::model::TaskDependencyType::Hard {
-                        crate::conductor::model::DependencyStatus::Blocked
-                    } else {
-                        crate::conductor::model::DependencyStatus::Pending
-                    }
-                })
-                .collect();
-
-            let is_blocked = task.is_blocked(completed_tasks);
-            let is_actionable = task.is_actionable(completed_tasks);
-        items.push(crate::conductor::model::SelectableItem::Task {
-                id: task.id.clone(),
-                title: task.title.clone(),
-                description: task.description.clone(),
-                notes: task.notes.clone().unwrap_or_default(),
-                depth,
-                status: task.status,
-                has_children,
-                is_expanded,
-                is_blocked,
-                is_actionable,
-                dependencies: task.dependencies.clone(),
-                dependency_statuses,
-            });
+            is_blocked,
+            is_actionable,
+            dependencies: task.dependencies.clone(),
+            dependency_statuses,
         });
 
         if is_expanded {
             for subtask in &task.subtasks {
-                self.add_tasks_to_selectable_items(subtask, depth + 1, items);
+                self.add_tasks_to_selectable_items(subtask, depth + 1, items, completed_tasks);
             }
+        }
+    }
+
+    /// Build a map of task IDs to their completion status from a list of tasks
+    fn build_completed_tasks_map(&self, tasks: &[Task]) -> std::collections::HashMap<String, bool> {
+        let mut map = std::collections::HashMap::new();
+        for task in tasks {
+            self.add_task_to_completed_map(task, &mut map);
+        }
+        map
+    }
+
+    /// Recursively add task and its subtasks to the completed map
+    fn add_task_to_completed_map(&self, task: &Task, map: &mut std::collections::HashMap<String, bool>) {
+        map.insert(task.id.clone(), matches!(task.status, TrackStatus::Completed));
+        for subtask in &task.subtasks {
+            self.add_task_to_completed_map(subtask, map);
         }
     }
 
@@ -1247,7 +1258,6 @@ pub fn render_conductor(
         crate::conductor::dashboard::render_dashboard(frame, area, &pane.state);
     }
 
-    }
     // Render Memory Browser overlay if any modal is visible
     if pane.memory_browser.is_visible()
         || pane.memory_browser.search_modal.is_visible()

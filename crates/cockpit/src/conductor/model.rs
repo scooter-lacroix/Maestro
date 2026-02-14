@@ -370,6 +370,14 @@ pub struct IterationTiming {
     pub model: Option<String>,
 }
 
+/// Dependency status for task dependencies
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyStatus {
+    Completed,
+    Blocked,
+    Pending,
+}
+
 /// A flattened representation of the track/task tree for navigation
 #[derive(Debug, Clone)]
 pub enum SelectableItem {
@@ -387,5 +395,11 @@ pub enum SelectableItem {
         status: leindex_core::orchestrate::model::TrackStatus,
         has_children: bool,
         is_expanded: bool,
+        description: String,
+        notes: String,
+        is_blocked: bool,
+        is_actionable: bool,
+        dependencies: Vec<leindex_core::orchestrate::model::TaskDependency>,
+        dependency_statuses: Vec<DependencyStatus>,
     },
 }

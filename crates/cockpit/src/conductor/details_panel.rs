@@ -276,9 +276,9 @@ fn render_details_view(
                 details
             }
             super::model::SelectableItem::Task {
-                title, id, status, ..
+                title, id, status, dependencies, dependency_statuses, ..
             } => {
-                vec![
+                let mut details = vec![
                     Line::from(vec![
                         Span::styled(
                             "Task:  ",
@@ -306,20 +306,17 @@ fn render_details_view(
                             Style::default().fg(conductor_theme.fg_secondary),
                         ),
                     ]),
-                ]
-            }
-
-
+                ];
                 // Dependencies section
-                if !item.dependencies.is_empty() {
+                if !dependencies.is_empty() {
                     details.push(Line::from(""));
                     details.push(Line::from(Span::styled(
                         "Dependencies:",
                         Style::default().fg(conductor_theme.accent_primary).underlined(),
                     )));
 
-                    for (idx, dep) in item.dependencies.iter().enumerate() {
-                        let icon = match item.dependency_statuses.get(idx) {
+                    for (idx, dep) in dependencies.iter().enumerate() {
+                        let icon = match dependency_statuses.get(idx) {
                             Some(crate::conductor::model::DependencyStatus::Completed) => "✓",
                             Some(crate::conductor::model::DependencyStatus::Blocked) => "⊘",
                             Some(crate::conductor::model::DependencyStatus::Pending) => "○",
@@ -338,6 +335,8 @@ fn render_details_view(
                     }
                 }
 
+                details
+            }
         }
     } else {
         vec![Line::from(Span::styled(

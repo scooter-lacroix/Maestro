@@ -1,5 +1,6 @@
 use crate::conductor::pane::ConductorPane;
 use crate::conductor::model::ConductorStatus;
+use crate::conductor::modals::Modal;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use leindex_core::orchestrate::model::LoopMode;
 
@@ -11,6 +12,10 @@ pub enum ConductorAction {
     Handled,
     /// Event was handled, display this status message
     StatusMessage(String),
+    /// Store a memory with content and category
+    StoreMemory { content: String, category: leindex_core::memory::models::MemoryCategory },
+    /// Delete a memory by ID
+    DeleteMemory { id: i64 },
 }
 
 /// Handle Conductor-specific key events
@@ -80,6 +85,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             super::selector_modal::SelectorAction::Cancel => return ConductorAction::Handled,
             super::selector_modal::SelectorAction::None => return ConductorAction::Handled,
         }
+    }
 
     // 1. Handle Memory Browser if open
     if pane.memory_browser.is_visible() || pane.memory_browser.search_modal.is_visible()
@@ -107,18 +113,18 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                 return ConductorAction::Handled;
             }
             super::memory_browser::MemoryBrowserAction::StoreMemory { content, category } => {
-                // This will be handled by the main app.rs which has access to MemoryService
-                // For now, just acknowledge the action
-                return ConductorAction::StatusMessage(format!(
-                    "Store memory requested: category='{}'", category));
+                // Return action to be handled by app.rs which has access to MemoryService
+                return ConductorAction::StoreMemory { content, category };
             }
             super::memory_browser::MemoryBrowserAction::StoreCancelled => {
                 return ConductorAction::Handled;
             }
-            super::memory_browser::MemoryBrowserAction::DeleteOpened | super::memory_browser::MemoryBrowserAction::DeleteConfirmed => {
-                // This will be handled by the main app.rs which has access to MemoryService
-                // For now, just acknowledge the action
-                return ConductorAction::StatusMessage("Delete memory requested".to_string());
+            super::memory_browser::MemoryBrowserAction::DeleteOpened => {
+                return ConductorAction::Handled;
+            }
+            super::memory_browser::MemoryBrowserAction::DeleteConfirmed { id } => {
+                // Return action to be handled by app.rs which has access to MemoryService
+                return ConductorAction::DeleteMemory { id };
             }
             super::memory_browser::MemoryBrowserAction::DeleteCancelled => {
                 return ConductorAction::Handled;
@@ -194,7 +200,8 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
                 pane.scroll_output_up();
             } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
-                pane.scroll_prompt_up();
+                // Prompt scrolling not yet implemented, treat same as output
+                pane.scroll_output_up();
             } else {
                 pane.move_selection(1);
             }
@@ -204,7 +211,8 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
                 pane.scroll_output_down();
             } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
-                pane.scroll_prompt_down();
+                // Prompt scrolling not yet implemented, treat same as output
+                pane.scroll_output_down();
             } else {
                 pane.move_selection(-1);
             }
@@ -216,8 +224,9 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                     pane.scroll_output_up();
                 }
             } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+                // Prompt scrolling not yet implemented
                 for _ in 0..10 {
-                    pane.scroll_prompt_up();
+                    pane.scroll_output_up();
                 }
             }
             ConductorAction::Handled
@@ -228,8 +237,9 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                     pane.scroll_output_down();
                 }
             } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+                // Prompt scrolling not yet implemented
                 for _ in 0..10 {
-                    pane.scroll_prompt_down();
+                    pane.scroll_output_down();
                 }
             }
             ConductorAction::Handled
@@ -405,8 +415,6 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             pane.memory_browser.show();
             ConductorAction::StatusMessage("Memory browser opened. Press Esc to close.".to_string())
         }
-
-        ConductorAction::None
 
         // Ralph behavior enforcement (CONTROL key combinations - check before single keys)
         (KeyModifiers::CONTROL, KeyCode::Char('r')) => {

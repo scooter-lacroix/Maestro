@@ -355,7 +355,7 @@ impl ConductorPane {
                     let comp_event = ConductorEvent::IterationCompleted {
                         iteration: log.iteration,
                         task_completed: true, // We don't know for sure from IterationLog alone if task is fully complete
-                        duration_ms: 0,       // Not in IterationLog
+                        duration_ms: log.duration_ms,
                     };
                     if !suppress_output {
                         self.state.transition(&comp_event);

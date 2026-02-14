@@ -274,6 +274,27 @@ impl DatabaseManager {
             })
         })
     }
+
+    /// Get memory statistics grouped by category
+    pub fn stats_by_category(&self) -> Result<Vec<super::models::MemoryCategoryStats>> {
+        self.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT category, COUNT(*) as count FROM memories GROUP BY category ORDER BY count DESC"
+            )?;
+
+            let stats = stmt
+                .query_map([], |row| {
+                    Ok(super::models::MemoryCategoryStats {
+                        category: row.get(0)?,
+                        count: row.get::<_, i64>(1)? as usize,
+                    })
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .context("Failed to collect category stats")?;
+
+            Ok(stats)
+        })
+    }
 }
 
 /// Database statistics

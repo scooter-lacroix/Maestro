@@ -421,6 +421,9 @@ async fn main() -> Result<()> {
                         tracks_dir,
                         max_retries,
                         error_strategy,
+                        pi_agent: None,
+                        pi_chain: None,
+                        pi_parallel: None,
                     },
                 })
                 .await

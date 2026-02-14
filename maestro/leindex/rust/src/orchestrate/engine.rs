@@ -775,11 +775,13 @@ impl OrchestrateEngine {
         })??;
 
         // Log iteration
+        let completed_at = Utc::now();
+        let duration_ms = (completed_at - start_time).num_milliseconds() as u64;
         let log = IterationLog {
             iteration: session.current_iteration,
             task_id: task.id.clone(),
             started_at: start_time.to_rfc3339(),
-            completed_at: Some(Utc::now().to_rfc3339()),
+            completed_at: Some(completed_at.to_rfc3339()),
             status: if run_result.success {
                 IterationStatus::Completed
             } else {
@@ -787,6 +789,7 @@ impl OrchestrateEngine {
             },
             output: run_result.output.clone(),
             error: run_result.error_message.clone(),
+            duration_ms,
         };
 
         self.state_manager.append_iteration_log(track_id, &log)?;

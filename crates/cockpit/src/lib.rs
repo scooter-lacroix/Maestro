@@ -12,6 +12,7 @@ pub mod orchestrate; // Deprecated: use conductor module instead
 pub mod state;
 pub mod tabs;
 pub mod theme;
+pub mod toast;
 
 pub use app::run;
 
