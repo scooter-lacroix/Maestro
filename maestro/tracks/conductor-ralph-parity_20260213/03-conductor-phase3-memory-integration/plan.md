@@ -15,7 +15,7 @@
 - **Dependencies:** None
 - **Deliverables:** MemoryService field
 
-### [ ] Task 1.2: Handle connection errors
+### [x] Task 1.1: Add MemoryService to ConductorPane
 - Wrap memory calls in error handling
 - Display error toast on failure
 - Graceful degradation when memory unavailable
