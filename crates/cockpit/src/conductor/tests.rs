@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::model::{SelectableItem, DependencyStatus};
     use super::super::model::SelectableItem;
     use super::super::pane::ConductorPane;
     use std::fs;
@@ -167,4 +168,64 @@ mod tests {
         let track_idx = pane.get_selected_track_index();
         assert!(track_idx.is_none(), "Selected track index should be None");
     }
+    #[test]
+    fn test_dependencies_section_in_details_panel() {
+        use leindex_core::orchestrate::model::{Task, Track, TrackStatus, TaskDependency, TaskDependencyType};
+
+        let mut pane = ConductorPane::new(PathBuf::from("/non-existent"));
+        pane.tracks.push(Track {
+            id: "test-track".to_string(),
+            description: "Test track".to_string(),
+            status: TrackStatus::Pending,
+            link_path: PathBuf::from("."),
+            metadata: None,
+            plan: Some(leindex_core::orchestrate::model::TrackPlan {
+                track_id: "test-track".to_string(),
+                tasks: vec![
+                    Task {
+                        id: "task-dep".to_string(),
+                        title: "Task with Dependencies".to_string(),
+                        status: TrackStatus::Pending,
+                        dependencies: vec![
+                            TaskDependency {
+                                task_id: "task-1".to_string(),
+                                dependency_type: TaskDependencyType::Hard,
+                            },
+                            TaskDependency {
+                                task_id: "task-2".to_string(),
+                                dependency_type: TaskDependencyType::Soft,
+                            },
+                        ],
+                        description: "This task depends on others".to_string(),
+                        subtasks: vec![],
+                        notes: None,
+                        line_number: 1,
+                    }
+                ],
+                phases: vec![],
+            }),
+        });
+
+        // Expand track to see tasks
+        pane.expanded_tasks.insert("test-track".to_string());
+
+        let items = pane.get_selectable_items();
+        
+        let task_item = items.iter().find(|i| match i {
+            SelectableItem::Task { id, .. } => id == "task-dep",
+            _ => false,
+        });
+
+        assert!(task_item.is_some(), "Task with dependencies should exist");
+        if let SelectableItem::Task { dependencies, dependency_statuses, .. } = task_item.unwrap() {
+            assert_eq!(dependencies.len(), 2, "Should have two dependencies");
+            assert!(!dependency_statuses.is_empty(), "Dependency statuses should be populated");
+            
+            // The details panel should include dependencies section
+            // This test verifies that data is available for display
+            assert_eq!(dependencies[0].task_id, "task-1");
+            assert_eq!(dependencies[1].task_id, "task-2");
+        }
+    }
+
 }

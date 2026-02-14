@@ -2,6 +2,7 @@
 //!
 //! Track and task tree structures for Maestro orchestration.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -187,7 +188,7 @@ impl TrackPlan {
         None
     }
 
-    fn completed_tasks_map(&self) -> HashMap<String, bool> {
+    pub fn completed_tasks_map(&self) -> HashMap<String, bool> {
         let mut map = HashMap::new();
         for task in &self.tasks {
             self.collect_completed(task, &mut map);
@@ -456,4 +457,273 @@ impl Default for OrchestrateConfig {
 
 fn default_retry_backoff_base_ms() -> u64 {
     5_000
+}
+
+/// Status of a parallel execution group
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ParallelStatus {
+    Idle,
+    Running,
+    Paused,
+    Merging,
+    Complete,
+}
+
+impl ParallelStatus {
+    pub fn is_active(&self) -> bool {
+        matches!(self, ParallelStatus::Running | ParallelStatus::Merging)
+    }
+}
+
+/// Status of a parallel worker
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkerStatus {
+    Idle,
+    Working,
+    Waiting,
+    Complete,
+    Error,
+}
+
+/// Status of a merge operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeStatus {
+    Waiting,
+    Merging,
+    Conflicted,
+    Complete,
+}
+
+/// State of a parallel worker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelWorkerState {
+    pub id: String,
+    pub task_id: String,
+    pub status: WorkerStatus,
+    pub progress: f32,
+    pub output: Vec<String>,
+    pub started_at: Option<DateTime<Utc>>,
+}
+
+/// Information about a merge conflict
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictInfo {
+    pub file: String,
+    pub ours: String,
+    pub theirs: String,
+    pub resolution_method: Option<String>,
+}
+
+/// Entry in the merge queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeQueueEntry {
+    pub worker_id: String,
+    pub task_id: String,
+    pub status: MergeStatus,
+    pub conflicts: Vec<ConflictInfo>,
+}
+
+/// Information about a parallel execution group
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelGroupInfo {
+    pub group_id: String,
+    pub task_ids: Vec<String>,
+    pub status: ParallelStatus,
+    pub workers: Vec<ParallelWorkerState>,
+    pub merge_queue: Vec<MergeQueueEntry>,
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_task(id: &str, status: TrackStatus, dependencies: Vec<TaskDependency>) -> Task {
+        Task {
+            id: id.to_string(),
+            title: format!("Task {}", id),
+            status,
+            dependencies,
+            description: String::new(),
+            subtasks: vec![],
+            notes: None,
+            line_number: 1,
+        }
+    }
+
+    fn create_dependency(task_id: &str, dependency_type: TaskDependencyType) -> TaskDependency {
+        TaskDependency {
+            task_id: task_id.to_string(),
+            dependency_type,
+        }
+    }
+
+    #[test]
+    fn test_is_blocked_with_incomplete_hard_dependency() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![create_dependency("dep-1", TaskDependencyType::Hard)],
+        );
+
+        let completed_tasks = HashMap::new(); // No tasks completed
+
+        // Task should be blocked because dep-1 is not completed
+        assert!(task.is_blocked(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_blocked_with_complete_hard_dependency() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![create_dependency("dep-1", TaskDependencyType::Hard)],
+        );
+
+        let mut completed_tasks = HashMap::new();
+        completed_tasks.insert("dep-1".to_string(), true);
+
+        // Task should NOT be blocked because dep-1 is completed
+        assert!(!task.is_blocked(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_actionable_with_completed_dependencies() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![create_dependency("dep-1", TaskDependencyType::Hard)],
+        );
+
+        let mut completed_tasks = HashMap::new();
+        completed_tasks.insert("dep-1".to_string(), true);
+
+        // Task should be actionable because dep-1 is completed
+        assert!(task.is_actionable(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_actionable_with_incomplete_dependencies() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![create_dependency("dep-1", TaskDependencyType::Hard)],
+        );
+
+        let completed_tasks = HashMap::new(); // No tasks completed
+
+        // Task should NOT be actionable because dep-1 is not completed
+        assert!(!task.is_actionable(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_actionable_with_no_dependencies() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![],
+        );
+
+        let completed_tasks = HashMap::new();
+
+        // Task should be actionable because there are no dependencies
+        assert!(task.is_actionable(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_blocked_with_no_dependencies() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![],
+        );
+
+        let completed_tasks = HashMap::new();
+
+        // Task should NOT be blocked because there are no dependencies
+        assert!(!task.is_blocked(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_actionable_all_dependencies_completed() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![
+                create_dependency("dep-1", TaskDependencyType::Hard),
+                create_dependency("dep-2", TaskDependencyType::Hard),
+            ],
+        );
+
+        let mut completed_tasks = HashMap::new();
+        completed_tasks.insert("dep-1".to_string(), true);
+        completed_tasks.insert("dep-2".to_string(), true);
+
+        // Task should be actionable because all dependencies are completed
+        assert!(task.is_actionable(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_blocked_all_dependencies_completed() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![
+                create_dependency("dep-1", TaskDependencyType::Hard),
+                create_dependency("dep-2", TaskDependencyType::Hard),
+            ],
+        );
+
+        let mut completed_tasks = HashMap::new();
+        completed_tasks.insert("dep-1".to_string(), true);
+        completed_tasks.insert("dep-2".to_string(), true);
+
+        // Task should NOT be blocked because all dependencies are completed
+        assert!(!task.is_blocked(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_actionable_soft_dependency_ignored() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![create_dependency("dep-1", TaskDependencyType::Soft)],
+        );
+
+        let completed_tasks = HashMap::new(); // Soft dep not completed
+
+        // Task should be actionable because soft deps don't block
+        assert!(task.is_actionable(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_blocked_soft_dependency_ignored() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Pending,
+            vec![create_dependency("dep-1", TaskDependencyType::Soft)],
+        );
+
+        let completed_tasks = HashMap::new(); // Soft dep not completed
+
+        // Task should NOT be blocked because soft deps don't block
+        assert!(!task.is_blocked(&completed_tasks));
+    }
+
+    #[test]
+    fn test_is_actionable_completed_status_not_actionable() {
+        let task = create_task(
+            "task-1",
+            TrackStatus::Completed, // Already completed
+            vec![],
+        );
+
+        let completed_tasks = HashMap::new();
+
+        // Task should NOT be actionable because it's already completed
+        assert!(!task.is_actionable(&completed_tasks));
+    }
 }

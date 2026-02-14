@@ -144,41 +144,45 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
     match (key.modifiers, key.code) {
         // Navigation
         (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-            if pane.output_focused
-                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
-            {
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
                 pane.scroll_output_up();
+            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+                pane.scroll_prompt_up();
             } else {
                 pane.move_selection(1);
             }
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-            if pane.output_focused
-                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
-            {
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
                 pane.scroll_output_down();
+            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+                pane.scroll_prompt_down();
             } else {
                 pane.move_selection(-1);
             }
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::PageDown) => {
-            if pane.output_focused
-                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
-            {
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
                 for _ in 0..10 {
                     pane.scroll_output_up();
+                }
+            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+                for _ in 0..10 {
+                    pane.scroll_prompt_up();
                 }
             }
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::PageUp) => {
-            if pane.output_focused
-                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
-            {
+            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
                 for _ in 0..10 {
                     pane.scroll_output_down();
+                }
+            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+                for _ in 0..10 {
+                    pane.scroll_prompt_down();
                 }
             }
             ConductorAction::Handled
@@ -238,6 +242,36 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         (_, KeyCode::Char('d')) => {
             pane.show_dashboard = !pane.show_dashboard;
             ConductorAction::Handled
+        }
+
+        // Dependency navigation: press 1-9 to jump to dependency
+        (_, KeyCode::Char('1')) | (_, KeyCode::Char('2')) | (_, KeyCode::Char('3')) | (_, KeyCode::Char('4')) | (_, KeyCode::Char('5')) | (_, KeyCode::Char('6')) | (_, KeyCode::Char('7')) | (_, KeyCode::Char('8')) | (_, KeyCode::Char('9')) => {
+            if !pane.output_focused {
+                let items = pane.get_selectable_items();
+                if let Some(item) = items.get(pane.selected_index) {
+                    if let crate::conductor::model::SelectableItem::Task { dependencies, .. } = item {
+                        if let KeyCode::Char(c) = key.code {
+                            if let Some(idx) = c.to_string().parse::<usize>().ok() {
+                                if idx > 0 && idx <= dependencies.len() {
+                                    let dep_id = &dependencies[idx - 1].task_id;
+                                    // Find the dependency task in selectable items
+                                    if let Some(dep_idx) = items.iter().position(|i| {
+                                        if let crate::conductor::model::SelectableItem::Task { id, .. } = i {
+                                            id == dep_id
+                                        } else {
+                                            false
+                                        }
+                                    }) {
+                                        pane.selected_index = dep_idx;
+                                        return ConductorAction::Handled;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ConductorAction::None
         }
 
         // Project Selector

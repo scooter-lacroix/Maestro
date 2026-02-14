@@ -8,26 +8,26 @@
 
 ## Phase 1: Parallel State Types (4 tasks)
 
-### [ ] Task 1.1: Add ParallelStatus enum
+### [x] Task 1.1: Add ParallelStatus enum
 - Create `ParallelStatus` enum with Idle/Running/Paused/Merging/Complete variants
 - Add Serialize/Deserialize
 - Add to orchestrate/model.rs
 - **Dependencies:** None
 - **Deliverables:** ParallelStatus enum
 
-### [ ] Task 1.2: Add WorkerStatus enum
-- Create `WorkerStatus` enum with Idle/Working/Waiting/Complete/Error variants
+### [x] Task 1.2: Add WorkerStatus enum
+- Add serialization
 - Add serialization
 - **Dependencies:** Task 1.1
 - **Deliverables:** WorkerStatus enum
 
-### [ ] Task 1.3: Add MergeStatus enum
+### [x] Task 1.3: Add MergeStatus enum
 - Create `MergeStatus` enum with Waiting/Merging/Conflicted/Complete variants
 - Add serialization
 - **Dependencies:** Task 1.2
 - **Deliverables:** MergeStatus enum
 
-### [ ] Task 1.4: Add unit tests for state types
+### [x] Task 1.4: Add unit tests for state types
 - Test serialization roundtrip for all enums
 - Test default values
 - **Dependencies:** Task 1.3
@@ -37,7 +37,7 @@
 
 ## Phase 2: Parallel Worker State Structs (4 tasks)
 
-### [ ] Task 2.1: Add ParallelWorkerState struct
+### [x] Task 2.1: Add ParallelWorkerState struct
 - id: String
 - task_id: String
 - status: WorkerStatus
@@ -47,7 +47,7 @@
 - **Dependencies:** Phase 1
 - **Deliverables:** ParallelWorkerState
 
-### [ ] Task 2.2: Add MergeQueueEntry struct
+### [x] Task 2.2: Add MergeQueueEntry struct
 - worker_id: String
 - task_id: String
 - status: MergeStatus
@@ -55,7 +55,7 @@
 - **Dependencies:** Task 2.1
 - **Deliverables:** MergeQueueEntry
 
-### [ ] Task 2.3: Add ConflictInfo struct
+### [x] Task 2.3: Add ConflictInfo struct
 - file: String
 - ours: String (content preview)
 - theirs: String (content preview)
@@ -63,7 +63,7 @@
 - **Dependencies:** Task 2.2
 - **Deliverables:** ConflictInfo
 
-### [ ] Task 2.4: Add ParallelGroupInfo struct
+### [x] Task 2.4: Add ParallelGroupInfo struct
 - group_id: String
 - task_ids: Vec<String>
 - status: ParallelStatus
@@ -76,28 +76,28 @@
 
 ## Phase 3: Parallel View Component (5 tasks)
 
-### [ ] Task 3.1: Create parallel_view.rs
+### [x] Task 3.1: Create parallel_view.rs
 - Define ParallelView struct
 - Fields: group_info, selected_worker, scroll_offset
 - Add to conductor/mod.rs
 - **Dependencies:** Phase 2
 - **Deliverables:** parallel_view.rs
 
-### [ ] Task 3.2: Implement worker list rendering
+### [x] Task 3.2: Implement worker list rendering
 - Render list of workers with status icons
 - Show task_id, progress bar, status
-- Highlight selected worker
+### [x] Task 3.2: Implement worker list rendering
 - **Dependencies:** Task 3.1
 - **Deliverables:** Worker list
 
-### [ ] Task 3.3: Implement merge queue rendering
+### [x] Task 3.3: Implement merge queue rendering
 - Show merge queue entries
 - Display status icons
 - Show conflict count if any
 - **Dependencies:** Task 3.2
 - **Deliverables:** Merge queue
 
-### [ ] Task 3.4: Implement progress overview
+### [x] Task 3.4: Implement progress overview
 - Show overall parallel progress
 - Workers complete / total workers
 - Merge queue position
@@ -114,14 +114,14 @@
 
 ## Phase 4: Conflict Resolution Panel (5 tasks)
 
-### [ ] Task 4.1: Create conflict_panel.rs
+### [x] Task 4.1: Create conflict_panel.rs
 - Define ConflictPanel struct
 - Fields: conflict, visible, selected_option
 - Add to conductor/mod.rs
 - **Dependencies:** Phase 2
 - **Deliverables:** conflict_panel.rs
 
-### [ ] Task 4.2: Implement conflict display
+### [x] Task 4.2: Implement conflict display
 - Show conflicting file path
 - Show ours content preview
 - Show theirs content preview
@@ -129,13 +129,13 @@
 - **Dependencies:** Task 4.1
 - **Deliverables:** Conflict display
 
-### [ ] Task 4.3: Implement resolution options
+### [x] Task 4.3: Implement resolution options
 - Radio buttons or list selector
 - Options: Accept Ours, Accept Theirs, AI Resolve, Skip
 - **Dependencies:** Task 4.2
 - **Deliverables:** Resolution options
 
-### [ ] Task 4.4: Wire resolution keybindings
+### [x] Task 4.4: Wire resolution keybindings
 - R → Accept ours
 - S → Accept theirs (when not in memory browser)
 - O → AI resolve
@@ -153,25 +153,25 @@
 
 ## Phase 5: Parallel ConductorEvents (4 tasks)
 
-### [ ] Task 5.1: Add parallel event variants (1-6)
+### [x] Task 5.1: Add parallel event variants (1-6)
 - ParallelStarted, WorkerStatusChanged, MergeQueueUpdated
 - ConflictDetected, ConflictResolved, ParallelCompleted
 - **Dependencies:** None
 - **Deliverables:** Event variants 1-6
 
-### [ ] Task 5.2: Add parallel event variants (7-12)
+### [x] Task 5.2: Add parallel event variants (7-12)
 - ParallelPaused, ParallelResumed, WorkerOutput
 - WorkerError, MergeProgress, MergeConflict
 - **Dependencies:** Task 5.1
 - **Deliverables:** Event variants 7-12
 
-### [ ] Task 5.3: Add event serialization
+### [~] Task 5.3: Add event serialization
 - Ensure all new events serialize/deserialize
 - Add to event parsing in polling.rs
 - **Dependencies:** Task 5.2
 - **Deliverables:** Serialization
 
-### [ ] Task 5.4: Add event tests
+### [~] Task 5.4: Add event tests
 - Test serialization for all 12 events
 - Test event parsing
 - **Dependencies:** Task 5.3

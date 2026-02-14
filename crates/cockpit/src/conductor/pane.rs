@@ -7,7 +7,7 @@
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
 use super::omp_agent::{OmpAgentManager, OmpAgentConfig};
-use crate::omp::{create_omp_provider, is_omp_available, OmpBridge, OmpToolDefinition, OmpWorkerConfig, ToolProvider, ToolResult, OmpWorkerStatus};
+use super::model::{ConductorEvent, ConductorState, DependencyStatus, SelectableItem, ConductorStatus, OutputStream, StopReason};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};
@@ -658,10 +658,44 @@ impl ConductorPane {
         items.push(crate::conductor::model::SelectableItem::Task {
             id: task.id.clone(),
             title: task.title.clone(),
+            description: task.description.clone(),
+            notes: task.notes.clone().unwrap_or_default(),
             depth,
             status: task.status,
             has_children,
             is_expanded,
+            // Compute status for each dependency
+            let dependency_statuses: Vec<crate::conductor::model::DependencyStatus> = task
+                .dependencies
+                .iter()
+                .map(|dep| {
+                    let is_completed = completed_tasks.get(&dep.task_id).copied().unwrap_or(false);
+                    if is_completed {
+                        crate::conductor::model::DependencyStatus::Completed
+                    } else if dep.dependency_type == leindex_core::orchestrate::model::TaskDependencyType::Hard {
+                        crate::conductor::model::DependencyStatus::Blocked
+                    } else {
+                        crate::conductor::model::DependencyStatus::Pending
+                    }
+                })
+                .collect();
+
+            let is_blocked = task.is_blocked(completed_tasks);
+            let is_actionable = task.is_actionable(completed_tasks);
+        items.push(crate::conductor::model::SelectableItem::Task {
+                id: task.id.clone(),
+                title: task.title.clone(),
+                description: task.description.clone(),
+                notes: task.notes.clone().unwrap_or_default(),
+                depth,
+                status: task.status,
+                has_children,
+                is_expanded,
+                is_blocked,
+                is_actionable,
+                dependencies: task.dependencies.clone(),
+                dependency_statuses,
+            });
         });
 
         if is_expanded {

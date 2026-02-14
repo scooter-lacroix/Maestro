@@ -1,0 +1,29 @@
+{
+  "project_id": "maestro",
+  "generation": "a238204e30f43cb22747d91e6f486e1f073427bd2b5e6214840f545fdb95ea83",
+  "phase": 5,
+  "options_hash": "1521063e",
+  "payload": {
+    "recommendations": [
+      {
+        "message": "Resolve 22206 external import edges to improve dependency certainty",
+        "priority": 0.95,
+        "confidence": "External",
+        "rationale": "Unresolved imports lower phase-2 confidence and reduce graph precision"
+      },
+      {
+        "message": "Prioritize test/refactor work in top focus file: .venv/lib/python3.13/site-packages/sqlalchemy/orm/context.py",
+        "priority": 0.8,
+        "confidence": "Heuristic",
+        "rationale": "Phase-3 forward impact indicates high fan-out from selected entry points"
+      },
+      {
+        "message": "Review hotspot .venv/lib/python3.13/site-packages/numpy/__init__.py:__module__ (complexity=1, impact=1586)",
+        "priority": 0.47918367,
+        "confidence": "Heuristic",
+        "rationale": "HybridScorer combined complexity + graph impact + textual risk markers"
+      }
+    ],
+    "public_symbol_hints": 0
+  }
+}
