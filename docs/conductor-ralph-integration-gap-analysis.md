@@ -342,3 +342,35 @@ Unlocks:
 - **OMP integration** — Agent manager with per-track workers (Maestro-specific advantage)
 - **Project discovery** — Auto-discovers from CWD, tmux, and `~/.maestro/orchestrate/`
 - **Test coverage** — Unit tests for track detection, external discovery, output suppression, command generation
+---
+
+## Phase Closure Status
+
+This section tracks which phases from the implementation plan have been completed and their impact on closing gaps.
+
+|| Phase | Status | Completion Date | Gaps Closed |
+||-------|--------|---------------|-------------|
+|| Phase 1: UI Primitives + Steering | ✅ COMPLETE | 2026-02-13T17:50:00Z | F1, A9-A12, F2-F6 |
+|| Phase 2: Task Display & Details | ✅ COMPLETE | 2026-02-13T17:50:00Z | C8-C12, D3 |
+|| Phase 3: Memory Integration | ⏳ IN PROGRESS | - | E2-E6 |
+|| Phase 4: Parallel UI | ⏳ PLANNED | - | G7-G11 |
+|| Phase 5: Parallel Polling | ⏳ PLANNED | - | B6 |
+|| Phase 6: Pi-Mono + Polish | ⏳ PLANNED | - | M3-M9, I2-I3, J3, H5 |
+|| Phase 7: Themes + Toast | ⏳ PLANNED | - | K2-K3, J4 |
+
+### Gap Closure Progress
+- **Gaps Closed:** 2 of 57 (3.5%)
+  - F1 (Steering): Phase 1
+  - A9-A12, F2-F6 (Runtime config): Phase 1
+  - C8-C12 (Task display): Phase 2
+  - D3 (Prompt preview): Phase 2
+- **Remaining Gaps:** 55 of 57 (96.5%)
+  - Memory system (E2-E6): Phase 3 (in progress)
+  - Parallel execution (G7-G11, B6): Phases 4-5
+  - Pi-Mono integration (M3-M9): Phase 6
+  - Theme system (K2-K3): Phase 7
+  - Remaining items: Various phases
+
+**Overall Parity:** 42% → **Target: 100%**
+
+---
