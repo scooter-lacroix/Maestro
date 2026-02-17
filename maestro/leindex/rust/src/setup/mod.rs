@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use walkdir::WalkDir;
 
 pub mod distro;
@@ -33,6 +34,8 @@ pub struct Config {
     pub install_path: String,
     pub editor: String,
     pub selected_tools: Vec<String>,
+    pub password_cache: Arc<PasswordCache>,
+    pub distro: Distro,
 }
 
 pub enum StepAction {
@@ -42,8 +45,8 @@ pub enum StepAction {
 
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     let mut steps = Vec::new();
-    // Detect distribution and get package manager
-    let distro = detect_distro();
+    // Use the distribution passed in config
+    let distro = config.distro;
     let pm = get_package_manager(distro);
     let pm_name = pm.name().to_string();
 
@@ -645,12 +648,77 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         });
     }
 
+    // Build frontend using internal action for correct path resolution
     steps.push(Step {
         name: "The Crescendo - Frontend".to_string(),
         description: "Building Maestro Memory Dashboard...".to_string(),
-        action: StepAction::Shell(
-            "cd ../../memory/frontend && npm install && npm run build".to_string(),
-        ),
+        action: StepAction::Internal(Box::new(|| {
+            let repo_root = find_repo_root()?;
+            let frontend_path = repo_root.join("maestro").join("memory").join("frontend");
+            let mut logs = Vec::new();
+
+            if !frontend_path.exists() {
+                logs.push("Frontend directory not found, skipping build".to_string());
+                return Ok(logs);
+            }
+
+            logs.push(format!("Building frontend at {}", frontend_path.display()));
+
+            // Run npm install
+            let npm_install = std::process::Command::new("npm")
+                .arg("install")
+                .current_dir(&frontend_path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output();
+
+            match npm_install {
+                Ok(out) => {
+                    if !out.stdout.is_empty() {
+                        for line in String::from_utf8_lossy(&out.stdout).lines().take(3) {
+                            logs.push(format!("  npm: {}", line));
+                        }
+                    }
+                    if !out.status.success() {
+                        logs.push(format!("npm install failed: {}", String::from_utf8_lossy(&out.stderr)));
+                        return Ok(logs);
+                    }
+                }
+                Err(e) => {
+                    logs.push(format!("npm install error: {}", e));
+                    return Ok(logs);
+                }
+            }
+
+            // Run npm run build
+            let npm_build = std::process::Command::new("npm")
+                .arg("run")
+                .arg("build")
+                .current_dir(&frontend_path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output();
+
+            match npm_build {
+                Ok(out) => {
+                    if !out.stdout.is_empty() {
+                        for line in String::from_utf8_lossy(&out.stdout).lines().take(3) {
+                            logs.push(format!("  build: {}", line));
+                        }
+                    }
+                    if !out.status.success() {
+                        logs.push(format!("npm build failed: {}", String::from_utf8_lossy(&out.stderr)));
+                    } else {
+                        logs.push("Frontend built successfully".to_string());
+                    }
+                }
+                Err(e) => {
+                    logs.push(format!("npm build error: {}", e));
+                }
+            }
+
+            Ok(logs)
+        })),
     });
 
     let total = steps.len();
@@ -666,157 +734,89 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 // ALL commands: capture output to prevent UI corruption
                 // Never use Stdio::inherit() - it corrupts the TUI
                 let needs_sudo = command.contains("sudo");
+                let clean_command = if needs_sudo {
+                    command.replace("sudo ", "")
+                } else {
+                    command.clone()
+                };
                 let is_long_running = command.contains("cargo build")
                     || command.contains("npm install")
                     || command.contains("npm run build")
                     || command.contains("make");
 
                 // For sudo commands, we need to handle them specially
-                if needs_sudo {
-                    // Run with captured output - sudo will use the terminal's cached credentials
-                    let output = Command::new("bash")
-                        .arg("-c")
-                        .arg(&command)
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .stdin(std::process::Stdio::null()) // Don't wait for stdin
-                        .output();
-
-                    match output {
-                        Ok(out) => {
-                            // Send stdout to TUI logs
-                            if !out.stdout.is_empty() {
-                                let s = String::from_utf8_lossy(&out.stdout);
-                                for line in s.lines().take(5) {
-                                    let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
-                                }
-                            }
-                            // Send stderr to TUI logs (but filter password prompts)
-                            if !out.stderr.is_empty() {
-                                let s = String::from_utf8_lossy(&out.stderr);
-                                for line in s.lines() {
-                                    // Don't send password prompts to logs - they'll be handled separately
-                                    if !line.contains("[sudo]") || !line.contains("password") {
-                                        let _ = tx.send(SetupEvent::Log(format!("  [ERR] {}", line)));
-                                    }
-                                }
-                            }
-
-                            if out.status.success() {
-                                let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
-                                let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
-                            } else {
-                                // Check if it's a password error
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                if stderr.contains("Sorry") || stderr.contains("incorrect") {
-                                    let _ = tx.send(SetupEvent::Error(
-                                        "Password authentication failed. Please run 'sudo -v' in a terminal first to cache your password.".to_string()
-                                    ));
-                                } else {
-                                    let _ = tx.send(SetupEvent::Error(format!(
-                                        "Step '{}' failed with exit code: {}",
-                                        step.name, out.status
-                                    )));
-                                }
-                                return;
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(SetupEvent::Error(format!(
-                                "Failed to execute step '{}': {}",
-                                step.name, e
-                            )));
-                            return;
+                let output = if needs_sudo {
+                    // Check if we have a cached password
+                    if !config.password_cache.is_valid() {
+                        let _ = tx.send(SetupEvent::Log("[sudo] password required".to_string()));
+                        // Wait for password to be provided via TUI
+                        while !config.password_cache.is_valid() {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     }
-                } else if is_long_running {
-                    // Long-running non-sudo commands: capture output but stream to logs
-                    let output = Command::new("bash")
+                    config.password_cache.sudo_with_password(&clean_command)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                } else {
+                    Command::new("bash")
                         .arg("-c")
                         .arg(&command)
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped())
-                        .output();
+                        .stdin(std::process::Stdio::null())
+                        .output()
+                };
 
-                    match output {
-                        Ok(out) => {
-                            // Send output to TUI logs
-                            if !out.stdout.is_empty() {
-                                let s = String::from_utf8_lossy(&out.stdout);
-                                for line in s.lines().take(10) {
-                                    let _ = tx.send(SetupEvent::Log(format!("  {}", line)));
+                match output {
+                    Ok(out) => {
+                        // Send stdout to TUI logs
+                        if !out.stdout.is_empty() {
+                            let s = String::from_utf8_lossy(&out.stdout);
+                            let max_lines = if is_long_running { 10 } else { 5 };
+                            for line in s.lines().take(max_lines) {
+                                let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
+                            }
+                        }
+                        // Send stderr to TUI logs (but filter password prompts)
+                        if !out.stderr.is_empty() {
+                            let s = String::from_utf8_lossy(&out.stderr);
+                            let max_lines = if is_long_running { 10 } else { 10 };
+                            for line in s.lines().take(max_lines) {
+                                // Don't send password prompts to logs - they'll be handled separately
+                                if !line.contains("[sudo]") || !line.contains("password") {
+                                    let prefix = if is_long_running { "  [WARN] " } else { "  [ERR] " };
+                                    let _ = tx.send(SetupEvent::Log(format!("{}{}", prefix, line)));
                                 }
                             }
-                            if !out.stderr.is_empty() {
-                                let s = String::from_utf8_lossy(&out.stderr);
-                                for line in s.lines().take(10) {
-                                    let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", line)));
-                                }
-                            }
+                        }
 
-                            if out.status.success() {
-                                let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
-                                let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                        if out.status.success() {
+                            let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
+                            let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                        } else {
+                            // Check if it's a password error
+                            let stderr = String::from_utf8_lossy(&out.stderr);
+                            if stderr.contains("Sorry") || stderr.contains("incorrect") {
+                                let _ = tx.send(SetupEvent::Error(
+                                    "Password authentication failed. Please check your password and try again.".to_string()
+                                ));
                             } else {
                                 let _ = tx.send(SetupEvent::Error(format!(
                                     "Step '{}' failed with exit code: {:?}",
-                                    step.name,
-                                    out.status.code()
+                                    step.name, out.status.code()
                                 )));
-                                return;
                             }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(SetupEvent::Error(format!(
-                                "Failed to execute step '{}': {}",
-                                step.name, e
-                            )));
                             return;
                         }
                     }
-                } else {
-                    // Quick commands: capture output
-                    let output = Command::new("bash")
-                        .arg("-c")
-                        .arg(&command)
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .output();
-
-                    match output {
-                        Ok(out) => {
-                            if !out.stdout.is_empty() {
-                                let s = String::from_utf8_lossy(&out.stdout);
-                                for line in s.lines().take(5) {
-                                    let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
-                                }
-                            }
-                            if !out.stderr.is_empty() {
-                                let s = String::from_utf8_lossy(&out.stderr);
-                                for line in s.lines().take(10) {
-                                    let _ = tx.send(SetupEvent::Log(format!("  [ERR] {}", line)));
-                                }
-                            }
-
-                            if out.status.success() {
-                                let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
-                            } else {
-                                let _ = tx.send(SetupEvent::Error(format!(
-                                    "Step '{}' failed with exit code: {}",
-                                    step.name, out.status
-                                )));
-                                return;
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx.send(SetupEvent::Error(format!(
-                                "Failed to execute step '{}': {}",
-                                step.name, e
-                            )));
-                            return;
-                        }
+                    Err(e) => {
+                        let _ = tx.send(SetupEvent::Error(format!(
+                            "Failed to execute step '{}': {}",
+                            step.name, e
+                        )));
+                        return;
                     }
                 }
+
             }
             StepAction::Internal(action) => match action() {
                 Ok(lines) => {
