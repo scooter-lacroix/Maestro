@@ -8,8 +8,11 @@ pub mod distro;
 pub mod package_manager;
 pub mod password;
 
-pub use distro::{Distro, detect_distro};
-pub use package_manager::{get_package_manager, get_package_name, get_package_names, get_build_tools_install_command, PackagePurpose, PackageManager};
+pub use distro::{detect_distro, Distro};
+pub use package_manager::{
+    get_build_tools_install_command, get_package_manager, get_package_name, get_package_names,
+    PackageManager, PackagePurpose,
+};
 pub use password::PasswordCache;
 
 pub enum SetupEvent {
@@ -51,17 +54,23 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     });
 
     // Woodwinds: Basic utilities using distribution-appropriate package manager
-    let basic_packages = get_package_names(&[
-        PackagePurpose::Curl,
-        PackagePurpose::Unzip,
-        PackagePurpose::PkgConfig,
-        PackagePurpose::OpenSSL,
-    ], distro);
-    
+    let basic_packages = get_package_names(
+        &[
+            PackagePurpose::Curl,
+            PackagePurpose::Unzip,
+            PackagePurpose::PkgConfig,
+            PackagePurpose::OpenSSL,
+        ],
+        distro,
+    );
+
     let woodwinds_cmd = match distro {
         Distro::Debian => {
             let pkgs = basic_packages.join(" ");
-            format!("sudo apt-get update && sudo apt-get install -y build-essential {}", pkgs)
+            format!(
+                "sudo apt-get update && sudo apt-get install -y build-essential {}",
+                pkgs
+            )
         }
         Distro::Arch => {
             let pkgs = basic_packages.join(" ");
@@ -71,9 +80,12 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             let pkgs = basic_packages.join(" ");
             format!("sudo dnf install -y @development-tools {}", pkgs)
         }
-        _ => format!("# Please install basic build tools: {}", basic_packages.join(" ")),
+        _ => format!(
+            "# Please install basic build tools: {}",
+            basic_packages.join(" ")
+        ),
     };
-    
+
     steps.push(Step {
         name: "Woodwinds".to_string(),
         description: format!("[{}] Installing basic utilities...", pm_name),
@@ -123,7 +135,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 // Install ctags first
                 let ctags_pkg = get_package_name(PackagePurpose::Ctags, distro).unwrap_or("ctags");
                 let ctags_cmd = match distro {
-                    Distro::Debian => format!("sudo apt-get install -y {} || sudo apt-get install -y ctags", ctags_pkg),
+                    Distro::Debian => format!(
+                        "sudo apt-get install -y {} || sudo apt-get install -y ctags",
+                        ctags_pkg
+                    ),
                     _ => pm.install_command(&[ctags_pkg]),
                 };
                 steps.push(Step {
@@ -139,16 +154,25 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 });
             }
             "Tmux / Tmux-RS" => {
-                let tmux_pkgs = get_package_names(&[
-                    PackagePurpose::Ncurses,
-                    PackagePurpose::LibEvent,
-                    PackagePurpose::Tmux,
-                ], distro);
+                let tmux_pkgs = get_package_names(
+                    &[
+                        PackagePurpose::Ncurses,
+                        PackagePurpose::LibEvent,
+                        PackagePurpose::Tmux,
+                    ],
+                    distro,
+                );
                 let tmux_cmd = match distro {
                     Distro::Debian => format!("sudo apt-get install -y {}", tmux_pkgs.join(" ")),
-                    Distro::Arch => format!("sudo pacman -S --noconfirm --needed {}", tmux_pkgs.join(" ")),
+                    Distro::Arch => format!(
+                        "sudo pacman -S --noconfirm --needed {}",
+                        tmux_pkgs.join(" ")
+                    ),
                     Distro::Fedora => format!("sudo dnf install -y {}", tmux_pkgs.join(" ")),
-                    _ => format!("# Please install tmux dependencies: {}", tmux_pkgs.join(" ")),
+                    _ => format!(
+                        "# Please install tmux dependencies: {}",
+                        tmux_pkgs.join(" ")
+                    ),
                 };
                 steps.push(Step {
                     name: "Percussion - Dependencies".to_string(),
@@ -493,7 +517,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // Remove existing symlink if present
                         if ext_dst.is_symlink() || ext_dst.exists() {
                             std::fs::remove_file(&ext_dst)?;
-                            logs.push(format!("Removed existing pi-maestro extension link"));
+                            logs.push("Removed existing pi-maestro extension link".to_string());
                         }
 
                         // Create symlink
