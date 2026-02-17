@@ -17,7 +17,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use leindex_core::setup::{run_orchestra, Config, SetupEvent};
+use leindex_core::setup::{run_orchestra, Config, SetupEvent, Distro, detect_distro};
 
 struct App {
     phase: Phase,
@@ -28,6 +28,8 @@ struct App {
     logs: Vec<String>,
     receiver: Option<Receiver<SetupEvent>>,
     error: Option<String>,
+    // Detected distribution
+    distro: Distro,
     // Config options
     install_path: String,
     editor: String,
@@ -70,15 +72,22 @@ fn main() -> Result<(), io::Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Detect distribution
+    let detected_distro = detect_distro();
+    
     let app = App {
         phase: Phase::Overture,
         frame_count: 0,
         should_quit: false,
         install_progress: 0.0,
         current_action: "Arranging the orchestra...".to_string(),
-        logs: vec!["Welcome to Maestro Setup v2.5".to_string()],
+        logs: vec![
+            "Welcome to Maestro Setup v2.5".to_string(),
+            format!("Detected: {} ({})", detected_distro, detected_distro.package_manager_name()),
+        ],
         receiver: None,
         error: None,
+        distro: detected_distro,
         install_path: "~/.maestro".to_string(),
         editor: "hx".to_string(),
         tool_selections: vec![
