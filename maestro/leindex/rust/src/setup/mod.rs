@@ -4,6 +4,14 @@ use std::process::Command;
 use std::sync::mpsc::Sender;
 use walkdir::WalkDir;
 
+pub mod distro;
+pub mod package_manager;
+pub mod password;
+
+pub use distro::{Distro, detect_distro};
+pub use package_manager::{get_package_manager, get_package_name, get_package_names, get_build_tools_install_command, PackagePurpose, PackageManager};
+pub use password::PasswordCache;
+
 pub enum SetupEvent {
     ActionStarted(String),
     StepCompleted(usize, usize), // current, total
@@ -31,6 +39,10 @@ pub enum StepAction {
 
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     let mut steps = Vec::new();
+    // Detect distribution and get package manager
+    let distro = detect_distro();
+    let pm = get_package_manager(distro);
+    let pm_name = pm.name().to_string();
 
     steps.push(Step {
         name: "The Overture".to_string(),
@@ -38,13 +50,34 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         action: StepAction::Shell(format!("mkdir -p {} && sleep 1", config.install_path)),
     });
 
+    // Woodwinds: Basic utilities using distribution-appropriate package manager
+    let basic_packages = get_package_names(&[
+        PackagePurpose::Curl,
+        PackagePurpose::Unzip,
+        PackagePurpose::PkgConfig,
+        PackagePurpose::OpenSSL,
+    ], distro);
+    
+    let woodwinds_cmd = match distro {
+        Distro::Debian => {
+            let pkgs = basic_packages.join(" ");
+            format!("sudo apt-get update && sudo apt-get install -y build-essential {}", pkgs)
+        }
+        Distro::Arch => {
+            let pkgs = basic_packages.join(" ");
+            format!("sudo pacman -S --noconfirm --needed base-devel {}", pkgs)
+        }
+        Distro::Fedora => {
+            let pkgs = basic_packages.join(" ");
+            format!("sudo dnf install -y @development-tools {}", pkgs)
+        }
+        _ => format!("# Please install basic build tools: {}", basic_packages.join(" ")),
+    };
+    
     steps.push(Step {
         name: "Woodwinds".to_string(),
-        description: "Installing basic utilities (curl, unzip, build-essential)...".to_string(),
-        action: StepAction::Shell(
-            "sudo apt-get update && sudo apt-get install -y curl unzip build-essential pkg-config libssl-dev"
-                .to_string(),
-        ),
+        description: format!("[{}] Installing basic utilities...", pm_name),
+        action: StepAction::Shell(woodwinds_cmd),
     });
 
     if config.editor == "fresh" {
@@ -78,20 +111,25 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     for tool in &config.selected_tools {
         match tool.as_str() {
             "Go Language (for Zoekt)" => {
+                let go_pkg = get_package_name(PackagePurpose::Go, distro).unwrap_or("golang-go");
+                let go_cmd = pm.install_command(&[go_pkg]);
                 steps.push(Step {
                     name: "Brass Section - Go".to_string(),
-                    description: "Synchronizing Go environment...".to_string(),
-                    action: StepAction::Shell("sudo apt-get install -y golang-go".to_string()),
+                    description: format!("[{}] Synchronizing Go environment...", pm_name),
+                    action: StepAction::Shell(go_cmd),
                 });
             }
             "Zoekt (Fast Code Search)" => {
+                // Install ctags first
+                let ctags_pkg = get_package_name(PackagePurpose::Ctags, distro).unwrap_or("ctags");
+                let ctags_cmd = match distro {
+                    Distro::Debian => format!("sudo apt-get install -y {} || sudo apt-get install -y ctags", ctags_pkg),
+                    _ => pm.install_command(&[ctags_pkg]),
+                };
                 steps.push(Step {
                     name: "Brass Section - Ctags".to_string(),
-                    description: "Installing Universal Ctags (Required for Zoekt)...".to_string(),
-                    action: StepAction::Shell(
-                        "sudo apt-get install -y universal-ctags || sudo apt-get install -y ctags"
-                            .to_string(),
-                    ),
+                    description: format!("[{}] Installing Universal Ctags...", pm_name),
+                    action: StepAction::Shell(ctags_cmd),
                 });
 
                 steps.push(Step {
@@ -101,12 +139,21 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 });
             }
             "Tmux / Tmux-RS" => {
+                let tmux_pkgs = get_package_names(&[
+                    PackagePurpose::Ncurses,
+                    PackagePurpose::LibEvent,
+                    PackagePurpose::Tmux,
+                ], distro);
+                let tmux_cmd = match distro {
+                    Distro::Debian => format!("sudo apt-get install -y {}", tmux_pkgs.join(" ")),
+                    Distro::Arch => format!("sudo pacman -S --noconfirm --needed {}", tmux_pkgs.join(" ")),
+                    Distro::Fedora => format!("sudo dnf install -y {}", tmux_pkgs.join(" ")),
+                    _ => format!("# Please install tmux dependencies: {}", tmux_pkgs.join(" ")),
+                };
                 steps.push(Step {
                     name: "Percussion - Dependencies".to_string(),
-                    description: "Installing Tmux dependencies...".to_string(),
-                    action: StepAction::Shell(
-                        "sudo apt-get install -y libncurses-dev libevent-dev tmux".to_string(),
-                    ),
+                    description: format!("[{}] Installing Tmux dependencies...", pm_name),
+                    action: StepAction::Shell(tmux_cmd),
                 });
 
                 steps.push(Step {
@@ -116,10 +163,17 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 });
             }
             "Yazi (Terminal File Manager)" => {
+                let yazi_pkg = get_package_name(PackagePurpose::Yazi, distro).unwrap_or("yazi");
+                let yazi_cmd = match distro {
+                    Distro::Debian => format!("command -v yazi > /dev/null 2>&1 || sudo apt-get install -y {} > /dev/null 2>&1 || cargo install --locked yazi-fm yazi-cli", yazi_pkg),
+                    Distro::Arch => format!("command -v yazi > /dev/null 2>&1 || sudo pacman -S --noconfirm --needed {} || cargo install --locked yazi-fm yazi-cli", yazi_pkg),
+                    Distro::Fedora => format!("command -v yazi > /dev/null 2>&1 || sudo dnf install -y {} || cargo install --locked yazi-fm yazi-cli", yazi_pkg),
+                    _ => "command -v yazi > /dev/null 2>&1 || cargo install --locked yazi-fm yazi-cli".to_string(),
+                };
                 steps.push(Step {
                     name: "Bass Note - Yazi".to_string(),
-                    description: "Ensuring Yazi is present...".to_string(),
-                    action: StepAction::Shell("command -v yazi > /dev/null 2>&1 || sudo apt-get install -y yazi > /dev/null 2>&1 || cargo install --locked yazi-fm yazi-cli".to_string()),
+                    description: format!("[{}] Ensuring Yazi is present...", pm_name),
+                    action: StepAction::Shell(yazi_cmd),
                 });
             }
             "Claude Code (by Anthropic)" => {
