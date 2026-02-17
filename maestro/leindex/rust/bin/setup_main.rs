@@ -17,7 +17,16 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use leindex_core::setup::{run_orchestra, Config, SetupEvent, Distro, detect_distro};
+use leindex_core::setup::{detect_distro, run_orchestra, Config, Distro, SetupEvent};
+
+/// Password input state for TUI-based password entry
+#[derive(Debug, Clone, PartialEq)]
+pub enum PasswordState {
+    None,
+    Prompting(String), // Service name requesting password
+    Inputting(String), // Current masked input
+    Error(String),     // Error message
+}
 
 struct App {
     phase: Phase,
@@ -28,6 +37,9 @@ struct App {
     logs: Vec<String>,
     receiver: Option<Receiver<SetupEvent>>,
     error: Option<String>,
+    // Password handling
+    password_state: PasswordState,
+    password_buffer: String,
     // Detected distribution
     distro: Distro,
     // Config options
@@ -35,21 +47,20 @@ struct App {
     editor: String,
     // Granular tool selection
     tool_selections: Vec<(String, bool)>,
-    config_selection: usize, // 0: path, 1: editor, 2: tools..., N: star, N+1: confirm
+    config_selection: usize,
     starred: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
 enum Phase {
-    Overture,    // Welcome
-    Tuning,      // Configuration
-    Performance, // Installation
-    Crescendo,   // Compilation (Special display)
-    Ovation,     // Complete
+    Overture,
+    Tuning,
+    Performance,
+    Crescendo,
+    Ovation,
 }
 
 fn main() -> Result<(), io::Error> {
-    // Check if we're running in a terminal
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         eprintln!("Error: Maestro Setup Wizard requires an interactive terminal.");
         eprintln!();
@@ -66,15 +77,32 @@ fn main() -> Result<(), io::Error> {
         std::process::exit(1);
     }
 
-    enable_raw_mode()?;
+    // Set up terminal with proper error handling
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // Detect distribution
-    let detected_distro = detect_distro();
     
+    // Enable raw mode first
+    enable_raw_mode().map_err(|e| {
+        eprintln!("Failed to enable raw mode: {}", e);
+        e
+    })?;
+    
+    // Enter alternate screen and enable mouse
+    let enter_result = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
+    if let Err(e) = enter_result {
+        let _ = disable_raw_mode();
+        eprintln!("Failed to enter alternate screen: {}", e);
+        return Err(e);
+    }
+    
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend).map_err(|e| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        e
+    })?;
+
+    let detected_distro = detect_distro();
+
     let app = App {
         phase: Phase::Overture,
         frame_count: 0,
@@ -83,10 +111,16 @@ fn main() -> Result<(), io::Error> {
         current_action: "Arranging the orchestra...".to_string(),
         logs: vec![
             "Welcome to Maestro Setup v2.5".to_string(),
-            format!("Detected: {} ({})", detected_distro, detected_distro.package_manager_name()),
+            format!(
+                "Detected: {} ({})",
+                detected_distro,
+                detected_distro.package_manager_name()
+            ),
         ],
         receiver: None,
         error: None,
+        password_state: PasswordState::None,
+        password_buffer: String::new(),
         distro: detected_distro,
         install_path: "~/.maestro".to_string(),
         editor: "hx".to_string(),
@@ -110,13 +144,8 @@ fn main() -> Result<(), io::Error> {
 
     let res = run_app(&mut terminal, app);
 
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+    // Cleanup with proper sequencing
+    cleanup_terminal(&mut terminal)?;
 
     if let Err(err) = res {
         println!("{:?}", err)
@@ -125,13 +154,34 @@ fn main() -> Result<(), io::Error> {
     Ok(())
 }
 
+/// Clean up terminal state properly to prevent lag/corruption
+fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), io::Error> {
+    // First, disable mouse capture
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture
+    )?;
+    // Leave alternate screen
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen
+    )?;
+    // Show cursor before disabling raw mode
+    terminal.show_cursor()?;
+    disable_raw_mode()?;
+    std::thread::sleep(Duration::from_millis(50));
+    Ok(())
+}
+
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     let tick_rate = Duration::from_millis(50);
     let mut last_tick = Instant::now();
 
     loop {
+        // Draw UI
         terminal.draw(|f| ui(f, &mut app))?;
 
+        // Check for setup events
         if let Some(ref rx) = app.receiver {
             while let Ok(event) = rx.try_recv() {
                 match event {
@@ -148,14 +198,33 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         app.install_progress = (current as f64 / total as f64) * 100.0;
                     }
                     SetupEvent::Log(msg) => {
-                        app.logs.push(msg);
+                        // Check for password prompt in log
+                        if msg.contains("[sudo]") && msg.contains("password") {
+                            app.password_state = PasswordState::Prompting("sudo".to_string());
+                            app.password_buffer.clear();
+                        } else if msg.contains("[PROMPT]") {
+                            // Custom prompt marker from setup module
+                            app.password_state = PasswordState::Prompting("system".to_string());
+                            app.password_buffer.clear();
+                        } else {
+                            app.logs.push(msg);
+                        }
+                        // Limit log size to prevent memory issues
+                        if app.logs.len() > 100 {
+                            app.logs.remove(0);
+                        }
                     }
                     SetupEvent::Finished => {
                         app.phase = Phase::Ovation;
                         app.install_progress = 100.0;
+                        app.password_state = PasswordState::None;
                     }
                     SetupEvent::Error(msg) => {
-                        app.error = Some(msg);
+                        if msg.contains("password") || msg.contains("authentication") {
+                            app.password_state = PasswordState::Error(msg.clone());
+                        } else {
+                            app.error = Some(msg);
+                        }
                     }
                 }
             }
@@ -163,16 +232,43 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
+            .unwrap_or_else(|| Duration::from_millis(0));
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
+                // Handle password input mode
+                if matches!(app.password_state, PasswordState::Prompting(_)) {
+                    match key.code {
+                        KeyCode::Enter => {
+                            // Submit password
+                            let password = app.password_buffer.clone();
+                            app.logs.push(format!("[PASSWORD] Received {} characters", password.len()));
+                            app.password_state = PasswordState::None;
+                            app.password_buffer.clear();
+                            // Note: In a full implementation, we'd send this to the setup thread
+                        }
+                        KeyCode::Backspace => {
+                            app.password_buffer.pop();
+                        }
+                        KeyCode::Esc => {
+                            app.password_state = PasswordState::None;
+                            app.password_buffer.clear();
+                        }
+                        KeyCode::Char(c) => {
+                            app.password_buffer.push(c);
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                // Normal key handling
                 match key.code {
                     KeyCode::Enter => {
                         if app.phase == Phase::Overture {
                             app.phase = Phase::Tuning;
                         } else if app.phase == Phase::Tuning {
-                            let total_options = 3 + app.tool_selections.len() + 1; // Path, Editor, Star, Tools, Confirm
+                            let total_options = 3 + app.tool_selections.len() + 1;
                             if app.config_selection == total_options - 1 {
                                 let config = Config {
                                     install_path: app.install_path.clone(),
@@ -271,6 +367,20 @@ fn ui(f: &mut Frame, app: &mut App) {
     let bg_style = Style::default().bg(Color::Rgb(10, 10, 18));
     f.render_widget(Block::default().style(bg_style), size);
 
+    // Render password modal if prompting
+    if matches!(app.password_state, PasswordState::Prompting(_)) {
+        render_password_modal(f, app, size);
+        return;
+    }
+
+    // Render password error if any
+    if matches!(app.password_state, PasswordState::Error(_)) {
+        if let PasswordState::Error(ref msg) = app.password_state {
+            render_error_modal(f, msg, size);
+        }
+        return;
+    }
+
     match app.phase {
         Phase::Overture => render_overture(f, app, size),
         Phase::Tuning => render_tuning(f, app, size),
@@ -282,6 +392,42 @@ fn ui(f: &mut Frame, app: &mut App) {
     if let Some(ref err) = app.error {
         render_error_modal(f, err, size);
     }
+}
+
+fn render_password_modal(f: &mut Frame, app: &mut App, area: Rect) {
+    let modal_area = centered_rect(50, 25, area);
+    f.render_widget(Clear, modal_area);
+    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" 🔐 Password Required ")
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
+    
+    let masked_password = "*".repeat(app.password_buffer.len());
+    
+    let text = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Password: ", Style::default().fg(Color::Cyan)),
+            Span::styled(masked_password, Style::default().fg(Color::White)),
+            Span::styled("▌", Style::default().fg(Color::Yellow)), // Cursor
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Press ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled(" to submit, ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::Red)),
+            Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+    
+    let p = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Left);
+    f.render_widget(p, modal_area);
 }
 
 fn render_overture(f: &mut Frame, app: &mut App, area: Rect) {
@@ -409,7 +555,6 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
         ListItem::new(Line::from("  Include Tooling (Space to toggle):")),
     ];
 
-    // Add granular tool selections
     for (idx, (name, selected)) in app.tool_selections.iter().enumerate() {
         let sel_idx = 2 + idx;
         let checkbox = if *selected { " [X] " } else { " [ ] " };
@@ -425,7 +570,6 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
         )])));
     }
 
-    // Star the repo item
     let star_idx = 2 + app.tool_selections.len();
     let star_check = if app.starred { " ⭐ " } else { " ☆ " };
     items.push(ListItem::new(vec![
@@ -442,7 +586,6 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
         )]),
     ]));
 
-    // Confirmation button
     let confirm_idx = 3 + app.tool_selections.len();
     items.push(ListItem::new(vec![
         Line::from(""),
@@ -515,11 +658,12 @@ fn render_performance(f: &mut Frame, app: &mut App, area: Rect) {
         .percent(app.install_progress as u16);
     f.render_widget(gauge, chunks[1]);
 
+    // Show only last 15 logs for better performance
     let logs: Vec<ListItem> = app
         .logs
         .iter()
         .rev()
-        .take(10)
+        .take(15)
         .map(|l| ListItem::new(l.as_str()))
         .collect();
     let log_list = List::new(logs).block(
@@ -557,16 +701,8 @@ fn render_crescendo(f: &mut Frame, app: &mut App, area: Rect) {
 
     let visual = Paragraph::new(format!(
         "{}{}{}{}{}{}{}{}{}{}",
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str
+        pulse_str, pulse_str, pulse_str, pulse_str, pulse_str,
+        pulse_str, pulse_str, pulse_str, pulse_str, pulse_str
     ))
     .alignment(Alignment::Center)
     .style(Style::default().fg(Color::Rgb(200, 100, 255)));

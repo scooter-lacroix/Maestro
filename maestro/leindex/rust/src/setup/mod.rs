@@ -663,32 +663,105 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
         match step.action {
             StepAction::Shell(command) => {
-                // For long-running commands (like cargo build), use streaming output
-                // For quick commands, use the standard approach
+                // ALL commands: capture output to prevent UI corruption
+                // Never use Stdio::inherit() - it corrupts the TUI
+                let needs_sudo = command.contains("sudo");
                 let is_long_running = command.contains("cargo build")
                     || command.contains("npm install")
                     || command.contains("npm run build")
-                    || command.contains("make")
-                    || command.contains("apt-get");
+                    || command.contains("make");
 
-                if is_long_running {
-                    // Stream output in real-time for better user feedback
-                    match Command::new("bash")
+                // For sudo commands, we need to handle them specially
+                if needs_sudo {
+                    // Run with captured output - sudo will use the terminal's cached credentials
+                    let output = Command::new("bash")
                         .arg("-c")
                         .arg(&command)
-                        .stdout(std::process::Stdio::inherit())
-                        .stderr(std::process::Stdio::inherit())
-                        .status()
-                    {
-                        Ok(status) => {
-                            if status.success() {
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .stdin(std::process::Stdio::null()) // Don't wait for stdin
+                        .output();
+
+                    match output {
+                        Ok(out) => {
+                            // Send stdout to TUI logs
+                            if !out.stdout.is_empty() {
+                                let s = String::from_utf8_lossy(&out.stdout);
+                                for line in s.lines().take(5) {
+                                    let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
+                                }
+                            }
+                            // Send stderr to TUI logs (but filter password prompts)
+                            if !out.stderr.is_empty() {
+                                let s = String::from_utf8_lossy(&out.stderr);
+                                for line in s.lines() {
+                                    // Don't send password prompts to logs - they'll be handled separately
+                                    if !line.contains("[sudo]") || !line.contains("password") {
+                                        let _ = tx.send(SetupEvent::Log(format!("  [ERR] {}", line)));
+                                    }
+                                }
+                            }
+
+                            if out.status.success() {
+                                let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
+                                let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                            } else {
+                                // Check if it's a password error
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                if stderr.contains("Sorry") || stderr.contains("incorrect") {
+                                    let _ = tx.send(SetupEvent::Error(
+                                        "Password authentication failed. Please run 'sudo -v' in a terminal first to cache your password.".to_string()
+                                    ));
+                                } else {
+                                    let _ = tx.send(SetupEvent::Error(format!(
+                                        "Step '{}' failed with exit code: {}",
+                                        step.name, out.status
+                                    )));
+                                }
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(SetupEvent::Error(format!(
+                                "Failed to execute step '{}': {}",
+                                step.name, e
+                            )));
+                            return;
+                        }
+                    }
+                } else if is_long_running {
+                    // Long-running non-sudo commands: capture output but stream to logs
+                    let output = Command::new("bash")
+                        .arg("-c")
+                        .arg(&command)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output();
+
+                    match output {
+                        Ok(out) => {
+                            // Send output to TUI logs
+                            if !out.stdout.is_empty() {
+                                let s = String::from_utf8_lossy(&out.stdout);
+                                for line in s.lines().take(10) {
+                                    let _ = tx.send(SetupEvent::Log(format!("  {}", line)));
+                                }
+                            }
+                            if !out.stderr.is_empty() {
+                                let s = String::from_utf8_lossy(&out.stderr);
+                                for line in s.lines().take(10) {
+                                    let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", line)));
+                                }
+                            }
+
+                            if out.status.success() {
                                 let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
                                 let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
                             } else {
                                 let _ = tx.send(SetupEvent::Error(format!(
                                     "Step '{}' failed with exit code: {:?}",
                                     step.name,
-                                    status.code()
+                                    out.status.code()
                                 )));
                                 return;
                             }
@@ -702,7 +775,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         }
                     }
                 } else {
-                    // Quick commands: capture output to prevent UI corruption
+                    // Quick commands: capture output
                     let output = Command::new("bash")
                         .arg("-c")
                         .arg(&command)
@@ -712,11 +785,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                     match output {
                         Ok(out) => {
-                            // Send logs from stdout/stderr to the TUI instead of terminal
                             if !out.stdout.is_empty() {
                                 let s = String::from_utf8_lossy(&out.stdout);
                                 for line in s.lines().take(5) {
-                                    // Only take a few lines to avoid flooding
                                     let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
                                 }
                             }
