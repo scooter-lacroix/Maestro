@@ -15,7 +15,7 @@ Goal: Implement an evented async core loop, approval/auth state machine, and Tan
 - [x] Task: Implement Session/Thread State Machine in `crates/core/src/engine/state.rs` and `crates/core/src/engine/session.rs`. (a21638f)
   - Include explicit states for Processing, AwaitingApproval, AwaitingAuth, Completed, Failed.
   - Add request-id validation semantics for approval submissions (IronClaw parity).
-- [ ] Task: Implement Async Agent Loop + Intent Routing in `crates/core/src/engine/loop.rs` and `crates/core/src/engine/router.rs`.
+- [x] Task: Implement Async Agent Loop + Intent Routing in `crates/core/src/engine/loop.rs` and `crates/core/src/engine/router.rs`. (f1934d3)
   - Build bounded tool-iteration loop with native-tool and text-fallback handling (ZeroClaw parity).
   - Emit deterministic terminal outcomes (Response / NeedApproval / Error).
 - [ ] Task: Implement Tool-Call Parsing + Robust Fallbacks in `crates/core/src/engine/tool_parse.rs`.
