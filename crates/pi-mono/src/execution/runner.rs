@@ -1200,6 +1200,9 @@ exit 1
             provider: Some("anthropic".to_string()),
             model: Some("claude-3".to_string()),
             max_retries: 5,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         };
 
         assert_eq!(config.pi_path, PathBuf::from("/custom/path/pi"));
@@ -1225,6 +1228,9 @@ exit 1
             provider: Some("test-provider".to_string()),
             model: Some("test-model".to_string()),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         };
 
         let runner = SubagentRunner::with_config(config.clone());
@@ -1499,6 +1505,9 @@ exit 1
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 3,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             timeout: Duration::from_secs(1),
             ..Default::default()
         };
@@ -1538,6 +1547,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_millis(100), // Very short timeout
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -1562,6 +1574,9 @@ exit 1
             provider: Some("test".to_string()),
             model: Some("model".to_string()),
             max_retries: 2,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         };
 
         let cloned = config.clone();
@@ -1626,6 +1641,9 @@ exit 1
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2238,6 +2256,9 @@ exit 1
             pi_path: mock_pi.path().clone(),
             timeout: Duration::from_secs(5),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         });
 
@@ -2257,6 +2278,9 @@ exit 1
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2547,6 +2571,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_millis(100), // Very short timeout
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2596,6 +2623,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_secs(20), // Long timeout
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2661,6 +2691,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_secs(20),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 

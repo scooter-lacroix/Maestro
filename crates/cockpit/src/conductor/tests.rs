@@ -1,11 +1,14 @@
 #[cfg(test)]
 mod tests {
     use super::super::model::SelectableItem;
-    use super::super::model::SelectableItem;
     use super::super::pane::ConductorPane;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    // Mutex to serialize tests that modify the HOME environment variable
+    static HOME_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_master_track_detection() {
@@ -63,6 +66,9 @@ mod tests {
 
     #[test]
     fn test_external_session_discovery() {
+        // Lock mutex to serialize tests that modify HOME
+        let _lock = HOME_MUTEX.lock().unwrap();
+
         let temp_home = TempDir::new().unwrap();
         let orchestrate_dir = temp_home.path().join(".maestro").join("orchestrate");
         fs::create_dir_all(&orchestrate_dir).unwrap();
@@ -71,7 +77,8 @@ mod tests {
         fs::create_dir_all(&session_dir).unwrap();
         fs::write(session_dir.join("session.json"), r#"{"session_id":"test","track_id":"ext-track","status":"running","mode":"building","agent_config":{"tool":"claude","dangerous_mode":false,"sandbox":false},"current_iteration":1,"current_task_id":null,"started_at":"","updated_at":""}"#).unwrap();
 
-        // Mock HOME
+        // Save original HOME and restore after test
+        let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", temp_home.path());
 
         let mut pane = ConductorPane::new(PathBuf::from("/non-existent"));
@@ -84,6 +91,13 @@ mod tests {
             } => id == "ext-track" && *is_external,
             _ => false,
         });
+
+        // Restore original HOME
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
 
         assert!(ext_track.is_some(), "External session should be discovered");
     }
@@ -101,6 +115,7 @@ mod tests {
             status: IterationStatus::Running,
             output: "some output".to_string(),
             error: None,
+            duration_ms: 0,
         };
 
         // Initial catch-up (suppress_output = true)
@@ -139,25 +154,32 @@ mod tests {
         let items = pane.get_selectable_items();
         pane.selected_index = items.len() - 1;
         let cmd = pane.get_start_command(None, false, false);
+        let cmd_str = cmd.map(|c| c.to_string()).unwrap_or_default();
         assert!(
-            cmd.contains("maestro orchestrate start test-track"),
-            "Command should contain start and track ID"
+            cmd_str.contains("orchestrate start test-track"),
+            "Command should contain 'orchestrate start' and track ID, got: {cmd_str}"
         );
         assert!(
-            cmd.contains("--mode building"),
-            "Default mode should be building"
+            cmd_str.contains("--mode building"),
+            "Default mode should be building, got: {cmd_str}"
         );
     }
 
     #[test]
     fn test_graceful_empty_state() {
+        // Lock mutex to serialize tests that modify HOME
+        let _lock = HOME_MUTEX.lock().unwrap();
+
         let temp = TempDir::new().unwrap();
         let mut pane = ConductorPane::new(temp.path().to_path_buf());
+
+        // Save original HOME and restore after test
+        let original_home = std::env::var("HOME").ok();
 
         // Mock HOME to empty dir
         let empty_home = temp.path().join("empty_home");
         fs::create_dir_all(&empty_home).unwrap();
-        std::env::set_var("HOME", empty_home);
+        std::env::set_var("HOME", &empty_home);
 
         pane.load_tracks().unwrap();
         assert!(pane.tracks.is_empty(), "Tracks should be empty");
@@ -167,10 +189,19 @@ mod tests {
 
         let track_idx = pane.get_selected_track_index();
         assert!(track_idx.is_none(), "Selected track index should be None");
+
+        // Restore original HOME
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
     }
     #[test]
     fn test_dependencies_section_in_details_panel() {
-        use leindex_core::orchestrate::model::{Task, Track, TrackStatus, TaskDependency, TaskDependencyType};
+        use leindex_core::orchestrate::model::{
+            Task, TaskDependency, TaskDependencyType, Track, TrackStatus,
+        };
 
         let mut pane = ConductorPane::new(PathBuf::from("/non-existent"));
         pane.tracks.push(Track {
@@ -181,27 +212,25 @@ mod tests {
             metadata: None,
             plan: Some(leindex_core::orchestrate::model::TrackPlan {
                 track_id: "test-track".to_string(),
-                tasks: vec![
-                    Task {
-                        id: "task-dep".to_string(),
-                        title: "Task with Dependencies".to_string(),
-                        status: TrackStatus::Pending,
-                        dependencies: vec![
-                            TaskDependency {
-                                task_id: "task-1".to_string(),
-                                dependency_type: TaskDependencyType::Hard,
-                            },
-                            TaskDependency {
-                                task_id: "task-2".to_string(),
-                                dependency_type: TaskDependencyType::Soft,
-                            },
-                        ],
-                        description: "This task depends on others".to_string(),
-                        subtasks: vec![],
-                        notes: None,
-                        line_number: 1,
-                    }
-                ],
+                tasks: vec![Task {
+                    id: "task-dep".to_string(),
+                    title: "Task with Dependencies".to_string(),
+                    status: TrackStatus::Pending,
+                    dependencies: vec![
+                        TaskDependency {
+                            task_id: "task-1".to_string(),
+                            dependency_type: TaskDependencyType::Hard,
+                        },
+                        TaskDependency {
+                            task_id: "task-2".to_string(),
+                            dependency_type: TaskDependencyType::Soft,
+                        },
+                    ],
+                    description: "This task depends on others".to_string(),
+                    subtasks: vec![],
+                    notes: None,
+                    line_number: 1,
+                }],
                 phases: vec![],
             }),
         });
@@ -210,22 +239,29 @@ mod tests {
         pane.expanded_tasks.insert("test-track".to_string());
 
         let items = pane.get_selectable_items();
-        
+
         let task_item = items.iter().find(|i| match i {
             SelectableItem::Task { id, .. } => id == "task-dep",
             _ => false,
         });
 
         assert!(task_item.is_some(), "Task with dependencies should exist");
-        if let SelectableItem::Task { dependencies, dependency_statuses, .. } = task_item.unwrap() {
+        if let SelectableItem::Task {
+            dependencies,
+            dependency_statuses,
+            ..
+        } = task_item.unwrap()
+        {
             assert_eq!(dependencies.len(), 2, "Should have two dependencies");
-            assert!(!dependency_statuses.is_empty(), "Dependency statuses should be populated");
-            
+            assert!(
+                !dependency_statuses.is_empty(),
+                "Dependency statuses should be populated"
+            );
+
             // The details panel should include dependencies section
             // This test verifies that data is available for display
             assert_eq!(dependencies[0].task_id, "task-1");
             assert_eq!(dependencies[1].task_id, "task-2");
         }
     }
-
 }

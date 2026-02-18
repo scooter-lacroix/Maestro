@@ -50,6 +50,37 @@ use crate::tabs::{
 pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
+/// Tab identifiers with explicit indices for maintainability
+/// Order: Dashboard(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9)
+pub mod tabs {
+    pub const DASHBOARD: usize = 0;
+    pub const MAESTERCLAW: usize = 1;
+    pub const SESSIONS: usize = 2;
+    pub const PROJECTS: usize = 3;
+    pub const CONDUCTOR: usize = 4;
+    pub const MEMORY: usize = 5;
+    pub const ANALYSIS: usize = 6;
+    pub const KRUSTOP: usize = 7;
+    pub const LSPS: usize = 8;
+    pub const SETTINGS: usize = 9;
+
+    /// Get all tab titles in order
+    pub fn all_titles() -> Vec<&'static str> {
+        vec![
+            "Dashboard",
+            "MaesterClaw",
+            "Sessions",
+            "Projects",
+            "Conductor",
+            "Memory",
+            "Analysis",
+            "Krustop",
+            "LSPs",
+            "Settings",
+        ]
+    }
+}
+
 pub async fn run() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -80,6 +111,7 @@ pub async fn run() -> Result<()> {
     let service = MemoryService::new(None).ok();
     let mcp_pool: Option<Arc<McpPool>> = if let Some(ref s) = service {
         let _ = s.initialize();
+        let _ = s.sync_projects_from_system(); // Auto-discover and register Maestro projects
         let _ = s.sync_mcp_servers_from_system();
         let _ = s.sync_memories_from_system();
 
@@ -623,9 +655,23 @@ impl App {
                 self.memories = memories
                     .iter()
                     .map(|m| MemoryInfo {
-                        _id: m.id,
+                        id: m.id,
                         content: m.content.clone(),
                         category: m.category.to_string(),
+                        summary: None,
+                        importance: "normal".to_string(),
+                        source: None,
+                        session_id: None,
+                        project_id: None,
+                        track_id: None,
+                        created_at: m.created_at.to_rfc3339(),
+                        expires_at: None,
+                        last_accessed: None,
+                        access_count: 0,
+                        accessed_by: Vec::new(),
+                        tags: Vec::new(),
+                        is_expanded: false,
+                        similarity_score: None,
                     })
                     .collect();
                 if self.memories.is_empty() {
@@ -1380,7 +1426,7 @@ async fn run_app<B: Backend>(
         }
 
         // Fetch preview for selected session
-        if app.tab_index == 1
+        if app.tab_index == tabs::SESSIONS
             && app.last_preview_refresh.elapsed() >= std::time::Duration::from_millis(200)
         {
             app.last_preview_refresh = Instant::now();
@@ -1463,7 +1509,7 @@ async fn run_app<B: Backend>(
                                                     app.refresh_session_entries();
                                                     app.refresh_dash_session_entries();
                                                     app.status_message = format!("Session '{}' created. Press Enter on Sessions tab to attach.", session.title);
-                                                    app.tab_index = 1;
+                                                    app.tab_index = tabs::SESSIONS;
                                                     let new_idx = app
                                                         .session_entries
                                                         .iter()
@@ -1957,6 +2003,10 @@ async fn run_app<B: Backend>(
                                     InputMode::MemorySearch => {
                                         app.input_mode = InputMode::Normal;
                                         app.refresh_from_service(&service);
+                                    }
+                                    InputMode::MemoryDetail | InputMode::MemoryDetailFocus => {
+                                        // Exit memory detail view on Enter
+                                        app.input_mode = InputMode::Normal;
                                     }
 
                                     InputMode::NewMemoryContent => {
@@ -2468,6 +2518,9 @@ async fn run_app<B: Backend>(
                                     InputMode::DiagnosticView => {
                                         app.diagnostic_view.is_open = false;
                                     }
+                                    InputMode::MemoryDetail | InputMode::MemoryDetailFocus => {
+                                        // Exit memory detail view - handled above
+                                    }
                                     InputMode::NewMemoryContent | InputMode::NewMemoryCategory => {
                                         app.new_memory_content.clear();
                                         app.new_memory_category.clear();
@@ -2775,7 +2828,7 @@ async fn run_app<B: Backend>(
                                     }
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
-                                } else if app.tab_index == 0 {
+                                } else if app.tab_index == tabs::DASHBOARD {
                                     // Dashboard
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
@@ -2797,7 +2850,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 2 {
+                                } else if app.tab_index == tabs::PROJECTS {
                                     // Projects
                                     if app.preview_focused {
                                         app.project_explorer_selected =
@@ -2818,7 +2871,7 @@ async fn run_app<B: Backend>(
                                         app.project_explorer_path = None;
                                         app.project_explorer_selected = 0;
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     // Sessions Tab
                                     let i = match app.session_state.selected() {
                                         Some(i) => {
@@ -2831,7 +2884,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == tabs::MEMORY {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -2844,15 +2897,15 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 8 {
-                                    // Capabilities - cycle through sections
+                                } else if app.tab_index == tabs::LSPS {
+                                    // LSPs - cycle through sections (formerly Capabilities)
                                     app.capabilities_section = match app.capabilities_section {
                                         Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::McpServers),
                                         Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                         Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::CronJobs),
                                         None => Some(crate::tabs::CapabilitiesSection::CronJobs),
                                     };
-                                } else if app.tab_index == 9 {
+                                } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -2911,7 +2964,7 @@ async fn run_app<B: Backend>(
                                     }
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
-                                } else if app.tab_index == 0 {
+                                } else if app.tab_index == tabs::DASHBOARD {
                                     // Dashboard
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
@@ -2932,7 +2985,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 2 {
+                                } else if app.tab_index == tabs::PROJECTS {
                                     // Projects Tab
                                     if app.preview_focused {
                                         app.project_explorer_selected =
@@ -2956,7 +3009,7 @@ async fn run_app<B: Backend>(
                                         app.project_explorer_path = None;
                                         app.project_explorer_selected = 0;
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     // Sessions Tab
                                     let i = match app.session_state.selected() {
                                         Some(i) => {
@@ -2969,7 +3022,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == tabs::MEMORY {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -2982,15 +3035,15 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 8 {
-                                    // Capabilities - cycle through sections (reverse)
+                                } else if app.tab_index == tabs::LSPS {
+                                    // LSPs - cycle through sections (reverse)
                                     app.capabilities_section = match app.capabilities_section {
                                         Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                         Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
                                         Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::McpServers),
                                         None => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                     };
-                                } else if app.tab_index == 9 {
+                                } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -3028,35 +3081,35 @@ async fn run_app<B: Backend>(
                             // 1. Global Navigation (Highest Priority)
                             // Tab / BackTab
                             (KeyModifiers::NONE, KeyCode::Tab) => {
-                                if app.tab_index == 0 {
+                                if app.tab_index == tabs::DASHBOARD {
                                     match app.dash_focus {
                                         DashFocus::Sessions => app.dash_focus = DashFocus::Mcp,
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Tabs,
                                         DashFocus::Tabs => {
-                                            app.tab_index = 1;
+                                            app.tab_index = tabs::MAESTERCLAW;
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                     };
                                 } else {
-                                    app.tab_index = (app.tab_index + 1) % 10; // 10 tabs now (including Capabilities)
+                                    app.tab_index = (app.tab_index + 1) % 10; // 10 tabs
                                     app.preview_focused = false;
                                 }
                             }
                             (KeyModifiers::SHIFT, KeyCode::BackTab) | (_, KeyCode::BackTab)
-                                if app.tab_index != 6 =>
+                                if app.tab_index != tabs::ANALYSIS =>
                             {
-                                if app.tab_index == 0 {
+                                if app.tab_index == tabs::DASHBOARD {
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
-                                            app.tab_index = 7; // Now Settings (was 6)
+                                            app.tab_index = tabs::SETTINGS;
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
                                         DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
                                     };
                                 } else {
-                                    app.tab_index = if app.tab_index == 0 {
-                                        8 // Wrap to last tab (Settings)
+                                    app.tab_index = if app.tab_index == tabs::DASHBOARD {
+                                        tabs::SETTINGS
                                     } else {
                                         app.tab_index - 1
                                     };
@@ -3064,31 +3117,20 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            // 2. Direct Numbers (Global)
-                            (KeyModifiers::NONE, KeyCode::Char('1')) => app.tab_index = 0,
-                            (KeyModifiers::NONE, KeyCode::Char('2')) => app.tab_index = 1,
-                            (KeyModifiers::NONE, KeyCode::Char('3')) => app.tab_index = 2,
-                            (KeyModifiers::NONE, KeyCode::Char('4')) => app.tab_index = 3,
-                            (KeyModifiers::NONE, KeyCode::Char('5')) => app.tab_index = 4,
-                            (KeyModifiers::NONE, KeyCode::Char('6')) => app.tab_index = 5,
-                            (KeyModifiers::NONE, KeyCode::Char('7')) => app.tab_index = 6,
-                            (KeyModifiers::NONE, KeyCode::Char('8')) => app.tab_index = 7,
-                            (KeyModifiers::NONE, KeyCode::Char('9')) => app.tab_index = 8,
-
-                            // 3. Conductor Specific Alt Keys
-                            (KeyModifiers::ALT, KeyCode::Char('1')) if app.tab_index == 4 => {
+                            // 2. Conductor Specific Alt Keys (must be before global tab switching)
+                            (KeyModifiers::ALT, KeyCode::Char('1')) if app.tab_index == tabs::CONDUCTOR => {
                                 app.conductor.details_mode =
                                     crate::conductor::model::DetailsViewMode::Details;
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('2')) if app.tab_index == 4 => {
+                            (KeyModifiers::ALT, KeyCode::Char('2')) if app.tab_index == tabs::CONDUCTOR => {
                                 app.conductor.details_mode =
                                     crate::conductor::model::DetailsViewMode::Output;
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('3')) if app.tab_index == 4 => {
+                            (KeyModifiers::ALT, KeyCode::Char('3')) if app.tab_index == tabs::CONDUCTOR => {
                                 app.conductor.details_mode =
                                     crate::conductor::model::DetailsViewMode::Prompt;
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 4 => {
+                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == tabs::CONDUCTOR => {
                                 app.conductor.output_focused = !app.conductor.output_focused;
                                 app.status_message = if app.conductor.output_focused {
                                     "Output focused. Scroll with Arrows/PgUp/PgDn."
@@ -3098,19 +3140,20 @@ async fn run_app<B: Backend>(
                                 .to_string();
                             }
 
-                            // 4. Global Alt Keys (Tab Switching)
-                            (KeyModifiers::ALT, KeyCode::Char('1')) => app.tab_index = 0,
-                            (KeyModifiers::ALT, KeyCode::Char('2')) => app.tab_index = 1,
-                            (KeyModifiers::ALT, KeyCode::Char('3')) => app.tab_index = 2,
-                            (KeyModifiers::ALT, KeyCode::Char('4')) => app.tab_index = 3,
-                            (KeyModifiers::ALT, KeyCode::Char('5')) => app.tab_index = 4,
-                            (KeyModifiers::ALT, KeyCode::Char('6')) => app.tab_index = 5,
-                            (KeyModifiers::ALT, KeyCode::Char('7')) => app.tab_index = 6,
-                            (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = 7,
-                            (KeyModifiers::ALT, KeyCode::Char('9')) => app.tab_index = 8,
+                            // 3. Global Tab Switching - Alt+N
+                            (KeyModifiers::ALT, KeyCode::Char('1')) => app.tab_index = tabs::DASHBOARD,
+                            (KeyModifiers::ALT, KeyCode::Char('2')) => app.tab_index = tabs::MAESTERCLAW,
+                            (KeyModifiers::ALT, KeyCode::Char('3')) => app.tab_index = tabs::SESSIONS,
+                            (KeyModifiers::ALT, KeyCode::Char('4')) => app.tab_index = tabs::PROJECTS,
+                            (KeyModifiers::ALT, KeyCode::Char('5')) => app.tab_index = tabs::CONDUCTOR,
+                            (KeyModifiers::ALT, KeyCode::Char('6')) => app.tab_index = tabs::MEMORY,
+                            (KeyModifiers::ALT, KeyCode::Char('7')) => app.tab_index = tabs::ANALYSIS,
+                            (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = tabs::KRUSTOP,
+                            (KeyModifiers::ALT, KeyCode::Char('9')) => app.tab_index = tabs::LSPS,
+                            (KeyModifiers::ALT, KeyCode::Char('0')) => app.tab_index = tabs::SETTINGS,
 
-                            // 5. Conductor Catch-All
-                            _ if app.tab_index == 4 => {
+                            // 4. Conductor Catch-All
+                            _ if app.tab_index == tabs::CONDUCTOR => {
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
                                 };
@@ -3535,7 +3578,7 @@ async fn run_app<B: Backend>(
                                     // New session wizard for other tabs
                                     app.input_mode = InputMode::NewSessionTitle;
                                     // Auto-fill path if a project is selected
-                                    if app.tab_index == 2 {
+                                    if app.tab_index == tabs::PROJECTS {
                                         // Projects Tab
                                         if let Some(i) = app.project_state.selected() {
                                             app.new_session_path = app.projects[i].path.clone();
@@ -3545,7 +3588,7 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 1 => {
+                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == tabs::PROJECTS => {
                                 app.preview_focused = !app.preview_focused;
                                 app.status_message = if app.preview_focused {
                                     "Preview focused. Scroll with Arrows/PgUp/PgDn."
@@ -3556,9 +3599,9 @@ async fn run_app<B: Backend>(
                             }
                             (KeyModifiers::ALT, KeyCode::Up)
                             | (KeyModifiers::ALT, KeyCode::Down)
-                                if app.tab_index != 4 =>
+                                if app.tab_index != tabs::CONDUCTOR =>
                             {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     let Some(svc) = service.as_ref() else {
                                         app.status_message =
                                             "Error: Memory service not available".to_string();
@@ -3662,8 +3705,8 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('p')) if app.tab_index != 4 => {
-                                if app.tab_index == 2 {
+                            (_, KeyCode::Char('p')) if app.tab_index != tabs::CONDUCTOR => {
+                                if app.tab_index == tabs::PROJECTS {
                                     // Projects
                                     app.input_mode = InputMode::NewProjectName;
                                     app.new_project_name.clear();
@@ -3675,7 +3718,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('t')) => {
-                                if app.tab_index == 2 {
+                                if app.tab_index == tabs::PROJECTS {
                                     // Projects
                                     app.input_mode = InputMode::NewTrackTitle;
                                     app.new_track_title.clear();
@@ -3695,13 +3738,13 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.should_quit = true,
-                            (_, KeyCode::Esc) if app.tab_index != 4 => {
+                            (_, KeyCode::Esc) if app.tab_index != tabs::CONDUCTOR => {
                                 if app.project_view_open {
                                     app.project_view_open = false;
                                 }
                             }
-                            (_, KeyCode::Char('r')) if app.tab_index != 4 => {
-                                if app.tab_index == 1 {
+                            (_, KeyCode::Char('r')) if app.tab_index != tabs::CONDUCTOR => {
+                                if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         match app.session_entries.get(i) {
                                             Some(SessionEntry::Session(s)) => {

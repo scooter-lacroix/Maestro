@@ -22,8 +22,15 @@ toml = "0.8"
 chacha20poly1305 = { version = "0.10", features = ["std"] }
 rand = "0.8"
 dirs = "5"
+which = "6"
+libc = "0.2"
 cron = "0.13"
 humantime-serde = "1.1"
 
 [dev-dependencies]
 tempfile = "3.10"
+
+[features]
+default = []
+# Enable hot cache for real-time memory suggestions during agent execution
+hot-cache = []
