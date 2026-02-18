@@ -56,12 +56,42 @@ pub struct ApiStatus {
     pub methods: Vec<String>,
 }
 
+/// Dashboard overview response
+#[derive(Debug, Serialize)]
+pub struct DashboardOverview {
+    pub uptime_secs: u64,
+    pub connections: usize,
+    pub cron_jobs: usize,
+    pub mcp_servers: McpServersStatus,
+    pub sandbox: SandboxStatus,
+}
+
+/// MCP servers status
+#[derive(Debug, Serialize)]
+pub struct McpServersStatus {
+    pub registered: usize,
+    pub connected: usize,
+}
+
+/// Sandbox status
+#[derive(Debug, Serialize)]
+pub struct SandboxStatus {
+    pub autonomy_level: String,
+    pub network_enabled: bool,
+    pub runtimes: Vec<String>,
+}
+
 /// Create the HTTP routes router (stateless, caller must apply state)
 pub fn create_routes() -> Router<Arc<GatewayState>> {
     Router::new()
         // Health and status
         .route("/health", get(handle_health))
         .route("/api/status", get(handle_api_status))
+
+        // Dashboard
+        .route("/api/dashboard", get(handle_dashboard))
+        .route("/api/dashboard/jobs", get(handle_dashboard_jobs))
+        .route("/api/dashboard/approvals", get(handle_dashboard_approvals))
 
         // Pairing
         .route("/pair", post(handle_pair))
@@ -241,4 +271,75 @@ pub async fn handle_cron_create(
         StatusCode::NOT_IMPLEMENTED,
         Json(serde_json::json!({"error": "Not yet implemented"})),
     )
+}
+
+/// Dashboard overview
+pub async fn handle_dashboard(
+    State(state): State<Arc<GatewayState>>,
+) -> impl IntoResponse {
+    let (registered, connected) = state.mcp_manager.try_get_status();
+    let policy = state.sandbox_manager.default_policy();
+
+    let autonomy_str = match policy.autonomy_level {
+        maestro_core::AutonomyLevel::HumanApproval => "Human Approval",
+        maestro_core::AutonomyLevel::Supervised => "Supervised",
+        maestro_core::AutonomyLevel::Autonomous => "Autonomous",
+    };
+
+    Json(DashboardOverview {
+        uptime_secs: state.start_time.elapsed().as_secs(),
+        connections: state.connection_count.load(std::sync::atomic::Ordering::Relaxed),
+        cron_jobs: state.cron_jobs.len(),
+        mcp_servers: McpServersStatus {
+            registered: registered.len(),
+            connected: connected.len(),
+        },
+        sandbox: SandboxStatus {
+            autonomy_level: autonomy_str.to_string(),
+            network_enabled: policy.allow_network,
+            runtimes: state.sandbox_manager.available_runtimes().iter().map(|s| s.to_string()).collect(),
+        },
+    })
+}
+
+/// Dashboard job monitoring
+pub async fn handle_dashboard_jobs(
+    State(state): State<Arc<GatewayState>>,
+) -> impl IntoResponse {
+    // Return cron jobs with additional monitoring info
+    let jobs: Vec<serde_json::Value> = state.cron_jobs.iter().map(|job| {
+        let schedule_str = match &job.schedule {
+            maestro_core::Schedule::Cron { expr, .. } => expr.clone(),
+            maestro_core::Schedule::At { at } => at.format("%Y-%m-%d %H:%M").to_string(),
+            maestro_core::Schedule::Every { every_ms, .. } => format!("every {}ms", every_ms),
+        };
+
+        serde_json::json!({
+            "id": job.id,
+            "name": job.name,
+            "schedule": schedule_str,
+            "enabled": job.enabled,
+            "job_type": match job.job_type {
+                maestro_core::JobType::Shell => "shell",
+                maestro_core::JobType::Agent => "agent",
+            },
+            "last_run": null,  // TODO: Track actual runs
+            "next_run": null,  // TODO: Calculate next run
+            "status": if job.enabled { "scheduled" } else { "paused" },
+        })
+    }).collect();
+
+    Json(jobs)
+}
+
+/// Dashboard approval queue
+pub async fn handle_dashboard_approvals(
+    State(_state): State<Arc<GatewayState>>,
+) -> impl IntoResponse {
+    // TODO: Wire up to approval manager
+    // For now, return empty queue
+    Json(serde_json::json!({
+        "pending": [],
+        "count": 0,
+    }))
 }
