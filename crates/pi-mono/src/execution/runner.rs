@@ -1604,7 +1604,8 @@ exit 1
             .unwrap();
 
         assert!(result.is_success());
-        assert!(result.duration.as_millis() > 0);
+        // Duration should be valid - use microseconds for sub-millisecond precision
+        assert!(result.duration.as_micros() > 0, "Duration should be greater than 0 microseconds");
     }
 
     #[tokio::test]
@@ -2242,13 +2243,6 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_stops_on_first_failure() {
-        let _mock_pi_success = MockPi::new(true);
-        let _mock_pi_failure = MockPi::new(false);
-
-        // For this test, we'll verify the logic by checking single step success
-        // The failure handling is tested in test_execute_chain_tracks_failed_at_step
-        let steps = vec![ChainStep::new(PiAgentType::Scout, "First task".to_string())];
-
         // Note: This test uses a mock executable that is kept alive for the duration
         // of the test and automatically cleaned up when dropped
         let mock_pi = MockPi::new(true);
@@ -2262,11 +2256,15 @@ exit 1
             ..Default::default()
         });
 
+        // For this test, we'll verify the logic by checking single step success
+        // The failure handling is tested in test_execute_chain_tracks_failed_at_step
+        let steps = vec![ChainStep::new(PiAgentType::Scout, "First task".to_string())];
+
         let result = runner.execute_chain(steps).await.unwrap();
 
         // Single step should succeed
+        assert!(result.steps[0].is_success(), "First step should succeed but got: {:?}", result.steps[0].output);
         assert_eq!(result.steps.len(), 1);
-        assert!(result.steps[0].is_success());
         assert!(result.failed_at_step.is_none());
     }
 
