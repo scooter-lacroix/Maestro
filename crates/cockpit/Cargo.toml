@@ -17,6 +17,9 @@ path = "src/main.rs"
 # Core library (shared data layer)
 leindex-core = { path = "../../maestro/leindex/rust" }
 
+# Maestro core capabilities (Phase 3)
+maestro-core = { path = "../core" }
+
 # Ktop collectors for system metrics
 ktop_collectors = { path = "../ktop_collectors" }
 
