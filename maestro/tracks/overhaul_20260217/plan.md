@@ -106,9 +106,17 @@ Goal: Build the Enhanced TUI, Web Dashboard, and Multi-Channel support.
 
 **Implementation Guidance:** See `phase3-5_guidance.md` for detailed patterns from IronClaw, ZeroClaw, and Moltis.
 
-- [ ] Task: Implement High-Performance TUI (Ratatui/Crossterm).
+- [~] Task: Implement High-Performance TUI (Ratatui/Crossterm). (IN PROGRESS)
   - Note: Cockpit TUI already implemented in `crates/cockpit/src/app.rs`
   - Enhancement: Add Observer pattern from `zeroclaw/src/observability/traits.rs`
+  - Added: Capabilities tab in `crates/cockpit/src/tabs/capabilities.rs`
+  - Features: Cron Jobs, MCP Servers, Sandbox sections with navigation
+  - Tab navigation updated (10 tabs now including Capabilities)
+  - **Integration Complete**: Wired Phase 3 services to TUI (commit 8ebb46d)
+    - CronService: `app.cron_jobs` displays in table with schedule/type/enabled
+    - McpManager: `try_get_status()` provides non-blocking sync access for server list
+    - SandboxManager: `default_policy()` and `available_runtimes()` show real data
+  - Remaining: Observer pattern integration for event streaming
 - [ ] Task: Build Axum-based Web Gateway with SSE/WebSocket Streaming.
   - Source: `zeroclaw/src/gateway/mod.rs` - Router with rate limiting
   - Source: `moltis/crates/gateway/src/ws.rs` - WebSocket lifecycle
