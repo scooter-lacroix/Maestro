@@ -294,3 +294,75 @@ This file tracks all major tracks for the project. Each track has its own detail
 **Total Tasks**: 37
 
 **Execution**: `/maestro:implement krustop-integration_20260210`
+
+---
+
+## [x] Track: Arch Linux and Fedora Compatibility
+*Link: [./maestro/tracks/linux-compat_20260216/](./maestro/tracks/linux-compat_20260216/)*
+
+**Description**: Add Arch Linux and Fedora compatibility to Maestro installer with distribution detection, package manager abstraction, password caching, and TUI improvements. The installer must maintain full backward compatibility with existing Debian/Ubuntu support.
+
+**Type**: Feature Enhancement
+
+**Status**: ✅ COMPLETE
+
+**Phases**:
+- Phase 1: Foundation - Distribution Detection Module (2 tasks)
+- Phase 2: Package Manager Abstraction (4 tasks)
+- Phase 3: Password Management System (4 tasks)
+- Phase 4: Shell Compatibility (2 tasks)
+- Phase 5: TUI Enhancements (3 tasks)
+- Phase 6: Integration and Testing (4 tasks)
+- Phase 7: Documentation (2 tasks)
+- Phase 8: Code Review and Finalization (3 tasks)
+- Phase 9: Git Commit and Track Completion (2 tasks)
+
+**Total Tasks**: 37
+
+**Key Features**:
+- Distribution detection using `/etc/os-release`
+- Package manager abstraction (apt-get, pacman, dnf)
+- Password caching (enter once, reuse throughout)
+- Fixed password prompt UI rendering
+- Shell compatibility (bash, fish, zsh, POSIX)
+- Backward compatible with Debian/Ubuntu
+
+**Execution**: `/maestro:implement linux-compat_20260216`
+
+--- 
+
+## [~] Track: Maestro Overhaul (IronClaw, ZeroClaw, Moltis Merger)
+*Link: [./maestro/tracks/overhaul_20260217/](./maestro/tracks/overhaul_20260217/)*
+
+**Description**: A major feature overhaul track meant to build on Maestro v2.5 by merging IronClaw, Moltis, and ZeroClaw into a high-performance, low-overhead, super-capable AI assistant with enhanced TUI, web dashboard, and multi-channel support.
+
+**Type**: Feature
+
+**Status**: IN PROGRESS - Phase 3: 4/5 tasks complete (131 lib tests passing)
+
+**Phases**:
+- [x] Phase 1: Infrastructure & Core Traits (5 tasks) - COMPLETE ✅
+- [x] Phase 2: Core Engine & Memory (13 tasks) - COMPLETE ✅
+  - Session/Thread State Machine (10 tests)
+  - Async Loop + Intent Routing
+  - Tool-Call Parsing + Robust Fallbacks (30 tests)
+  - Approval Manager + Policy Hooks (18 tests)
+  - Auth Interrupt/Resume Flow (19 tests)
+  - Ordered Event Stream (21 tests)
+  - Context Compaction + Retry-on-Overflow (18 tests)
+  - Tantivy Hybrid Memory Provider (26 tests)
+  - LeIndex Semantic Graph Integration (26 tests)
+  - Persistence Pipeline (35 tests)
+  - User Manual Verification: PASSED
+- [~] Phase 3: Capabilities & Sandboxing (4/5 tasks) - IN PROGRESS
+  - [x] Sub-Agent Delegation Tool (9 tests)
+  - [x] Routines Engine (Cron & Event Scheduler) (10 tests)
+  - [x] Dual-Tier Sandboxing (WASM + Docker) (13 tests)
+  - [x] MCP Client Integration (9 tests)
+  - [ ] User Manual Verification
+- [ ] Phase 4: Interface & Communication (5 tasks)
+- [ ] Phase 5: Integration & Polish (4 tasks)
+
+**Total Tasks**: 32 (22 complete, 10 remaining)
+**Tests**: 131 lib tests passing in maestro-core
+**Execution**: `/maestro:implement overhaul_20260217`

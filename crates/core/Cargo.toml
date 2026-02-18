@@ -1,0 +1,28 @@
+[package]
+name = "maestro-core"
+version = "0.1.0"
+edition = "2021"
+description = "Maestro Core - Traits, Config, and Engine Primitives"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+futures = "0.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tantivy = "0.22"
+regex = "1.10"
+toml = "0.8"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+rand = "0.8"
+dirs = "5"
+cron = "0.13"
+humantime-serde = "1.1"
+
+[dev-dependencies]
+tempfile = "3.10"
