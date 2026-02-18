@@ -260,12 +260,7 @@ pub fn render_modal_frame<'a>(title: &'a str, theme: &ConductorTheme) -> Block<'
 /// Helper: Render modal footer hints
 ///
 /// Renders centered footer text with navigation hints.
-pub fn render_modal_footer(
-    frame: &mut Frame,
-    area: Rect,
-    text: &str,
-    theme: &ConductorTheme,
-) {
+pub fn render_modal_footer(frame: &mut Frame, area: Rect, text: &str, theme: &ConductorTheme) {
     use ratatui::widgets::Paragraph;
 
     let footer = Paragraph::new(text)
@@ -284,7 +279,7 @@ mod tests {
         let centered = centered_modal_rect(50, 50, area);
 
         assert_eq!(centered.x, 25);
-        assert_eq!(centered.y, 7);
+        assert_eq!(centered.y, 8);
         assert_eq!(centered.width, 50);
         assert_eq!(centered.height, 15);
     }

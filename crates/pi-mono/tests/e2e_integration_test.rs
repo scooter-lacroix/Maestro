@@ -8,13 +8,13 @@ use maestro_pi_mono::{
         role_to_pi_agent_type, AgentMapping, AgentRegistry, AgentRole, PiAgentType, TaskComplexity,
         ToolAccess,
     },
-    config::PiMonoConfig,
+    ModelConfig,
     detection::PiDetection,
     discovery::ModelDiscovery,
     execution::{
-        ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType, SubagentResult,
-        SubagentRunner, UsageMetrics,
+        ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType,
     },
+    SubagentResult, SubagentRunner, UsageMetrics,
 };
 use std::time::Duration;
 
@@ -81,12 +81,12 @@ async fn e2e_model_discovery_workflow() {
 /// Test 3: End-to-end configuration workflow
 #[tokio::test]
 async fn e2e_configuration_workflow() {
-    let config = PiMonoConfig::default();
+    let config = ModelConfig::default();
     assert!(config.path.is_none());
     assert!(config.providers.is_empty());
     assert!(config.model_preferences.is_empty());
 
-    let mut config = PiMonoConfig::default();
+    let mut config = ModelConfig::default();
     config.path = Some("/usr/local/bin/pi".to_string());
     config.version_info = Some("0.49.3".to_string());
 
@@ -153,21 +153,20 @@ async fn e2e_executor_workflow() {
     let detection_result = PiDetection::detect();
     if detection_result.is_ok() {
         let detection = detection_result.unwrap();
-        let executor_result = Executor::from_detection(&detection);
+        let runner_result = SubagentRunner::from_detection(&detection);
 
-        match executor_result {
-            Ok(executor) => {
-                println!("Executor created successfully");
-                let executor_config = executor.config();
-                assert_eq!(executor_config.timeout_secs, 300);
-                assert_eq!(executor_config.max_retries, 3);
+        match runner_result {
+            Ok(runner) => {
+                println!("SubagentRunner created successfully");
+                let runner_config = runner.config();
+                assert!(!runner_config.pi_path.as_os_str().is_empty());
             }
             Err(e) => {
-                println!("Executor creation failed (acceptable): {}", e);
+                println!("SubagentRunner creation failed (acceptable): {}", e);
             }
         }
     } else {
-        println!("Skipping executor creation: pi-mono not installed");
+        println!("Skipping runner creation: pi-mono not installed");
     }
 }
 

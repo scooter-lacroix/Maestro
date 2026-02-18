@@ -20,6 +20,12 @@ leindex-core = { path = "../../maestro/leindex/rust" }
 # Maestro core capabilities (Phase 3)
 maestro-core = { path = "../core" }
 
+# Pi-Mono agent integration
+maestro-pi-mono = { path = "../pi-mono" }
+
+# Cancellation token support (CancellationToken is in default)
+tokio-util = "0.7"
+
 # Ktop collectors for system metrics
 ktop_collectors = { path = "../ktop_collectors" }
 
@@ -49,6 +55,7 @@ unicode-width = "0.2"
 lazy_static = "1.4"
 which = "6.0"
 cli-clipboard = "0.4"
+dirs = "5.0"
 
 [dev-dependencies]
 tempfile = "3.10"
