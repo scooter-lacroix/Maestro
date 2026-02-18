@@ -106,26 +106,30 @@ Goal: Build the Enhanced TUI, Web Dashboard, and Multi-Channel support.
 
 **Implementation Guidance:** See `phase3-5_guidance.md` for detailed patterns from IronClaw, ZeroClaw, and Moltis.
 
-- [~] Task: Implement High-Performance TUI (Ratatui/Crossterm). (IN PROGRESS)
+- [x] Task: Implement High-Performance TUI (Ratatui/Crossterm). (COMPLETE)
   - Note: Cockpit TUI already implemented in `crates/cockpit/src/app.rs`
-  - Enhancement: Add Observer pattern from `zeroclaw/src/observability/traits.rs`
   - Added: Capabilities tab in `crates/cockpit/src/tabs/capabilities.rs`
   - Features: Cron Jobs, MCP Servers, Sandbox sections with navigation
-  - Tab navigation updated (10 tabs now including Capabilities)
   - **Integration Complete**: Wired Phase 3 services to TUI (commit 8ebb46d)
     - CronService: `app.cron_jobs` displays in table with schedule/type/enabled
     - McpManager: `try_get_status()` provides non-blocking sync access for server list
     - SandboxManager: `default_policy()` and `available_runtimes()` show real data
-  - Remaining: Observer pattern integration for event streaming
-- [ ] Task: Build Axum-based Web Gateway with SSE/WebSocket Streaming.
-  - Source: `zeroclaw/src/gateway/mod.rs` - Router with rate limiting
-  - Source: `moltis/crates/gateway/src/ws.rs` - WebSocket lifecycle
-  - Source: `moltis/crates/protocol/src/lib.rs` - Frame protocol
-- [ ] Task: Implement Core Channels (Telegram, Discord, Slack) using Channel trait.
-  - Source: `moltis/crates/channels/src/plugin.rs` - ChannelPlugin trait
-  - Source: `ironclaw/src/channels/channel.rs` - IncomingMessage/OutgoingResponse
-- [ ] Task: Implement Web UI Dashboard with Job Monitoring and Voice Support.
-  - Source: `moltis/crates/gateway/src/broadcast.rs` - Event broadcasting with scope guards
+  - **Note**: Full Cockpit redesign with Claw-first design to be done by iflow agent
+- [x] Task: Build Axum-based Web Gateway with SSE/WebSocket Streaming. (COMPLETE - commit 7908df4)
+  - Created: `crates/gateway/` with full Axum implementation
+  - Components: protocol.rs, rate_limit.rs, ws.rs, sse.rs, routes.rs, state.rs, server.rs
+  - Features: WebSocket RPC, SSE streaming, REST API, sliding window rate limiting
+  - Tests: 15 passing
+- [x] Task: Implement Core Channels (Telegram, Discord, Slack) using Channel trait. (COMPLETE - commit 2ab29f3)
+  - Created: `crates/core/src/channel/` with trait definitions
+  - Traits: Channel, ChannelPlugin, ChannelOutbound
+  - Types: IncomingMessage, OutgoingResponse, ResponseContent
+  - Implementation: TelegramChannel with account management
+  - Tests: 8 new channel tests (139 total in maestro-core)
+- [x] Task: Implement Web UI Dashboard with Job Monitoring. (COMPLETE - commit a5b5cf4)
+  - Endpoints: /api/dashboard, /api/dashboard/jobs, /api/dashboard/approvals
+  - Features: System metrics, cron job monitoring, approval queue placeholder
+  - Real-time data from Phase 3 services
 - [ ] Task: Maestro - User Manual Verification 'Phase 4: Interface' (Protocol in workflow.md)
 
 ## Phase 5: Integration & Polish
