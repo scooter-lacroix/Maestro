@@ -360,7 +360,12 @@ This file tracks all major tracks for the project. Each track has its own detail
   - [x] Dual-Tier Sandboxing (WASM + Docker) (13 tests)
   - [x] MCP Client Integration (9 tests)
   - [ ] User Manual Verification
-- [ ] Phase 4: Interface & Communication (5 tasks)
+- [~] Phase 4: Interface & Communication (1/5 tasks) - IN PROGRESS
+  - [~] TUI Capabilities Tab - Phase 3 services wired (commit 8ebb46d)
+  - [ ] Axum Web Gateway
+  - [ ] Core Channels
+  - [ ] Web UI Dashboard
+  - [ ] User Manual Verification
 - [ ] Phase 5: Integration & Polish (4 tasks)
 
 **Total Tasks**: 32 (22 complete, 10 remaining)
