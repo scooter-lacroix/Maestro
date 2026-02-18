@@ -2459,6 +2459,7 @@ dependencies = [
  "cron",
  "dirs",
  "futures",
+ "futures-util",
  "humantime-serde",
  "rand 0.8.5",
  "regex",
