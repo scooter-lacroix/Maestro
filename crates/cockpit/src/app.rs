@@ -25,14 +25,17 @@ use tracing::debug;
 
 use leindex_core::config::Config;
 use leindex_core::memory::lsp_manager::LspType;
-use leindex_core::memory::LspStatus;
+use leindex_core::memory::turso_backend::LspStatus;
+use leindex_core::memory::turso_backend::TursoStorageBackend;
 use leindex_core::memory::McpPool;
 use leindex_core::memory::MemoryService;
-use leindex_core::memory::TursoStorageBackend;
 use leindex_core::multiplexer::TmuxMultiplexer;
 
-use crate::modals;
+// Phase 3: Capabilities
+use maestro_core::{CronJob, McpManager, SandboxManager, SecurityPolicy};
+
 use crate::conductor::omp_agent::OmpAgentManager;
+use crate::modals;
 use crate::omp::{is_omp_available, OmpWorkerStatus};
 use crate::state::{
     AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
@@ -171,6 +174,13 @@ pub struct App {
     pub explorer_items: Vec<String>,
     pub config: Config,
     pub settings_option: SettingsOption,
+    // Phase 3: Capabilities tab state
+    pub capabilities_section: Option<crate::tabs::CapabilitiesSection>,
+    // Phase 3: Capabilities services
+    pub cron_jobs: Vec<CronJob>,
+    pub cron_job_state: ratatui::widgets::ListState,
+    pub mcp_manager: maestro_core::McpManager,
+    pub sandbox_manager: maestro_core::SandboxManager,
     pub settings_menu_kind: Option<SettingsMenuKind>,
     pub settings_menu_state: ratatui::widgets::ListState,
     pub settings_menu_items: Vec<(String, String)>,
@@ -216,8 +226,8 @@ pub struct App {
     mcp_refresh_task: Option<tokio::task::JoinHandle<()>>,
     // Ktop tab state (system resource monitoring)
     pub ktop_state: Option<crate::tabs::ktop::KtopState>,
- // OMP agent manager for tool execution
- pub omp_manager: Option<OmpAgentManager>,
+    // OMP agent manager for tool execution
+    pub omp_manager: Option<OmpAgentManager>,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -291,6 +301,12 @@ impl App {
             explorer_items: Vec::new(),
             config,
             settings_option: SettingsOption::Editor,
+            capabilities_section: Some(crate::tabs::CapabilitiesSection::CronJobs),
+            // Phase 3: Capabilities services
+            cron_jobs: Vec::new(),
+            cron_job_state: ratatui::widgets::ListState::default(),
+            mcp_manager: McpManager::new(),
+            sandbox_manager: SandboxManager::new(SecurityPolicy::default()),
             settings_menu_kind: None,
             settings_menu_state: ratatui::widgets::ListState::default(),
             settings_menu_items: Vec::new(),
@@ -324,7 +340,11 @@ impl App {
             conductor: crate::conductor::ConductorPane::auto_discover(),
             mcp_refresh_task: None,
             ktop_state: None,
- omp_manager: if is_omp_available() { Some(OmpAgentManager::new(None)) } else { None },
+            omp_manager: if is_omp_available() {
+                Some(OmpAgentManager::new(None))
+            } else {
+                None
+            },
         };
 
         // Start MCP status refresh background task
@@ -666,22 +686,23 @@ impl App {
             // Poll Conductor engine state
             self.conductor.poll_engine_state();
 
-
- // Poll OMP agent status for active track
- if let Some(ref manager) = self.omp_manager {
- if let Some(track_id) = &self.conductor.state.current_track {
- if let Ok(status) = manager.get_agent_status_sync(track_id) {
- // Use OmpWorkerStatus methods to check health and display status
- let worker_status: OmpWorkerStatus = status;
- if worker_status.is_healthy() {
- debug!("OMP worker healthy for track {}: model={}, uptime={}s", 
- track_id, worker_status.model, worker_status.uptime_secs);
- }
- // Update status in conductor state for display
- self.conductor.state.omp_agent_status = Some(worker_status);
- }
- }
- }
+            // Poll OMP agent status for active track
+            if let Some(ref manager) = self.omp_manager {
+                if let Some(track_id) = &self.conductor.state.current_track {
+                    if let Ok(status) = manager.get_agent_status_sync(track_id) {
+                        // Use OmpWorkerStatus methods to check health and display status
+                        let worker_status: OmpWorkerStatus = status;
+                        if worker_status.is_healthy() {
+                            debug!(
+                                "OMP worker healthy for track {}: model={}, uptime={}s",
+                                track_id, worker_status.model, worker_status.uptime_secs
+                            );
+                        }
+                        // Update status in conductor state for display
+                        self.conductor.state.omp_agent_status = Some(worker_status);
+                    }
+                }
+            }
             // Fetch memories for the active track
             if let Some(_track_id) = &self.conductor.state.current_track {
                 if let Ok(memories) = svc.list_memories(10) {
@@ -954,8 +975,7 @@ impl App {
 
             // Quick scan for file extensions (depth-limited)
             let max_depth = 2;
-            let mut dirs_to_visit: Vec<(std::path::PathBuf, usize)> =
-                vec![(path.to_path_buf(), 0)];
+            let mut dirs_to_visit: Vec<(std::path::PathBuf, usize)> = vec![(path.to_path_buf(), 0)];
 
             while let Some((current_dir, depth)) = dirs_to_visit.pop() {
                 if depth > max_depth {
@@ -996,7 +1016,8 @@ impl App {
                                     }
                                 }
                                 "ts" | "tsx" | "js" | "jsx" => {
-                                    if !detected.contains(&"typescript-language-server".to_string()) {
+                                    if !detected.contains(&"typescript-language-server".to_string())
+                                    {
                                         detected.push("typescript-language-server".to_string());
                                     }
                                 }
@@ -1267,6 +1288,39 @@ impl App {
         );
         self.lsp_log_source = Some((session_id.to_string(), lsp_name.to_string()));
         self.lsp_log_scroll = 0;
+    }
+}
+
+/// Cycle to the next theme and save to config
+fn cycle_theme(app: &mut App) {
+    let current_theme = app.config.theme.to_lowercase();
+    let theme_names: Vec<&str> = THEMES.iter().map(|(id, _)| *id).collect();
+
+    // Find current theme index
+    let current_idx = theme_names
+        .iter()
+        .position(|t| t.to_lowercase() == current_theme)
+        .unwrap_or(0);
+
+    // Cycle to next theme
+    let next_idx = (current_idx + 1) % theme_names.len();
+    let next_theme = theme_names[next_idx].to_string();
+
+    // Update config
+    app.config.theme = next_theme.clone();
+
+    // Save to config file
+    if let Err(e) = app.config.save() {
+        app.toast_queue
+            .error(format!("Failed to save theme: {}", e));
+    } else {
+        // Find the display name for the toast
+        let display_name = THEMES
+            .iter()
+            .find(|(id, _)| *id == next_theme)
+            .map(|(_, label)| *label)
+            .unwrap_or(&next_theme);
+        app.toast_queue.success(format!("Theme: {}", display_name));
     }
 }
 
@@ -1908,22 +1962,27 @@ async fn run_app<B: Backend>(
                                     InputMode::NewMemoryContent => {
                                         // Move to category input
                                         if app.new_memory_content.trim().is_empty() {
-                                            app.status_message = "Memory content cannot be empty".to_string();
+                                            app.status_message =
+                                                "Memory content cannot be empty".to_string();
                                         } else {
                                             app.input_mode = InputMode::NewMemoryCategory;
-                                            app.status_message = "Enter category (or press Enter for 'general')".to_string();
+                                            app.status_message =
+                                                "Enter category (or press Enter for 'general')"
+                                                    .to_string();
                                         }
                                     }
 
                                     InputMode::NewMemoryCategory => {
                                         // Create the memory
                                         let Some(svc) = service.as_ref() else {
-                                            app.status_message = "Error: Memory service not available".to_string();
+                                            app.status_message =
+                                                "Error: Memory service not available".to_string();
                                             app.input_mode = InputMode::Normal;
                                             continue;
                                         };
 
-                                        let category = if app.new_memory_category.trim().is_empty() {
+                                        let category = if app.new_memory_category.trim().is_empty()
+                                        {
                                             "general".to_string()
                                         } else {
                                             app.new_memory_category.trim().to_string()
@@ -1943,13 +2002,20 @@ async fn run_app<B: Backend>(
                                             _ => leindex_core::memory::models::MemoryCategory::General,
                                         };
 
-                                        match svc.store_memory(app.new_memory_content.trim(), mem_category) {
+                                        match svc.store_memory(
+                                            app.new_memory_content.trim(),
+                                            mem_category,
+                                        ) {
                                             Ok(_) => {
-                                                app.status_message = format!("Memory created with category '{}'", category);
+                                                app.status_message = format!(
+                                                    "Memory created with category '{}'",
+                                                    category
+                                                );
                                                 app.refresh_from_service(&service);
                                             }
                                             Err(e) => {
-                                                app.status_message = format!("Failed to create memory: {}", e);
+                                                app.status_message =
+                                                    format!("Failed to create memory: {}", e);
                                             }
                                         }
 
@@ -2154,22 +2220,29 @@ async fn run_app<B: Backend>(
                                         app.input_mode = InputMode::Normal;
                                     }
                                     InputMode::LspInstaller => {
-                                        let available_lsps = crate::tabs::lsp_registry::get_available_lsps();
-                                        if let Some(selected_lsp) = available_lsps.get(app.lsp_installer.selected_index) {
-                                            let install_cmd = crate::tabs::lsp_registry::get_install_command(selected_lsp);
-                                            
+                                        let available_lsps =
+                                            crate::tabs::lsp_registry::get_available_lsps();
+                                        if let Some(selected_lsp) =
+                                            available_lsps.get(app.lsp_installer.selected_index)
+                                        {
+                                            let install_cmd =
+                                                crate::tabs::lsp_registry::get_install_command(
+                                                    selected_lsp,
+                                                );
+
                                             app.status_message = format!(
                                                 "Installing {}... This may take a few minutes.",
                                                 selected_lsp.display_name
                                             );
                                             let _ = terminal.draw(|frame| ui(frame, &mut app));
-                                            
-                                            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+
+                                            let shell = std::env::var("SHELL")
+                                                .unwrap_or_else(|_| "/bin/bash".to_string());
                                             let exec_result = std::process::Command::new(&shell)
                                                 .arg("-c")
                                                 .arg(&install_cmd)
                                                 .status();
-                                            
+
                                             match exec_result {
                                                 Ok(exit_status) => {
                                                     if exit_status.success() {
@@ -2186,10 +2259,8 @@ async fn run_app<B: Backend>(
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    app.status_message = format!(
-                                                        "Failed to start install: {}",
-                                                        e
-                                                    );
+                                                    app.status_message =
+                                                        format!("Failed to start install: {}", e);
                                                 }
                                             }
                                             app.lsp_installer.is_open = false;
@@ -2400,7 +2471,8 @@ async fn run_app<B: Backend>(
                                     InputMode::NewMemoryContent | InputMode::NewMemoryCategory => {
                                         app.new_memory_content.clear();
                                         app.new_memory_category.clear();
-                                        app.status_message = "Memory creation cancelled".to_string();
+                                        app.status_message =
+                                            "Memory creation cancelled".to_string();
                                     }
                                     _ => {}
                                 }
@@ -2684,7 +2756,8 @@ async fn run_app<B: Backend>(
                                         McpOption::Remove => McpOption::Start,
                                     };
                                 } else if app.input_mode == InputMode::LspInstaller {
-                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    let count =
+                                        crate::tabs::lsp_registry::get_available_lsps().len();
                                     if app.lsp_installer.selected_index < count.saturating_sub(1) {
                                         app.lsp_installer.selected_index += 1;
                                     } else {
@@ -2692,7 +2765,10 @@ async fn run_app<B: Backend>(
                                     }
                                 } else if app.input_mode == InputMode::DiagnosticView {
                                     let count = app.lsp_diagnostics_cache.len();
-                                    if count > 0 && app.diagnostic_view.selected_index < count.saturating_sub(1) {
+                                    if count > 0
+                                        && app.diagnostic_view.selected_index
+                                            < count.saturating_sub(1)
+                                    {
                                         app.diagnostic_view.selected_index += 1;
                                     } else {
                                         app.diagnostic_view.selected_index = 0;
@@ -2769,6 +2845,14 @@ async fn run_app<B: Backend>(
                                     };
                                     app.memory_state.select(Some(i));
                                 } else if app.tab_index == 8 {
+                                    // Capabilities - cycle through sections
+                                    app.capabilities_section = match app.capabilities_section {
+                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::McpServers),
+                                        Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::Sandbox),
+                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::CronJobs),
+                                        None => Some(crate::tabs::CapabilitiesSection::CronJobs),
+                                    };
+                                } else if app.tab_index == 9 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -2810,7 +2894,8 @@ async fn run_app<B: Backend>(
                                     };
                                     app.settings_menu_state.select(Some(i));
                                 } else if app.input_mode == InputMode::LspInstaller {
-                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    let count =
+                                        crate::tabs::lsp_registry::get_available_lsps().len();
                                     if app.lsp_installer.selected_index > 0 {
                                         app.lsp_installer.selected_index -= 1;
                                     } else {
@@ -2821,7 +2906,8 @@ async fn run_app<B: Backend>(
                                     if count > 0 && app.diagnostic_view.selected_index > 0 {
                                         app.diagnostic_view.selected_index -= 1;
                                     } else if count > 0 {
-                                        app.diagnostic_view.selected_index = count.saturating_sub(1);
+                                        app.diagnostic_view.selected_index =
+                                            count.saturating_sub(1);
                                     }
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
@@ -2897,6 +2983,14 @@ async fn run_app<B: Backend>(
                                     };
                                     app.memory_state.select(Some(i));
                                 } else if app.tab_index == 8 {
+                                    // Capabilities - cycle through sections (reverse)
+                                    app.capabilities_section = match app.capabilities_section {
+                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
+                                        Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
+                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::McpServers),
+                                        None => Some(crate::tabs::CapabilitiesSection::Sandbox),
+                                    };
+                                } else if app.tab_index == 9 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -2944,15 +3038,17 @@ async fn run_app<B: Backend>(
                                         }
                                     };
                                 } else {
-                                    app.tab_index = (app.tab_index + 1) % 9; // 9 tabs now (including Settings)
+                                    app.tab_index = (app.tab_index + 1) % 10; // 10 tabs now (including Capabilities)
                                     app.preview_focused = false;
                                 }
                             }
-                            (KeyModifiers::SHIFT, KeyCode::BackTab) | (_, KeyCode::BackTab) if app.tab_index != 6 => {
+                            (KeyModifiers::SHIFT, KeyCode::BackTab) | (_, KeyCode::BackTab)
+                                if app.tab_index != 6 =>
+                            {
                                 if app.tab_index == 0 {
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
-                                            app.tab_index = 7;  // Now Settings (was 6)
+                                            app.tab_index = 7; // Now Settings (was 6)
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
@@ -2960,7 +3056,7 @@ async fn run_app<B: Backend>(
                                     };
                                 } else {
                                     app.tab_index = if app.tab_index == 0 {
-                                        8  // Wrap to last tab (Settings)
+                                        8 // Wrap to last tab (Settings)
                                     } else {
                                         app.tab_index - 1
                                     };
@@ -3020,19 +3116,42 @@ async fn run_app<B: Backend>(
                                 };
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.toast_queue.info(msg);
+                                    ConductorAction::Toast { message, level } => {
+                                        match level {
+                                            crate::toast::ToastLevel::Info => {
+                                                app.toast_queue.info(message)
+                                            }
+                                            crate::toast::ToastLevel::Success => {
+                                                app.toast_queue.success(message)
+                                            }
+                                            crate::toast::ToastLevel::Warning => {
+                                                app.toast_queue.warning(message)
+                                            }
+                                            crate::toast::ToastLevel::Error => {
+                                                app.toast_queue.error(message)
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::CycleTheme => {
+                                        cycle_theme(&mut app);
                                         continue;
                                     }
                                     ConductorAction::StoreMemory { content, category } => {
                                         if let Some(svc) = service.as_ref() {
                                             match svc.store_memory(&content, category) {
                                                 Ok(id) => {
-                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.toast_queue.success(format!(
+                                                        "Memory stored with ID {}",
+                                                        id
+                                                    ));
                                                     app.refresh_from_service(&service);
                                                 }
                                                 Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to store memory: {}",
+                                                        e
+                                                    ));
                                                 }
                                             }
                                         } else {
@@ -3044,14 +3163,21 @@ async fn run_app<B: Backend>(
                                         if let Some(svc) = service.as_ref() {
                                             match svc.delete_memory(id) {
                                                 Ok(true) => {
-                                                    app.toast_queue.success(format!("Memory {} deleted", id));
+                                                    app.toast_queue
+                                                        .success(format!("Memory {} deleted", id));
                                                     app.refresh_from_service(&service);
                                                 }
                                                 Ok(false) => {
-                                                    app.toast_queue.warning(format!("Memory {} not found", id));
+                                                    app.toast_queue.warning(format!(
+                                                        "Memory {} not found",
+                                                        id
+                                                    ));
                                                 }
                                                 Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to delete memory: {}",
+                                                        e
+                                                    ));
                                                 }
                                             }
                                         } else {
@@ -3072,169 +3198,42 @@ async fn run_app<B: Backend>(
                                 };
                                 match handle_key_event(&mut app.conductor, key) {
                                     ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.toast_queue.info(msg);
-                                        continue;
-                                    }
-                                    ConductorAction::StoreMemory { content, category } => {
-                                        if let Some(svc) = service.as_ref() {
-                                            match svc.store_memory(&content, category) {
-                                                Ok(id) => {
-                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
-                                                    app.refresh_from_service(&service);
-                                                }
-                                                Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
-                                                }
+                                    ConductorAction::Toast { message, level } => {
+                                        match level {
+                                            crate::toast::ToastLevel::Info => {
+                                                app.toast_queue.info(message)
                                             }
-                                        } else {
-                                            app.toast_queue.error("Memory service not available");
+                                            crate::toast::ToastLevel::Success => {
+                                                app.toast_queue.success(message)
+                                            }
+                                            crate::toast::ToastLevel::Warning => {
+                                                app.toast_queue.warning(message)
+                                            }
+                                            crate::toast::ToastLevel::Error => {
+                                                app.toast_queue.error(message)
+                                            }
                                         }
                                         continue;
                                     }
-                                                                        ConductorAction::DeleteMemory { id } => {
-                                                                            if let Some(svc) = service.as_ref() {
-                                                                                match svc.delete_memory(id) {
-                                                                                    Ok(true) => {
-                                                                                        app.toast_queue.success(format!("Memory {} deleted", id));
-                                                                                        app.refresh_from_service(&service);
-                                                                                    }
-                                                                                    Ok(false) => {
-                                                                                        app.toast_queue.warning(format!("Memory {} not found", id));
-                                                                                    }
-                                                                                    Err(e) => {
-                                                                                        app.toast_queue.error(format!("Failed to delete memory: {}", e));
-                                                                                    }
-                                                                                }
-                                                                            } else {
-                                                                                app.toast_queue.error("Memory service not available");
-                                                                            }
-                                                                            continue;
-                                                                        }
-                                                                        ConductorAction::None => {}
-                                                                    }
-                                                                }
-                                    
-                                                                (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == 4 => {
-                                // Pause track
-                                use crate::conductor::keybindings::{
-                                    handle_key_event, ConductorAction,
-                                };
-                                match handle_key_event(&mut app.conductor, key) {
-                                    ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.toast_queue.info(msg);
+                                    ConductorAction::CycleTheme => {
+                                        cycle_theme(&mut app);
                                         continue;
                                     }
                                     ConductorAction::StoreMemory { content, category } => {
                                         if let Some(svc) = service.as_ref() {
                                             match svc.store_memory(&content, category) {
                                                 Ok(id) => {
-                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
+                                                    app.toast_queue.success(format!(
+                                                        "Memory stored with ID {}",
+                                                        id
+                                                    ));
                                                     app.refresh_from_service(&service);
                                                 }
                                                 Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
-                                                }
-                                            }
-                                        } else {
-                                            app.toast_queue.error("Memory service not available");
-                                        }
-                                        continue;
-                                    }
-                                                                        ConductorAction::DeleteMemory { id } => {
-                                                                            if let Some(svc) = service.as_ref() {
-                                                                                match svc.delete_memory(id) {
-                                                                                    Ok(true) => {
-                                                                                        app.toast_queue.success(format!("Memory {} deleted", id));
-                                                                                        app.refresh_from_service(&service);
-                                                                                    }
-                                                                                    Ok(false) => {
-                                                                                        app.toast_queue.warning(format!("Memory {} not found", id));
-                                                                                    }
-                                                                                    Err(e) => {
-                                                                                        app.toast_queue.error(format!("Failed to delete memory: {}", e));
-                                                                                    }
-                                                                                }
-                                                                            } else {
-                                                                                app.toast_queue.error("Memory service not available");
-                                                                            }
-                                                                            continue;
-                                                                        }
-                                                                        ConductorAction::None => {}
-                                                                    }
-                                                                }
-                                    
-                                                                (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == 4 => {
-                                // Resume track
-                                use crate::conductor::keybindings::{
-                                    handle_key_event, ConductorAction,
-                                };
-                                match handle_key_event(&mut app.conductor, key) {
-                                    ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.toast_queue.info(msg);
-                                        continue;
-                                    }
-                                    ConductorAction::StoreMemory { content, category } => {
-                                        if let Some(svc) = service.as_ref() {
-                                            match svc.store_memory(&content, category) {
-                                                Ok(id) => {
-                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
-                                                    app.refresh_from_service(&service);
-                                                }
-                                                Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
-                                                }
-                                            }
-                                        } else {
-                                            app.toast_queue.error("Memory service not available");
-                                        }
-                                        continue;
-                                    }
-                                                                        ConductorAction::DeleteMemory { id } => {
-                                                                            if let Some(svc) = service.as_ref() {
-                                                                                match svc.delete_memory(id) {
-                                                                                    Ok(true) => {
-                                                                                        app.toast_queue.success(format!("Memory {} deleted", id));
-                                                                                        app.refresh_from_service(&service);
-                                                                                    }
-                                                                                    Ok(false) => {
-                                                                                        app.toast_queue.warning(format!("Memory {} not found", id));
-                                                                                    }
-                                                                                    Err(e) => {
-                                                                                        app.toast_queue.error(format!("Failed to delete memory: {}", e));
-                                                                                    }
-                                                                                }
-                                                                            } else {
-                                                                                app.toast_queue.error("Memory service not available");
-                                                                            }
-                                                                            continue;
-                                                                        }
-                                                                        ConductorAction::None => {}
-                                                                    }
-                                                                }
-                                    
-                                                                (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == 4 => {
-                                // Show status/help
-                                use crate::conductor::keybindings::{
-                                    handle_key_event, ConductorAction,
-                                };
-                                match handle_key_event(&mut app.conductor, key) {
-                                    ConductorAction::Handled => continue,
-                                    ConductorAction::StatusMessage(msg) => {
-                                        app.toast_queue.info(msg);
-                                        continue;
-                                    }
-                                    ConductorAction::StoreMemory { content, category } => {
-                                        if let Some(svc) = service.as_ref() {
-                                            match svc.store_memory(&content, category) {
-                                                Ok(id) => {
-                                                    app.toast_queue.success(format!("Memory stored with ID {}", id));
-                                                    app.refresh_from_service(&service);
-                                                }
-                                                Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to store memory: {}", e));
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to store memory: {}",
+                                                        e
+                                                    ));
                                                 }
                                             }
                                         } else {
@@ -3246,14 +3245,261 @@ async fn run_app<B: Backend>(
                                         if let Some(svc) = service.as_ref() {
                                             match svc.delete_memory(id) {
                                                 Ok(true) => {
-                                                    app.toast_queue.success(format!("Memory {} deleted", id));
+                                                    app.toast_queue
+                                                        .success(format!("Memory {} deleted", id));
                                                     app.refresh_from_service(&service);
                                                 }
                                                 Ok(false) => {
-                                                    app.toast_queue.warning(format!("Memory {} not found", id));
+                                                    app.toast_queue.warning(format!(
+                                                        "Memory {} not found",
+                                                        id
+                                                    ));
                                                 }
                                                 Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to delete memory: {}", e));
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to delete memory: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+
+                            (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == 4 => {
+                                // Pause track
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::Toast { message, level } => {
+                                        match level {
+                                            crate::toast::ToastLevel::Info => {
+                                                app.toast_queue.info(message)
+                                            }
+                                            crate::toast::ToastLevel::Success => {
+                                                app.toast_queue.success(message)
+                                            }
+                                            crate::toast::ToastLevel::Warning => {
+                                                app.toast_queue.warning(message)
+                                            }
+                                            crate::toast::ToastLevel::Error => {
+                                                app.toast_queue.error(message)
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::CycleTheme => {
+                                        cycle_theme(&mut app);
+                                        continue;
+                                    }
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!(
+                                                        "Memory stored with ID {}",
+                                                        id
+                                                    ));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to store memory: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::DeleteMemory { id } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.delete_memory(id) {
+                                                Ok(true) => {
+                                                    app.toast_queue
+                                                        .success(format!("Memory {} deleted", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Ok(false) => {
+                                                    app.toast_queue.warning(format!(
+                                                        "Memory {} not found",
+                                                        id
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to delete memory: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+
+                            (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == 4 => {
+                                // Resume track
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::Toast { message, level } => {
+                                        match level {
+                                            crate::toast::ToastLevel::Info => {
+                                                app.toast_queue.info(message)
+                                            }
+                                            crate::toast::ToastLevel::Success => {
+                                                app.toast_queue.success(message)
+                                            }
+                                            crate::toast::ToastLevel::Warning => {
+                                                app.toast_queue.warning(message)
+                                            }
+                                            crate::toast::ToastLevel::Error => {
+                                                app.toast_queue.error(message)
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::CycleTheme => {
+                                        cycle_theme(&mut app);
+                                        continue;
+                                    }
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!(
+                                                        "Memory stored with ID {}",
+                                                        id
+                                                    ));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to store memory: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::DeleteMemory { id } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.delete_memory(id) {
+                                                Ok(true) => {
+                                                    app.toast_queue
+                                                        .success(format!("Memory {} deleted", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Ok(false) => {
+                                                    app.toast_queue.warning(format!(
+                                                        "Memory {} not found",
+                                                        id
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to delete memory: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::None => {}
+                                }
+                            }
+
+                            (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == 4 => {
+                                // Show status/help
+                                use crate::conductor::keybindings::{
+                                    handle_key_event, ConductorAction,
+                                };
+                                match handle_key_event(&mut app.conductor, key) {
+                                    ConductorAction::Handled => continue,
+                                    ConductorAction::Toast { message, level } => {
+                                        match level {
+                                            crate::toast::ToastLevel::Info => {
+                                                app.toast_queue.info(message)
+                                            }
+                                            crate::toast::ToastLevel::Success => {
+                                                app.toast_queue.success(message)
+                                            }
+                                            crate::toast::ToastLevel::Warning => {
+                                                app.toast_queue.warning(message)
+                                            }
+                                            crate::toast::ToastLevel::Error => {
+                                                app.toast_queue.error(message)
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::CycleTheme => {
+                                        cycle_theme(&mut app);
+                                        continue;
+                                    }
+                                    ConductorAction::StoreMemory { content, category } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.store_memory(&content, category) {
+                                                Ok(id) => {
+                                                    app.toast_queue.success(format!(
+                                                        "Memory stored with ID {}",
+                                                        id
+                                                    ));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to store memory: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        } else {
+                                            app.toast_queue.error("Memory service not available");
+                                        }
+                                        continue;
+                                    }
+                                    ConductorAction::DeleteMemory { id } => {
+                                        if let Some(svc) = service.as_ref() {
+                                            match svc.delete_memory(id) {
+                                                Ok(true) => {
+                                                    app.toast_queue
+                                                        .success(format!("Memory {} deleted", id));
+                                                    app.refresh_from_service(&service);
+                                                }
+                                                Ok(false) => {
+                                                    app.toast_queue.warning(format!(
+                                                        "Memory {} not found",
+                                                        id
+                                                    ));
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!(
+                                                        "Failed to delete memory: {}",
+                                                        e
+                                                    ));
                                                 }
                                             }
                                         } else {
@@ -3283,7 +3529,8 @@ async fn run_app<B: Backend>(
                                     app.new_memory_content.clear();
                                     app.new_memory_category.clear();
                                     app.input_mode = InputMode::NewMemoryContent;
-                                    app.status_message = "Creating new memory - enter content".to_string();
+                                    app.status_message =
+                                        "Creating new memory - enter content".to_string();
                                 } else {
                                     // New session wizard for other tabs
                                     app.input_mode = InputMode::NewSessionTitle;
@@ -3532,7 +3779,11 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('D') | KeyCode::Char('d')) if app.tab_index != 4 && app.tab_index != 6 && app.tab_index != 7 => {
+                            (_, KeyCode::Char('D') | KeyCode::Char('d'))
+                                if app.tab_index != 4
+                                    && app.tab_index != 6
+                                    && app.tab_index != 7 =>
+                            {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i) {
@@ -3606,7 +3857,8 @@ async fn run_app<B: Backend>(
                                 app.lsp_installer.is_open = true;
                                 app.lsp_installer.selected_index = 0;
                                 app.input_mode = InputMode::LspInstaller;
-                                app.status_message = "LSP Installer - Select an LSP to install".to_string();
+                                app.status_message =
+                                    "LSP Installer - Select an LSP to install".to_string();
                             }
                             // Ktop-specific keybindings (use Alt to avoid conflicts)
                             (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 6 => {
@@ -3636,7 +3888,9 @@ async fn run_app<B: Backend>(
                                 if app.tab_index == 6 {
                                     // Ktop tab - decrease refresh rate
                                     if let Some(ref mut ktop) = app.ktop_state {
-                                        ktop.set_refresh_interval(ktop.refresh_interval_secs.saturating_sub(1).max(1));
+                                        ktop.set_refresh_interval(
+                                            ktop.refresh_interval_secs.saturating_sub(1).max(1),
+                                        );
                                         app.status_message = format!(
                                             "Refresh interval: {}s",
                                             ktop.refresh_interval_secs
@@ -3682,18 +3936,22 @@ async fn run_app<B: Backend>(
                                     app.diagnostic_view.is_open = true;
                                     app.diagnostic_view.selected_index = 0;
                                     app.input_mode = InputMode::DiagnosticView;
-                                    app.status_message = "Diagnostic Details - Press 'S' to send to agent".to_string();
+                                    app.status_message =
+                                        "Diagnostic Details - Press 'S' to send to agent"
+                                            .to_string();
                                 }
                             }
                             (_, KeyCode::Char('S')) => {
                                 if app.tab_index == 6 && app.diagnostic_view.is_open {
                                     // Send diagnostics to agent
-                                    let project_path = app.sessions.first()
+                                    let project_path = app
+                                        .sessions
+                                        .first()
                                         .map(|s| s.project_path.clone())
                                         .unwrap_or_else(|| ".".to_string());
                                     let prompt = crate::tabs::lsps::generate_agent_prompt(
                                         &app.lsp_diagnostics_cache,
-                                        &project_path
+                                        &project_path,
                                     );
                                     // Copy to clipboard
                                     let _ = cli_clipboard::set_contents(prompt.clone());
@@ -3765,7 +4023,9 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('d'))
                             | (KeyModifiers::ALT, KeyCode::Char('D'))
                             | (KeyModifiers::NONE, KeyCode::Char('d'))
-                                if app.tab_index != 4 && app.tab_index != 6 && app.tab_index != 7 =>
+                                if app.tab_index != 4
+                                    && app.tab_index != 6
+                                    && app.tab_index != 7 =>
                             {
                                 if app.tab_index == 1 {
                                     if let Some(i) = app.session_state.selected() {
@@ -3820,12 +4080,13 @@ async fn run_app<B: Backend>(
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 9; // 9 tabs now (including Settings)
+                                app.tab_index = (app.tab_index + 1) % 10; // 10 tabs now (including Capabilities)
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
                                 if app.input_mode == InputMode::LspInstaller {
-                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    let count =
+                                        crate::tabs::lsp_registry::get_available_lsps().len();
                                     if app.lsp_installer.selected_index < count.saturating_sub(1) {
                                         app.lsp_installer.selected_index += 1;
                                     } else {
@@ -3833,7 +4094,10 @@ async fn run_app<B: Backend>(
                                     }
                                 } else if app.input_mode == InputMode::DiagnosticView {
                                     let count = app.lsp_diagnostics_cache.len();
-                                    if count > 0 && app.diagnostic_view.selected_index < count.saturating_sub(1) {
+                                    if count > 0
+                                        && app.diagnostic_view.selected_index
+                                            < count.saturating_sub(1)
+                                    {
                                         app.diagnostic_view.selected_index += 1;
                                     } else {
                                         app.diagnostic_view.selected_index = 0;
@@ -3937,7 +4201,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 8 {
+                                } else if app.tab_index == 9 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -3951,7 +4215,8 @@ async fn run_app<B: Backend>(
                             }
                             (_, KeyCode::Up) => {
                                 if app.input_mode == InputMode::LspInstaller {
-                                    let count = crate::tabs::lsp_registry::get_available_lsps().len();
+                                    let count =
+                                        crate::tabs::lsp_registry::get_available_lsps().len();
                                     if app.lsp_installer.selected_index > 0 {
                                         app.lsp_installer.selected_index -= 1;
                                     } else {
@@ -3962,7 +4227,8 @@ async fn run_app<B: Backend>(
                                     if count > 0 && app.diagnostic_view.selected_index > 0 {
                                         app.diagnostic_view.selected_index -= 1;
                                     } else if count > 0 {
-                                        app.diagnostic_view.selected_index = count.saturating_sub(1);
+                                        app.diagnostic_view.selected_index =
+                                            count.saturating_sub(1);
                                     }
                                 } else if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
@@ -4065,6 +4331,14 @@ async fn run_app<B: Backend>(
                                     };
                                     app.lsp_state.select(Some(i));
                                 } else if app.tab_index == 8 {
+                                    // Capabilities - cycle through sections (reverse)
+                                    app.capabilities_section = match app.capabilities_section {
+                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
+                                        Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
+                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::McpServers),
+                                        None => Some(crate::tabs::CapabilitiesSection::Sandbox),
+                                    };
+                                } else if app.tab_index == 9 {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -4254,7 +4528,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 8 {
+                                } else if app.tab_index == 9 {
                                     // Settings
                                     match app.settings_option {
                                         SettingsOption::Editor => {
@@ -4604,6 +4878,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         "Memory",
         "Ktop",
         "LSPs",
+        "Capabilities",
         "Settings",
     ])
     .block(
@@ -4640,7 +4915,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
         5 => render_memory(frame, chunks[1], app),
         6 => crate::tabs::ktop::render_ktop(frame, chunks[1], app),
         7 => render_lsps(frame, chunks[1], app),
-        8 => render_settings(frame, app),
+        8 => crate::tabs::capabilities::render_capabilities(frame, app),
+        9 => render_settings(frame, app),
         _ => {}
     }
     // Footer
@@ -4733,6 +5009,92 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     if app.is_spawning {
         modals::render_spawning_overlay(frame, app);
+    }
+
+    // Render toast notifications (always on top)
+    render_toasts(frame, app);
+}
+
+/// Render toast notifications as floating overlays
+fn render_toasts(frame: &mut Frame, app: &App) {
+    // Remove expired toasts (we do this in render since we don't have a tick event)
+    // Note: In a real app you'd want to do this on a timer
+    let toasts: Vec<_> = app.toast_queue.iter().collect();
+
+    if toasts.is_empty() {
+        return;
+    }
+
+    let area = frame.area();
+    let max_toasts = 5;
+    let toast_height = 3u16;
+    let toast_width = 50u16;
+    let margin = 1u16;
+
+    // Position toasts in top-right corner
+    let start_x = area.right().saturating_sub(toast_width + margin);
+    let start_y = area.top() + margin;
+
+    for (i, toast) in toasts.iter().take(max_toasts).enumerate() {
+        let y = start_y + (i as u16 * (toast_height + margin));
+
+        // Skip if would overflow
+        if y + toast_height > area.bottom() {
+            break;
+        }
+
+        let toast_area = Rect::new(start_x, y, toast_width, toast_height);
+
+        // Determine style based on level
+        let (icon, fg_color, bg_color) = match toast.level {
+            crate::toast::ToastLevel::Info => ("ℹ", Color::Cyan, Color::Rgb(0, 60, 80)),
+            crate::toast::ToastLevel::Success => ("✓", Color::Green, Color::Rgb(0, 60, 40)),
+            crate::toast::ToastLevel::Warning => ("⚠", Color::Yellow, Color::Rgb(80, 60, 0)),
+            crate::toast::ToastLevel::Error => ("✗", Color::Red, Color::Rgb(80, 20, 20)),
+        };
+
+        // Progress bar
+        let progress = toast.progress();
+        let progress_width = ((toast_width as f32 * (1.0 - progress)) as u16).max(1);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(fg_color))
+            .style(Style::default().bg(bg_color));
+
+        let inner = block.inner(toast_area);
+        frame.render_widget(block, toast_area);
+
+        // Render icon and message
+        let text = Paragraph::new(Line::from(vec![
+            Span::styled(format!("{} ", icon), Style::default().fg(fg_color).bold()),
+            Span::styled(
+                truncate_str(&toast.message, inner.width as usize - 3),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+        frame.render_widget(text, inner);
+
+        // Render progress bar at bottom
+        let progress_area = Rect::new(
+            toast_area.left() + 1,
+            toast_area.bottom() - 1,
+            progress_width,
+            1,
+        );
+        let progress_block = Block::default().style(Style::default().fg(fg_color).bg(fg_color));
+        frame.render_widget(progress_block, progress_area);
+    }
+}
+
+/// Truncate a string to fit within a maximum width
+fn truncate_str(s: &str, max_width: usize) -> String {
+    if s.chars().count() <= max_width {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_width.saturating_sub(3)).collect();
+        format!("{}...", truncated)
     }
 }
 

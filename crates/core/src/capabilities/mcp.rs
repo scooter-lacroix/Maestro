@@ -363,6 +363,22 @@ impl McpManager {
 
         Ok(bridges)
     }
+
+    /// Get server status synchronously (non-blocking).
+    /// Returns (registered_servers, connected_servers) pairs.
+    pub fn try_get_status(&self) -> (Vec<String>, Vec<String>) {
+        match self.inner.try_read() {
+            Ok(inner) => {
+                let registered: Vec<String> = inner.configs.keys().cloned().collect();
+                let connected: Vec<String> = inner.clients.keys().cloned().collect();
+                (registered, connected)
+            }
+            Err(_) => {
+                // Lock contention - return empty lists
+                (Vec::new(), Vec::new())
+            }
+        }
+    }
 }
 
 impl Default for McpManager {
