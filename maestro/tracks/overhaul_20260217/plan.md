@@ -137,9 +137,11 @@ Goal: Final wiring, documentation, and performance verification.
 
 **Implementation Guidance:** See `phase3-5_guidance.md` for detailed patterns from IronClaw, ZeroClaw, and Moltis.
 
-- [ ] Task: Align all features with Maestro Spec-Driven Workflow (Metadata/Tracks integration).
-  - Wire track context to memory search
-  - Connect approval flow to track task completion
+- [x] Task: Align all features with Maestro Spec-Driven Workflow (Metadata/Tracks integration). (COMPLETE - commit b1835db)
+  - Created: `crates/core/src/integration/mod.rs`
+  - Components: TrackContext, TaskStatus, MemorySearchContext, ApprovalTrackIntegration
+  - Features: Wire approval flow to track task completion, augment memory search with track context
+  - Tests: 5 new integration tests (144 total in maestro-core)
 - [ ] Task: Conduct Performance Benchmarking (Target <5MB RAM, <10ms startup).
   - Source: `moltis/crates/benchmarks/benches/boot.rs` - Divan benchmark patterns
   - Benchmark: config loading, session state machine, memory search, event buffering
