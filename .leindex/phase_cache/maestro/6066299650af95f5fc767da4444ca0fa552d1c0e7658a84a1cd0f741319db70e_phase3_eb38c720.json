@@ -1,0 +1,27 @@
+{
+  "project_id": "maestro",
+  "generation": "6066299650af95f5fc767da4444ca0fa552d1c0e7658a84a1cd0f741319db70e",
+  "phase": 3,
+  "options_hash": "eb38c720",
+  "payload": {
+    "entry_points": [
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs:popup_display",
+      ".venv/lib/python3.14/site-packages/yaml/__init__.py:dump_all",
+      ".venv/lib/python3.14/site-packages/yaml/cyaml.py:CBaseDumper.__init__",
+      ".venv/lib/python3.14/site-packages/yaml/cyaml.py:CDumper.__init__",
+      ".venv/lib/python3.14/site-packages/yaml/cyaml.py:CSafeDumper.__init__",
+      ".venv/lib/python3.14/site-packages/yaml/dumper.py:BaseDumper.__init__",
+      ".venv/lib/python3.14/site-packages/yaml/dumper.py:Dumper.__init__",
+      ".venv/lib/python3.14/site-packages/yaml/dumper.py:SafeDumper.__init__",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs:format_draw_absolute_centre",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs:format_draw_centre"
+    ],
+    "impacted_nodes": 32,
+    "focus_files": [
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs",
+      ".venv/lib/python3.14/site-packages/yaml/cyaml.py",
+      ".venv/lib/python3.14/site-packages/yaml/dumper.py",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs"
+    ]
+  }
+}

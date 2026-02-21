@@ -245,12 +245,7 @@ impl InputModal {
 /// Render the input modal as a centered overlay.
 ///
 /// This is a no-op when `modal.visible` is false.
-pub fn render_input_modal(
-    f: &mut Frame,
-    area: Rect,
-    modal: &InputModal,
-    theme: &ConductorTheme,
-) {
+pub fn render_input_modal(f: &mut Frame, area: Rect, modal: &InputModal, theme: &ConductorTheme) {
     if !modal.visible {
         return;
     }
@@ -272,7 +267,7 @@ pub fn render_input_modal(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // prompt
-            Constraint::Min(1),   // input field
+            Constraint::Min(1),    // input field
             Constraint::Length(1), // footer hints
         ])
         .split(inner);
@@ -285,10 +280,13 @@ pub fn render_input_modal(
 
     // -- Input field with cursor --
     let before_cursor = &modal.input_buffer[..modal.cursor_pos];
-    let after_cursor = &modal.input_buffer[modal.cursor_pos..];
+    let _after_cursor = &modal.input_buffer[modal.cursor_pos..];
 
     let cursor_char = if modal.cursor_pos < modal.input_buffer.len() {
-        let ch = modal.input_buffer[modal.cursor_pos..].chars().next().unwrap();
+        let ch = modal.input_buffer[modal.cursor_pos..]
+            .chars()
+            .next()
+            .unwrap();
         // Show the character under the cursor with inverted style
         ch.to_string()
     } else {
@@ -308,10 +306,7 @@ pub fn render_input_modal(
     };
 
     let input_line = Line::from(vec![
-        Span::styled(
-            before_cursor,
-            Style::default().fg(theme.fg_primary),
-        ),
+        Span::styled(before_cursor, Style::default().fg(theme.fg_primary)),
         Span::styled(
             cursor_char,
             Style::default()
@@ -319,10 +314,7 @@ pub fn render_input_modal(
                 .bg(theme.fg_primary)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            after_display,
-            Style::default().fg(theme.fg_primary),
-        ),
+        Span::styled(after_display, Style::default().fg(theme.fg_primary)),
     ]);
 
     let input_widget = Paragraph::new(input_line)

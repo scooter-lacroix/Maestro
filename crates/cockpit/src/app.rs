@@ -38,8 +38,8 @@ use crate::conductor::omp_agent::OmpAgentManager;
 use crate::modals;
 use crate::omp::{is_omp_available, OmpWorkerStatus};
 use crate::state::{
-    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
-    ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, MaesterClawSetupCheck, MaesterClawSetupState,
+    McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };
 use crate::tabs::{
     render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
@@ -51,7 +51,7 @@ pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
 /// Tab identifiers with explicit indices for maintainability
-/// Order: Dashboard(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9)
+/// Order: Welcome(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9)
 pub mod tabs {
     pub const DASHBOARD: usize = 0;
     pub const MAESTERCLAW: usize = 1;
@@ -67,7 +67,7 @@ pub mod tabs {
     /// Get all tab titles in order
     pub fn all_titles() -> Vec<&'static str> {
         vec![
-            "Dashboard",
+            "Welcome",
             "MaesterClaw",
             "Sessions",
             "Projects",
@@ -208,6 +208,7 @@ pub struct App {
     pub settings_option: SettingsOption,
     // Phase 3: Capabilities tab state
     pub capabilities_section: Option<crate::tabs::CapabilitiesSection>,
+    pub maesterclaw_setup: MaesterClawSetupState,
     // Phase 3: Capabilities services
     pub cron_jobs: Vec<CronJob>,
     pub cron_job_state: ratatui::widgets::ListState,
@@ -260,6 +261,8 @@ pub struct App {
     pub ktop_state: Option<crate::tabs::ktop::KtopState>,
     // OMP agent manager for tool execution
     pub omp_manager: Option<OmpAgentManager>,
+    // Phase 7.7: Hot cache for memory suggestions
+    pub hot_cache: crate::maesterclaw::HotCache,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -334,6 +337,7 @@ impl App {
             config,
             settings_option: SettingsOption::Editor,
             capabilities_section: Some(crate::tabs::CapabilitiesSection::CronJobs),
+            maesterclaw_setup: MaesterClawSetupState::default(),
             // Phase 3: Capabilities services
             cron_jobs: Vec::new(),
             cron_job_state: ratatui::widgets::ListState::default(),
@@ -377,6 +381,7 @@ impl App {
             } else {
                 None
             },
+            hot_cache: crate::maesterclaw::HotCache::new(),
         };
 
         // Start MCP status refresh background task
@@ -410,6 +415,7 @@ impl App {
 
         // Check LSP availability on startup
         app.check_lsp_availability();
+        app.refresh_maesterclaw_setup();
         app.mcp_state.select(Some(0));
         app.dash_session_state.select(Some(0));
         app.memory_state.select(Some(0));
@@ -459,6 +465,66 @@ impl App {
             .unwrap_or(0);
         self.settings_menu_state.select(Some(selected));
         self.input_mode = InputMode::SettingsMenu;
+    }
+
+    fn refresh_maesterclaw_setup(&mut self) {
+        // Use the readiness reducer to evaluate runtime state
+        // Collect evaluations first to avoid borrow checker issues
+        let mut evaluations = Vec::with_capacity(self.maesterclaw_setup.steps.len());
+
+        for step in self.maesterclaw_setup.steps.iter() {
+            let is_ready = match step.check {
+                MaesterClawSetupCheck::ManualAcknowledge => step.is_ready,
+                MaesterClawSetupCheck::CronConfigured => !self.cron_jobs.is_empty(),
+                MaesterClawSetupCheck::McpConnected => {
+                    let (registered, connected) = self.mcp_manager.try_get_status();
+                    !registered.is_empty() && !connected.is_empty()
+                }
+                MaesterClawSetupCheck::MemoryVisualizationAvailable => true, // Always available
+                MaesterClawSetupCheck::SandboxPolicyVisible => {
+                    !self.sandbox_manager.available_runtimes().is_empty()
+                }
+            };
+            evaluations.push(is_ready);
+        }
+
+        // Apply the evaluations
+        for (i, step) in self.maesterclaw_setup.steps.iter_mut().enumerate() {
+            if let Some(&is_ready) = evaluations.get(i) {
+                step.is_ready = is_ready;
+            }
+        }
+    }
+    fn open_maesterclaw_setup(&mut self) {
+        self.maesterclaw_setup.is_open = true;
+        self.maesterclaw_setup.current_step = 0;
+        self.refresh_maesterclaw_setup();
+    }
+    fn close_maesterclaw_setup(&mut self) {
+        self.maesterclaw_setup.is_open = false;
+    }
+    fn advance_maesterclaw_setup(&mut self) {
+        if let Some(step) = self
+            .maesterclaw_setup
+            .steps
+            .get_mut(self.maesterclaw_setup.current_step)
+        {
+            if step.check == MaesterClawSetupCheck::ManualAcknowledge {
+                step.is_ready = true;
+            }
+        }
+        let max_step = self.maesterclaw_setup.steps.len().saturating_sub(1);
+        if self.maesterclaw_setup.current_step >= max_step {
+            self.close_maesterclaw_setup();
+            self.status_message = "MaesterClaw setup checklist complete. Reference repos are source-only; runtime parity is validated inside Maestro.".to_string();
+            return;
+        }
+        self.maesterclaw_setup.current_step += 1;
+        self.refresh_maesterclaw_setup();
+    }
+
+    fn rewind_maesterclaw_setup(&mut self) {
+        self.maesterclaw_setup.current_step = self.maesterclaw_setup.current_step.saturating_sub(1);
     }
 
     fn dash_selected_session_id(&self) -> Option<String> {
@@ -732,6 +798,10 @@ impl App {
             // Poll Conductor engine state
             self.conductor.poll_engine_state();
 
+            // Poll orchestrate sessions (Phase 6: Agentic Loop Integration)
+            self.conductor.poll_observed_sessions_sync();
+            self.conductor.sync_orchestrate_sessions_blocking();
+
             // Poll OMP agent status for active track
             if let Some(ref manager) = self.omp_manager {
                 if let Some(track_id) = &self.conductor.state.current_track {
@@ -948,7 +1018,7 @@ impl App {
                     for state in states {
                         new_cache
                             .entry(session_id.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push((state.lsp_name, state.status));
                     }
                 }
@@ -1455,6 +1525,10 @@ async fn run_app<B: Backend>(
             if let Event::Key(key) = event::read()? {
                 // Some terminals report Enter as Repeat; treat Press+Repeat as actionable input.
                 if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                    if app.lsp_installer.install_output.is_some() {
+                        app.lsp_installer.install_output = None;
+                        continue;
+                    }
                     if app.input_mode != InputMode::Normal {
                         match key.code {
                             KeyCode::Enter | KeyCode::Char('\n') | KeyCode::Char('\r') => {
@@ -1630,8 +1704,8 @@ async fn run_app<B: Backend>(
                                                 let mut moved = 0usize;
                                                 if let Ok(sessions) = svc.list_sessions() {
                                                     for s in sessions {
-                                                        if s.group_path.is_none() {
-                                                            if svc
+                                                        if s.group_path.is_none()
+                                                            && svc
                                                                 .update_session_group(
                                                                     &s.session_id,
                                                                     Some(new_path.clone()),
@@ -1640,7 +1714,6 @@ async fn run_app<B: Backend>(
                                                             {
                                                                 moved += 1;
                                                             }
-                                                        }
                                                     }
                                                 }
 
@@ -2286,33 +2359,70 @@ async fn run_app<B: Backend>(
                                             );
                                             let _ = terminal.draw(|frame| ui(frame, &mut app));
 
+                                            app.lsp_installer.is_installing = true;
                                             let shell = std::env::var("SHELL")
                                                 .unwrap_or_else(|_| "/bin/bash".to_string());
                                             let exec_result = std::process::Command::new(&shell)
                                                 .arg("-c")
                                                 .arg(&install_cmd)
-                                                .status();
-
+                                                .output();
                                             match exec_result {
-                                                Ok(exit_status) => {
-                                                    if exit_status.success() {
+                                                Ok(output) => {
+                                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                                    let mut combined_output = String::new();
+
+                                                    if !stdout.trim().is_empty() {
+                                                        combined_output.push_str("[OUT]\n");
+                                                        combined_output.push_str(&stdout);
+                                                        combined_output.push('\n');
+                                                    }
+
+                                                    if !stderr.trim().is_empty() {
+                                                        combined_output.push_str("[ERR]\n");
+                                                        combined_output.push_str(&stderr);
+                                                        combined_output.push('\n');
+                                                    }
+
+                                                    if output.status.success() {
                                                         app.status_message = format!(
                                                             "{} installed successfully!",
                                                             selected_lsp.display_name
                                                         );
+                                                        combined_output.push_str(&format!(
+                                                            "SUCCESS: {} installed successfully.",
+                                                            selected_lsp.display_name
+                                                        ));
                                                     } else {
                                                         app.status_message = format!(
                                                             "Installation of {} failed with exit code: {:?}",
                                                             selected_lsp.display_name,
-                                                            exit_status.code()
+                                                            output.status.code()
                                                         );
+                                                        combined_output.push_str(&format!(
+                                                            "FAILED: {} install exited with code {:?}.",
+                                                            selected_lsp.display_name,
+                                                            output.status.code()
+                                                        ));
                                                     }
+
+                                                    if combined_output.trim().is_empty() {
+                                                        combined_output
+                                                            .push_str("No installer output captured.");
+                                                    }
+
+                                                    app.lsp_installer.install_output = Some(combined_output);
                                                 }
                                                 Err(e) => {
                                                     app.status_message =
                                                         format!("Failed to start install: {}", e);
+                                                    app.lsp_installer.install_output = Some(format!(
+                                                        "FAILED: could not start install command.\n{}",
+                                                        e
+                                                    ));
                                                 }
                                             }
+                                            app.lsp_installer.is_installing = false;
                                             app.lsp_installer.is_open = false;
                                             app.input_mode = InputMode::Normal;
                                             app.check_lsp_availability();
@@ -2343,7 +2453,7 @@ async fn run_app<B: Backend>(
                                                         id: 0,
                                                         name: clean_name.to_string(),
                                                         path: path.clone(),
-                                                        category: category,
+                                                        category,
                                                         is_expanded: true,
                                                         sort_order: 0,
                                                         parent_id: None,
@@ -2398,7 +2508,7 @@ async fn run_app<B: Backend>(
                                                     app.sessions = sessions;
                                                 }
                                                 app.status_message =
-                                                    format!("Session moved to group");
+                                                    "Session moved to group".to_string();
                                                 app.refresh_session_entries();
                                                 app.refresh_dash_session_entries();
                                             }
@@ -2597,9 +2707,7 @@ async fn run_app<B: Backend>(
                                     InputMode::NewSessionPath => app.new_session_path.push(c),
                                     InputMode::NewSessionTool => {
                                         // Cycle tools
-                                        let tools = vec![
-                                            "claude", "gemini", "shell", "codex", "opencode", "amp",
-                                        ];
+                                        let tools = ["claude", "gemini", "shell", "codex", "opencode", "amp"];
                                         if let Some(pos) =
                                             tools.iter().position(|&t| t == app.new_session_tool)
                                         {
@@ -2681,7 +2789,7 @@ async fn run_app<B: Backend>(
                                                 // Group delete logic
                                                 if let Some(path) = app.target_group_path.take() {
                                                     let _ = svc.delete_group(&path);
-                                                    app.status_message = format!("Group deleted");
+                                                    app.status_message = "Group deleted".to_string();
                                                     if let Ok(groups) = svc.list_session_groups() {
                                                         app.groups = groups;
                                                     }
@@ -2723,14 +2831,14 @@ async fn run_app<B: Backend>(
                                         HubFocus::Search => HubFocus::Rename,
                                     };
                                 }
-                                InputMode::Normal if app.tab_index == 0 => {
+                                InputMode::Normal if app.tab_index == tabs::DASHBOARD => {
                                     app.dash_focus = match app.dash_focus {
                                         DashFocus::Sessions => DashFocus::Mcp,
                                         DashFocus::Mcp => DashFocus::Tabs,
                                         DashFocus::Tabs => DashFocus::Sessions,
                                     };
                                 }
-                                InputMode::Normal if app.tab_index == 4 => {
+                                InputMode::Normal if app.tab_index == tabs::CONDUCTOR => {
                                     app.conductor.output_focused = !app.conductor.output_focused;
                                 }
                                 _ => {}
@@ -2755,19 +2863,19 @@ async fn run_app<B: Backend>(
                                         HubFocus::Search => HubFocus::Group,
                                     };
                                 }
-                                InputMode::Normal if app.tab_index == 0 => {
+                                InputMode::Normal if app.tab_index == tabs::DASHBOARD => {
                                     app.dash_focus = match app.dash_focus {
                                         DashFocus::Sessions => DashFocus::Tabs,
                                         DashFocus::Mcp => DashFocus::Sessions,
                                         DashFocus::Tabs => DashFocus::Mcp,
                                     };
                                 }
-                                InputMode::Normal if app.tab_index == 4 => {
+                                InputMode::Normal if app.tab_index == tabs::CONDUCTOR => {
                                     app.conductor.output_focused = !app.conductor.output_focused;
                                 }
                                 _ => {}
                             },
-                            KeyCode::Down if app.tab_index != 4 => {
+                            KeyCode::Down if app.tab_index != tabs::CONDUCTOR => {
                                 if app.input_mode == InputMode::SessionSwitcher {
                                     let i = match app.switcher_state.selected() {
                                         Some(i) => {
@@ -2897,8 +3005,8 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == tabs::LSPS {
-                                    // LSPs - cycle through sections (formerly Capabilities)
+                                } else if app.tab_index == tabs::MAESTERCLAW {
+                                    // MaesterClaw - cycle through sections
                                     app.capabilities_section = match app.capabilities_section {
                                         Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::McpServers),
                                         Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::Sandbox),
@@ -2917,7 +3025,7 @@ async fn run_app<B: Backend>(
                                 }
                                 app.scroll = app.scroll.saturating_add(1);
                             }
-                            KeyCode::Up if app.tab_index != 4 => {
+                            KeyCode::Up if app.tab_index != tabs::CONDUCTOR => {
                                 if app.input_mode == InputMode::McpMenu {
                                     app.mcp_menu_option = match app.mcp_menu_option {
                                         McpOption::Start => McpOption::Remove,
@@ -3035,8 +3143,8 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == tabs::LSPS {
-                                    // LSPs - cycle through sections (reverse)
+                                } else if app.tab_index == tabs::MAESTERCLAW {
+                                    // MaesterClaw - cycle through sections (reverse)
                                     app.capabilities_section = match app.capabilities_section {
                                         Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                         Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
@@ -3151,6 +3259,45 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = tabs::KRUSTOP,
                             (KeyModifiers::ALT, KeyCode::Char('9')) => app.tab_index = tabs::LSPS,
                             (KeyModifiers::ALT, KeyCode::Char('0')) => app.tab_index = tabs::SETTINGS,
+                            // 3b. MaesterClaw setup wizard controls
+                            (KeyModifiers::NONE, KeyCode::Char('w'))
+                                if app.tab_index == tabs::MAESTERCLAW =>
+                            {
+                                if app.maesterclaw_setup.is_open {
+                                    app.close_maesterclaw_setup();
+                                    app.status_message = "MaesterClaw setup wizard closed".to_string();
+                                } else {
+                                    app.open_maesterclaw_setup();
+                                    app.status_message =
+                                        "MaesterClaw setup wizard opened (Left/Right/Enter to navigate)"
+                                            .to_string();
+                                }
+                            }
+                            (_, KeyCode::Esc)
+                                if app.tab_index == tabs::MAESTERCLAW
+                                    && app.maesterclaw_setup.is_open =>
+                            {
+                                app.close_maesterclaw_setup();
+                            }
+                            (_, KeyCode::Right)
+                                if app.tab_index == tabs::MAESTERCLAW
+                                    && app.maesterclaw_setup.is_open =>
+                            {
+                                app.advance_maesterclaw_setup();
+                            }
+                            (_, KeyCode::Left)
+                                if app.tab_index == tabs::MAESTERCLAW
+                                    && app.maesterclaw_setup.is_open =>
+                            {
+                                app.rewind_maesterclaw_setup();
+                            }
+                            (_, KeyCode::Enter)
+                                if app.tab_index == tabs::MAESTERCLAW
+                                    && app.maesterclaw_setup.is_open =>
+                            {
+                                app.advance_maesterclaw_setup();
+                            }
+
 
                             // 4. Conductor Catch-All
                             _ if app.tab_index == tabs::CONDUCTOR => {
@@ -3234,7 +3381,7 @@ async fn run_app<B: Backend>(
                             }
 
                             // 5b. Ralph Loop Keys for Conductor (explicit handling for s, p, r, ?)
-                            (KeyModifiers::NONE, KeyCode::Char('s')) if app.tab_index == 4 => {
+                            (KeyModifiers::NONE, KeyCode::Char('s')) if app.tab_index == tabs::CONDUCTOR => {
                                 // Start/Run track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3314,7 +3461,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == 4 => {
+                            (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == tabs::CONDUCTOR => {
                                 // Pause track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3394,7 +3541,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == 4 => {
+                            (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == tabs::CONDUCTOR => {
                                 // Resume track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3474,7 +3621,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == 4 => {
+                            (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == tabs::CONDUCTOR => {
                                 // Show status/help
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3555,20 +3702,20 @@ async fn run_app<B: Backend>(
                             }
 
                             (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
-                                if app.tab_index == 5 {
+                                if app.tab_index == tabs::MEMORY {
                                     app.input_mode = InputMode::MemorySearch;
                                 }
                             }
                             (KeyModifiers::CONTROL, KeyCode::Char('l')) => {
-                                if app.tab_index == 5 {
+                                if app.tab_index == tabs::MEMORY {
                                     app.memory_query.clear();
                                     app.refresh_from_service(&service);
                                 }
                             }
                             (KeyModifiers::NONE, KeyCode::Char('n')) => {
                                 // Memory tab: Start new memory creation
-                                // Handle both tab 5 and 6 (both are memory tabs)
-                                if app.tab_index == 5 || app.tab_index == 6 {
+                                // Use n to create a memory when Memory tab is focused
+                                if app.tab_index == tabs::MEMORY {
                                     app.new_memory_content.clear();
                                     app.new_memory_category.clear();
                                     app.input_mode = InputMode::NewMemoryContent;
@@ -3763,7 +3910,7 @@ async fn run_app<B: Backend>(
                                             _ => {}
                                         }
                                     }
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == tabs::MEMORY {
                                     if let Some(svc) = service.as_ref() {
                                         match svc.sync_memories_from_system() {
                                             Ok(n) => {
@@ -3779,13 +3926,13 @@ async fn run_app<B: Backend>(
                                         }
                                         app.refresh_from_service(&service);
                                     }
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - manual refresh
                                     if app.ktop_state.is_some() {
                                         app.ktop_state.as_mut().unwrap().mark_refreshed();
                                         app.status_message = "Krustop refreshed".to_string();
                                     }
-                                } else if app.tab_index == 7 {
+                                } else if app.tab_index == tabs::LSPS {
                                     // LSPs tab
                                     let scheduled = app.queue_lsp_autostart_for_sessions();
                                     // Use force=true for manual refresh to bypass throttle
@@ -3801,8 +3948,8 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('k')) if app.tab_index != 4 => {
-                                if app.tab_index == 1 {
+                            (_, KeyCode::Char('k')) if app.tab_index != tabs::CONDUCTOR => {
+                                if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(SessionEntry::Session(s)) =
                                             app.session_entries.get(i)
@@ -3811,7 +3958,7 @@ async fn run_app<B: Backend>(
                                             app.input_mode = InputMode::KillConfirm;
                                         }
                                     }
-                                } else if app.tab_index == 0
+                                } else if app.tab_index == tabs::DASHBOARD
                                     && app.dash_focus == DashFocus::Sessions
                                 {
                                     if let Some(session_id) =
@@ -3823,11 +3970,11 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('D') | KeyCode::Char('d'))
-                                if app.tab_index != 4
-                                    && app.tab_index != 6
-                                    && app.tab_index != 7 =>
+                                if app.tab_index != tabs::CONDUCTOR
+                                    && app.tab_index != tabs::KRUSTOP
+                                    && app.tab_index != tabs::LSPS =>
                             {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i) {
                                             match entry {
@@ -3851,7 +3998,7 @@ async fn run_app<B: Backend>(
                                             }
                                         }
                                     }
-                                } else if app.tab_index == 0
+                                } else if app.tab_index == tabs::DASHBOARD
                                     && app.dash_focus == DashFocus::Sessions
                                 {
                                     if let Some((sid, title)) = app
@@ -3866,7 +4013,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('f')) => {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(SessionEntry::Session(s)) =
                                             app.session_entries.get(i)
@@ -3879,7 +4026,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('l')) => {
-                                if app.tab_index == 7 {
+                                if app.tab_index == tabs::LSPS {
                                     // LSPs tab - view logs
                                     if let Some((session_id, lsp_name, _status)) =
                                         app.get_selected_lsp()
@@ -3895,16 +4042,18 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('i')) if app.tab_index == 7 => {
+                            (_, KeyCode::Char('i')) if app.tab_index == tabs::LSPS => {
                                 // LSPs tab - open installer modal
                                 app.lsp_installer.is_open = true;
                                 app.lsp_installer.selected_index = 0;
+                                app.lsp_installer.install_output = None;
                                 app.input_mode = InputMode::LspInstaller;
+                                app.lsp_installer.is_installing = false;
                                 app.status_message =
                                     "LSP Installer - Select an LSP to install".to_string();
                             }
                             // Ktop-specific keybindings (use Alt to avoid conflicts)
-                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == 6 => {
+                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == tabs::KRUSTOP => {
                                 // Ktop tab - pause/resume
                                 if let Some(ref mut ktop) = app.ktop_state {
                                     ktop.toggle_pause();
@@ -3916,7 +4065,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('+') | KeyCode::Char('=')) => {
-                                if app.tab_index == 6 {
+                                if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - increase refresh rate
                                     if let Some(ref mut ktop) = app.ktop_state {
                                         ktop.set_refresh_interval(ktop.refresh_interval_secs + 1);
@@ -3928,7 +4077,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('-') | KeyCode::Char('_')) => {
-                                if app.tab_index == 6 {
+                                if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - decrease refresh rate
                                     if let Some(ref mut ktop) = app.ktop_state {
                                         ktop.set_refresh_interval(
@@ -3942,7 +4091,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Tab) => {
-                                if app.tab_index == 6 {
+                                if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - cycle section focus
                                     if let Some(ref mut ktop) = app.ktop_state {
                                         use crate::tabs::ktop::KtopFocus;
@@ -3958,7 +4107,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (KeyModifiers::ALT | KeyModifiers::SHIFT, KeyCode::BackTab) => {
-                                if app.tab_index == 6 {
+                                if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - reverse cycle section focus
                                     if let Some(ref mut ktop) = app.ktop_state {
                                         use crate::tabs::ktop::KtopFocus;
@@ -3973,8 +4122,8 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (_, KeyCode::Char('d')) if app.tab_index == 7 || app.tab_index == 6 => {
-                                if app.tab_index == 7 {
+                            (_, KeyCode::Char('d')) if app.tab_index == tabs::LSPS => {
+                                if app.tab_index == tabs::LSPS {
                                     // LSPs tab - open diagnostic detail view
                                     app.diagnostic_view.is_open = true;
                                     app.diagnostic_view.selected_index = 0;
@@ -3985,7 +4134,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('S')) => {
-                                if app.tab_index == 6 && app.diagnostic_view.is_open {
+                                if app.tab_index == tabs::LSPS && app.diagnostic_view.is_open {
                                     // Send diagnostics to agent
                                     let project_path = app
                                         .sessions
@@ -4002,7 +4151,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('u') | KeyCode::Char('U')) => {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     let Some(i) = app.session_state.selected() else {
                                         continue;
                                     };
@@ -4058,7 +4207,7 @@ async fn run_app<B: Backend>(
                                             };
                                         }
                                         None => {
-                                            app.status_message = format!("Resume failed");
+                                            app.status_message = "Resume failed".to_string();
                                         }
                                     }
                                 }
@@ -4066,11 +4215,11 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('d'))
                             | (KeyModifiers::ALT, KeyCode::Char('D'))
                             | (KeyModifiers::NONE, KeyCode::Char('d'))
-                                if app.tab_index != 4
-                                    && app.tab_index != 6
-                                    && app.tab_index != 7 =>
+                                if app.tab_index != tabs::CONDUCTOR
+                                    && app.tab_index != tabs::KRUSTOP
+                                    && app.tab_index != tabs::LSPS =>
                             {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i) {
                                             match entry {
@@ -4094,7 +4243,7 @@ async fn run_app<B: Backend>(
                                             }
                                         }
                                     }
-                                } else if app.tab_index == 0
+                                } else if app.tab_index == tabs::DASHBOARD
                                     && app.dash_focus == DashFocus::Sessions
                                 {
                                     if let Some((session_id, title)) = app
@@ -4108,22 +4257,22 @@ async fn run_app<B: Backend>(
                                         );
                                         app.input_mode = InputMode::DeleteConfirm;
                                     }
-                                } else if app.tab_index == 2 {
+                                } else if app.tab_index == tabs::PROJECTS {
                                     // Project list temporary message
                                     app.status_message =
                                         "Project deletion via TUI coming soon in v2.1".to_string();
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('o')) => {
-                                app.tab_index = if app.tab_index == 0 {
-                                    6
+                                app.tab_index = if app.tab_index == tabs::DASHBOARD {
+                                    tabs::SETTINGS
                                 } else {
                                     app.tab_index - 1
                                 };
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 10; // 10 tabs now (including Capabilities)
+                                app.tab_index = (app.tab_index + 1) % 10; // 10 tabs
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
@@ -4156,7 +4305,7 @@ async fn run_app<B: Backend>(
                                     };
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
-                                } else if app.tab_index == 0 {
+                                } else if app.tab_index == tabs::DASHBOARD {
                                     // Dashboard
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
@@ -4178,7 +4327,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 2 {
+                                } else if app.tab_index == tabs::PROJECTS {
                                     // Projects
                                     if app.preview_focused {
                                         app.project_explorer_selected =
@@ -4199,7 +4348,7 @@ async fn run_app<B: Backend>(
                                         app.project_explorer_path = None;
                                         app.project_explorer_selected = 0;
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     // Sessions Tab
                                     let i = match app.session_state.selected() {
                                         Some(i) => {
@@ -4212,7 +4361,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == tabs::MEMORY {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -4225,7 +4374,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == tabs::LSPS {
                                     // LSPs
                                     let i = match app.lsp_state.selected() {
                                         Some(i) => {
@@ -4244,7 +4393,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 9 {
+                                } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Theme,
@@ -4284,7 +4433,7 @@ async fn run_app<B: Backend>(
                                     };
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
-                                } else if app.tab_index == 0 {
+                                } else if app.tab_index == tabs::DASHBOARD {
                                     // Dashboard
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
@@ -4305,7 +4454,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 2 {
+                                } else if app.tab_index == tabs::PROJECTS {
                                     // Projects Tab
                                     if app.preview_focused {
                                         app.project_explorer_selected =
@@ -4329,7 +4478,7 @@ async fn run_app<B: Backend>(
                                         app.project_explorer_path = None;
                                         app.project_explorer_selected = 0;
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     // Sessions Tab
                                     let i = match app.session_state.selected() {
                                         Some(i) => {
@@ -4342,7 +4491,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.session_state.select(Some(i));
-                                } else if app.tab_index == 5 {
+                                } else if app.tab_index == tabs::MEMORY {
                                     // Memory
                                     let i = match app.memory_state.selected() {
                                         Some(i) => {
@@ -4355,7 +4504,7 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == tabs::LSPS {
                                     // LSPs
                                     let i = match app.lsp_state.selected() {
                                         Some(i) => {
@@ -4373,15 +4522,15 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == 8 {
-                                    // Capabilities - cycle through sections (reverse)
+                                } else if app.tab_index == tabs::MAESTERCLAW {
+                                    // MaesterClaw - cycle through sections (reverse)
                                     app.capabilities_section = match app.capabilities_section {
                                         Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                         Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
                                         Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::McpServers),
                                         None => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                     };
-                                } else if app.tab_index == 9 {
+                                } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
                                         SettingsOption::Editor => SettingsOption::Save,
@@ -4394,21 +4543,21 @@ async fn run_app<B: Backend>(
                                 app.scroll = app.scroll.saturating_sub(1);
                             }
                             (_, KeyCode::Char('G')) => {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     app.input_mode = InputMode::NewGroupTitle;
                                     app.rename_buffer.clear();
                                     app.new_group_category.clear();
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('c')) => {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     app.input_mode = InputMode::NewGroupTitle;
                                     app.rename_buffer.clear();
                                     app.new_group_category.clear();
                                 }
                             }
                             (_, KeyCode::Char('m')) => {
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(SessionEntry::Session(s)) =
                                             app.session_entries.get(i)
@@ -4421,13 +4570,13 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('a')) => {
-                                if app.tab_index == 3 {
+                                if app.tab_index == tabs::ANALYSIS {
                                     // Analysis tab
                                     app.input_mode = InputMode::AnalysisPrompt;
                                 }
                             }
                             (_, KeyCode::Right) => {
-                                if app.tab_index == 2 && app.preview_focused {
+                                if app.tab_index == tabs::PROJECTS && app.preview_focused {
                                     if let (Some(_), Some(path)) =
                                         (app.project_state.selected(), &app.project_explorer_path)
                                     {
@@ -4454,7 +4603,7 @@ async fn run_app<B: Backend>(
                                             }
                                         }
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(SessionEntry::Group(g)) =
                                             app.session_entries.get(i)
@@ -4480,7 +4629,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Left) => {
-                                if app.tab_index == 2 && app.preview_focused {
+                                if app.tab_index == tabs::PROJECTS && app.preview_focused {
                                     if let Some(current) = &app.project_explorer_path {
                                         let path = std::path::PathBuf::from(current);
                                         if let Some(parent) = path.parent() {
@@ -4489,7 +4638,7 @@ async fn run_app<B: Backend>(
                                             app.project_explorer_selected = 0;
                                         }
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(SessionEntry::Group(g)) =
                                             app.session_entries.get(i)
@@ -4515,7 +4664,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Backspace)
-                                if app.tab_index == 2 && app.preview_focused =>
+                                if app.tab_index == tabs::PROJECTS && app.preview_focused =>
                             {
                                 if let Some(current) = &app.project_explorer_path {
                                     let path =
@@ -4534,11 +4683,11 @@ async fn run_app<B: Backend>(
                                 app.show_help = true;
                                 app.help_scroll = 0;
                             }
-                            (_, KeyCode::Char('e')) if app.tab_index == 2 => {
+                            (_, KeyCode::Char('e')) if app.tab_index == tabs::PROJECTS => {
                                 app.preview_focused = !app.preview_focused;
                             }
-                            (_, KeyCode::Enter) if app.tab_index != 4 => {
-                                if app.tab_index == 0 {
+                            (_, KeyCode::Enter) if app.tab_index != tabs::CONDUCTOR => {
+                                if app.tab_index == tabs::DASHBOARD {
                                     // Dashboard
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
@@ -4571,7 +4720,7 @@ async fn run_app<B: Backend>(
                                         }
                                         DashFocus::Tabs => {}
                                     }
-                                } else if app.tab_index == 9 {
+                                } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     match app.settings_option {
                                         SettingsOption::Editor => {
@@ -4603,7 +4752,7 @@ async fn run_app<B: Backend>(
                                             app.status_message = "Configuration saved to ~/.config/maestro/config.toml".to_string();
                                         }
                                     }
-                                } else if app.tab_index == 2 {
+                                } else if app.tab_index == tabs::PROJECTS {
                                     // Projects Tab
                                     if let Some(i) = app.project_state.selected() {
                                         let project = &app.projects[i].clone();
@@ -4629,7 +4778,7 @@ async fn run_app<B: Backend>(
                                             }
                                         }
                                     }
-                                } else if app.tab_index == 1 {
+                                } else if app.tab_index == tabs::SESSIONS {
                                     // Sessions Tab
                                     if let Some(i) = app.session_state.selected() {
                                         if let Some(entry) = app.session_entries.get(i).cloned() {
@@ -4745,8 +4894,8 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (_, KeyCode::Char('s')) if app.tab_index != 4 => {
-                                if app.tab_index == 0 {
+                            (_, KeyCode::Char('s')) if app.tab_index != tabs::CONDUCTOR => {
+                                if app.tab_index == tabs::DASHBOARD {
                                     // Dashboard (MCP)
                                     if let Some(i) = app.mcp_state.selected() {
                                         if let Some(mcp) = app.mcp_servers.get(i) {
@@ -4755,7 +4904,7 @@ async fn run_app<B: Backend>(
                                             app.mcp_menu_option = McpOption::Start;
                                         }
                                     }
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == tabs::LSPS {
                                     // LSPs tab
                                     // Toggle LSP start/stop
                                     if let Some((session_id, lsp_name, status)) =
@@ -4776,7 +4925,7 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Char('x')) => {
-                                if app.tab_index == 0 {
+                                if app.tab_index == tabs::DASHBOARD {
                                     // Remove MCP
                                     if let Some(i) = app.mcp_state.selected() {
                                         let name = app.mcp_servers[i].name.clone();
@@ -4791,7 +4940,7 @@ async fn run_app<B: Backend>(
                             }
                             (_, KeyCode::Char('R')) => {
                                 // Sessions tab: restart the selected session (shell/tool fresh).
-                                if app.tab_index == 1 {
+                                if app.tab_index == tabs::SESSIONS {
                                     let Some(i) = app.session_state.selected() else {
                                         continue;
                                     };
@@ -4847,10 +4996,10 @@ async fn run_app<B: Backend>(
                                             };
                                         }
                                         None => {
-                                            app.status_message = format!("Restart failed");
+                                            app.status_message = "Restart failed".to_string();
                                         }
                                     }
-                                } else if app.tab_index == 6 {
+                                } else if app.tab_index == tabs::LSPS {
                                     // LSPs tab
                                     // Restart LSP
                                     if let Some((session_id, lsp_name, _status)) =
@@ -4911,19 +5060,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
         .split(frame.area());
 
     // Header with tabs
-    let is_focused = app.tab_index == 0 && app.dash_focus == DashFocus::Tabs;
-    let tabs = Tabs::new(vec![
-        "Dashboard",
-        "Sessions",
-        "Projects",
-        "Analysis",
-        "Conductor",
-        "Memory",
-        "Ktop",
-        "LSPs",
-        "Capabilities",
-        "Settings",
-    ])
+    let is_focused = app.tab_index == tabs::DASHBOARD && app.dash_focus == DashFocus::Tabs;
+    let tabs = Tabs::new(tabs::all_titles())
     .block(
         Block::default()
             .borders(Borders::ALL)
@@ -4945,21 +5083,21 @@ fn ui(frame: &mut Frame, app: &mut App) {
     frame.render_widget(tabs, chunks[0]);
 
     match app.tab_index {
-        0 => render_dashboard(frame, chunks[1], app),
-        1 => render_sessions(frame, chunks[1], app),
-        2 => render_projects(frame, chunks[1], app),
-        3 => render_analysis(frame, chunks[1], app),
-        4 => {
+        tabs::DASHBOARD => render_dashboard(frame, chunks[1], app),
+        tabs::MAESTERCLAW => crate::tabs::capabilities::render_capabilities(frame, app),
+        tabs::SESSIONS => render_sessions(frame, chunks[1], app),
+        tabs::PROJECTS => render_projects(frame, chunks[1], app),
+        tabs::CONDUCTOR => {
             let theme = app.theme();
             // Sync active sessions from Sessions tab into conductor tracks
             app.conductor.sync_sessions_as_tracks(&app.sessions);
             crate::conductor::render_conductor(frame, chunks[1], &mut app.conductor, &theme);
         }
-        5 => render_memory(frame, chunks[1], app),
-        6 => crate::tabs::ktop::render_ktop(frame, chunks[1], app),
-        7 => render_lsps(frame, chunks[1], app),
-        8 => crate::tabs::capabilities::render_capabilities(frame, app),
-        9 => render_settings(frame, app),
+        tabs::MEMORY => render_memory(frame, chunks[1], app),
+        tabs::ANALYSIS => render_analysis(frame, chunks[1], app),
+        tabs::KRUSTOP => crate::tabs::ktop::render_ktop(frame, chunks[1], app),
+        tabs::LSPS => render_lsps(frame, chunks[1], app),
+        tabs::SETTINGS => render_settings(frame, app),
         _ => {}
     }
     // Footer
@@ -4972,7 +5110,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         ),
         Span::raw(" Scroll  "),
         Span::styled(
-            " Alt+1-8 ",
+            " Alt+1-0 ",
             Style::default().bg(Color::Cyan).fg(Color::Black),
         ),
         Span::raw(" Tabs  "),

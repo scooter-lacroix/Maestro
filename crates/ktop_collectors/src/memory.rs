@@ -4,8 +4,8 @@
 
 use crate::error::Result;
 use crate::types::MemoryMetrics;
-use sysinfo::System;
 use std::time::Duration;
+use sysinfo::System;
 
 /// Default refresh interval for memory metrics
 const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -172,7 +172,9 @@ mod tests {
     #[test]
     fn test_memory_collector_collect() {
         let mut collector = MemoryCollector::new();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
 
         // Total memory should be positive on any real system
         assert!(metrics.total_bytes > 0);
@@ -188,7 +190,7 @@ mod tests {
             .collect_usage_percent()
             .expect("Failed to collect memory usage");
 
-        assert!(usage >= 0.0 && usage <= 100.0);
+        assert!((0.0..=100.0).contains(&usage));
     }
 
     #[test]
@@ -198,7 +200,7 @@ mod tests {
             .collect_swap_usage_percent()
             .expect("Failed to collect swap usage");
 
-        assert!(swap_usage >= 0.0 && swap_usage <= 100.0);
+        assert!((0.0..=100.0).contains(&swap_usage));
     }
 
     #[test]
@@ -253,7 +255,9 @@ mod tests {
     fn test_memory_metrics_timestamp() {
         let mut collector = MemoryCollector::new();
         let before = std::time::Instant::now();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
         let after = std::time::Instant::now();
 
         assert!(metrics.timestamp >= before);
@@ -263,7 +267,9 @@ mod tests {
     #[test]
     fn test_memory_metrics_age() {
         let mut collector = MemoryCollector::new();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
 
         std::thread::sleep(Duration::from_millis(10));
         assert!(metrics.age() >= Duration::from_millis(10));
@@ -272,19 +278,23 @@ mod tests {
     #[test]
     fn test_memory_metrics_usage_percent() {
         let mut collector = MemoryCollector::new();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
 
         let usage = metrics.usage_percent();
-        assert!(usage >= 0.0 && usage <= 100.0);
+        assert!((0.0..=100.0).contains(&usage));
     }
 
     #[test]
     fn test_memory_metrics_swap_usage_percent() {
         let mut collector = MemoryCollector::new();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
 
         let swap_usage = metrics.swap_usage_percent();
-        assert!(swap_usage >= 0.0 && swap_usage <= 100.0);
+        assert!((0.0..=100.0).contains(&swap_usage));
     }
 
     #[test]
@@ -299,14 +309,18 @@ mod tests {
         let mut collector = MemoryCollector::new();
 
         // First collection
-        let metrics1 = collector.collect().expect("Failed to collect memory metrics");
+        let metrics1 = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
         assert!(metrics1.total_bytes > 0);
 
         // Wait to ensure refresh interval passes
         std::thread::sleep(Duration::from_secs(3));
 
         // Second collection
-        let metrics2 = collector.collect().expect("Failed to collect memory metrics");
+        let metrics2 = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
         assert!(metrics2.total_bytes > 0);
 
         // Total memory should be consistent
@@ -324,7 +338,9 @@ mod tests {
     #[test]
     fn test_memory_consistency() {
         let mut collector = MemoryCollector::new();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
 
         // Used + Available should be approximately equal to total
         let used_plus_available = metrics.used_bytes + metrics.available_bytes;
@@ -341,7 +357,9 @@ mod tests {
     #[test]
     fn test_swap_less_than_total() {
         let mut collector = MemoryCollector::new();
-        let metrics = collector.collect().expect("Failed to collect memory metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect memory metrics");
 
         // Used swap should not exceed total swap
         assert!(metrics.swap_used_bytes <= metrics.swap_total_bytes);

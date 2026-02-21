@@ -51,7 +51,11 @@ impl Modal for SelectorModal {
 
         match key.code {
             KeyCode::Enter => {
-                let value = self.items.get(self.selected).map(|item| item.value.clone()).unwrap_or_default();
+                let value = self
+                    .items
+                    .get(self.selected)
+                    .map(|item| item.value.clone())
+                    .unwrap_or_default();
                 self.visible = false;
                 Some(Ok(value))
             }
@@ -213,7 +217,9 @@ impl SelectorModal {
 
     /// Get the value of the currently highlighted item.
     pub fn selected_value(&self) -> Option<&str> {
-        self.items.get(self.selected).map(|item| item.value.as_str())
+        self.items
+            .get(self.selected)
+            .map(|item| item.value.as_str())
     }
 }
 
@@ -260,23 +266,15 @@ pub fn render_selector_modal(
                 Style::default().fg(theme.fg_secondary)
             };
 
-            let mut lines = vec![Line::from(Span::styled(
-                format!(" {} ", item.label),
-                style,
-            ))];
+            let mut lines = vec![Line::from(Span::styled(format!(" {} ", item.label), style))];
 
             if let Some(ref desc) = item.description {
                 let desc_style = if is_selected {
-                    Style::default()
-                        .fg(theme.fg_muted)
-                        .bg(theme.bg_highlight)
+                    Style::default().fg(theme.fg_muted).bg(theme.bg_highlight)
                 } else {
                     Style::default().fg(theme.fg_dim)
                 };
-                lines.push(Line::from(Span::styled(
-                    format!("   {}", desc),
-                    desc_style,
-                )));
+                lines.push(Line::from(Span::styled(format!("   {}", desc), desc_style)));
             }
 
             ListItem::new(lines)
@@ -293,10 +291,9 @@ pub fn render_selector_modal(
         selector_area.width - 2,
         1,
     );
-    let help_text =
-        Paragraph::new("↑/↓: Navigate • Enter: Select • Esc: Cancel")
-            .style(Style::default().fg(theme.fg_dim))
-            .alignment(Alignment::Center);
+    let help_text = Paragraph::new("↑/↓: Navigate • Enter: Select • Esc: Cancel")
+        .style(Style::default().fg(theme.fg_dim))
+        .alignment(Alignment::Center);
     f.render_widget(help_text, help_area);
 }
 

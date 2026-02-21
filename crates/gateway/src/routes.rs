@@ -16,6 +16,28 @@ use tracing::debug;
 
 use crate::state::GatewayState;
 
+/// Generate a random number in the range [0, upper) using rejection sampling
+/// to avoid modulo bias.
+///
+/// This ensures a uniform distribution even when the range doesn't evenly
+/// divide the random number generator's output space.
+fn random_uniform(upper: u32) -> u32 {
+    assert!(upper > 0, "upper bound must be positive");
+    assert!(upper <= u32::MAX / 2, "upper bound too large for rejection sampling");
+
+    // Calculate the threshold for rejection
+    // We want to reject any value >= threshold to avoid bias
+    let threshold = u32::MAX - (u32::MAX % upper);
+
+    loop {
+        let val = rand::random::<u32>();
+        if val < threshold {
+            return val % upper;
+        }
+        // Reject and retry to avoid bias
+    }
+}
+
 /// Health check response
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -146,8 +168,8 @@ pub async fn handle_pair(
 
     // Generate a pairing code if not provided
     let code = req.code.unwrap_or_else(|| {
-        // Generate 6-digit code
-        format!("{:06}", rand::random::<u32>() % 1_000_000)
+        // Generate 6-digit code using rejection sampling for uniform distribution
+        format!("{:06}", random_uniform(1_000_000))
     });
 
     // In a real implementation, this would:
@@ -342,4 +364,79 @@ pub async fn handle_dashboard_approvals(
         "pending": [],
         "count": 0,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_random_uniform_range() {
+        // Test that generated values are within the expected range
+        for _ in 0..1000 {
+            let val = random_uniform(100);
+            assert!(val < 100, "Value {} should be less than 100", val);
+        }
+
+        // Test with 1,000,000 (pairing code range)
+        for _ in 0..100 {
+            let val = random_uniform(1_000_000);
+            assert!(val < 1_000_000, "Value {} should be less than 1,000,000", val);
+        }
+    }
+
+    #[test]
+    fn test_random_uniform_no_bias() {
+        // Statistical test for uniform distribution
+        // For a power-of-2 range, modulo bias doesn't occur
+        // For 1,000,000, we use rejection sampling to avoid bias
+        const SAMPLES: usize = 100_000;
+        const BINS: usize = 10;
+        const RANGE: u32 = 1_000_000;
+
+        let mut bins = [0usize; BINS];
+        let bin_size = (RANGE as usize) / BINS;
+
+        for _ in 0..SAMPLES {
+            let val = random_uniform(RANGE) as usize;
+            let bin = val / bin_size;
+            if bin < BINS {
+                bins[bin] += 1;
+            }
+        }
+
+        // Each bin should have approximately SAMPLES / BINS values
+        // Allow for some variance (Chi-square test would be more rigorous)
+        let expected = SAMPLES / BINS;
+        let tolerance = (expected as f64) * 0.15; // 15% tolerance
+
+        for (i, count) in bins.iter().enumerate() {
+            let diff = (*count as f64) - (expected as f64);
+            assert!(
+                diff.abs() < tolerance,
+                "Bin {} has {} samples, expected around {} (diff: {:.2})",
+                i, count, expected, diff
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "upper bound must be positive")]
+    fn test_random_uniform_zero_panics() {
+        random_uniform(0);
+    }
+
+    #[test]
+    fn test_random_uniform_edge_cases() {
+        // Test with upper = 1 (should always return 0)
+        for _ in 0..10 {
+            assert_eq!(random_uniform(1), 0);
+        }
+
+        // Test with upper = 2 (should return 0 or 1)
+        for _ in 0..100 {
+            let val = random_uniform(2);
+            assert!(val < 2);
+        }
+    }
 }

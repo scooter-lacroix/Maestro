@@ -108,7 +108,7 @@ pub fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
                 Line::from("  Tip: LSP logs may not be enabled for this server."),
             ]
         } else {
-            app.lsp_log_content.lines().map(|l| Line::from(l)).collect()
+            app.lsp_log_content.lines().map(Line::from).collect()
         };
         let scroll_offset = (app.lsp_log_scroll, 0);
         (title, content, scroll_offset)

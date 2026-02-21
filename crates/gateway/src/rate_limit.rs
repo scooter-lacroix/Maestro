@@ -83,7 +83,7 @@ impl SlidingWindowRateLimiter {
         let mut requests = self.requests.lock();
 
         // Get or create entry for this key
-        let entry = requests.entry(key.to_string()).or_insert_with(Vec::new);
+        let entry = requests.entry(key.to_string()).or_default();
 
         // Remove expired timestamps
         entry.retain(|&ts| ts > window_start);

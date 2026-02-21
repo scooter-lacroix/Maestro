@@ -101,17 +101,12 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    info!(
-        "Starting Maestro LSP-MCP Bridge v2.5.0");
+    info!("Starting Maestro LSP-MCP Bridge v2.5.0");
     let lsp_type: LspType = args.lsp.into();
     info!("LSP: {:?}, Project: {}", lsp_type, args.project);
 
     // Create the bridge
-    let bridge = McpBridge::new_with_session(
-        lsp_type,
-        &args.project,
-        args.session.clone(),
-    );
+    let bridge = McpBridge::new_with_session(lsp_type, &args.project, args.session.clone());
 
     // Run the MCP server (stdio-based)
     if let Err(e) = run_mcp_server(bridge, &args.project, args.session).await {
@@ -252,7 +247,12 @@ async fn run_mcp_server(
                 {
                     Ok(result) => result,
                     Err(e) => {
-                        send_error(&mut stdout, -32603, &format!("Tool error: {}", e), id.as_ref())?;
+                        send_error(
+                            &mut stdout,
+                            -32603,
+                            &format!("Tool error: {}", e),
+                            id.as_ref(),
+                        )?;
                         continue;
                     }
                 }
@@ -293,12 +293,7 @@ async fn run_mcp_server(
 }
 
 /// Send a JSON-RPC error response
-fn send_error(
-    stdout: &mut io::Stdout,
-    code: i64,
-    message: &str,
-    id: Option<&Value>,
-) -> Result<()> {
+fn send_error(stdout: &mut io::Stdout, code: i64, message: &str, id: Option<&Value>) -> Result<()> {
     let response = json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -327,7 +322,8 @@ mod tests {
 
     #[test]
     fn test_args_default() {
-        let args = Args::try_parse_from(["maestro-lsp-mcp-bridge", "--project", "/tmp/test"]).unwrap();
+        let args =
+            Args::try_parse_from(["maestro-lsp-mcp-bridge", "--project", "/tmp/test"]).unwrap();
         assert_eq!(args.lsp, LspCliType::Rust);
         assert_eq!(args.project, "/tmp/test");
         assert!(args.session.is_none());

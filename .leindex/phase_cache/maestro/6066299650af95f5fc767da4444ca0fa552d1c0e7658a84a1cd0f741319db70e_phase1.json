@@ -1,0 +1,38 @@
+{
+  "project_id": "maestro",
+  "generation": "6066299650af95f5fc767da4444ca0fa552d1c0e7658a84a1cd0f741319db70e",
+  "phase": 1,
+  "options_hash": null,
+  "payload": {
+    "total_files": 921,
+    "parsed_files": 154,
+    "parse_failures": 0,
+    "signatures": 3142,
+    "language_distribution": {
+      "Go": 1111,
+      "Rust": 8648,
+      "Python": 7234,
+      "external": 7067,
+      "TypeScript": 144,
+      "JavaScript": 14
+    },
+    "parser_completeness": [
+      {
+        "language": "python",
+        "signatures": 3083,
+        "calls_ratio": 0.80376256,
+        "imports_ratio": 0.98929614,
+        "byte_range_ratio": 1.0,
+        "score": 0.93101954
+      },
+      {
+        "language": "rust",
+        "signatures": 59,
+        "calls_ratio": 0.33898306,
+        "imports_ratio": 1.0,
+        "byte_range_ratio": 0.6779661,
+        "score": 0.6723164
+      }
+    ]
+  }
+}

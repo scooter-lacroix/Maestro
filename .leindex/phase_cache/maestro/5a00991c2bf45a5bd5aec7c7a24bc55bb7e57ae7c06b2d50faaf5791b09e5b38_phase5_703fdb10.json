@@ -1,0 +1,29 @@
+{
+  "project_id": "maestro",
+  "generation": "5a00991c2bf45a5bd5aec7c7a24bc55bb7e57ae7c06b2d50faaf5791b09e5b38",
+  "phase": 5,
+  "options_hash": "703fdb10",
+  "payload": {
+    "recommendations": [
+      {
+        "message": "Resolve 7067 external import edges to improve dependency certainty",
+        "priority": 0.95,
+        "confidence": "External",
+        "rationale": "Unresolved imports lower phase-2 confidence and reduce graph precision"
+      },
+      {
+        "message": "Prioritize test/refactor work in top focus file: /run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs",
+        "priority": 0.8,
+        "confidence": "Heuristic",
+        "rationale": "Phase-3 forward impact indicates high fan-out from selected entry points"
+      },
+      {
+        "message": "Review hotspot .venv/lib/python3.14/site-packages/pydantic/_internal/_generate_schema.py:__module__ (complexity=1, impact=410)",
+        "priority": 0.4925,
+        "confidence": "Heuristic",
+        "rationale": "HybridScorer combined complexity + graph impact + textual risk markers"
+      }
+    ],
+    "public_symbol_hints": 0
+  }
+}

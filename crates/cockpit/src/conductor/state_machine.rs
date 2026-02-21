@@ -114,7 +114,15 @@ impl ConductorState {
                 self.lsp_diagnostics_errors.clear();
                 self.lsp_diagnostics_warnings.clear();
             }
-            (_, ConductorEvent::DiagnosticsCompleted { error_count, warning_count, diagnostics, .. }) => {
+            (
+                _,
+                ConductorEvent::DiagnosticsCompleted {
+                    error_count,
+                    warning_count,
+                    diagnostics,
+                    ..
+                },
+            ) => {
                 // Store error diagnostics
                 for diag in diagnostics {
                     // Simple heuristic: ERROR/WARN in the formatted string
@@ -143,7 +151,8 @@ impl ConductorState {
             }
             (_, ConductorEvent::DiagnosticsFailed { error }) => {
                 tracing::warn!("LSP diagnostics failed: {}", error);
-                self.current_stderr.push_str(&format!("[!] LSP diagnostic check failed: {}\n", error));
+                self.current_stderr
+                    .push_str(&format!("[!] LSP diagnostic check failed: {}\n", error));
             }
             (_, ConductorEvent::LspStatusUpdated { lsp_servers }) => {
                 self.running_lsp_servers = lsp_servers.clone();

@@ -224,16 +224,20 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
 else
     SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 fi
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
 
-if [ -z "$SCRIPT_DIR" ] || [ ! -d "$SCRIPT_DIR/maestro/leindex/rust" ]; then
+if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/maestro/leindex/rust" ]; then
     echo -e "${Y}  [!] Running from pipe — cloning Maestro repository...${NC}"
     TMPDIR="${TMPDIR:-/tmp}"
     REPO_TMP="$(mktemp -d "$TMPDIR/maestro-XXXXXX")"
-    git clone --depth 1 https://github.com/scooter-lacroix/Maestro.git "$REPO_TMP/Maestro"
-    SCRIPT_DIR="$REPO_TMP/Maestro"
+    # Default branch is v2.5, but can be overridden with MAESTRO_BRANCH env var
+    MAESTRO_BRANCH="${MAESTRO_BRANCH:-v2.5}"
+    echo -e "${C}    Cloning branch: ${MAESTRO_BRANCH}${NC}"
+    git clone --depth 1 --branch "$MAESTRO_BRANCH" https://github.com/scooter-lacroix/Maestro.git "$REPO_TMP/Maestro"
+    REPO_ROOT="$REPO_TMP/Maestro"
 fi
 
-cd "$SCRIPT_DIR/maestro/leindex/rust"
+cd "$REPO_ROOT/maestro/leindex/rust"
 
 # Build and Run the Conductor Wizard
 echo -e "${G}    Launching Maestro Conductor Wizard...${NC}"

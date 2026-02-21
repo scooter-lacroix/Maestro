@@ -4,14 +4,18 @@ Pi-Mono Hook for Nexus Memory System
 This module provides the hook implementation for pi-mono, a TypeScript/Node.js
 based coding agent with subagent support.
 
-Pi-Mono CLI: /home/stan/pi-mono/pi
+Pi-Mono CLI: Found via PATH or user-local installation
 Main package: packages/coding-agent/
+
+Portability: This module uses PATH-first discovery with XDG-compliant paths.
+No hardcoded absolute paths are used.
 """
 
 import asyncio
 import json
 import os
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -23,21 +27,22 @@ from .base import AgentHook, HookResult
 class PiMonoHook(AgentHook):
     """
     Hook for extracting memory from pi-mono session execution.
-    
+
     Pi-mono is a TypeScript/Node.js based coding agent that provides
     subagent workflows with parallel, chain, and single execution modes.
-    
-    Detection paths:
-    - /home/stan/pi-mono/pi (development)
-    - ~/.local/bin/pi
-    - /usr/local/bin/pi
-    - $PATH
-    
+
+    Detection uses PATH-first discovery:
+    1. $PI_MONO_PATH environment variable (if set)
+    2. System PATH (via which command)
+    3. XDG_BIN_HOME (~/.local/bin)
+    4. ~/.cargo/bin
+    5. ~/bin
+
     Session files:
     - .pi/sessions/ - Session history
     - .pi/logs/ - Execution logs
     """
-    
+
     def __init__(self) -> None:
         super().__init__()
         self.agent_type = "pi-mono"
@@ -45,43 +50,49 @@ class PiMonoHook(AgentHook):
         self._session_dir: Optional[Path] = None
         self._active_session_data: Dict[str, Any] = {}
         self._detect_installation()
-    
+
     def _detect_installation(self) -> None:
-        """Detect pi-mono installation and set up paths."""
-        # Check common locations for pi-mono
+        """Detect pi-mono installation and set up paths using PATH-first discovery."""
+        # 1. Check custom path via environment variable
+        custom_path = os.environ.get("PI_MONO_PATH")
+        if custom_path:
+            path = Path(custom_path)
+            if path.exists() and os.access(path, os.X_OK):
+                self._executable_path = path
+                logger.info(f"Found pi-mono via PI_MONO_PATH: {path}")
+                return
+
+        # 2. Check PATH using which
+        which_result = shutil.which("pi")
+        if which_result:
+            self._executable_path = Path(which_result)
+            logger.info(f"Found pi-mono in PATH: {self._executable_path}")
+            return
+
+        # 3. Check user-local installation paths (XDG-compliant, no hardcoded paths)
+        home = Path.home()
+        xdg_bin_home = os.environ.get("XDG_BIN_HOME", str(home / ".local/bin"))
+
         possible_paths = [
-            Path("/home/stan/pi-mono/pi"),  # Development path
-            Path.home() / ".local/bin/pi",
-            Path.home() / "bin/pi",
-            Path("/usr/local/bin/pi"),
-            Path("/usr/bin/pi"),
+            Path(xdg_bin_home) / "pi",
+            home / ".local/bin/pi",
+            home / ".cargo/bin/pi",
+            home / "bin/pi",
         ]
-        
+
         for path in possible_paths:
             if path.exists() and os.access(path, os.X_OK):
                 self._executable_path = path
                 logger.info(f"Found pi-mono at: {path}")
                 break
-        
+
         if self._executable_path is None:
-            # Try to find in PATH
-            try:
-                result = subprocess.run(
-                    ["which", "pi"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if result.returncode == 0:
-                    self._executable_path = Path(result.stdout.strip())
-                    logger.info(f"Found pi-mono in PATH: {self._executable_path}")
-            except Exception as e:
-                logger.warning(f"Failed to find pi-mono in PATH: {e}")
-        
+            logger.warning("pi-mono not found in PATH or common locations")
+
         # Set up session directory
         if self._executable_path:
             # Sessions are typically in .pi directory relative to home
-            pi_dir = Path.home() / ".pi"
+            pi_dir = home / ".pi"
             if pi_dir.exists():
                 self._session_dir = pi_dir
     

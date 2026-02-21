@@ -15,7 +15,7 @@ use tokio::time::timeout;
 
 /// Allowed tools for execution (security allowlist)
 const ALLOWED_TOOLS: &[&str] = &[
-    "claude", "gemini", "qwen", "opencode", "maestro", "pi",    // Pi-Mono CLI
+    "claude", "gemini", "qwen", "opencode", "iflow", "maestro", "pi", // Pi-Mono CLI
     "amp",   // Amp CLI - first-class integration
     "codex", // Codex CLI - first-class integration
     "droid", // Droid CLI - first-class integration
@@ -114,11 +114,7 @@ pub struct CliRunner {
 }
 
 impl CliRunner {
-    pub fn new(
-        config: AgentConfig,
-        working_dir: PathBuf,
-        iteration_timeout_secs: u64,
-    ) -> Self {
+    pub fn new(config: AgentConfig, working_dir: PathBuf, iteration_timeout_secs: u64) -> Self {
         Self {
             config,
             working_dir,
@@ -129,10 +125,7 @@ impl CliRunner {
     }
 
     /// Set LSP diagnostic configuration
-    pub fn with_lsp_diagnostics(
-        mut self,
-        diagnostics: LspDiagnosticConfig,
-    ) -> Self {
+    pub fn with_lsp_diagnostics(mut self, diagnostics: LspDiagnosticConfig) -> Self {
         self.lsp_diagnostics = diagnostics;
         self
     }
@@ -395,6 +388,7 @@ impl CliRunner {
             "gemini" => vec!["chat".to_string(), "--prompt-file".to_string(), prompt_str],
             "qwen" => vec!["chat".to_string(), "-f".to_string(), prompt_str],
             "opencode" => vec!["chat".to_string(), "--prompt".to_string(), prompt_str],
+            "iflow" => vec!["-p".to_string(), std::fs::read_to_string(prompt_file)?],
             "pi" => vec![
                 "-p".to_string(),
                 "subagent".to_string(),

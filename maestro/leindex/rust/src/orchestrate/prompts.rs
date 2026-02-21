@@ -14,7 +14,10 @@ pub struct PromptBuilder {
 
 impl PromptBuilder {
     pub fn new(context_budget: usize) -> Self {
-        Self { context_budget, steering: None }
+        Self {
+            context_budget,
+            steering: None,
+        }
     }
 
     /// Build a prompt for the current iteration

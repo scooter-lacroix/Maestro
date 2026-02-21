@@ -216,7 +216,7 @@ impl DelegateTool {
         let timeout = self.config.timeout;
         let result = tokio::time::timeout(
             timeout,
-            self.run_agent_loop(&agent_config, exec_context, provider),
+            self.run_agent_loop(agent_config, exec_context, provider),
         )
         .await;
 

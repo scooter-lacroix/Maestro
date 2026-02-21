@@ -41,6 +41,8 @@ pub enum ControlCommand {
     SetMaxIterations(usize),
     /// Toggle between execution modes (Auto, Interactive, DryRun)
     SetMode(Mode),
+    /// Toggle between loop modes (Planning, Building)
+    SetLoopMode(crate::orchestrate::model::LoopMode),
     /// Change the active agent by name
     SwitchAgent(String),
     /// Enable/disable sandbox mode
@@ -125,6 +127,14 @@ pub enum EngineEvent {
         iteration: u64,
         task_id: String,
         message: String,
+        timestamp: String,
+    },
+    /// Parallel group state updated (Phase 4/5)
+    ParallelGroupUpdated {
+        group_id: String,
+        task_ids: Vec<String>,
+        status: String,
+        active_workers: u32,
         timestamp: String,
     },
 }

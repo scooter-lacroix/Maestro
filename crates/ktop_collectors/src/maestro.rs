@@ -5,12 +5,12 @@
 
 use crate::error::{Error, Result};
 use crate::types::{
-    AgentInfo, AgentStatus, LspStatus, LeIndexStats, MaestroMemoryStats, MaestroMetrics,
+    AgentInfo, AgentStatus, LeIndexStats, LspStatus, MaestroMemoryStats, MaestroMetrics,
 };
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use std::fs;
 
 /// Default refresh interval for Maestro metrics
 const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
@@ -98,7 +98,8 @@ impl MaestroCollector {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if path.is_dir() {
-                            let name = path.file_name()
+                            let name = path
+                                .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown")
                                 .to_string();
@@ -160,7 +161,11 @@ impl MaestroCollector {
         );
         lsp_servers.insert(
             "typescript-language-server".to_string(),
-            LspStatus::new("typescript-language-server".to_string(), true, "Ready".to_string()),
+            LspStatus::new(
+                "typescript-language-server".to_string(),
+                true,
+                "Ready".to_string(),
+            ),
         );
         lsp_servers.insert(
             "pylsp".to_string(),
@@ -223,15 +228,27 @@ impl MaestroCollector {
 
         agents.insert(
             "researcher".to_string(),
-            AgentInfo::new("researcher".to_string(), "general-purpose".to_string(), AgentStatus::Idle),
+            AgentInfo::new(
+                "researcher".to_string(),
+                "general-purpose".to_string(),
+                AgentStatus::Idle,
+            ),
         );
         agents.insert(
             "rust-dev".to_string(),
-            AgentInfo::new("rust-dev".to_string(), "general-purpose".to_string(), AgentStatus::Working),
+            AgentInfo::new(
+                "rust-dev".to_string(),
+                "general-purpose".to_string(),
+                AgentStatus::Working,
+            ),
         );
         agents.insert(
             "tui-integrator".to_string(),
-            AgentInfo::new("tui-integrator".to_string(), "general-purpose".to_string(), AgentStatus::Idle),
+            AgentInfo::new(
+                "tui-integrator".to_string(),
+                "general-purpose".to_string(),
+                AgentStatus::Idle,
+            ),
         );
 
         agents
@@ -292,9 +309,12 @@ impl MaestroCollector {
                 if path.is_dir() {
                     total += Self::dir_size(&path)?;
                 } else {
-                    total += entry.metadata().map_err(|e| {
-                        Error::MaestroMetricsFailed(format!("Failed to get metadata: {}", e))
-                    })?.len();
+                    total += entry
+                        .metadata()
+                        .map_err(|e| {
+                            Error::MaestroMetricsFailed(format!("Failed to get metadata: {}", e))
+                        })?
+                        .len();
                 }
             }
         }
@@ -406,6 +426,7 @@ impl Default for MaestroCollector {
 
 /// JSON representation of LSP info
 #[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Default)]
 struct LspInfo {
     #[serde(default)]
     files_tracked: usize,
@@ -413,14 +434,6 @@ struct LspInfo {
     diagnostics_count: usize,
 }
 
-impl Default for LspInfo {
-    fn default() -> Self {
-        Self {
-            files_tracked: 0,
-            diagnostics_count: 0,
-        }
-    }
-}
 
 /// JSON representation of an agent
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -485,7 +498,9 @@ mod tests {
     #[test]
     fn test_maestro_collector_with_live_mode() {
         let mut collector = MaestroCollector::new().with_live_mode(false);
-        let metrics = collector.collect().expect("Failed to collect Maestro metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect Maestro metrics");
 
         // Should return stub data in non-live mode
         assert!(!metrics.lsp_servers.is_empty() || !metrics.agents.is_empty());
@@ -500,7 +515,9 @@ mod tests {
     #[test]
     fn test_maestro_collector_collect() {
         let mut collector = MaestroCollector::new().with_live_mode(false);
-        let metrics = collector.collect().expect("Failed to collect Maestro metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect Maestro metrics");
 
         // Should have some data (either live or stub)
         // Just verify the structure is valid
@@ -537,7 +554,11 @@ mod tests {
 
     #[test]
     fn test_agent_info_new() {
-        let agent = AgentInfo::new("test".to_string(), "general-purpose".to_string(), AgentStatus::Working);
+        let agent = AgentInfo::new(
+            "test".to_string(),
+            "general-purpose".to_string(),
+            AgentStatus::Working,
+        );
         assert_eq!(agent.name, "test");
         assert_eq!(agent.agent_type, "general-purpose");
         assert_eq!(agent.status, AgentStatus::Working);
@@ -547,12 +568,30 @@ mod tests {
 
     #[test]
     fn test_agent_status_parsing() {
-        assert_eq!(MaestroCollector::parse_agent_status("idle"), AgentStatus::Idle);
-        assert_eq!(MaestroCollector::parse_agent_status("Idle"), AgentStatus::Idle);
-        assert_eq!(MaestroCollector::parse_agent_status("working"), AgentStatus::Working);
-        assert_eq!(MaestroCollector::parse_agent_status("paused"), AgentStatus::Paused);
-        assert_eq!(MaestroCollector::parse_agent_status("error"), AgentStatus::Error);
-        assert_eq!(MaestroCollector::parse_agent_status("unknown"), AgentStatus::Unknown);
+        assert_eq!(
+            MaestroCollector::parse_agent_status("idle"),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            MaestroCollector::parse_agent_status("Idle"),
+            AgentStatus::Idle
+        );
+        assert_eq!(
+            MaestroCollector::parse_agent_status("working"),
+            AgentStatus::Working
+        );
+        assert_eq!(
+            MaestroCollector::parse_agent_status("paused"),
+            AgentStatus::Paused
+        );
+        assert_eq!(
+            MaestroCollector::parse_agent_status("error"),
+            AgentStatus::Error
+        );
+        assert_eq!(
+            MaestroCollector::parse_agent_status("unknown"),
+            AgentStatus::Unknown
+        );
     }
 
     #[test]

@@ -18,4 +18,4 @@
 
 pub mod mcp_bridge;
 
-pub use mcp_bridge::{McpBridge, McpTool, McpEvent};
+pub use mcp_bridge::{McpBridge, McpEvent, McpTool};

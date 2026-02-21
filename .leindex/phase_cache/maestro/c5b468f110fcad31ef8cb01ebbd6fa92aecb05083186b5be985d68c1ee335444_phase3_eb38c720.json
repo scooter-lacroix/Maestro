@@ -1,0 +1,28 @@
+{
+  "project_id": "maestro",
+  "generation": "c5b468f110fcad31ef8cb01ebbd6fa92aecb05083186b5be985d68c1ee335444",
+  "phase": 3,
+  "options_hash": "eb38c720",
+  "payload": {
+    "entry_points": [
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs:popup_display",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs:format_draw_absolute_centre",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs:format_draw_centre",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs:format_draw_left",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs:format_draw_right",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/menu_.rs:menu_display",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/menu_.rs:menu_prepare",
+      "/run/media/scooter/W.D SSD/Prod/maestro/crates/ktop_collectors/src/types.rs:new",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/job_.rs:job_run",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/mode_tree.rs:mode_tree_start"
+    ],
+    "impacted_nodes": 72,
+    "focus_files": [
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/format_draw_.rs",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/mode_tree.rs",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/job_.rs",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/popup.rs",
+      "/run/media/scooter/W.D SSD/Prod/maestro/maestro/leindex/rust/tmux-rs/src/menu_.rs"
+    ]
+  }
+}

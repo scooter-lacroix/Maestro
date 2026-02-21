@@ -86,7 +86,7 @@ impl PasswordCache {
     pub fn is_valid(&self) -> bool {
         let password_guard = self.password.lock();
         let last_used_guard = self.last_used.lock();
-        
+
         match (password_guard, last_used_guard) {
             (Ok(pw), Ok(lu)) => {
                 if pw.is_none() {
@@ -106,7 +106,7 @@ impl PasswordCache {
     /// Refreshes the sudo session to keep it alive
     pub fn refresh_sudo_session(&self) -> Result<(), String> {
         let password = self.get_password().ok_or("No password cached")?;
-        
+
         let mut output = Command::new("sudo")
             .arg("-S")
             .arg("-v") // Validate/refresh sudo ticket
@@ -117,10 +117,12 @@ impl PasswordCache {
             .map_err(|e| format!("Failed to spawn sudo: {}", e))?;
 
         if let Some(ref mut stdin) = output.stdin {
-            writeln!(stdin, "{}", password).map_err(|e| format!("Failed to write password: {}", e))?;
+            writeln!(stdin, "{}", password)
+                .map_err(|e| format!("Failed to write password: {}", e))?;
         }
 
-        let result = output.wait_with_output()
+        let result = output
+            .wait_with_output()
             .map_err(|e| format!("Failed to wait for sudo: {}", e))?;
 
         if result.status.success() {
@@ -136,22 +138,28 @@ impl PasswordCache {
     /// Executes a sudo command with the cached password
     pub fn sudo_with_password(&self, command: &str) -> Result<std::process::Output, String> {
         let password = self.get_password().ok_or("No password cached")?;
-        
+
         // Refresh session if needed
         if !self.is_valid() {
             self.refresh_sudo_session()?;
         }
 
-        let output = Command::new("bash")
+        let mut output = Command::new("sudo")
+            .arg("-S")
+            .arg("bash")
             .arg("-c")
-            .arg(format!("echo '{}' | sudo -S {}", password, command))
+            .arg(command)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to spawn command: {}", e))?;
-
-        let result = output.wait_with_output()
+        if let Some(ref mut stdin) = output.stdin {
+            writeln!(stdin, "{}", password)
+                .map_err(|e| format!("Failed to write password: {}", e))?;
+        }
+        let result = output
+            .wait_with_output()
             .map_err(|e| format!("Failed to wait for command: {}", e))?;
 
         if let Ok(mut guard) = self.last_used.lock() {
@@ -178,7 +186,7 @@ pub fn prompt_password_terminal(_prompt: &str) -> Result<String, io::Error> {
     // password reading or use a crate like `rpassword`.
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "Terminal password prompt requires rpassword crate or TUI implementation"
+        "Terminal password prompt requires rpassword crate or TUI implementation",
     ))
 }
 

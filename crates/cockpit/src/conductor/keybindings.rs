@@ -1,6 +1,8 @@
-use crate::conductor::pane::ConductorPane;
-use crate::conductor::model::ConductorStatus;
 use crate::conductor::modals::Modal;
+use crate::conductor::model::ConductorStatus;
+use crate::conductor::pane::CommandArgs;
+use crate::conductor::pane::ConductorPane;
+use crate::toast::ToastLevel;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use leindex_core::orchestrate::model::LoopMode;
 
@@ -10,12 +12,48 @@ pub enum ConductorAction {
     None,
     /// Event was handled, no further action needed
     Handled,
-    /// Event was handled, display this status message
-    StatusMessage(String),
+    /// Event was handled, display a toast notification
+    Toast { message: String, level: ToastLevel },
+    /// Cycle to the next theme
+    CycleTheme,
     /// Store a memory with content and category
-    StoreMemory { content: String, category: leindex_core::memory::models::MemoryCategory },
+    StoreMemory {
+        content: String,
+        category: leindex_core::memory::models::MemoryCategory,
+    },
     /// Delete a memory by ID
     DeleteMemory { id: i64 },
+}
+
+/// Helper to create info toast action
+impl ConductorAction {
+    pub fn info(msg: impl Into<String>) -> Self {
+        ConductorAction::Toast {
+            message: msg.into(),
+            level: ToastLevel::Info,
+        }
+    }
+
+    pub fn success(msg: impl Into<String>) -> Self {
+        ConductorAction::Toast {
+            message: msg.into(),
+            level: ToastLevel::Success,
+        }
+    }
+
+    pub fn warning(msg: impl Into<String>) -> Self {
+        ConductorAction::Toast {
+            message: msg.into(),
+            level: ToastLevel::Warning,
+        }
+    }
+
+    pub fn error(msg: impl Into<String>) -> Self {
+        ConductorAction::Toast {
+            message: msg.into(),
+            level: ToastLevel::Error,
+        }
+    }
 }
 
 /// Handle Conductor-specific key events
@@ -30,7 +68,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                             &track_id,
                             ControlCommandType::Steer { message: text },
                         );
-                        return ConductorAction::StatusMessage("Steering message sent".to_string());
+                        return ConductorAction::success("Steering message sent");
                     }
                 }
                 return ConductorAction::Handled;
@@ -50,7 +88,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                             &track_id,
                             ControlCommandType::SetMaxIterations { max },
                         );
-                        return ConductorAction::StatusMessage(format!("Max iterations set to {}", max));
+                        return ConductorAction::success(format!("Max iterations set to {}", max));
                     }
                 }
                 return ConductorAction::Handled;
@@ -71,13 +109,16 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                             &track_id,
                             ControlCommandType::SetErrorStrategy { strategy: value },
                         );
-                        return ConductorAction::StatusMessage("Error strategy updated".to_string());
+                        return ConductorAction::success("Error strategy updated");
                     } else if title.contains("Agent") {
                         let _ = send_control_command(
                             &track_id,
-                            ControlCommandType::SwitchAgent { tool: value, model: None },
+                            ControlCommandType::SwitchAgent {
+                                tool: value,
+                                _model: None,
+                            },
                         );
-                        return ConductorAction::StatusMessage("Agent switched".to_string());
+                        return ConductorAction::success("Agent switched");
                     }
                 }
                 return ConductorAction::Handled;
@@ -88,22 +129,27 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
     }
 
     // 1. Handle Memory Browser if open
-    if pane.memory_browser.is_visible() || pane.memory_browser.search_modal.is_visible()
+    if pane.memory_browser.is_visible()
+        || pane.memory_browser.search_modal.is_visible()
         || pane.memory_browser.category_modal.is_visible()
-        || pane.memory_browser.store_modal.is_visible() || pane.memory_browser.delete_modal.is_visible() {
+        || pane.memory_browser.store_modal.is_visible()
+        || pane.memory_browser.delete_modal.is_visible()
+    {
         match pane.memory_browser.handle_key(key) {
             super::memory_browser::MemoryBrowserAction::Handled => return ConductorAction::Handled,
             super::memory_browser::MemoryBrowserAction::Close => {
                 pane.memory_browser.hide();
                 return ConductorAction::Handled;
             }
-            super::memory_browser::MemoryBrowserAction::SearchFocused | super::memory_browser::MemoryBrowserAction::SearchSubmitted => {
+            super::memory_browser::MemoryBrowserAction::SearchFocused
+            | super::memory_browser::MemoryBrowserAction::SearchSubmitted => {
                 return ConductorAction::Handled;
             }
             super::memory_browser::MemoryBrowserAction::SearchCancelled => {
                 return ConductorAction::Handled;
             }
-            super::memory_browser::MemoryBrowserAction::CategoryOpened | super::memory_browser::MemoryBrowserAction::CategorySelected => {
+            super::memory_browser::MemoryBrowserAction::CategoryOpened
+            | super::memory_browser::MemoryBrowserAction::CategorySelected => {
                 return ConductorAction::Handled;
             }
             super::memory_browser::MemoryBrowserAction::CategoryCancelled => {
@@ -197,9 +243,13 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
     match (key.modifiers, key.code) {
         // Navigation
         (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+            if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
+            {
                 pane.scroll_output_up();
-            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+            } else if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt
+            {
                 // Prompt scrolling not yet implemented, treat same as output
                 pane.scroll_output_up();
             } else {
@@ -208,9 +258,13 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+            if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
+            {
                 pane.scroll_output_down();
-            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+            } else if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt
+            {
                 // Prompt scrolling not yet implemented, treat same as output
                 pane.scroll_output_down();
             } else {
@@ -219,11 +273,15 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::PageDown) => {
-            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+            if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
+            {
                 for _ in 0..10 {
                     pane.scroll_output_up();
                 }
-            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+            } else if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt
+            {
                 // Prompt scrolling not yet implemented
                 for _ in 0..10 {
                     pane.scroll_output_up();
@@ -232,11 +290,15 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::PageUp) => {
-            if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Output {
+            if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
+            {
                 for _ in 0..10 {
                     pane.scroll_output_down();
                 }
-            } else if pane.output_focused && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt {
+            } else if pane.output_focused
+                && pane.details_mode == crate::conductor::model::DetailsViewMode::Prompt
+            {
                 // Prompt scrolling not yet implemented
                 for _ in 0..10 {
                     pane.scroll_output_down();
@@ -286,11 +348,15 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             pane.details_mode = crate::conductor::model::DetailsViewMode::Prompt;
             ConductorAction::Handled
         }
+        (KeyModifiers::ALT, KeyCode::Char('4')) => {
+            pane.details_mode = crate::conductor::model::DetailsViewMode::Parallel;
+            ConductorAction::Handled
+        }
 
         // Details mode switching (Legacy fallback removed to allow tab switching)
 
-        // Output control
-        (_, KeyCode::Char('c')) => {
+        // Output control (plain 'c' only, not Ctrl+C)
+        (KeyModifiers::NONE, KeyCode::Char('c')) => {
             pane.clear_output();
             ConductorAction::Handled
         }
@@ -302,18 +368,31 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         }
 
         // Dependency navigation: press 1-9 to jump to dependency
-        (_, KeyCode::Char('1')) | (_, KeyCode::Char('2')) | (_, KeyCode::Char('3')) | (_, KeyCode::Char('4')) | (_, KeyCode::Char('5')) | (_, KeyCode::Char('6')) | (_, KeyCode::Char('7')) | (_, KeyCode::Char('8')) | (_, KeyCode::Char('9')) => {
+        (_, KeyCode::Char('1'))
+        | (_, KeyCode::Char('2'))
+        | (_, KeyCode::Char('3'))
+        | (_, KeyCode::Char('4'))
+        | (_, KeyCode::Char('5'))
+        | (_, KeyCode::Char('6'))
+        | (_, KeyCode::Char('7'))
+        | (_, KeyCode::Char('8'))
+        | (_, KeyCode::Char('9')) => {
             if !pane.output_focused {
                 let items = pane.get_selectable_items();
                 if let Some(item) = items.get(pane.selected_index) {
-                    if let crate::conductor::model::SelectableItem::Task { dependencies, .. } = item {
+                    if let crate::conductor::model::SelectableItem::Task { dependencies, .. } = item
+                    {
                         if let KeyCode::Char(c) = key.code {
-                            if let Some(idx) = c.to_string().parse::<usize>().ok() {
+                            if let Ok(idx) = c.to_string().parse::<usize>() {
                                 if idx > 0 && idx <= dependencies.len() {
                                     let dep_id = &dependencies[idx - 1].task_id;
                                     // Find the dependency task in selectable items
                                     if let Some(dep_idx) = items.iter().position(|i| {
-                                        if let crate::conductor::model::SelectableItem::Task { id, .. } = i {
+                                        if let crate::conductor::model::SelectableItem::Task {
+                                            id,
+                                            ..
+                                        } = i
+                                        {
                                             id == dep_id
                                         } else {
                                             false
@@ -382,6 +461,29 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             ConductorAction::Handled
         }
 
+        // Cycle agent role (Shift+A) - always available
+        (KeyModifiers::SHIFT, KeyCode::Char('A')) => {
+            let role = pane.cycle_agent_role();
+            let role_name = super::agent_executor::role_utils::role_display_name(&role);
+            let role_desc = super::agent_executor::role_utils::role_description(&role);
+            ConductorAction::info(format!("Agent role: {} - {}", role_name, role_desc))
+        }
+
+        // Cancel active execution (Ctrl+C)
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+            // Note: This conflicts with Ctrl+C for abort. We handle it specially here.
+            // Use async runtime to cancel
+            let cancelled = pane.cancellation_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false);
+            if cancelled {
+                ConductorAction::warning("Execution already cancelled")
+            } else if let Some(ref token) = pane.cancellation_token {
+                token.cancel();
+                ConductorAction::success("Execution cancelled")
+            } else {
+                ConductorAction::warning("No active execution to cancel")
+            }
+        }
+
         // Mode toggle (m) - only when running
         (KeyModifiers::NONE, KeyCode::Char('m')) if pane.state.status != ConductorStatus::Ready => {
             let new_mode = if pane.state.loop_mode == LoopMode::Building {
@@ -392,11 +494,13 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             if let Some(track_id) = pane.state.current_track.clone() {
                 let _ = send_control_command(
                     &track_id,
-                    ControlCommandType::SetMode { mode: new_mode.to_string() },
+                    ControlCommandType::SetLoopMode {
+                        mode: new_mode.to_string(),
+                    },
                 );
-                return ConductorAction::StatusMessage(format!("Mode switched to {}", new_mode))
+                return ConductorAction::success(format!("Loop mode switched to {}", new_mode));
             }
-            ConductorAction::StatusMessage("No track active".to_string())
+            ConductorAction::warning("No track active")
         }
 
         // Focus toggle
@@ -407,13 +511,18 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             } else {
                 "Tracks focused."
             };
-            ConductorAction::StatusMessage(msg.to_string())
+            ConductorAction::info(msg)
+        }
+
+        // Theme cycle (Shift+T)
+        (KeyModifiers::SHIFT, KeyCode::Char('T')) => {
+            ConductorAction::CycleTheme
         }
 
         // Memory Browser (Shift+M) - always available
         (KeyModifiers::SHIFT, KeyCode::Char('M')) => {
             pane.memory_browser.show();
-            ConductorAction::StatusMessage("Memory browser opened. Press Esc to close.".to_string())
+            ConductorAction::info("Memory browser opened. Press Esc to close.")
         }
 
         // Ralph behavior enforcement (CONTROL key combinations - check before single keys)
@@ -428,15 +537,15 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                             iteration: pane.state.current_iteration,
                         },
                     ) {
-                        ConductorAction::StatusMessage(format!("Retry failed: {}", e))
+                        ConductorAction::error(format!("Retry failed: {}", e))
                     } else {
-                        ConductorAction::StatusMessage("Retry command sent".to_string())
+                        ConductorAction::success("Retry command sent")
                     }
                 } else {
-                    ConductorAction::StatusMessage("No active task to retry".to_string())
+                    ConductorAction::warning("No active task to retry")
                 }
             } else {
-                ConductorAction::StatusMessage("No track active".to_string())
+                ConductorAction::warning("No track active")
             }
         }
         (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
@@ -450,15 +559,15 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                             iteration: pane.state.current_iteration,
                         },
                     ) {
-                        ConductorAction::StatusMessage(format!("Skip failed: {}", e))
+                        ConductorAction::error(format!("Skip failed: {}", e))
                     } else {
-                        ConductorAction::StatusMessage("Skip command sent".to_string())
+                        ConductorAction::success("Skip command sent")
                     }
                 } else {
-                    ConductorAction::StatusMessage("No active task to skip".to_string())
+                    ConductorAction::warning("No active task to skip")
                 }
             } else {
-                ConductorAction::StatusMessage("No track active".to_string())
+                ConductorAction::warning("No track active")
             }
         }
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
@@ -470,12 +579,12 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
                         reason: Some("User requested abort via conductor".to_string()),
                     },
                 ) {
-                    ConductorAction::StatusMessage(format!("Abort failed: {}", e))
+                    ConductorAction::error(format!("Abort failed: {}", e))
                 } else {
-                    ConductorAction::StatusMessage("Abort command sent".to_string())
+                    ConductorAction::success("Abort command sent")
                 }
             } else {
-                ConductorAction::StatusMessage("No track active".to_string())
+                ConductorAction::warning("No track active")
             }
         }
 
@@ -483,7 +592,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         (_, KeyCode::Char('s')) => {
             let track_idx = match pane.get_selected_track_index() {
                 Some(idx) => idx,
-                None => return ConductorAction::StatusMessage("No track selected".to_string()),
+                None => return ConductorAction::warning("No track selected"),
             };
             let track_id = &pane.tracks[track_idx].id;
 
@@ -491,110 +600,95 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             if pane.state.track_runtime_statuses.get(track_id)
                 == Some(&crate::conductor::model::ConductorStatus::Running)
             {
-                return ConductorAction::StatusMessage(format!(
-                    "Track {} is already running",
-                    track_id
-                ));
+                return ConductorAction::warning(format!("Track {} is already running", track_id));
             }
 
             let cmd = pane.get_start_command(None, false, false);
-            if let Err(e) = execute_orchestrate_command(&cmd) {
-                return ConductorAction::StatusMessage(format!("Error: {}", e));
+            match cmd {
+                Some(cmd) => {
+                    if let Err(e) = execute_orchestrate_command(&cmd) {
+                        return ConductorAction::error(format!("Error: {}", e));
+                    }
+                    ConductorAction::success(format!("Started: {}", cmd))
+                }
+                None => ConductorAction::warning("No track selected"),
             }
-            ConductorAction::StatusMessage(format!("Started: {}", cmd))
         }
         // Note: We handle CONTROL+s for skip separately below, so check for it first
         // For pause, only match without modifiers (or with SHIFT which is same key)
         (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('p')) => {
             let cmd = pane.get_pause_command();
-            if let Err(e) = execute_orchestrate_command(&cmd) {
-                return ConductorAction::StatusMessage(format!("Error: {}", e));
+            match cmd {
+                Some(cmd) => {
+                    if let Err(e) = execute_orchestrate_command(&cmd) {
+                        return ConductorAction::error(format!("Error: {}", e));
+                    }
+                    ConductorAction::success(format!("Paused: {}", cmd))
+                }
+                None => ConductorAction::warning("No track selected"),
             }
-            ConductorAction::StatusMessage(format!("Paused: {}", cmd))
         }
         // Note: We handle CONTROL+r for retry separately below, so check for it first
         // For resume, only match without modifiers
         (KeyModifiers::NONE, KeyCode::Char('r')) => {
             let cmd = pane.get_resume_command();
-            if let Err(e) = execute_orchestrate_command(&cmd) {
-                return ConductorAction::StatusMessage(format!("Error: {}", e));
+            match cmd {
+                Some(cmd) => {
+                    if let Err(e) = execute_orchestrate_command(&cmd) {
+                        return ConductorAction::error(format!("Error: {}", e));
+                    }
+                    ConductorAction::success(format!("Resumed: {}", cmd))
+                }
+                None => ConductorAction::warning("No track selected"),
             }
-            ConductorAction::StatusMessage(format!("Resumed: {}", cmd))
         }
         (_, KeyCode::Char('?')) => {
             let cmd = pane.get_status_command();
             if let Err(e) = execute_orchestrate_command(&cmd) {
-                return ConductorAction::StatusMessage(format!("Error: {}", e));
+                return ConductorAction::error(format!("Error: {}", e));
             }
-            ConductorAction::StatusMessage(format!("Status checked: {}", cmd))
+            ConductorAction::info(format!("Status checked: {}", cmd))
         }
 
         _ => ConductorAction::None,
     }
 }
 
-fn execute_orchestrate_command(cmd: &str) -> std::io::Result<()> {
-    // Robust argument parsing: handle spaces in paths/IDs using shell-like splitting
-    // For simplicity here, we'll use a basic vector of args.
-    let parts: Vec<String> = cmd
-        .split(" --")
-        .enumerate()
-        .map(|(i, s)| {
-            if i == 0 {
-                s.to_string()
-            } else {
-                format!("--{}", s)
-            }
-        })
-        .collect();
-
-    if parts.is_empty() {
-        return Ok(());
-    }
-
-    // First part contains "maestro orchestrate <subcmd> <track_id>"
-    let initial_parts: Vec<&str> = parts[0].split_whitespace().collect();
-    if initial_parts.is_empty() {
-        return Ok(());
-    }
-
-    let program_name = initial_parts[0];
-    let program = if program_name == "maestro" {
-        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("maestro"))
-    } else {
-        std::path::PathBuf::from(program_name)
-    };
-
-    let mut args = Vec::new();
-    // Add "orchestrate", "<subcmd>", "<track_id>"
-    if initial_parts.len() > 1 {
-        args.extend(initial_parts[1..].iter().map(|s| s.to_string()));
-    }
-
-    // Add the remaining flags
-    for part in &parts[1..] {
-        let flag_parts: Vec<&str> = part.split_whitespace().collect();
-        for fp in flag_parts {
-            args.push(fp.to_string());
-        }
-    }
-
-    // Run it detached
-    std::process::Command::new(program).args(args).spawn()?;
-
-    Ok(())
+/// Execute an orchestrate command using type-safe CommandArgs.
+/// This avoids shell injection vulnerabilities by using proper argument separation.
+fn execute_orchestrate_command(cmd: &CommandArgs) -> std::io::Result<std::process::Child> {
+    cmd.spawn_detached()
 }
 
 /// Control command types for Ralph behavior enforcement
 enum ControlCommandType {
-    Retry { task_id: String, iteration: u64 },
-    Skip { task_id: String, iteration: u64 },
-    Abort { reason: Option<String> },
-    Steer { message: String },
-    SetMaxIterations { max: u64 },
-    SetErrorStrategy { strategy: String },
-    SwitchAgent { tool: String, model: Option<String> },
-    SetMode { mode: String },
+    Retry {
+        task_id: String,
+        iteration: u64,
+    },
+    Skip {
+        task_id: String,
+        iteration: u64,
+    },
+    Abort {
+        reason: Option<String>,
+    },
+    Steer {
+        message: String,
+    },
+    SetMaxIterations {
+        max: u64,
+    },
+    SetErrorStrategy {
+        strategy: String,
+    },
+    SwitchAgent {
+        tool: String,
+        _model: Option<String>,
+    },
+    SetLoopMode {
+        mode: String,
+    },
 }
 
 /// Send a control command to the orchestrate engine via control.json
@@ -627,7 +721,9 @@ fn send_control_command(track_id: &str, cmd: ControlCommandType) -> anyhow::Resu
         }
         ControlCommandType::Abort { reason } => ControlCommand::Abort { reason },
         ControlCommandType::Steer { message } => ControlCommand::Steer(message),
-        ControlCommandType::SetMaxIterations { max } => ControlCommand::SetMaxIterations(max as usize),
+        ControlCommandType::SetMaxIterations { max } => {
+            ControlCommand::SetMaxIterations(max as usize)
+        }
         ControlCommandType::SetErrorStrategy { strategy } => {
             use leindex_core::orchestrate::control::ErrorStrategyValue;
             let strategy_value = match strategy.as_str() {
@@ -636,21 +732,22 @@ fn send_control_command(track_id: &str, cmd: ControlCommandType) -> anyhow::Resu
                 "abort" => ErrorStrategyValue::Abort,
                 _ => ErrorStrategyValue::Retry, // Default to retry
             };
-            ControlCommand::SetErrorStrategy { strategy: strategy_value }
+            ControlCommand::SetErrorStrategy {
+                strategy: strategy_value,
+            }
         }
-        ControlCommandType::SwitchAgent { tool, model } => {
+        ControlCommandType::SwitchAgent { tool, _model: _ } => {
             // Note: model is ignored for now as ControlCommand::SwitchAgent only takes tool
             ControlCommand::SwitchAgent(tool)
         }
-        ControlCommandType::SetMode { mode } => {
-            use leindex_core::orchestrate::control::Mode;
-            let mode_value = match mode.as_str() {
-                "auto" => Mode::Auto,
-                "interactive" => Mode::Interactive,
-                "dry_run" | "dryrun" => Mode::DryRun,
-                _ => Mode::Auto, // Default to Auto
+        ControlCommandType::SetLoopMode { mode } => {
+            use leindex_core::orchestrate::model::LoopMode;
+            let loop_mode_value = match mode.as_str() {
+                "planning" => LoopMode::Planning,
+                "building" => LoopMode::Building,
+                _ => LoopMode::Building, // Default to Building
             };
-            ControlCommand::SetMode(mode_value)
+            ControlCommand::SetLoopMode(loop_mode_value)
         }
     };
 

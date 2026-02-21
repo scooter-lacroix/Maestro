@@ -16,12 +16,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use cron::Schedule as CronScheduleLib;
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for a job.
 pub type JobId = String;
+
+/// Helper function to safely acquire a mutex lock, handling poisoning
+fn safe_lock<T>(mutex: &std::sync::Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, String> {
+    mutex.lock().map_err(|e| format!("Lock is poisoned: {}", e))
+}
 
 /// Schedule type for cron jobs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -88,7 +94,12 @@ impl Schedule {
     /// Calculate the next run time after the given time.
     pub fn next_run(&self, after: &DateTime<Utc>) -> Option<DateTime<Utc>> {
         match self {
-            Self::Cron { expr, tz: _ } => {
+            Self::Cron { expr, tz } => {
+                // TODO: Implement timezone support using the tz field.
+                // For now, all cron expressions are evaluated in UTC.
+                // The tz field is preserved for API compatibility and future implementation.
+                let _tz = tz;
+
                 // Parse cron expression using TryFrom
                 let schedule = CronScheduleLib::try_from(expr.as_str()).ok()?;
 
@@ -108,10 +119,27 @@ impl Schedule {
                 let interval_ms = *every_ms;
                 let anchor = anchor_ms.unwrap_or_else(|| after.timestamp_millis() as u64);
 
-                let elapsed = after.timestamp_millis() as u64 - anchor;
+                // SAFETY: Check for timestamp underflow
+                // If `after` is before the anchor, the next run should be at the anchor
+                let after_ms = after.timestamp_millis();
+                if after_ms < 0 {
+                    // Timestamp is negative (before Unix epoch), anchor is likely in the future
+                    return Utc.timestamp_millis_opt(anchor as i64).single();
+                }
+
+                let after_ms_u64 = after_ms as u64;
+                if after_ms_u64 < anchor {
+                    // We're before the anchor time, next run is at the anchor
+                    return Utc.timestamp_millis_opt(anchor as i64).single();
+                }
+
+                // Normal case: calculate next interval after current time
+                let elapsed = after_ms_u64 - anchor;
                 let intervals_elapsed = elapsed / interval_ms;
                 let next_offset = (intervals_elapsed + 1) * interval_ms;
-                let next_ts = anchor + next_offset;
+
+                // Check for overflow when adding to anchor
+                let next_ts = anchor.checked_add(next_offset)?;
 
                 Utc.timestamp_millis_opt(next_ts as i64).single()
             }
@@ -568,7 +596,13 @@ impl<S: JobStore + 'static> CronService<S> {
     pub async fn tick(&self) {
         let now = Utc::now();
         let due_jobs: Vec<CronJob> = {
-            let store = self.store.lock().unwrap();
+            let store = match safe_lock(&self.store) {
+                Ok(guard) => guard,
+                Err(e) => {
+                    tracing::error!("Failed to acquire lock in tick: {}", e);
+                    return;
+                }
+            };
             store
                 .get_jobs()
                 .into_iter()
@@ -600,7 +634,13 @@ impl<S: JobStore + 'static> CronService<S> {
             duration_ms: 0,
         };
 
-        let mut store = self.store.lock().unwrap();
+        let mut store = match safe_lock(&self.store) {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("Failed to acquire lock in execute_job: {}", e);
+                return;
+            }
+        };
         store.record_run(result);
 
         // Delete one-shot jobs after execution
@@ -610,26 +650,36 @@ impl<S: JobStore + 'static> CronService<S> {
     }
 
     /// Add a job.
-    pub fn add_job(&self, job: CronJob) {
-        let mut store = self.store.lock().unwrap();
+    pub fn add_job(&self, job: CronJob) -> Result<()> {
+        let mut store = safe_lock(&self.store).map_err(|e| anyhow::anyhow!("{}", e))?;
         store.save_job(job);
+        Ok(())
     }
 
     /// Remove a job.
     pub fn remove_job(&self, id: &str) -> bool {
-        let mut store = self.store.lock().unwrap();
+        let mut store = match safe_lock(&self.store) {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
         store.delete_job(id)
     }
 
     /// Get all jobs.
     pub fn get_jobs(&self) -> Vec<CronJob> {
-        let store = self.store.lock().unwrap();
+        let store = match safe_lock(&self.store) {
+            Ok(guard) => guard,
+            Err(_) => return Vec::new(),
+        };
         store.get_jobs()
     }
 
     /// Get a job by ID.
     pub fn get_job(&self, id: &str) -> Option<CronJob> {
-        let store = self.store.lock().unwrap();
+        let store = match safe_lock(&self.store) {
+            Ok(guard) => guard,
+            Err(_) => return None,
+        };
         store.get_job(id)
     }
 }
@@ -725,9 +775,9 @@ mod tests {
         let now = Utc::now();
         assert!(job.is_due(&now, None));
 
-        // Job with recent last run (within interval) should not be due
-        let recent = now - chrono::Duration::seconds(30);
-        // Note: is_due checks if next scheduled time <= now, so this depends on schedule
+        // Job with recent last run (within interval) - note: is_due checks if next scheduled time <= now
+        let _recent = now - chrono::Duration::seconds(30);
+        // The exact behavior depends on the schedule calculation
     }
 
     #[test]
@@ -779,5 +829,92 @@ mod tests {
         assert_eq!(config.poll_interval, Duration::from_secs(30));
         assert_eq!(config.default_timeout, Duration::from_secs(300));
         assert_eq!(config.max_retries, 3);
+    }
+
+    #[test]
+    fn test_safe_lock_helper() {
+        use std::sync::{Arc, Mutex};
+
+        let mutex = Arc::new(Mutex::new(42));
+        // Test normal locking works
+        let guard = safe_lock(&mutex).unwrap();
+        assert_eq!(*guard, 42);
+        drop(guard);
+
+        // Test poisoned lock handling
+        let poisoned_mutex: Arc<Mutex<i32>> = {
+            let m = Arc::new(Mutex::new(0));
+            let m2 = m.clone();
+            std::thread::spawn(move || {
+                let _lock = m2.lock().unwrap();
+                panic!("Poison the mutex!");
+            })
+            .join()
+            .unwrap_err();
+            m
+        };
+
+        let result = safe_lock(&poisoned_mutex);
+        assert!(result.is_err(), "Should return error for poisoned mutex");
+        assert!(result.unwrap_err().contains("poisoned"), "Error should mention poisoning");
+    }
+
+    #[test]
+    fn test_schedule_every_before_anchor() {
+        // Test the case where current time is before the anchor
+        let anchor_time = Utc::now() + chrono::Duration::hours(1);
+        let schedule = Schedule::every_with_anchor(Duration::from_secs(60), anchor_time);
+
+        let now = Utc::now();
+        let next = schedule.next_run(&now);
+
+        assert!(next.is_some(), "Should return a next time even when before anchor");
+        let next_time = next.unwrap();
+        // When before anchor, next run should be at the anchor time
+        // They should be very close (same millisecond timestamp)
+        let diff = (next_time - anchor_time).num_milliseconds().abs();
+        assert!(diff <= 1, "Next run should be at anchor time, but got {} ms difference (next: {}, anchor: {})", diff, next_time, anchor_time);
+    }
+
+    #[test]
+    fn test_schedule_every_after_anchor() {
+        // Test normal case where current time is after the anchor
+        let anchor_time = Utc::now() - chrono::Duration::hours(1);
+        let schedule = Schedule::every_with_anchor(Duration::from_secs(60), anchor_time);
+
+        let now = Utc::now();
+        let next = schedule.next_run(&now);
+
+        assert!(next.is_some(), "Should return a next time when after anchor");
+        let next_time = next.unwrap();
+        // Next run should be in the future
+        assert!(next_time > now, "Next run should be in the future");
+        // Next run should be within one interval from now
+        assert!(next_time <= now + chrono::Duration::seconds(120), "Next run should be within reasonable time");
+    }
+
+    #[test]
+    fn test_schedule_every_no_anchor() {
+        // Test with no anchor (default behavior)
+        let schedule = Schedule::every(Duration::from_secs(60));
+
+        let now = Utc::now();
+        let next = schedule.next_run(&now);
+
+        assert!(next.is_some(), "Should return a next time");
+        let next_time = next.unwrap();
+        assert!(next_time > now, "Next run should be in the future");
+        assert!(next_time <= now + chrono::Duration::seconds(120), "Next run should be within two intervals");
+    }
+
+    #[test]
+    fn test_schedule_every_handles_negative_timestamp() {
+        // Test with a timestamp before Unix epoch (1969-12-31 23:59:59 UTC)
+        let past_time = DateTime::<Utc>::MIN_UTC + chrono::Duration::days(1);
+        let schedule = Schedule::every(Duration::from_secs(60));
+
+        // Should handle negative timestamps gracefully
+        let next = schedule.next_run(&past_time);
+        assert!(next.is_some() || next.is_none(), "Should not panic with negative timestamp");
     }
 }

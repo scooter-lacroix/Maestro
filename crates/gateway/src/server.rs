@@ -17,7 +17,7 @@ use tower_http::{
     trace::TraceLayer,
     ServiceBuilderExt,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::routes::create_routes;
 use crate::sse::{sse_handler, sse_heartbeat};
@@ -56,20 +56,72 @@ pub async fn run_with_state(
 }
 
 /// Create the Axum application
-pub fn create_app(state: Arc<GatewayState>, _config: GatewayConfig) -> Router {
+pub fn create_app(state: Arc<GatewayState>, config: GatewayConfig) -> Router {
+    // Build CORS layer based on configuration
+    let cors = if config.cors_allowed_origins.is_empty() {
+        warn!("CORS: No allowed origins configured - denying all CORS requests");
+        // Deny all CORS requests
+        CorsLayer::new()
+    } else if config.cors_allowed_origins.iter().any(|o| o == "*") {
+        warn!("CORS: Permissive mode enabled - allowing all origins. NOT RECOMMENDED FOR PRODUCTION!");
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        // Restrictive CORS with specific origins
+        let origins: Result<Vec<_>, _> = config
+            .cors_allowed_origins
+            .iter()
+            .map(|s| s.parse())
+            .collect();
+
+        match origins {
+            Ok(parsed_origins) => {
+                info!(
+                    "CORS: Restrictive mode enabled - allowing {} origins",
+                    parsed_origins.len()
+                );
+                let methods: Result<Vec<_>, _> = config
+                    .cors_allowed_methods
+                    .iter()
+                    .map(|s| s.parse())
+                    .collect();
+
+                let headers: Result<Vec<_>, _> = config
+                    .cors_allowed_headers
+                    .iter()
+                    .map(|s| s.parse())
+                    .collect();
+
+                match (methods, headers) {
+                    (Ok(methods), Ok(headers)) => {
+                        CorsLayer::new()
+                            .allow_origin(parsed_origins)
+                            .allow_methods(methods)
+                            .allow_headers(headers)
+                    }
+                    _ => {
+                        warn!("CORS: Invalid methods or headers configuration, using restrictive defaults");
+                        CorsLayer::new()
+                    }
+                }
+            }
+            Err(_) => {
+                warn!("CORS: Invalid origin configuration, using restrictive defaults");
+                CorsLayer::new()
+            }
+        }
+    };
+
     // Build middleware stack
     let middleware = ServiceBuilder::new()
         // Request ID
         .set_x_request_id(MakeRequestUuid)
         // Trace layer for logging
         .layer(TraceLayer::new_for_http())
-        // CORS
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        // CORS (configurable)
+        .layer(cors)
         // Propagate request ID
         .propagate_x_request_id();
 

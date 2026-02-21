@@ -1,8 +1,14 @@
 //! Zellij Multiplexer Integration
 //!
 //! Provides high-performance terminal multiplexing using Zellij.
+//!
+//! ## Portability
+//!
+//! This module uses PATH-first discovery and XDG-compliant paths.
+//! No hardcoded absolute paths are used.
 
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::process::Command;
 use tracing::{debug, info};
 
@@ -23,27 +29,59 @@ impl ZellijMultiplexer {
         path.to_string()
     }
 
+    /// Get home directory with portable fallback
+    fn get_home() -> PathBuf {
+        dirs::home_dir().unwrap_or_else(|| {
+            // Fallback to current directory if home cannot be determined
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        })
+    }
+
     /// Check if we are currently running inside a Zellij session
     pub fn is_in_zellij() -> bool {
         std::env::var("ZELLIJ").is_ok()
     }
 
+    /// Get zide resources directory using XDG-compliant paths
+    fn get_zide_dir() -> String {
+        let home = Self::get_home();
+
+        // Priority order for zide resources:
+        // 1. $MAESTRO_HOME/resources/zide
+        // 2. ~/.maestro/resources/zide
+        // 3. $XDG_DATA_HOME/maestro/resources/zide
+        let possible_paths = vec![
+            // MAESTRO_HOME override
+            std::env::var("MAESTRO_HOME")
+                .ok()
+                .map(|p| PathBuf::from(p).join("resources/zide")),
+            // User maestro directory
+            Some(home.join(".maestro").join("resources").join("zide")),
+            // XDG data directory
+            std::env::var("XDG_DATA_HOME")
+                .ok()
+                .map(|p| PathBuf::from(p).join("maestro/resources/zide")),
+        ];
+
+        for path in possible_paths.into_iter().flatten() {
+            if path.exists() {
+                return path.to_string_lossy().to_string();
+            }
+        }
+
+        // Default to user maestro directory (will be created if needed)
+        home.join(".maestro")
+            .join("resources")
+            .join("zide")
+            .to_string_lossy()
+            .to_string()
+    }
+
     /// Launch Zide for a project
     pub fn spawn_zide(project_path: &str, name: &str) -> Result<()> {
         let project_path = Self::expand_tilde(project_path);
-
-        // Find bundled resources
-        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let user_zide_path = home.join(".maestro").join("resources").join("zide");
-        let user_zide_str = user_zide_path.to_string_lossy();
-
-        let possible_paths = [&user_zide_str, "/usr/local/share/maestro/zide"];
-
-        let zide_dir = possible_paths
-            .iter()
-            .find(|p| std::path::Path::new(p).exists())
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "/usr/local/share/maestro/zide".to_string());
+        let zide_dir = Self::get_zide_dir();
+        let home = Self::get_home();
 
         let zide_bin = format!("{}/bin/zide", zide_dir);
 
@@ -61,16 +99,15 @@ impl ZellijMultiplexer {
         cmd.env("ZIDE_DIR", &zide_dir);
 
         // Add Zide bin to PATH so it can find zide-pick, zide-edit etc.
-        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/stan"));
+        // Uses XDG-compliant paths (no hardcoded absolute paths)
         let local_bin = home.join(".local").join("bin");
         let cargo_bin = home.join(".cargo").join("bin");
         let current_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!(
-            "{}/bin:{}:{}:{}:{}",
+            "{}/bin:{}:{}:{}",
             zide_dir,
             local_bin.to_string_lossy(),
             cargo_bin.to_string_lossy(),
-            "/usr/local/bin",
             current_path
         );
         cmd.env("PATH", new_path);
@@ -136,29 +173,16 @@ impl ZellijMultiplexer {
     pub fn run_in_pane(session_name: &str, command: &str, cwd: Option<&str>) -> Result<()> {
         debug!("Running command in Zellij pane: {}", command);
 
-        // Find bundled resources
-        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let user_zide_path = home.join(".maestro").join("resources").join("zide");
-        let user_zide_str = user_zide_path.to_string_lossy();
-
-        let possible_paths = [&user_zide_str, "/usr/local/share/maestro/zide"];
-
-        let zide_dir = possible_paths
-            .iter()
-            .find(|p| std::path::Path::new(p).exists())
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "/usr/local/share/maestro/zide".to_string());
-
-        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/stan"));
+        let zide_dir = Self::get_zide_dir();
+        let home = Self::get_home();
         let local_bin = home.join(".local").join("bin");
         let cargo_bin = home.join(".cargo").join("bin");
         let current_path = std::env::var("PATH").unwrap_or_default();
         let new_path = format!(
-            "{}/bin:{}:{}:{}:{}",
+            "{}/bin:{}:{}:{}",
             zide_dir,
             local_bin.to_string_lossy(),
             cargo_bin.to_string_lossy(),
-            "/usr/local/bin",
             current_path
         );
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());

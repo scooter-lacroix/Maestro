@@ -65,9 +65,19 @@ impl LspClient {
     pub fn socket_path(session_id: &str, lsp_type: LspType) -> String {
         let sanitized = session_id
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
-        format!("/tmp/maestro-lsp-{}-{}.sock", lsp_type.language(), sanitized)
+        format!(
+            "/tmp/maestro-lsp-{}-{}.sock",
+            lsp_type.language(),
+            sanitized
+        )
     }
 
     /// Notify LSP of file changes and get diagnostics
@@ -116,13 +126,10 @@ impl LspClient {
         timeout_secs: u64,
     ) -> Result<DiagnosticValidation> {
         // Connect to the proxy socket
-        let mut stream = timeout(
-            Duration::from_secs(2),
-            UnixStream::connect(socket_path),
-        )
-        .await
-        .with_context(|| format!("LSP proxy connection timeout at {}", socket_path))?
-        .with_context(|| format!("Failed to connect to LSP proxy at {}", socket_path))?;
+        let mut stream = timeout(Duration::from_secs(2), UnixStream::connect(socket_path))
+            .await
+            .with_context(|| format!("LSP proxy connection timeout at {}", socket_path))?
+            .with_context(|| format!("Failed to connect to LSP proxy at {}", socket_path))?;
 
         // Read file content for didChange notification
         let content = tokio::fs::read_to_string(file_path)
@@ -191,7 +198,11 @@ impl LspClient {
     }
 
     /// Send a message to the LSP with proper LSP framing
-    async fn send_message(&self, stream: &mut UnixStream, message: &serde_json::Value) -> Result<()> {
+    async fn send_message(
+        &self,
+        stream: &mut UnixStream,
+        message: &serde_json::Value,
+    ) -> Result<()> {
         let content = message.to_string();
         let header = format!("Content-Length: {}\r\n\r\n", content.len());
 
@@ -240,7 +251,11 @@ impl LspClient {
     }
 
     /// Parse diagnostics from LSP response
-    fn parse_diagnostics_response(&self, response: &str, file_uri: &str) -> Result<Vec<Diagnostic>> {
+    fn parse_diagnostics_response(
+        &self,
+        response: &str,
+        file_uri: &str,
+    ) -> Result<Vec<Diagnostic>> {
         let json_val: serde_json::Value = serde_json::from_str(response)?;
 
         // Check if this is a response with result
@@ -264,7 +279,11 @@ impl LspClient {
     }
 
     /// Parse a single LSP diagnostic from JSON
-    fn parse_lsp_diagnostic(&self, diag_json: &serde_json::Value, file_uri: &str) -> Result<Diagnostic> {
+    fn parse_lsp_diagnostic(
+        &self,
+        diag_json: &serde_json::Value,
+        file_uri: &str,
+    ) -> Result<Diagnostic> {
         let range = diag_json
             .get("range")
             .ok_or_else(|| anyhow!("Diagnostic missing range"))?;
@@ -360,10 +379,7 @@ pub fn path_to_file_uri(path: &Path) -> Result<String> {
 }
 
 /// Create an LSP client connected via proxy
-pub async fn create_proxy_client(
-    session_id: &str,
-    lsp_type: LspType,
-) -> Result<LspClient> {
+pub async fn create_proxy_client(session_id: &str, lsp_type: LspType) -> Result<LspClient> {
     let socket_path = LspClient::socket_path(session_id, lsp_type);
 
     // Check if socket exists and is accessible
@@ -375,7 +391,11 @@ pub async fn create_proxy_client(
     {
         // Socket is available
         drop(stream);
-        Ok(LspClient::with_proxy(session_id.to_string(), lsp_type, socket_path))
+        Ok(LspClient::with_proxy(
+            session_id.to_string(),
+            lsp_type,
+            socket_path,
+        ))
     } else {
         // Socket not available, try direct mode
         tracing::warn!(
@@ -434,7 +454,9 @@ mod tests {
             "source": "rust-analyzer"
         });
 
-        let diag = client.parse_lsp_diagnostic(&diag_json, "file:///tmp/test.rs").unwrap();
+        let diag = client
+            .parse_lsp_diagnostic(&diag_json, "file:///tmp/test.rs")
+            .unwrap();
         assert_eq!(diag.severity, DiagnosticSeverity::Error);
         assert_eq!(diag.message, "expected type, found `()`");
         assert_eq!(diag.source, Some("rust-analyzer".to_string()));

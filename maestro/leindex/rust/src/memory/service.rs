@@ -79,7 +79,7 @@ impl MemoryService {
     pub fn stats(&self) -> Result<super::db::DbStats> {
         self.db.stats()
     }
-        /// Get breakdown by category
+    /// Get breakdown by category
     pub fn stats_by_category(&self) -> Result<Vec<super::models::MemoryCategoryStats>> {
         self.db.stats_by_category()
     }
@@ -626,6 +626,112 @@ impl MemoryService {
 
         info!("Imported {} projects to database", result.projects_found);
         Ok(result)
+    }
+
+    // ========================================================================
+    // System-wide project discovery
+    // ========================================================================
+
+    /// Auto-discover and register Maestro projects from common directories.
+    ///
+    /// This scans standard project directories and tmux pane working directories
+    /// to find Maestro projects (those with maestro/tracks.md or .maestro/tracks.md).
+    /// Discovered projects are registered in the database for the Projects tab.
+    ///
+    /// This is called automatically on TUI startup to ensure the Projects tab
+    /// shows relevant projects even on fresh installs.
+    pub fn sync_projects_from_system(&self) -> Result<usize> {
+        use crate::multiplexer::TmuxMultiplexer;
+        let mut working_dirs: Vec<std::path::PathBuf> = Vec::new();
+
+        // Add current working directory
+        if let Ok(cwd) = std::env::current_dir() {
+            working_dirs.push(cwd);
+        }
+
+        // Add tmux pane paths if available
+        let mux = TmuxMultiplexer::new();
+        if let Ok(tmux_paths) = mux.get_all_pane_paths() {
+            for path in tmux_paths {
+                working_dirs.push(std::path::PathBuf::from(path));
+            }
+        }
+
+        // Add common project directories
+        if let Some(home) = dirs::home_dir() {
+            for subdir in &["Prod", "Projects", "projects", "src", "code", "work"] {
+                let dir = home.join(subdir);
+                if dir.exists() {
+                    working_dirs.push(dir);
+                }
+            }
+        }
+
+        // Deduplicate working directories
+        let mut seen = std::collections::HashSet::new();
+        working_dirs.retain(|dir| seen.insert(dir.clone()));
+
+        let mut imported = 0usize;
+
+        for dir in working_dirs {
+            // Walk up from each directory to find tracks.md
+            if let Some((project_path, project_name)) = Self::find_maestro_project_from_dir(&dir) {
+                if let Err(e) = self.get_or_create_project(&project_path, &project_name) {
+                    warn!("Failed to register project {}: {}", project_name, e);
+                } else {
+                    imported += 1;
+                }
+            }
+        }
+
+        info!("Auto-discovered {} projects from system", imported);
+        Ok(imported)
+    }
+
+    /// Find a Maestro project by walking up from a directory.
+    ///
+    /// Looks for maestro/tracks.md or .maestro/tracks.md in ancestor directories.
+    /// Returns (project_path, project_name) tuple if found.
+    fn find_maestro_project_from_dir(start: &std::path::Path) -> Option<(String, String)> {
+        const SEARCH_PATHS: &[&str] = &[
+            "maestro/tracks.md",
+            "tracks.md",
+            ".maestro/tracks.md",
+            "maestro/tracks/tracks.md",
+        ];
+
+        let mut current = start;
+        loop {
+            for pattern in SEARCH_PATHS {
+                let candidate = current.join(pattern);
+                if candidate.exists() && candidate.is_file() {
+                    // Get the tracks directory (parent of tracks.md)
+                    let tracks_dir = candidate.parent()?.to_path_buf();
+
+                    // Determine root_dir: if tracks_dir ends with "maestro" or ".maestro", parent is root
+                    let dir_name = tracks_dir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    let root_dir = if dir_name == "maestro" || dir_name == ".maestro" {
+                        tracks_dir.parent()?.to_path_buf()
+                    } else {
+                        tracks_dir.clone()
+                    };
+
+                    // Get project name from root directory
+                    let project_name = root_dir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("Unknown")
+                        .to_string();
+
+                    let project_path = root_dir.to_string_lossy().to_string();
+                    return Some((project_path, project_name));
+                }
+            }
+            current = current.parent()?;
+        }
     }
 
     // ========================================================================

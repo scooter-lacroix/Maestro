@@ -8,6 +8,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use leindex_core::setup::password::PasswordCache;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -16,6 +17,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Gauge, List, ListItem, Paragraph},
     Frame, Terminal,
 };
+use std::sync::Arc;
 
 use leindex_core::setup::{detect_distro, run_orchestra, Config, Distro, SetupEvent};
 
@@ -49,6 +51,7 @@ struct App {
     tool_selections: Vec<(String, bool)>,
     config_selection: usize,
     starred: bool,
+    password_cache: Arc<PasswordCache>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -79,13 +82,13 @@ fn main() -> Result<(), io::Error> {
 
     // Set up terminal with proper error handling
     let mut stdout = io::stdout();
-    
+
     // Enable raw mode first
     enable_raw_mode().map_err(|e| {
         eprintln!("Failed to enable raw mode: {}", e);
         e
     })?;
-    
+
     // Enter alternate screen and enable mouse
     let enter_result = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
     if let Err(e) = enter_result {
@@ -93,12 +96,11 @@ fn main() -> Result<(), io::Error> {
         eprintln!("Failed to enter alternate screen: {}", e);
         return Err(e);
     }
-    
+
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend).map_err(|e| {
+    let mut terminal = Terminal::new(backend).inspect_err(|_e| {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
-        e
     })?;
 
     let detected_distro = detect_distro();
@@ -140,6 +142,7 @@ fn main() -> Result<(), io::Error> {
         ],
         config_selection: 0,
         starred: true,
+        password_cache: Arc::new(PasswordCache::new()),
     };
 
     let res = run_app(&mut terminal, app);
@@ -155,17 +158,13 @@ fn main() -> Result<(), io::Error> {
 }
 
 /// Clean up terminal state properly to prevent lag/corruption
-fn cleanup_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), io::Error> {
+fn cleanup_terminal(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> Result<(), io::Error> {
     // First, disable mouse capture
-    execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), DisableMouseCapture)?;
     // Leave alternate screen
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     // Show cursor before disabling raw mode
     terminal.show_cursor()?;
     disable_raw_mode()?;
@@ -202,10 +201,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         if msg.contains("[sudo]") && msg.contains("password") {
                             app.password_state = PasswordState::Prompting("sudo".to_string());
                             app.password_buffer.clear();
+                            app.logs.push(msg.clone());
                         } else if msg.contains("[PROMPT]") {
                             // Custom prompt marker from setup module
                             app.password_state = PasswordState::Prompting("system".to_string());
                             app.password_buffer.clear();
+                            app.logs.push(msg.clone());
                         } else {
                             app.logs.push(msg);
                         }
@@ -242,11 +243,14 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         KeyCode::Enter => {
                             // Submit password
                             let password = app.password_buffer.clone();
-                            app.logs.push(format!("[PASSWORD] Received {} characters", password.len()));
+                            app.logs
+                                .push(format!("[PASSWORD] Received {} characters", password.len()));
+                            // Set the password in the cache for the orchestra thread to pick up
+                            app.password_cache.set_password(password);
                             app.password_state = PasswordState::None;
                             app.password_buffer.clear();
-                            // Note: In a full implementation, we'd send this to the setup thread
                         }
+
                         KeyCode::Backspace => {
                             app.password_buffer.pop();
                         }
@@ -279,7 +283,10 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                         .filter(|(_, s)| *s)
                                         .map(|(n, _)| n.clone())
                                         .collect(),
+                                    password_cache: Arc::clone(&app.password_cache),
+                                    distro: app.distro,
                                 };
+
                                 let (tx, rx) = mpsc::channel();
                                 app.receiver = Some(rx);
                                 thread::spawn(move || {
@@ -397,16 +404,16 @@ fn ui(f: &mut Frame, app: &mut App) {
 fn render_password_modal(f: &mut Frame, app: &mut App, area: Rect) {
     let modal_area = centered_rect(50, 25, area);
     f.render_widget(Clear, modal_area);
-    
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" 🔐 Password Required ")
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Yellow))
         .style(Style::default().bg(Color::Rgb(20, 20, 30)));
-    
+
     let masked_password = "*".repeat(app.password_buffer.len());
-    
+
     let text = vec![
         Line::from(""),
         Line::from(vec![
@@ -423,10 +430,8 @@ fn render_password_modal(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
         ]),
     ];
-    
-    let p = Paragraph::new(text)
-        .block(block)
-        .alignment(Alignment::Left);
+
+    let p = Paragraph::new(text).block(block).alignment(Alignment::Left);
     f.render_widget(p, modal_area);
 }
 
@@ -523,6 +528,19 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
     );
 
     let mut items = vec![
+        ListItem::new(vec![
+            Line::from(vec![
+                Span::styled(
+                    "  System Environment: ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} ({})", app.distro, app.distro.package_manager_name()),
+                    Style::default().fg(Color::Magenta),
+                ),
+            ]),
+            Line::from(""),
+        ]),
         ListItem::new(vec![
             Line::from("  Installation Path:"),
             Line::from(vec![Span::styled(
@@ -701,8 +719,16 @@ fn render_crescendo(f: &mut Frame, app: &mut App, area: Rect) {
 
     let visual = Paragraph::new(format!(
         "{}{}{}{}{}{}{}{}{}{}",
-        pulse_str, pulse_str, pulse_str, pulse_str, pulse_str,
-        pulse_str, pulse_str, pulse_str, pulse_str, pulse_str
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str,
+        pulse_str
     ))
     .alignment(Alignment::Center)
     .style(Style::default().fg(Color::Rgb(200, 100, 255)));

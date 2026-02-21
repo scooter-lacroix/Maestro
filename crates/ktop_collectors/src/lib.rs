@@ -48,9 +48,9 @@ pub use network::NetworkCollector;
 pub use process::ProcessCollector;
 pub use state::{MetricsState, StateUpdate, UpdateFlags};
 pub use types::{
-    AgentInfo, AgentStatus, CpuMetrics, DiskMetrics, DiskMount, InterfaceStats,
-    LeIndexStats, LspStatus, MaestroMemoryStats, MaestroMetrics, MemoryMetrics,
-    NetworkMetrics, ProcessInfo, ProcessStatus, SystemMetrics,
+    AgentInfo, AgentStatus, CpuMetrics, DiskMetrics, DiskMount, InterfaceStats, LeIndexStats,
+    LspStatus, MaestroMemoryStats, MaestroMetrics, MemoryMetrics, NetworkMetrics, ProcessInfo,
+    ProcessStatus, SystemMetrics,
 };
 
 /// Version information

@@ -15,6 +15,7 @@ pub enum AgentTool {
     Gemini,
     Qwen,
     OpenCode,
+    Iflow,
     Amp,
     Codex,
     Droid,
@@ -27,6 +28,7 @@ impl AgentTool {
             AgentTool::Gemini => "gemini",
             AgentTool::Qwen => "qwen",
             AgentTool::OpenCode => "opencode",
+            AgentTool::Iflow => "iflow",
             AgentTool::Amp => "amp",
             AgentTool::Codex => "codex",
             AgentTool::Droid => "droid",
@@ -43,6 +45,7 @@ impl AgentTool {
             "claude" => Some(AgentTool::Claude),
             "gemini" => Some(AgentTool::Gemini),
             "qwen" => Some(AgentTool::Qwen),
+            "iflow" => Some(AgentTool::Iflow),
             "opencode" => Some(AgentTool::OpenCode),
             "amp" => Some(AgentTool::Amp),
             "codex" => Some(AgentTool::Codex),
@@ -78,10 +81,12 @@ impl SetupStatus {
         self.maestro_config_exists
             && self.tracks_md_exists
             && !self.available_tools.is_empty()
-            && self
-                .available_tools
-                .iter()
-                .any(|t| matches!(t, AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen))
+            && self.available_tools.iter().any(|t| {
+                matches!(
+                    t,
+                    AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen | AgentTool::Iflow
+                )
+            })
     }
 
     /// Get missing requirements
@@ -94,7 +99,7 @@ impl SetupStatus {
 
         if self.available_tools.is_empty() {
             missing.push(
-                "No AI tools found. Install at least one: claude, gemini, qwen, or opencode."
+                "No AI tools found. Install at least one: iflow, claude, gemini, qwen, or opencode."
                     .to_string(),
             );
         }
@@ -113,12 +118,13 @@ impl SetupStatus {
             );
         }
 
-        if !self
-            .available_tools
-            .iter()
-            .any(|t| matches!(t, AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen))
-        {
-            improvements.push("No primary AI tool (claude/gemini/qwen) found. These are recommended for orchestrate.".to_string());
+        if !self.available_tools.iter().any(|t| {
+            matches!(
+                t,
+                AgentTool::Claude | AgentTool::Gemini | AgentTool::Qwen | AgentTool::Iflow
+            )
+        }) {
+            improvements.push("No primary AI tool (iflow/claude/gemini/qwen) found. These are recommended for orchestrate.".to_string());
         }
 
         if !self.sandbox_available {
@@ -158,6 +164,7 @@ pub fn detect_setup_status(tracks_dir: &Path) -> Result<SetupStatus> {
         AgentTool::Claude,
         AgentTool::Gemini,
         AgentTool::Qwen,
+        AgentTool::Iflow,
         AgentTool::OpenCode,
         AgentTool::Amp,
         AgentTool::Codex,
@@ -229,6 +236,7 @@ mod tests {
     fn test_agent_tool_from_str() {
         assert_eq!(AgentTool::from_str("claude"), Some(AgentTool::Claude));
         assert_eq!(AgentTool::from_str("gemini"), Some(AgentTool::Gemini));
+        assert_eq!(AgentTool::from_str("iflow"), Some(AgentTool::Iflow));
         assert_eq!(AgentTool::from_str("unknown"), None);
     }
 

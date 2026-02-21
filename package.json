@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@lmstudio/sdk": "^1.5.0"
+  }
+}

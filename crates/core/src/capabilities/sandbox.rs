@@ -10,14 +10,138 @@
 //! - SecurityPolicy with resource limits
 //! - RuntimeAdapter trait for pluggable execution backends
 //! - WASM and Docker sandbox implementations
+//! - Command injection protection through allowlist and validation
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+/// Command allowlist for safe execution
+const COMMAND_ALLOWLIST: &[&str] = &[
+    // Common safe commands
+    "echo", "cat", "head", "tail", "grep", "sort", "uniq", "wc",
+    "ls", "find", "file", "stat", "dirname", "basename",
+    "date", "sleep", "true", "false", "yes", "seq",
+    // Build tools
+    "cargo", "rustc", "gcc", "clang", "make", "cmake", "ninja",
+    "python", "python3", "node", "npm", "pnpm", "yarn", "bun",
+    // Git operations
+    "git",
+    // File operations
+    "cp", "mv", "rm", "mkdir", "touch", "chmod", "chown",
+    // Compression
+    "tar", "gzip", "gunzip", "zip", "unzip", "xz",
+    // Text processing
+    "sed", "awk", "cut", "tr", "diff",
+    // Network (restricted)
+    "curl", "wget", "ssh",
+    // System info
+    "ps", "top", "htop", "df", "du", "free", "uname",
+];
+
+/// Characters that are dangerous in shell commands
+const DANGEROUS_CHARS: &[char] = &['|', '&', ';', '$', '`', '\n', '\r', '\x00'];
+
+/// Validate that a command string does not contain shell injection patterns
+pub fn validate_command_safe(command: &str, args: &[String]) -> anyhow::Result<()> {
+    // Check command name against allowlist
+    let command_name = command.split('/').next_back().unwrap_or(command);
+    if !COMMAND_ALLOWLIST.contains(&command_name) {
+        anyhow::bail!(
+            "Command '{}' is not in the allowlist. Allowed commands: {:?}",
+            command_name,
+            COMMAND_ALLOWLIST
+        );
+    }
+
+    // Check for dangerous characters in command
+    for c in DANGEROUS_CHARS {
+        if command.contains(*c) {
+            anyhow::bail!(
+                "Command contains dangerous character '{}'. This could indicate a shell injection attempt.",
+                c
+            );
+        }
+    }
+
+    // Check each argument for dangerous characters
+    for (i, arg) in args.iter().enumerate() {
+        for c in DANGEROUS_CHARS {
+            if arg.contains(*c) {
+                anyhow::bail!(
+                    "Argument {} contains dangerous character '{}': '{}'",
+                    i,
+                    c,
+                    arg
+                );
+            }
+        }
+    }
+
+    // Check for pipe chains in arguments
+    for arg in args {
+        if arg.contains('|') || arg.contains('&') || arg.contains(';') {
+            anyhow::bail!(
+                "Argument contains shell operator: '{}'. This could indicate command chaining.",
+                arg
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate that a path is safe and within allowed roots
+/// Uses canonicalize to resolve symlinks and relative paths
+pub fn validate_path_safe(path: &Path, allowed_roots: &[PathBuf]) -> anyhow::Result<()> {
+    // Canonicalize the path to resolve any symlinks or relative components
+    let canonical = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+
+    // If no allowed roots, deny all
+    if allowed_roots.is_empty() {
+        anyhow::bail!("No allowed paths configured - access denied");
+    }
+
+    // Check if the canonical path is within any allowed root
+    let mut is_allowed = false;
+    for root in allowed_roots {
+        let root_canonical = root
+            .canonicalize()
+            .unwrap_or_else(|_| root.clone());
+
+        if canonical.starts_with(&root_canonical) {
+            is_allowed = true;
+            break;
+        }
+    }
+
+    if !is_allowed {
+        anyhow::bail!(
+            "Path '{}' is not within allowed roots: {:?}",
+            canonical.display(),
+            allowed_roots
+        );
+    }
+
+    Ok(())
+}
+
+/// Check if an environment variable key is safe (no shell injection)
+pub fn is_safe_env_key(key: &str) -> bool {
+    // Environment variable keys should be alphanumeric with underscores
+    // No spaces, quotes, or special characters
+    key.chars()
+        .all(|c| c.is_alphanumeric() || c == '_')
+        && !key.is_empty()
+        && !key.starts_with(|c: char| c.is_ascii_digit())
+}
 
 /// Level of autonomy for tool execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -134,22 +258,52 @@ impl SecurityPolicy {
     }
 
     /// Check if a path is readable.
+    /// Uses canonicalize to prevent path traversal attacks.
     pub fn can_read(&self, path: &std::path::Path) -> bool {
         if self.allowed_read_paths.is_empty() {
             return false;
         }
+
+        // First, try to canonicalize the path to resolve symlinks and relative paths
+        let canonical = match path.canonicalize() {
+            Ok(p) => p,
+            Err(_) => {
+                // Path doesn't exist, so we can't fully validate it
+                // Fall back to prefix check on the raw path
+                return self.allowed_read_paths.iter().any(|allowed| {
+                    path.starts_with(allowed) || path == allowed
+                });
+            }
+        };
+
         self.allowed_read_paths.iter().any(|allowed| {
-            path.starts_with(allowed) || path == allowed
+            let allowed_canonical = allowed.canonicalize().unwrap_or_else(|_| allowed.clone());
+            canonical.starts_with(&allowed_canonical) || canonical == allowed_canonical
         })
     }
 
     /// Check if a path is writable.
+    /// Uses canonicalize to prevent path traversal attacks.
     pub fn can_write(&self, path: &std::path::Path) -> bool {
         if self.allowed_write_paths.is_empty() {
             return false;
         }
+
+        // First, try to canonicalize the path to resolve symlinks and relative paths
+        let canonical = match path.canonicalize() {
+            Ok(p) => p,
+            Err(_) => {
+                // Path doesn't exist, so we can't fully validate it
+                // Fall back to prefix check on the raw path
+                return self.allowed_write_paths.iter().any(|allowed| {
+                    path.starts_with(allowed) || path == allowed
+                });
+            }
+        };
+
         self.allowed_write_paths.iter().any(|allowed| {
-            path.starts_with(allowed) || path == allowed
+            let allowed_canonical = allowed.canonicalize().unwrap_or_else(|_| allowed.clone());
+            canonical.starts_with(&allowed_canonical) || canonical == allowed_canonical
         })
     }
 }
@@ -263,14 +417,28 @@ impl RuntimeAdapter for NativeRuntime {
         use std::process::{Command, Stdio};
         use std::time::Instant;
 
+        // SECURITY: Validate command against injection attacks
+        validate_command_safe(&request.command, &request.args)
+            .context("Command validation failed - possible injection attempt")?;
+
+        // Validate working directory is within allowed paths
+        if let Some(cwd) = &request.cwd {
+            if let Err(e) = validate_path_safe(cwd, &self.policy.allowed_read_paths) {
+                anyhow::bail!("Working directory validation failed: {}", e);
+            }
+        }
+
         let start = Instant::now();
 
-        // Build command
+        // Build command - using Command API which avoids shell interpretation
         let mut cmd = Command::new(&request.command);
         cmd.args(&request.args);
 
-        // Set environment
+        // Set environment (validate keys are safe)
         for (key, value) in &request.env {
+            if !is_safe_env_key(key) {
+                anyhow::bail!("Environment variable key '{}' contains unsafe characters", key);
+            }
             cmd.env(key, value);
         }
 
@@ -637,5 +805,184 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("exitCode"));
         assert!(json.contains("output"));
+    }
+
+    // ========== SECURITY TESTS ==========
+
+    #[test]
+    fn test_command_injection_blocked_pipe() {
+        let result = validate_command_safe("cat", &["| rm -rf /".to_string()]);
+        assert!(result.is_err(), "Should reject pipe injection");
+    }
+
+    #[test]
+    fn test_command_injection_blocked_semicolon() {
+        let result = validate_command_safe("cat", &["; echo hacked".to_string()]);
+        assert!(result.is_err(), "Should reject semicolon injection");
+    }
+
+    #[test]
+    fn test_command_injection_blocked_backtick() {
+        let result = validate_command_safe("cat", &["`whoami`".to_string()]);
+        assert!(result.is_err(), "Should reject backtick injection");
+    }
+
+    #[test]
+    fn test_command_injection_blocked_dollar() {
+        let result = validate_command_safe("cat", &["$(rm -rf /)".to_string()]);
+        assert!(result.is_err(), "Should reject dollar substitution");
+    }
+
+    #[test]
+    fn test_command_injection_blocked_newline() {
+        let result = validate_command_safe("cat", &["file.txt\necho hacked".to_string()]);
+        assert!(result.is_err(), "Should reject newline injection");
+    }
+
+    #[test]
+    fn test_command_not_in_allowlist() {
+        let result = validate_command_safe("malicious_command", &[]);
+        assert!(result.is_err(), "Should reject commands not in allowlist");
+    }
+
+    #[test]
+    fn test_safe_command_allowed() {
+        let result = validate_command_safe("cat", &["file.txt".to_string()]);
+        assert!(result.is_ok(), "Should allow safe commands");
+    }
+
+    #[test]
+    fn test_safe_command_with_multiple_args() {
+        let result = validate_command_safe(
+            "grep",
+            &["-r".to_string(), "pattern".to_string(), "/path".to_string()],
+        );
+        assert!(result.is_ok(), "Should allow safe commands with multiple args");
+    }
+
+    #[test]
+    fn test_git_command_allowed() {
+        let result = validate_command_safe("git", &["status".to_string()]);
+        assert!(result.is_ok(), "Should allow git commands");
+    }
+
+    #[test]
+    fn test_path_traversal_blocked() {
+        // Use temp dir for actual filesystem testing
+        let temp_dir = std::env::temp_dir();
+        let safe_base = temp_dir.join("maestro_test_safe");
+        let _ = std::fs::create_dir_all(&safe_base);
+
+        let allowed_paths = vec![safe_base.clone()];
+
+        // Test 1: Direct safe path should work
+        let safe = safe_base.join("file.txt");
+        std::fs::write(&safe, "test").unwrap(); // Create the file
+        let result = validate_path_safe(&safe, &allowed_paths);
+        assert!(result.is_ok(), "Should allow safe path: {:?}", result.err());
+
+        // Test 2: Path traversal via .. should be rejected
+        // Create a file outside the safe directory
+        let outside_dir = temp_dir.join("maestro_test_outside");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let outside_file = outside_dir.join("outside.txt");
+        std::fs::write(&outside_file, "outside data").unwrap();
+
+        // Try to access via .. traversal
+        let traversal = safe_base.join("../maestro_test_outside/outside.txt");
+        let result = validate_path_safe(&traversal, &allowed_paths);
+        assert!(result.is_err(), "Should reject path traversal via ..: {:?}", result.err());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&safe_base);
+        let _ = std::fs::remove_dir_all(&outside_dir);
+    }
+
+    #[test]
+    fn test_path_symlink_blocked() {
+        // Use temp dir for actual filesystem testing
+        let temp_dir = std::env::temp_dir();
+        let safe_base = temp_dir.join("maestro_test_symlink");
+        let outside = temp_dir.join("maestro_test_outside");
+        let _ = std::fs::create_dir_all(&safe_base);
+        let _ = std::fs::create_dir_all(&outside);
+
+        // Create a file outside safe area
+        let outside_file = outside.join("secret.txt");
+        std::fs::write(&outside_file, "secret data").unwrap();
+
+        // Create a symlink inside safe area pointing outside
+        let symlink = safe_base.join("link_to_outside");
+        #[cfg(unix)]
+        {
+            let _ = std::os::unix::fs::symlink(&outside, &symlink);
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::os::windows::fs::symlink_dir(&outside, &symlink);
+        }
+
+        let allowed_paths = vec![safe_base.clone()];
+
+        // The symlink target should be validated
+        let result = validate_path_safe(&symlink, &allowed_paths);
+        // Symlinks are resolved by canonicalize, so if it points outside,
+        // it should be rejected
+        assert!(result.is_err(), "Should reject symlink pointing outside allowed path");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&safe_base);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn test_path_validation_empty_roots() {
+        let path = PathBuf::from("/etc/passwd");
+        let result = validate_path_safe(&path, &[]);
+        assert!(result.is_err(), "Should reject when no allowed roots configured");
+    }
+
+    #[test]
+    fn test_env_key_validation_unsafe_chars() {
+        assert!(!is_safe_env_key("TEST;VAR"), "Should reject semicolon in env key");
+        assert!(!is_safe_env_key("TEST VAR"), "Should reject space in env key");
+        assert!(!is_safe_env_key("TEST|VAR"), "Should reject pipe in env key");
+    }
+
+    #[test]
+    fn test_env_key_validation_safe() {
+        assert!(is_safe_env_key("TEST_VAR"), "Should allow normal env key");
+        assert!(is_safe_env_key("PATH"), "Should allow PATH");
+        assert!(is_safe_env_key("HOME"), "Should allow HOME");
+    }
+
+    #[test]
+    fn test_env_key_validation_empty() {
+        assert!(!is_safe_env_key(""), "Should reject empty env key");
+    }
+
+    #[test]
+    fn test_env_key_validation_leading_digit() {
+        assert!(!is_safe_env_key("1VAR"), "Should reject env key starting with digit");
+        assert!(is_safe_env_key("V1AR"), "Should allow env key with digit not at start");
+    }
+
+    // Test that NativeRuntime validates commands
+    #[tokio::test]
+    async fn test_native_runtime_blocks_injection() {
+        let policy = SecurityPolicy::permissive();
+        let runtime = NativeRuntime::new(policy);
+
+        let request = ExecutionRequest {
+            command: "cat".to_string(),
+            args: vec!["| echo hacked".to_string()],
+            env: HashMap::new(),
+            cwd: None,
+            stdin: None,
+            limits: ResourceLimits::default(),
+        };
+
+        let result = runtime.execute(request).await;
+        assert!(result.is_err(), "Should reject command injection attempt");
     }
 }

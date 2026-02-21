@@ -73,5 +73,3 @@ pub fn render_project_selector(f: &mut Frame, area: Rect, state: &ConductorState
         .alignment(Alignment::Center);
     f.render_widget(help_text, help_area);
 }
-
-

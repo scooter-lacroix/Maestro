@@ -240,7 +240,7 @@ pub enum LoopMode {
 pub struct AgentConfig {
     pub tool: String,
     pub model: Option<String>,
-    pub dangerous_mode: bool,  // CORRECTED: was "dangerous"
+    pub dangerous_mode: bool, // CORRECTED: was "dangerous"
     pub sandbox: bool,
 }
 
@@ -413,10 +413,7 @@ impl Default for LspDiagnosticConfig {
                 "**/*.go".to_string(),
                 "**/*.java".to_string(),
             ],
-            exclude_patterns: vec![
-                "**/.*".to_string(),
-                "**/*.generated.rs".to_string(),
-            ],
+            exclude_patterns: vec!["**/.*".to_string(), "**/*.generated.rs".to_string()],
             exclude_dirs: vec![
                 "target".to_string(),
                 "node_modules".to_string(),
@@ -446,10 +443,7 @@ fn default_diagnostic_timeout_secs() -> u64 {
 }
 
 fn default_exclude_patterns() -> Vec<String> {
-    vec![
-        "**/.*".to_string(),
-        "**/*.generated.rs".to_string(),
-    ]
+    vec!["**/.*".to_string(), "**/*.generated.rs".to_string()]
 }
 
 impl Default for OrchestrateConfig {
@@ -554,7 +548,6 @@ pub struct ParallelGroupInfo {
     pub merge_queue: Vec<MergeQueueEntry>,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,11 +632,7 @@ mod tests {
 
     #[test]
     fn test_is_actionable_with_no_dependencies() {
-        let task = create_task(
-            "task-1",
-            TrackStatus::Pending,
-            vec![],
-        );
+        let task = create_task("task-1", TrackStatus::Pending, vec![]);
 
         let completed_tasks = HashMap::new();
 
@@ -653,11 +642,7 @@ mod tests {
 
     #[test]
     fn test_is_blocked_with_no_dependencies() {
-        let task = create_task(
-            "task-1",
-            TrackStatus::Pending,
-            vec![],
-        );
+        let task = create_task("task-1", TrackStatus::Pending, vec![]);
 
         let completed_tasks = HashMap::new();
 

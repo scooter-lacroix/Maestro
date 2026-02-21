@@ -127,7 +127,10 @@ impl OmpAgent {
         // Use Python tool for code execution, or direct invoke for other tools
         let result = self
             .bridge
-            .execute_python(&format!("print('Task: {}')", task), Some(&self.project_path))
+            .execute_python(
+                &format!("print('Task: {}')", task),
+                Some(&self.project_path),
+            )
             .await
             .context("Failed to execute task via OMP")?;
 
@@ -141,6 +144,7 @@ impl OmpAgent {
 }
 
 /// Manager for OMP agents in the conductor
+#[derive(Clone)]
 pub struct OmpAgentManager {
     /// Active agents (track_id -> agent)
     agents: Arc<RwLock<std::collections::HashMap<String, OmpAgent>>>,
@@ -181,7 +185,7 @@ impl OmpAgentManager {
 
         let config = config.unwrap_or_else(|| self.default_config.clone());
         let agent = OmpAgent::new(track_id.clone(), project_path, config);
-        
+
         agents.insert(track_id, agent.clone());
 
         Ok(Arc::new(agent))
@@ -212,35 +216,38 @@ impl OmpAgentManager {
     }
 
     /// Get all active track IDs
- /// List all agents with their configs
- pub async fn list_agents(&self) -> Vec<(String, OmpAgentConfig)> {
- let agents = self.agents.read().await;
- agents.iter().map(|(id, agent)| (id.clone(), agent.config.clone())).collect()
- }
+    /// List all agents with their configs
+    pub async fn list_agents(&self) -> Vec<(String, OmpAgentConfig)> {
+        let agents = self.agents.read().await;
+        agents
+            .iter()
+            .map(|(id, agent)| (id.clone(), agent.config.clone()))
+            .collect()
+    }
 
- /// Get status for a specific agent
- pub async fn get_agent_status(&self, track_id: &str) -> Result<OmpWorkerStatus> {
- let agents = self.agents.read().await;
- if let Some(agent) = agents.get(track_id) {
- agent.status().await
- } else {
- Ok(OmpWorkerStatus::uninitialized())
- }
- }
+    /// Get status for a specific agent
+    pub async fn get_agent_status(&self, track_id: &str) -> Result<OmpWorkerStatus> {
+        let agents = self.agents.read().await;
+        if let Some(agent) = agents.get(track_id) {
+            agent.status().await
+        } else {
+            Ok(OmpWorkerStatus::uninitialized())
+        }
+    }
 
-     /// Get status for a specific agent (sync version for non-async contexts)
-     pub fn get_agent_status_sync(&self, track_id: &str) -> Result<OmpWorkerStatus> {
-         // Use the track_id to retrieve the agent status from the agents map
-         // For sync context, we return a default status - actual status is retrieved via async
-         // This implementation uses the track_id to validate the request
-         if track_id.is_empty() {
-             return Err(anyhow!("Track ID cannot be empty"));
-         }
-         
-         // Return uninitialized status - the async version updates the actual status
-         // The track_id is used here to validate that we have a valid track reference
-         Ok(OmpWorkerStatus::uninitialized())
-     }
+    /// Get status for a specific agent (sync version for non-async contexts)
+    pub fn get_agent_status_sync(&self, track_id: &str) -> Result<OmpWorkerStatus> {
+        // Use the track_id to retrieve the agent status from the agents map
+        // For sync context, we return a default status - actual status is retrieved via async
+        // This implementation uses the track_id to validate the request
+        if track_id.is_empty() {
+            return Err(anyhow!("Track ID cannot be empty"));
+        }
+
+        // Return uninitialized status - the async version updates the actual status
+        // The track_id is used here to validate that we have a valid track reference
+        Ok(OmpWorkerStatus::uninitialized())
+    }
     pub async fn active_tracks(&self) -> Vec<String> {
         let agents = self.agents.read().await;
         agents.keys().cloned().collect()

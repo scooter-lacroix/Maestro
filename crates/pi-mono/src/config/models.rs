@@ -382,8 +382,7 @@ mod tests {
 
         #[test]
         fn test_multiple_providers() {
-            let providers = vec![
-                ProviderConfig {
+            let providers = [ProviderConfig {
                     display_name: "Anthropic".to_string(),
                     is_configured: true,
                     env_var: "ANTHROPIC_API_KEY".to_string(),
@@ -397,8 +396,7 @@ mod tests {
                     display_name: "Google".to_string(),
                     is_configured: false,
                     env_var: "GEMINI_API_KEY".to_string(),
-                },
-            ];
+                }];
 
             assert_eq!(providers.len(), 3);
             assert!(providers[0].is_configured);

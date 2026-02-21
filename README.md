@@ -435,14 +435,17 @@ Interact with the Nexus Memory System.
 # Browse memory via web dashboard
 maestro memory serve
 
-# Import data from external memory
-maestro memory import <db_path>
+# Check memory system status
+maestro memory status
 
-# Search memory
-maestro memory search "authentication flow"
+# Scan directories for Maestro projects
+maestro memory scan . --depth 3
 
-# Get statistics
-maestro memory stats
+# Store a memory entry
+maestro memory store \
+  --content "authentication flow validated" \
+  --category decision \
+  --importance high
 ```
 
 ### 6. TUI Session Management
@@ -529,11 +532,8 @@ These commands run in your terminal and require the full installation:
 |---------|-------------|
 | `maestro memory serve` | Launch web dashboard (http://localhost:18765) |
 | `maestro memory status` | Show memory system statistics |
-| `maestro memory import <db>` | Import from external memory systems |
-| `maestro memory search <query>` | Search memories by query |
-| `maestro memory stats` | Display memory statistics |
-| `maestro memory export <file>` | Export memories to JSON |
-| `maestro memory import <file>` | Import memories from JSON |
+| `maestro memory scan <path> --depth <n>` | Scan directories for Maestro projects |
+| `maestro memory store --content <text> --category <type> --importance <level>` | Store a memory entry |
 
 #### TUI Commands
 | Command | Description |
@@ -547,6 +547,8 @@ These commands run in your terminal and require the full installation:
 - [Marketplace](docs/MARKETPLACE.md) - Plugin marketplace and distribution
 - [Agent Usage](docs/AGENTS.md) - All 8+ agents explained
 - [Memory System](maestro/memory/docs/) - Nexus Memory documentation
+- [Memory Integration Guide](maestro/memory/docs/memory_integration.md) - Current CLI memory command surface and architecture
+- [Memory Quick Start](maestro/memory/docs/quick_start.md) - 5-minute validation flow for memory commands
 - [TUI Configuration](maestro/tui/docs/CONFIG_FORMAT.md) - TUI setup guide
 - [Testing](maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md) - Test coverage details
 
@@ -619,8 +621,17 @@ maestro memory serve
 # - View project and track progress
 # - Visualize memory statistics
 
-# Search from CLI
-maestro memory search "JWT implementation details"
+# Check status from CLI
+maestro memory status
+
+# Scan current directory for projects
+maestro memory scan . --depth 2
+
+# Store from CLI
+maestro memory store \
+  --content "JWT implementation details captured" \
+  --category observation \
+  --importance normal
 ```
 
 ### TUI Session Management

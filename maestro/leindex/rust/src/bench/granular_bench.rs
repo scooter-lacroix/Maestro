@@ -35,7 +35,7 @@ fn main() {
         println!("\n=== Dataset Size: {} vectors ===", size);
 
         // Generate embeddings once
-        let embeddings: Vec<_> = (0..size).map(|i| generate_embedding(i)).collect();
+        let embeddings: Vec<_> = (0..size).map(generate_embedding).collect();
 
         // Benchmark Linear Search
         println!("\n[Linear Search]");

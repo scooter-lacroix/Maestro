@@ -8,7 +8,7 @@
 //!
 //! Run benchmarks with: cargo bench --bench collectors
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use ktop_collectors::cpu::CpuCollector;
 use ktop_collectors::types::{CpuMetrics, MemoryMetrics, ProcessInfo, SystemMetrics};
 use std::time::Duration;
@@ -141,9 +141,21 @@ fn bench_system_metrics_is_complete(c: &mut Criterion) {
 
     // Now with populated metrics
     metrics.cpu = Some(CpuMetrics::new(50.0, 8, vec![], None, (0.0, 0.0, 0.0)));
-    metrics.memory = Some(MemoryMetrics::new(16_000_000_000, 8_000_000_000, 8_000_000_000, 0, 0, 0, 0));
+    metrics.memory = Some(MemoryMetrics::new(
+        16_000_000_000,
+        8_000_000_000,
+        8_000_000_000,
+        0,
+        0,
+        0,
+        0,
+    ));
     metrics.network = Some(ktop_collectors::types::NetworkMetrics::new(
-        std::collections::HashMap::new(), 0, 0, 0, 0
+        std::collections::HashMap::new(),
+        0,
+        0,
+        0,
+        0,
     ));
     metrics.disk = Some(ktop_collectors::types::DiskMetrics::new(vec![], 0, 0, 0, 0));
     metrics.maestro = Some(ktop_collectors::types::MaestroMetrics::empty());

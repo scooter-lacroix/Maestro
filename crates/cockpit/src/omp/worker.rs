@@ -160,7 +160,7 @@ impl OmpWorker {
         cmd.arg("run")
             .arg("--silent")
             .arg(
-                &self
+                self
                     .config
                     .omp_path
                     .join("packages/coding-agent/src/worker.ts"),
@@ -316,7 +316,10 @@ impl OmpWorker {
                 // Get elapsed time before sending (to avoid borrow after move)
                 let elapsed = pending.elapsed();
                 // Send timeout error to the waiting caller
-                let _ = pending.tx.send(Err(anyhow!("Request {} timed out after {:?}", id, elapsed)));
+                let _ =
+                    pending
+                        .tx
+                        .send(Err(anyhow!("Request {} timed out after {:?}", id, elapsed)));
                 timed_out_count += 1;
             }
         }
@@ -338,11 +341,7 @@ impl OmpWorker {
     }
 
     /// Send a request to the worker and wait for response
-    pub async fn invoke(
-        &mut self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<OmpResponse> {
+    pub async fn invoke(&mut self, method: &str, params: serde_json::Value) -> Result<OmpResponse> {
         let stdin = self.stdin.as_mut().context("Worker not started")?;
 
         // Get next request ID

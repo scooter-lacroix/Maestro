@@ -50,6 +50,23 @@ pub fn render_header(frame: &mut Frame, area: Rect, state: &ConductorState) {
         Span::styled("", Style::default())
     };
 
+    // Backend indicator with Pi-Mono preference
+    let backend_indicator = if state.pi_mono_available {
+        Span::styled(" PI-MONO●", Style::default().fg(Color::Cyan).bold())
+    } else {
+        omp_indicator
+    };
+
+    // Agent role indicator
+    let role_indicator = if let Some(ref role) = state.selected_agent_role {
+        Span::styled(
+            format!(" [{}]", role),
+            Style::default().fg(Color::Magenta).bold(),
+        )
+    } else {
+        Span::styled("", Style::default())
+    };
+
     let content = Line::from(vec![
         Span::styled(
             status_text,
@@ -66,7 +83,8 @@ pub fn render_header(frame: &mut Frame, area: Rect, state: &ConductorState) {
         Span::styled(agent_info, Style::default().fg(theme.fg_muted)),
         Span::styled(iteration, Style::default().fg(theme.fg_muted).italic()),
         Span::styled(progress, Style::default().fg(theme.accent_primary)),
-        omp_indicator,
+        backend_indicator,
+        role_indicator,
     ]);
 
     let paragraph = Paragraph::new(content).style(Style::default().bg(theme.bg_primary));

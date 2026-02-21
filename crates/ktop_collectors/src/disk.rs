@@ -3,9 +3,9 @@
 //! This module provides disk usage and I/O statistics.
 
 use crate::error::Result;
-use crate::types::{DiskMount, DiskMetrics};
+use crate::types::{DiskMetrics, DiskMount};
 use std::time::{Duration, Instant};
-use sysinfo::{Disks, DiskKind};
+use sysinfo::{DiskKind, Disks};
 
 /// Default refresh interval for disk metrics
 const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
@@ -69,8 +69,7 @@ impl DiskCollector {
         let now = Instant::now();
 
         // Calculate I/O speeds if enough time has passed
-        let (read_speed, write_speed) = if now.duration_since(self.last_io_time)
-            >= MIN_IO_DURATION
+        let (read_speed, write_speed) = if now.duration_since(self.last_io_time) >= MIN_IO_DURATION
         {
             let elapsed = now.duration_since(self.previous_time);
             if elapsed.as_secs_f64() > 0.0 {

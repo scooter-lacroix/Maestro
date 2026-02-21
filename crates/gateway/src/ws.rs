@@ -19,6 +19,9 @@ use tracing::{debug, info, warn};
 use crate::protocol::{RequestFrame, ResponseFrame};
 use crate::state::GatewayState;
 
+/// Maximum allowed message size in bytes (1MB)
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
 /// WebSocket connection handler
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -31,6 +34,9 @@ pub async fn ws_handler(
 /// Handle a WebSocket connection
 async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, remote_addr: SocketAddr) {
     info!("WebSocket connection established from {}", remote_addr);
+
+    // Generate a unique client ID for rate limiting
+    let client_id = format!("ws:{}", remote_addr);
 
     // Split into read and write halves
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -67,15 +73,16 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, remote_a
 
     // Read loop: handle incoming messages from client
     let read_state = state.clone();
+    let read_client_id = client_id.clone();
     let read_handle = tokio::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    handle_text_message(&text, &client_tx, &read_state).await;
+                    handle_text_message(&text, &client_tx, &read_state, &read_client_id).await;
                 }
                 Ok(Message::Binary(data)) => {
                     let text = String::from_utf8_lossy(&data);
-                    handle_text_message(&text, &client_tx, &read_state).await;
+                    handle_text_message(&text, &client_tx, &read_state, &read_client_id).await;
                 }
                 Ok(Message::Ping(data)) => {
                     debug!("Received ping: {} bytes", data.len());
@@ -109,7 +116,42 @@ async fn handle_text_message(
     text: &str,
     client_tx: &mpsc::Sender<String>,
     state: &Arc<GatewayState>,
+    client_id: &str,
 ) {
+    // SECURITY: Check message size limit before processing
+    if text.len() > MAX_MESSAGE_SIZE {
+        warn!(
+            "Message size {} bytes exceeds limit {} for client: {}",
+            text.len(),
+            MAX_MESSAGE_SIZE,
+            client_id
+        );
+        let response = ResponseFrame::error(
+            "unknown",
+            format!("Message too large. Maximum size is {} bytes", MAX_MESSAGE_SIZE),
+            Some(413), // HTTP 413 Payload Too Large
+        );
+        if let Ok(json) = response.to_json() {
+            let _ = client_tx.send(json).await;
+        }
+        return;
+    }
+
+    // SECURITY: Check rate limit for this client
+    let (allowed, _remaining, retry_after) = state.ws_rate_limiter.check(client_id);
+    if !allowed {
+        warn!("WebSocket rate limit exceeded for client: {}", client_id);
+        let response = ResponseFrame::error(
+            "unknown",
+            format!("Rate limit exceeded. Try again in {} ms", retry_after.unwrap_or(1000)),
+            Some(429), // HTTP 429 Too Many Requests
+        );
+        if let Ok(json) = response.to_json() {
+            let _ = client_tx.send(json).await;
+        }
+        return;
+    }
+
     // Parse as request frame
     let request: Result<RequestFrame, _> = serde_json::from_str(text);
 
@@ -119,7 +161,7 @@ async fn handle_text_message(
 
             // Look up method handler
             let response = if let Some(handler) = state.method_registry.get(&req.method) {
-                handler(req.clone(), state).await
+                handler(req.clone(), &state.clone()).await
             } else {
                 ResponseFrame::error(
                     &req.id,
@@ -248,5 +290,18 @@ mod tests {
         assert!(handlers.iter().any(|(m, _)| *m == "ping"));
         assert!(handlers.iter().any(|(m, _)| *m == "echo"));
         assert!(handlers.iter().any(|(m, _)| *m == "methods/list"));
+    }
+
+    #[test]
+    fn test_max_message_size_constant() {
+        // Verify the max message size is set to 1MB
+        assert_eq!(MAX_MESSAGE_SIZE, 1024 * 1024);
+    }
+
+    #[test]
+    fn test_message_size_check() {
+        // Test that size limit is reasonable
+        assert!(MAX_MESSAGE_SIZE > 0);
+        assert!(MAX_MESSAGE_SIZE < 100 * 1024 * 1024); // Less than 100MB
     }
 }
