@@ -1,11 +1,11 @@
 //! Parallel execution view component
 
-use crate::conductor::model::ConductorState;
 use leindex_core::orchestrate::model::ParallelGroupInfo;
-use leindex_core::orchestrate::model::{ParallelWorkerState, WorkerStatus};
+use leindex_core::orchestrate::model::WorkerStatus;
 
 /// Parallel view component displaying worker status and merge queue
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct ParallelView {
     /// The parallel group being displayed
     pub group_info: Option<ParallelGroupInfo>,
@@ -15,15 +15,6 @@ pub struct ParallelView {
     pub scroll_offset: u16,
 }
 
-impl Default for ParallelView {
-    fn default() -> Self {
-        Self {
-            group_info: None,
-            selected_worker: None,
-            scroll_offset: 0,
-        }
-    }
-}
 
 impl ParallelView {
     /// Create a new parallel view

@@ -119,6 +119,41 @@ impl MaestroProject {
             last_scanned_at: None,
         }
     }
+
+    /// Get the project name
+    pub fn name(&self) -> &str {
+        &self.project_name
+    }
+
+    /// Create a MaestroProject from a tracks.md path
+    pub fn from_tracks_path(tracks_path: std::path::PathBuf) -> Self {
+        // The tracks_dir is typically the directory containing tracks.md
+        let tracks_dir = tracks_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| tracks_path.clone());
+
+        // Project name is typically the parent directory name
+        let project_name = tracks_path
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        Self {
+            id: 0,
+            project_path: tracks_dir.to_string_lossy().to_string(),
+            project_name: project_name.to_string(),
+            description: None,
+            project_type: None,
+            tech_stack: Vec::new(),
+            is_active: true,
+            created_at: Utc::now(),
+            updated_at: None,
+            last_scanned_at: None,
+        }
+    }
 }
 
 /// Maestro track (work unit within a project)

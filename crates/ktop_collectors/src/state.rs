@@ -5,8 +5,8 @@
 use crate::types::SystemMetrics;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 use tokio::sync::broadcast;
+use tokio::sync::RwLock;
 
 /// Default channel capacity for state updates
 const DEFAULT_CHANNEL_CAPACITY: usize = 100;
@@ -112,8 +112,7 @@ impl UpdateFlags {
             (None, None) => false,
             (None, Some(_)) | (Some(_), None) => true,
             (Some(o), Some(n)) => {
-                (o.usage_percent - n.usage_percent).abs() > 1.0
-                    || o.core_count != n.core_count
+                (o.usage_percent - n.usage_percent).abs() > 1.0 || o.core_count != n.core_count
             }
         }
     }
@@ -200,7 +199,10 @@ impl MetricsState {
     }
 
     /// Update metrics with delta optimization
-    pub async fn update(&self, new_metrics: SystemMetrics) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update(
+        &self,
+        new_metrics: SystemMetrics,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         let old_metrics = inner.metrics.clone();
 
@@ -227,13 +229,19 @@ impl MetricsState {
     }
 
     /// Update only CPU metrics
-    pub async fn update_cpu(&self, cpu: crate::types::CpuMetrics) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update_cpu(
+        &self,
+        cpu: crate::types::CpuMetrics,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         inner.metrics.cpu = Some(cpu);
         inner.last_update = Instant::now();
         inner.update_count += 1;
 
-        let changes = UpdateFlags { cpu: true, ..Default::default() };
+        let changes = UpdateFlags {
+            cpu: true,
+            ..Default::default()
+        };
 
         let update = StateUpdate {
             changes,
@@ -247,13 +255,19 @@ impl MetricsState {
     }
 
     /// Update only memory metrics
-    pub async fn update_memory(&self, memory: crate::types::MemoryMetrics) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update_memory(
+        &self,
+        memory: crate::types::MemoryMetrics,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         inner.metrics.memory = Some(memory);
         inner.last_update = Instant::now();
         inner.update_count += 1;
 
-        let changes = UpdateFlags { memory: true, ..Default::default() };
+        let changes = UpdateFlags {
+            memory: true,
+            ..Default::default()
+        };
 
         let update = StateUpdate {
             changes,
@@ -267,14 +281,21 @@ impl MetricsState {
     }
 
     /// Update only process lists
-    pub async fn update_processes(&self, top_cpu: Vec<crate::types::ProcessInfo>, top_memory: Vec<crate::types::ProcessInfo>) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update_processes(
+        &self,
+        top_cpu: Vec<crate::types::ProcessInfo>,
+        top_memory: Vec<crate::types::ProcessInfo>,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         inner.metrics.top_cpu_processes = top_cpu;
         inner.metrics.top_memory_processes = top_memory;
         inner.last_update = Instant::now();
         inner.update_count += 1;
 
-        let changes = UpdateFlags { processes: true, ..Default::default() };
+        let changes = UpdateFlags {
+            processes: true,
+            ..Default::default()
+        };
 
         let update = StateUpdate {
             changes,
@@ -288,13 +309,19 @@ impl MetricsState {
     }
 
     /// Update only network metrics
-    pub async fn update_network(&self, network: crate::types::NetworkMetrics) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update_network(
+        &self,
+        network: crate::types::NetworkMetrics,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         inner.metrics.network = Some(network);
         inner.last_update = Instant::now();
         inner.update_count += 1;
 
-        let changes = UpdateFlags { network: true, ..Default::default() };
+        let changes = UpdateFlags {
+            network: true,
+            ..Default::default()
+        };
 
         let update = StateUpdate {
             changes,
@@ -308,13 +335,19 @@ impl MetricsState {
     }
 
     /// Update only disk metrics
-    pub async fn update_disk(&self, disk: crate::types::DiskMetrics) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update_disk(
+        &self,
+        disk: crate::types::DiskMetrics,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         inner.metrics.disk = Some(disk);
         inner.last_update = Instant::now();
         inner.update_count += 1;
 
-        let changes = UpdateFlags { disk: true, ..Default::default() };
+        let changes = UpdateFlags {
+            disk: true,
+            ..Default::default()
+        };
 
         let update = StateUpdate {
             changes,
@@ -328,13 +361,19 @@ impl MetricsState {
     }
 
     /// Update only Maestro metrics
-    pub async fn update_maestro(&self, maestro: crate::types::MaestroMetrics) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
+    pub async fn update_maestro(
+        &self,
+        maestro: crate::types::MaestroMetrics,
+    ) -> Result<UpdateFlags, broadcast::error::SendError<()>> {
         let mut inner = self.inner.write().await;
         inner.metrics.maestro = Some(maestro);
         inner.last_update = Instant::now();
         inner.update_count += 1;
 
-        let changes = UpdateFlags { maestro: true, ..Default::default() };
+        let changes = UpdateFlags {
+            maestro: true,
+            ..Default::default()
+        };
 
         let update = StateUpdate {
             changes,
@@ -412,7 +451,15 @@ mod tests {
 
         let mut metrics = SystemMetrics::new();
         metrics.cpu = Some(CpuMetrics::new(50.0, 8, vec![], None, (0.0, 0.0, 0.0)));
-        metrics.memory = Some(MemoryMetrics::new(16_000_000_000, 8_000_000_000, 8_000_000_000, 0, 0, 0, 0));
+        metrics.memory = Some(MemoryMetrics::new(
+            16_000_000_000,
+            8_000_000_000,
+            8_000_000_000,
+            0,
+            0,
+            0,
+            0,
+        ));
 
         let changes = state.update(metrics).await.expect("Failed to update");
 
@@ -539,8 +586,24 @@ mod tests {
         let mut old = SystemMetrics::new();
         let mut new = SystemMetrics::new();
 
-        old.memory = Some(MemoryMetrics::new(16_000_000_000, 8_000_000_000, 8_000_000_000, 0, 0, 0, 0));
-        new.memory = Some(MemoryMetrics::new(16_000_000_000, 10_000_000_000, 6_000_000_000, 0, 0, 0, 0));
+        old.memory = Some(MemoryMetrics::new(
+            16_000_000_000,
+            8_000_000_000,
+            8_000_000_000,
+            0,
+            0,
+            0,
+            0,
+        ));
+        new.memory = Some(MemoryMetrics::new(
+            16_000_000_000,
+            10_000_000_000,
+            6_000_000_000,
+            0,
+            0,
+            0,
+            0,
+        ));
 
         let flags = UpdateFlags::from_metrics(&old, &new);
         assert!(flags.memory);
@@ -650,7 +713,10 @@ mod tests {
         let mut rx = state.subscribe();
 
         let cpu = CpuMetrics::new(50.0, 8, vec![], None, (0.0, 0.0, 0.0));
-        state.update_cpu(cpu.clone()).await.expect("Failed to update");
+        state
+            .update_cpu(cpu.clone())
+            .await
+            .expect("Failed to update");
 
         let update1 = rx.recv().await.unwrap();
         assert_eq!(update1.index, 1);

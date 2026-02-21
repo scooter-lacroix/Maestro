@@ -3,7 +3,7 @@
 //! Route definitions for the lattice API.
 
 use axum::{
-    routing::{get, post, delete},
+    routing::{delete, get, post},
     Router,
 };
 

@@ -212,7 +212,10 @@ impl OmpStreamEvent {
 
     /// Create a tool start event
     pub fn tool_start(tool: &str) -> Self {
-        Self::new(OmpStreamEventKind::ToolStart, format!("Starting tool: {}", tool))
+        Self::new(
+            OmpStreamEventKind::ToolStart,
+            format!("Starting tool: {}", tool),
+        )
     }
 
     /// Create a tool output event

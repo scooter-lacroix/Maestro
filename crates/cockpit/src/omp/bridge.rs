@@ -75,7 +75,10 @@ impl OmpBridge {
             .ok_or_else(|| anyhow!(OmpError::worker_not_ready().to_string()))?;
 
         let response = worker
-            .invoke("invoke_tool", serde_json::json!({ "tool": tool, "params": params }))
+            .invoke(
+                "invoke_tool",
+                serde_json::json!({ "tool": tool, "params": params }),
+            )
             .await
             .context("Failed to invoke tool")?;
 
@@ -119,7 +122,10 @@ impl OmpBridge {
     /// Check if OMP is available
     pub fn is_available(&self) -> bool {
         // Check if OMP path exists and has required files
-        let worker_path = self.config.omp_path.join("packages/coding-agent/src/worker.ts");
+        let worker_path = self
+            .config
+            .omp_path
+            .join("packages/coding-agent/src/worker.ts");
         worker_path.exists()
     }
 
@@ -257,11 +263,9 @@ static OMP_BRIDGE: tokio::sync::OnceCell<Arc<OmpBridge>> = tokio::sync::OnceCell
 pub async fn get_omp_bridge(config: Option<OmpWorkerConfig>) -> Result<Arc<OmpBridge>> {
     OMP_BRIDGE
         .get_or_try_init(|| async {
-            let config = config.unwrap_or_else(|| {
-                OmpWorkerConfig {
-                    omp_path: PathBuf::from("vendor/oh-my-pi"),
-                    ..Default::default()
-                }
+            let config = config.unwrap_or_else(|| OmpWorkerConfig {
+                omp_path: PathBuf::from("vendor/oh-my-pi"),
+                ..Default::default()
             });
             let bridge = Arc::new(OmpBridge::new(config));
             Ok(bridge)
@@ -271,8 +275,15 @@ pub async fn get_omp_bridge(config: Option<OmpWorkerConfig>) -> Result<Arc<OmpBr
 }
 
 /// Check if OMP is available globally
+///
+/// Uses PATH-first discovery with no hardcoded absolute paths.
+/// Checks:
+/// 1. vendor/oh-my-pi directory (relative to cwd)
+/// 2. 'pi' or 'omp' in PATH
+/// 3. User-local installation (~/.local/bin, ~/.cargo/bin)
+/// 4. oh-my-pi directory in common locations
 pub fn is_omp_available() -> bool {
-    // Check 1: vendor/oh-my-pi/packages/coding-agent/src/worker.ts (original path)
+    // Check 1: vendor/oh-my-pi/packages/coding-agent/src/worker.ts (relative path)
     let worker_path = PathBuf::from("vendor/oh-my-pi/packages/coding-agent/src/worker.ts");
     if worker_path.exists() {
         return true;
@@ -281,6 +292,9 @@ pub fn is_omp_available() -> bool {
     // Check 2: Check if 'pi' or 'omp' command exists in PATH
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in path_var.split(':') {
+            if dir.is_empty() {
+                continue;
+            }
             let pi_path = PathBuf::from(dir).join("pi");
             let omp_path = PathBuf::from(dir).join("omp");
             if pi_path.exists() || omp_path.exists() {
@@ -289,35 +303,42 @@ pub fn is_omp_available() -> bool {
         }
     }
 
-    // Check 3: Common install locations
-    let home = std::env::var("HOME").unwrap_or_default();
-    let common_paths = vec![
-        PathBuf::from(&home).join(".local/bin/pi"),
-        PathBuf::from(&home).join(".local/bin/omp"),
-        PathBuf::from("/usr/local/bin/pi"),
-        PathBuf::from("/usr/local/bin/omp"),
-        PathBuf::from("/usr/bin/pi"),
-        PathBuf::from("/usr/bin/omp"),
-    ];
+    // Check 3: User-local installation paths (computed from home, no hardcoded paths)
+    if let Some(home) = dirs::home_dir() {
+        let user_local_paths = vec![
+            home.join(".local/bin/pi"),
+            home.join(".local/bin/omp"),
+            home.join(".cargo/bin/pi"),
+            home.join(".cargo/bin/omp"),
+            home.join("bin/pi"),
+            home.join("bin/omp"),
+        ];
 
-    for path in common_paths {
-        if path.exists() {
-            return true;
+        for path in user_local_paths {
+            if path.exists() {
+                return true;
+            }
+        }
+
+        // Check 4: Check for oh-my-pi directory in user locations
+        let omp_dir_paths = vec![
+            home.join("oh-my-pi"),
+            home.join(".oh-my-pi"),
+        ];
+
+        for omp_dir in omp_dir_paths {
+            let worker = omp_dir.join("packages/coding-agent/src/worker.ts");
+            if worker.exists() {
+                return true;
+            }
         }
     }
 
-    // Check 4: Check for oh-my-pi directory in common locations
-    let omp_dir_paths = vec![
-        PathBuf::from(&home).join("oh-my-pi"),
-        PathBuf::from(&home).join(".oh-my-pi"),
-        PathBuf::from("..").join("oh-my-pi"),
-    ];
-
-    for omp_dir in omp_dir_paths {
-        let worker = omp_dir.join("packages/coding-agent/src/worker.ts");
-        if worker.exists() {
-            return true;
-        }
+    // Check 5: Relative path for development
+    let dev_omp = PathBuf::from("..").join("oh-my-pi");
+    let worker = dev_omp.join("packages/coding-agent/src/worker.ts");
+    if worker.exists() {
+        return true;
     }
 
     false

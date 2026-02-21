@@ -86,7 +86,7 @@ pub fn detect_distro() -> Distro {
 /// Parses /etc/os-release content to detect distribution
 fn parse_os_release(content: &str) -> Option<Distro> {
     let vars = parse_os_release_vars(content);
-    
+
     let id = vars.get("ID").map(|s| s.to_lowercase());
     let id_like = vars.get("ID_LIKE").map(|s| s.to_lowercase());
 
@@ -98,14 +98,14 @@ fn parse_os_release(content: &str) -> Option<Distro> {
         Some("endeavouros") => Some(Distro::Arch),
         Some("arcolinux") => Some(Distro::Arch),
         Some("garuda") => Some(Distro::Arch),
-        
+
         // Fedora and derivatives
         Some("fedora") => Some(Distro::Fedora),
         Some("rhel") => Some(Distro::Fedora),
         Some("centos") => Some(Distro::Fedora),
         Some("almalinux") => Some(Distro::Fedora),
         Some("rocky") | Some("rockylinux") => Some(Distro::Fedora),
-        
+
         // Debian and derivatives
         Some("debian") => Some(Distro::Debian),
         Some("ubuntu") => Some(Distro::Debian),
@@ -115,7 +115,7 @@ fn parse_os_release(content: &str) -> Option<Distro> {
         Some("kali") => Some(Distro::Debian),
         Some("raspbian") => Some(Distro::Debian),
         Some("zorin") => Some(Distro::Debian),
-        
+
         // Check ID_LIKE for derivative detection
         _ => {
             if let Some(like) = id_like.as_deref() {
@@ -138,40 +138,38 @@ fn parse_os_release(content: &str) -> Option<Distro> {
 /// Parses /etc/os-release into a HashMap of key-value pairs
 fn parse_os_release_vars(content: &str) -> HashMap<String, String> {
     let mut vars = HashMap::new();
-    
+
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        
+
         if let Some((key, value)) = line.split_once('=') {
             let key = key.trim().to_string();
             // Remove quotes from value if present
-            let value = value.trim()
+            let value = value
+                .trim()
                 .trim_matches('"')
                 .trim_matches('\'')
                 .to_string();
             vars.insert(key, value);
         }
     }
-    
+
     vars
 }
 
 /// Fallback detection using lsb_release command
 fn detect_via_lsb_release() -> Option<Distro> {
-    let output = Command::new("lsb_release")
-        .arg("-i")
-        .output()
-        .ok()?;
-    
+    let output = Command::new("lsb_release").arg("-i").output().ok()?;
+
     if !output.status.success() {
         return None;
     }
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-    
+
     if stdout.contains("arch") || stdout.contains("manjaro") || stdout.contains("cachyos") {
         return Some(Distro::Arch);
     }
@@ -181,7 +179,7 @@ fn detect_via_lsb_release() -> Option<Distro> {
     if stdout.contains("debian") || stdout.contains("ubuntu") || stdout.contains("mint") {
         return Some(Distro::Debian);
     }
-    
+
     None
 }
 

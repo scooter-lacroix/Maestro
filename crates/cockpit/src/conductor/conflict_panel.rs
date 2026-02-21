@@ -1,21 +1,18 @@
 //! Conflict resolution panel component
 
-use leindex_core::orchestrate::model::{ConflictInfo, MergeStatus};
+use leindex_core::orchestrate::model::ConflictInfo;
 
 /// Resolution method for a conflict
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ResolutionMethod {
+    #[default]
     AcceptOurs,
     AcceptTheirs,
     AiResolve,
     Skip,
 }
 
-impl Default for ResolutionMethod {
-    fn default() -> Self {
-        ResolutionMethod::AcceptOurs
-    }
-}
 
 /// Conflict resolution panel
 #[derive(Debug, Clone)]

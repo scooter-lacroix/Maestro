@@ -278,6 +278,23 @@ impl TmuxMultiplexer {
         env_args.push("-e".to_string());
         env_args.push(format!("CLAUDE_CONFIG_DIR={}", claude_config));
 
+        // Pass through COLORTERM for true color support (enables transparency in many terminals)
+        if let Ok(colorterm) = std::env::var("COLORTERM") {
+            env_args.push("-e".to_string());
+            env_args.push(format!("COLORTERM={}", colorterm));
+        }
+
+        // Pass through TERM for proper terminal detection
+        if let Ok(term) = std::env::var("TERM") {
+            env_args.push("-e".to_string());
+            env_args.push(format!("TERM={}", term));
+        }
+
+        // Set environment variable to indicate transparency is desired
+        // Shells can check this to avoid setting background colors
+        env_args.push("-e".to_string());
+        env_args.push("MAESTRO_TRANSPARENCY=1".to_string());
+
         // Build tmux new-session command
         let mut args = vec![
             "new-session".to_string(),
@@ -323,6 +340,19 @@ impl TmuxMultiplexer {
             warn!("Failed to enable pipe-pane for {}: {}", session.name, e);
         }
 
+        // Clear any background color that might have been set by the shell
+        // This sends an escape sequence to reset the background to default (transparent)
+        // ESC [ 49 m = reset background color to default
+        let _ = Command::new("tmux")
+            .args([
+                "send-keys",
+                "-t",
+                &session.name,
+                "-l",
+                "\x1b[49m\x1b[27m",
+            ])
+            .output();
+
         info!("Created tmux session: {}", session.name);
         Ok(())
     }
@@ -335,6 +365,8 @@ impl TmuxMultiplexer {
             ("history-limit", "10000"),
             ("escape-time", "10"),
             ("detach-on-destroy", "off"),
+            // Set proper terminal type for true color support
+            ("default-terminal", "tmux-256color"),
         ];
 
         for (option, value) in options {
@@ -342,6 +374,31 @@ impl TmuxMultiplexer {
                 .args(["set-option", "-t", session_name, option, value])
                 .output();
         }
+
+        // Enable true color (RGB) pass-through for transparency support
+        // This allows the parent terminal's transparency to show through tmux
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                session_name,
+                "-a",
+                "terminal-overrides",
+                ",*256col*:Tc",
+            ])
+            .output();
+
+        // Additional terminal overrides for xterm and common terminals
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                session_name,
+                "-a",
+                "terminal-overrides",
+                ",xterm-256color:RGB",
+            ])
+            .output();
 
         // Ensure remain-on-exit is NOT set by default (want it to die if process finishes normally)
         // but want it to STAY if we detach.
@@ -355,6 +412,64 @@ impl TmuxMultiplexer {
             ])
             .output();
 
+        // Transparency support: Set window background to inherit from parent terminal
+        // This allows terminal transparency to pass through tmux sessions
+        let _ = Command::new("tmux")
+            .args([
+                "set-window-option",
+                "-t",
+                session_name,
+                "window-style",
+                "bg=default",
+            ])
+            .output();
+
+        // Pane background style - critical for transparency
+        // "default" means inherit from parent terminal, not set a color
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                session_name,
+                "-p",
+                "window-style",
+                "bg=default",
+            ])
+            .output();
+
+        // Set pane border styles (subtle, non-intrusive, transparent)
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                session_name,
+                "pane-border-style",
+                "fg=#3d59a1,bg=default",
+            ])
+            .output();
+
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                session_name,
+                "pane-active-border-style",
+                "fg=#7aa2f7,bg=default",
+            ])
+            .output();
+
+        // Main pane style - ensure the actual content area is transparent
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-t",
+                session_name,
+                "-p",
+                "pane-border-style",
+                "fg=#3d59a1,bg=default",
+            ])
+            .output();
+
         // Custom detach bind: Ctrl+Shift+Q is hard to capture in all terminals,
         // using a more reliable sequence or just binding C-q if user prefers.
         // User asked for ctrl+shift+q. We'll try to bind it as C-S-q.
@@ -363,6 +478,7 @@ impl TmuxMultiplexer {
             .output();
 
         // Enable passthrough for modern terminal features (tmux 3.2+)
+        // This is CRITICAL for transparency - allows escape sequences to pass through
         let _ = Command::new("tmux")
             .args([
                 "set-option",
@@ -394,14 +510,15 @@ impl TmuxMultiplexer {
             .args(["set-option", "-t", &session.name, "status", "on"])
             .output();
 
-        // Style (Tokyo Night inspired)
+        // Style (Tokyo Night inspired, with transparency support)
+        // Use bg=default to inherit terminal transparency
         let _ = Command::new("tmux")
             .args([
                 "set-option",
                 "-t",
                 &session.name,
                 "status-style",
-                "bg=#1a1b26,fg=#a9b1d6",
+                "bg=default,fg=#a9b1d6",
             ])
             .output();
 

@@ -528,7 +528,7 @@ mod tests {
         fn test_default_config_providers_not_configured() {
             let config = default_config();
 
-            for (_name, provider) in &config.providers {
+            for provider in config.providers.values() {
                 assert!(!provider.is_configured);
             }
         }
@@ -989,7 +989,7 @@ settings:
                 loaded_config.providers.len(),
                 original_config.providers.len()
             );
-            assert_eq!(loaded_config.providers["anthropic"].is_configured, true);
+            assert!(loaded_config.providers["anthropic"].is_configured);
             assert_eq!(loaded_config.settings.timeout, 450);
             assert_eq!(loaded_config.settings.parallel_limit, 6);
         }

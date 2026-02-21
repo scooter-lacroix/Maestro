@@ -1,7 +1,7 @@
 """
 Oh-My-Pi (OMP) Hook for Nexus Memory System
 
-This module provides the hook implementation for oh-my-pi (OMP), 
+This module provides the hook implementation for oh-my-pi (OMP),
 which is a fork of pi-mono with additional features.
 
 OMP is similar to pi-mono but may have:
@@ -9,15 +9,14 @@ OMP is similar to pi-mono but may have:
 - Extended capabilities
 - Modified subagent system
 
-Detection paths:
-- /home/stan/Prod/maestro/vendor/oh-my-pi/
-- /tmp/oh-my-pi/
-- $HOME/oh-my-pi/
+Portability: Uses PATH-first discovery with XDG-compliant paths.
+No hardcoded absolute paths are used.
 """
 
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -30,20 +29,21 @@ from .base import AgentHook, HookResult
 class OhMyPiHook(AgentHook):
     """
     Hook for extracting memory from oh-my-pi (OMP) session execution.
-    
+
     Oh-My-Pi is a fork of pi-mono with additional features and modifications.
     It maintains similar session management but may have different:
     - CLI name (omp instead of pi)
     - Session storage location
     - Configuration paths
-    
-    Detection paths checked:
-    - /home/stan/Prod/maestro/vendor/oh-my-pi/
-    - /tmp/oh-my-pi/
-    - ~/.oh-my-pi/
-    - $PATH (omp command)
+
+    Detection uses PATH-first discovery:
+    1. $OMP_PATH environment variable (if set)
+    2. System PATH (via which command)
+    3. XDG_BIN_HOME (~/.local/bin)
+    4. ~/.cargo/bin
+    5. Vendor directory (relative to cwd)
     """
-    
+
     def __init__(self) -> None:
         super().__init__()
         self.agent_type = "oh-my-pi"
@@ -52,51 +52,65 @@ class OhMyPiHook(AgentHook):
         self._config_dir: Optional[Path] = None
         self._active_session_data: Dict[str, Any] = {}
         self._detect_installation()
-    
+
     def _detect_installation(self) -> None:
-        """Detect oh-my-pi installation and set up paths."""
-        # Check common locations for oh-my-pi
+        """Detect oh-my-pi installation using PATH-first discovery."""
+        # 1. Check custom path via environment variable
+        custom_path = os.environ.get("OMP_PATH")
+        if custom_path:
+            path = Path(custom_path)
+            if path.exists() and os.access(path, os.X_OK):
+                self._executable_path = path
+                logger.info(f"Found oh-my-pi via OMP_PATH: {path}")
+                return
+
+        # 2. Check PATH using which
+        which_result = shutil.which("omp")
+        if which_result:
+            self._executable_path = Path(which_result)
+            logger.info(f"Found oh-my-pi in PATH: {self._executable_path}")
+            return
+
+        # 3. Check user-local installation paths (XDG-compliant, no hardcoded paths)
+        home = Path.home()
+        xdg_bin_home = os.environ.get("XDG_BIN_HOME", str(home / ".local/bin"))
+
         possible_paths = [
-            Path("/home/stan/Prod/maestro/vendor/oh-my-pi/pi"),
-            Path("/tmp/oh-my-pi/pi"),
-            Path.home() / "oh-my-pi" / "pi",
-            Path.home() / ".local/bin/omp",
-            Path.home() / "bin/omp",
-            Path("/usr/local/bin/omp"),
+            # XDG_BIN_HOME
+            Path(xdg_bin_home) / "omp",
+            # User-local bin (XDG default)
+            home / ".local/bin/omp",
+            # Cargo bin
+            home / ".cargo/bin/omp",
+            # User bin
+            home / "bin/omp",
+            # User oh-my-pi directory
+            home / "oh-my-pi/pi",
+            home / ".oh-my-pi/pi",
+            # Relative vendor directory (for development)
+            Path("vendor/oh-my-pi/pi"),
         ]
-        
+
         for path in possible_paths:
             if path.exists() and os.access(path, os.X_OK):
                 self._executable_path = path
                 logger.info(f"Found oh-my-pi at: {path}")
                 break
-        
+
         if self._executable_path is None:
-            # Try to find omp in PATH
-            try:
-                result = subprocess.run(
-                    ["which", "omp"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if result.returncode == 0:
-                    self._executable_path = Path(result.stdout.strip())
-                    logger.info(f"Found oh-my-pi in PATH: {self._executable_path}")
-            except Exception as e:
-                logger.warning(f"Failed to find oh-my-pi in PATH: {e}")
-        
+            logger.warning("oh-my-pi not found in PATH or common locations")
+
         # Set up directories
         if self._executable_path:
             # OMP typically uses .omp or .oh-my-pi directory
-            omp_dir = Path.home() / ".omp"
+            omp_dir = home / ".omp"
             if not omp_dir.exists():
-                omp_dir = Path.home() / ".oh-my-pi"
-            
+                omp_dir = home / ".oh-my-pi"
+
             if omp_dir.exists():
                 self._config_dir = omp_dir
                 self._session_dir = omp_dir / "sessions"
-    
+
     async def install_session_end_hook(self) -> HookResult:
         """
         Install the session end hook for oh-my-pi.

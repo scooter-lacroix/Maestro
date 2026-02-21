@@ -536,6 +536,7 @@ impl AgentInfo {
 
 /// LeIndex statistics
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct LeIndexStats {
     /// Number of indexed files
     pub files_indexed: usize,
@@ -550,19 +551,10 @@ pub struct LeIndexStats {
     pub last_update: Option<String>,
 }
 
-impl Default for LeIndexStats {
-    fn default() -> Self {
-        Self {
-            files_indexed: 0,
-            symbols_indexed: 0,
-            index_size_bytes: 0,
-            last_update: None,
-        }
-    }
-}
 
 /// Maestro memory statistics
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct MaestroMemoryStats {
     /// Total memory allocated by Maestro
     pub total_bytes: u64,
@@ -577,16 +569,6 @@ pub struct MaestroMemoryStats {
     pub session_bytes: u64,
 }
 
-impl Default for MaestroMemoryStats {
-    fn default() -> Self {
-        Self {
-            total_bytes: 0,
-            cache_bytes: 0,
-            index_bytes: 0,
-            session_bytes: 0,
-        }
-    }
-}
 
 impl MaestroMetrics {
     /// Create new Maestro metrics

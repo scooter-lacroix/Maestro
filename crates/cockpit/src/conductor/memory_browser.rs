@@ -3,16 +3,16 @@
 //! Provides an overlay to browse, search, filter, and manage memories
 //! associated with the current track.
 
-use crate::conductor::input_modal::{InputModal, InputAction};
-use crate::conductor::modals::{Modal, ModalCancelled, TextInputModal};
-use crate::conductor::selector_modal::{SelectorModal, SelectorItem, SelectorAction};
+use crate::conductor::input_modal::{InputAction, InputModal};
+use crate::conductor::modals::{Modal, TextInputModal};
+use crate::conductor::selector_modal::{SelectorAction, SelectorItem, SelectorModal};
 use crate::conductor::theme::ConductorTheme;
 use crossterm::event::{KeyCode, KeyEvent};
 use leindex_core::memory::models::{Memory, MemoryCategory};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::{Line, Span},
+    text::Span,
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
@@ -62,17 +62,61 @@ impl Default for MemoryBrowser {
             category_modal: SelectorModal {
                 title: "Select Category".to_string(),
                 items: vec![
-                    SelectorItem { label: "All Categories".to_string(), value: "all".to_string(), description: None },
-                    SelectorItem { label: "General".to_string(), value: "general".to_string(), description: None },
-                    SelectorItem { label: "Knowledge".to_string(), value: "knowledge".to_string(), description: None },
-                    SelectorItem { label: "Preferences".to_string(), value: "preference".to_string(), description: None },
-                    SelectorItem { label: "Specifications".to_string(), value: "specification".to_string(), description: None },
-                    SelectorItem { label: "Fact".to_string(), value: "fact".to_string(), description: None },
-                    SelectorItem { label: "Pattern".to_string(), value: "pattern".to_string(), description: None },
-                    SelectorItem { label: "Decision".to_string(), value: "decision".to_string(), description: None },
-                    SelectorItem { label: "Context".to_string(), value: "context".to_string(), description: None },
-                    SelectorItem { label: "Temporary".to_string(), value: "temporary".to_string(), description: None },
-                    SelectorItem { label: "Observation".to_string(), value: "observation".to_string(), description: None },
+                    SelectorItem {
+                        label: "All Categories".to_string(),
+                        value: "all".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "General".to_string(),
+                        value: "general".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Knowledge".to_string(),
+                        value: "knowledge".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Preferences".to_string(),
+                        value: "preference".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Specifications".to_string(),
+                        value: "specification".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Fact".to_string(),
+                        value: "fact".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Pattern".to_string(),
+                        value: "pattern".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Decision".to_string(),
+                        value: "decision".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Context".to_string(),
+                        value: "context".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Temporary".to_string(),
+                        value: "temporary".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "Observation".to_string(),
+                        value: "observation".to_string(),
+                        description: None,
+                    },
                 ],
                 selected: 0,
                 visible: false,
@@ -81,8 +125,16 @@ impl Default for MemoryBrowser {
             delete_modal: SelectorModal {
                 title: "Delete Memory".to_string(),
                 items: vec![
-                    SelectorItem { label: "Yes, delete this memory".to_string(), value: "yes".to_string(), description: None },
-                    SelectorItem { label: "No, cancel".to_string(), value: "no".to_string(), description: None },
+                    SelectorItem {
+                        label: "Yes, delete this memory".to_string(),
+                        value: "yes".to_string(),
+                        description: None,
+                    },
+                    SelectorItem {
+                        label: "No, cancel".to_string(),
+                        value: "no".to_string(),
+                        description: None,
+                    },
                 ],
                 selected: 0,
                 visible: false,
@@ -171,6 +223,9 @@ impl MemoryBrowser {
     /// Move selection down
     pub fn move_selection_down(&mut self) {
         let page_memories = self.current_page_memories();
+        if page_memories.is_empty() {
+            return;
+        }
         if self.selected < page_memories.len() - 1 {
             self.selected += 1;
         }
@@ -407,7 +462,9 @@ impl MemoryBrowser {
             .border_style(Style::default().fg(theme.border_color))
             .title(Span::styled(
                 "Memory Browser",
-                Style::default().fg(theme.accent_primary).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
             ))
             .title_style(Style::default().fg(theme.accent_secondary));
 
@@ -416,7 +473,7 @@ impl MemoryBrowser {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3), // Header with filters
-                Constraint::Min(0), // Memory list
+                Constraint::Min(0),    // Memory list
                 Constraint::Length(1), // Footer with navigation hints
             ])
             .split(block.inner(browser_area));
@@ -452,13 +509,15 @@ impl MemoryBrowser {
 
         // Search indicator
         let search_text = if self.search_query.is_empty() {
-            format!("[/] Search: <all>")
+            "[/] Search: <all>".to_string()
         } else {
             format!("[/] Search: {}", self.search_query)
         };
 
         let search_style = if self.search_focused {
-            Style::default().fg(theme.accent_primary).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.accent_primary)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.fg_secondary)
         };
@@ -511,7 +570,12 @@ impl MemoryBrowser {
 
         let page_memories = self.current_page_memories();
         let max_page = (total_count / self.page_size).max(1) - 1;
-        let page_info = format!("Page {}/{} ({} total)", self.page + 1, max_page + 1, total_count);
+        let page_info = format!(
+            "Page {}/{} ({} total)",
+            self.page + 1,
+            max_page + 1,
+            total_count
+        );
 
         let items: Vec<ListItem> = page_memories
             .iter()
@@ -521,30 +585,29 @@ impl MemoryBrowser {
                 let category_icon = category_to_icon(memory.category);
                 let preview = preview_content(&memory.content, 60);
 
-                let text = format!(
-                    "{} {} | {}",
-                    category_icon,
-                    memory.category,
-                    preview
-                );
+                let text = format!("{} {} | {}", category_icon, memory.category, preview);
 
                 if is_selected {
-                    ListItem::new(text).style(Style::default().fg(theme.accent_primary).add_modifier(Modifier::BOLD))
+                    ListItem::new(text).style(
+                        Style::default()
+                            .fg(theme.accent_primary)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else {
                     ListItem::new(text)
                 }
             })
             .collect();
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme.border_color)));
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border_color)),
+        );
 
         let list_area_inner = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
 
         f.render_widget(list, list_area_inner[0]);
@@ -558,11 +621,9 @@ impl MemoryBrowser {
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect, theme: &ConductorTheme) {
-        let hints = vec![
-            "[↑/k] Up [↓/j] Down [PgUp/u] Prev Pg [PgDown/d] Next",
+        let hints = ["[↑/k] Up [↓/j] Down [PgUp/u] Prev Pg [PgDown/d] Next",
             "[/] Focus Search [c] Category Filter [n] New Memory",
-            "[Del] Delete [Esc] Close",
-        ];
+            "[Del] Delete [Esc] Close"];
 
         let hint_text = hints.join("  ");
         let para = Paragraph::new(hint_text)
@@ -581,14 +642,16 @@ impl MemoryBrowser {
             .border_style(Style::default().fg(theme.border_color))
             .title(Span::styled(
                 "Delete Memory",
-                Style::default().fg(theme.accent_primary).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent_primary)
+                    .add_modifier(Modifier::BOLD),
             ));
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // Spacer
-                Constraint::Min(0), // Content
+                Constraint::Min(0),    // Content
                 Constraint::Length(1), // Spacer
             ])
             .split(block.inner(modal_area));
@@ -637,7 +700,10 @@ pub enum MemoryBrowserAction {
     /// Store modal opened
     StoreOpened,
     /// Store to memory with content and category
-    StoreMemory { content: String, category: MemoryCategory },
+    StoreMemory {
+        content: String,
+        category: MemoryCategory,
+    },
     /// Store cancelled
     StoreCancelled,
     /// Delete confirmation opened

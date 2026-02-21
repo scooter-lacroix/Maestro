@@ -192,7 +192,7 @@ impl ProcessCollector {
         let total_memory = self.system.total_memory();
         self.system
             .process(Pid::from_u32(pid))
-            .map(|p| self.process_to_info(&p, total_memory))
+            .map(|p| self.process_to_info(p, total_memory))
     }
 
     /// Find processes by name

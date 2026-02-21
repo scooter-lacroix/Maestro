@@ -3,11 +3,14 @@ Base Hook Classes for Nexus Memory System Integration
 
 This module provides the base classes for agent hooks in the Nexus Memory System.
 All agent-specific hooks should inherit from the AgentHook base class.
+
+Portability: Uses PATH-first discovery with XDG-compliant paths.
 """
 
 import asyncio
 import os
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Awaitable
@@ -120,24 +123,37 @@ class AgentHook(ABC):
                 logger.warning(f"Activity callback error: {e}")
     
     def _find_executable(self, *names: str) -> Optional[Path]:
-        """Find an executable in PATH or common locations."""
+        """Find an executable in PATH or common locations.
+
+        Uses PATH-first discovery with XDG-compliant paths.
+        No hardcoded absolute system paths are used.
+        """
         for name in names:
-            # Check PATH
+            # 1. Check PATH using shutil.which
             path = shutil.which(name)
             if path:
                 return Path(path)
-            
-            # Check common locations
+
+            # 2. Check XDG_BIN_HOME and user-local paths
+            home = Path.home()
+            xdg_bin_home = os.environ.get("XDG_BIN_HOME", "")
+
+            # Build search paths (no hardcoded absolute paths)
             common_paths = [
-                Path.home() / ".local/bin" / name,
-                Path.home() / "bin" / name,
-                Path("/usr/local/bin") / name,
-                Path("/usr/bin") / name,
+                # XDG_BIN_HOME (if set)
+                Path(xdg_bin_home) / name if xdg_bin_home else None,
+                # User-local bin (XDG default)
+                home / ".local/bin" / name,
+                # Cargo bin
+                home / ".cargo/bin" / name,
+                # User bin
+                home / "bin" / name,
             ]
+
             for common_path in common_paths:
-                if common_path.exists() and os.access(common_path, os.X_OK):
+                if common_path and common_path.exists() and os.access(common_path, os.X_OK):
                     return common_path
-        
+
         return None
     
     def _run_command(
@@ -170,6 +186,3 @@ class AgentHook(ABC):
             return -1, "", "Command timed out"
         except Exception as e:
             return -1, "", str(e)
-
-
-import shutil

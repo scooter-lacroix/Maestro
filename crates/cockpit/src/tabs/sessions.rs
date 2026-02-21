@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::state::SessionEntry;
-use leindex_core::memory::LspStatus;
+use leindex_core::memory::turso_backend::LspStatus;
 
 /// Get the tail of a session log file
 pub fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
@@ -46,6 +46,7 @@ pub fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
 }
 
 pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
@@ -63,7 +64,8 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(Color::Cyan).bold()
         } else {
             Style::default().fg(Color::DarkGray)
-        });
+        })
+        .style(Style::default().bg(theme.panel_bg));
 
     let preview_block = Block::default()
         .borders(Borders::ALL)
@@ -80,7 +82,8 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(Color::Yellow).bold()
         } else {
             Style::default().fg(Color::DarkGray)
-        });
+        })
+        .style(Style::default().bg(theme.panel_bg));
 
     if app.session_entries.is_empty() {
         let text = vec![
@@ -228,12 +231,15 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             }
         }
 
-        let list = List::new(items).block(list_block).highlight_style(
-            Style::default()
-                .bg(Color::Rgb(40, 40, 60))
-                .fg(Color::White)
-                .bold(),
-        );
+        let list = List::new(items)
+            .block(list_block)
+            .style(Style::default().bg(theme.panel_bg)) // Fix: Apply background to list content
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight_bg)
+                    .fg(Color::White)
+                    .bold(),
+            );
         frame.render_stateful_widget(list, chunks[0], &mut app.session_state);
 
         // Render Preview
@@ -402,16 +408,45 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             }
         }
 
+        // Terminal output styling - unique aesthetic for tmux sessions
+        // Uses a subtle green-tinted style reminiscent of classic terminals
+        let terminal_style = Style::default()
+            .fg(Color::Rgb(152, 195, 121)); // Soft green (like terminal output)
+
         if app.session_preview_content.is_empty() {
-            preview_lines.push(Line::from("  (No preview available)"));
+            preview_lines.push(Line::from(Span::styled(
+                "  (No preview available)",
+                Style::default().fg(theme.muted).italic(),
+            )));
         } else {
             for line in app.session_preview_content.lines() {
-                preview_lines.push(Line::from(format!("  {}", line)));
+                // Apply terminal-style formatting with subtle color variations
+                let styled_line = if line.starts_with('$') || line.starts_with('>') {
+                    // Command lines - highlight in accent color
+                    Span::styled(format!("  {}", line), terminal_style.bold())
+                } else if line.contains("error") || line.contains("Error") || line.contains("ERROR") {
+                    // Error lines - red tint
+                    Span::styled(format!("  {}", line), Style::default().fg(Color::Rgb(224, 108, 117)))
+                } else if line.contains("warning") || line.contains("Warning") || line.contains("WARN") {
+                    // Warning lines - yellow tint
+                    Span::styled(format!("  {}", line), Style::default().fg(Color::Rgb(229, 192, 123)))
+                } else if line.contains("success") || line.contains("Success") || line.contains("✓") {
+                    // Success lines - bright green
+                    Span::styled(format!("  {}", line), Style::default().fg(Color::Rgb(134, 179, 98)))
+                } else if line.trim().is_empty() {
+                    // Empty lines - just spacing
+                    Span::raw("")
+                } else {
+                    // Regular output - soft terminal green
+                    Span::styled(format!("  {}", line), terminal_style)
+                };
+                preview_lines.push(Line::from(styled_line));
             }
         }
 
         let preview = Paragraph::new(preview_lines)
             .block(preview_block)
+            .style(Style::default().bg(theme.panel_bg)) // Fix: Apply background to paragraph content
             .wrap(Wrap { trim: false })
             .scroll((app.preview_scroll, 0));
         frame.render_widget(preview, chunks[1]);

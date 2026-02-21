@@ -229,7 +229,7 @@ pub fn role_to_pi_agent_type(role: &AgentRole) -> Option<PiAgentType> {
     default_mappings()
         .iter()
         .find(|m| &m.maestro_role == role)
-        .map(|m| m.pi_agent_type.clone())
+        .map(|m| m.pi_agent_type)
 }
 
 /// Registered agent with all execution information
@@ -766,7 +766,7 @@ mod tests {
             let pi_type = role_to_pi_agent_type(&role);
             assert_eq!(
                 pi_type,
-                Some(expected_pi_type.clone()),
+                Some(expected_pi_type),
                 "Role {:?} should map to {:?}",
                 role,
                 expected_pi_type

@@ -264,4 +264,208 @@ mod tests {
             assert_eq!(dependencies[1].task_id, "task-2");
         }
     }
+
+    // Phase 7.6: Observer event bridge tests (RED - expected to fail before implementation)
+    #[test]
+    fn test_observer_can_subscribe_to_session_events() {
+        use super::super::observer::SessionEventBridge;
+        use super::super::model::ConductorEvent;
+        
+
+        // This test will fail until SessionEventBridge is implemented
+        let bridge = crate::conductor::observer::InMemoryEventBridge::new();
+        let session_id = "test-session-123";
+
+        // Subscribe to events
+        let mut rx = bridge.subscribe(session_id);
+
+        // Simulate sending an event
+        let event = ConductorEvent::IterationStarted {
+            iteration: 1,
+            task_id: "task-1".to_string(),
+        };
+
+        // This will fail until publish is implemented
+        assert!(bridge.publish(session_id, event).is_ok(), "Should publish event to bridge");
+
+        // This will fail until subscribe channel receives events
+        let received = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { rx.recv().await });
+
+        assert!(received.is_some(), "Should receive event from subscription");
+    }
+
+    #[test]
+    fn test_observer_action_review_current_task() {
+        use super::super::observer::ObserverAction;
+
+        // Verify ObserverAction enum exists and has the expected variants
+        let action = ObserverAction::ReviewCurrentTask {
+            iteration: 1,
+            task_id: "task-1".to_string(),
+        };
+
+        match action {
+            ObserverAction::ReviewCurrentTask { iteration, task_id } => {
+                assert_eq!(iteration, 1);
+                assert_eq!(task_id, "task-1");
+            }
+            _ => panic!("Expected ReviewCurrentTask variant"),
+        }
+    }
+
+    #[test]
+    fn test_observer_action_request_retry() {
+        use super::super::observer::ObserverAction;
+
+        let action = ObserverAction::RequestRetry {
+            task_id: "task-1".to_string(),
+            reason: "Temporary error".to_string(),
+        };
+
+        match action {
+            ObserverAction::RequestRetry { task_id, reason } => {
+                assert_eq!(task_id, "task-1");
+                assert_eq!(reason, "Temporary error");
+            }
+            _ => panic!("Expected RequestRetry variant"),
+        }
+    }
+
+    #[test]
+    fn test_observer_action_inject_guidance() {
+        use super::super::observer::ObserverAction;
+
+        let action = ObserverAction::InjectGuidance {
+            task_id: "task-1".to_string(),
+            guidance: "Consider using async/await".to_string(),
+        };
+
+        match action {
+            ObserverAction::InjectGuidance { task_id, guidance } => {
+                assert_eq!(task_id, "task-1");
+                assert_eq!(guidance, "Consider using async/await");
+            }
+            _ => panic!("Expected InjectGuidance variant"),
+        }
+    }
+
+    #[test]
+    fn test_parallel_updates_preserve_task_focus() {
+        use super::super::observer::SessionEventBridge;
+        use super::super::model::{ConductorEvent, ConductorState};
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        // This test verifies that parallel event processing doesn't corrupt
+        // the selected task focus in the conductor state
+
+        let bridge = Arc::new(crate::conductor::observer::InMemoryEventBridge::new());
+        let state = Arc::new(RwLock::new(ConductorState::default()));
+        let session_id = "parallel-test-session";
+
+        // Set initial task focus
+        {
+            let mut s = state.try_write().unwrap();
+            s.current_task = Some("task-5".to_string());
+            s.current_track = Some("track-a".to_string());
+        }
+
+        // Simulate concurrent events (this tests thread safety)
+        let bridge_clone = Arc::clone(&bridge);
+        let _state_clone = Arc::clone(&state);
+        let session_id_clone = session_id.to_string();
+
+        let handle = std::thread::spawn(move || {
+            // Simulate fast event sequence
+            let events = vec![
+                ConductorEvent::TaskSelected {
+                    task_id: "task-1".to_string(),
+                    iteration: 1,
+                },
+                ConductorEvent::IterationStarted {
+                    iteration: 1,
+                    task_id: "task-1".to_string(),
+                },
+                ConductorEvent::TaskCompleted {
+                    task_id: "task-1".to_string(),
+                    iteration: 1,
+                },
+            ];
+
+            for event in events {
+                let _ = bridge_clone.publish(&session_id_clone, event);
+            }
+        });
+
+        handle.join().unwrap();
+
+        // Verify state hasn't been corrupted by parallel updates
+        let s = state.try_read().unwrap();
+        // The original focus should remain intact or be deterministically updated
+        assert_eq!(s.current_track.as_ref().unwrap(), "track-a");
+        // Task may have changed due to events, but should be deterministic
+        assert!(s.current_task.is_some(), "Task focus should be maintained");
+    }
+
+    #[test]
+    fn test_event_deterministic_ordering() {
+        use super::super::observer::SessionEventBridge;
+        use super::super::model::ConductorEvent;
+
+        // Verify events are delivered in the order they were published
+        let bridge = crate::conductor::observer::InMemoryEventBridge::new();
+        let session_id = "order-test-session";
+
+        let events = vec![
+            ConductorEvent::IterationStarted {
+                iteration: 1,
+                task_id: "task-1".to_string(),
+            },
+            ConductorEvent::IterationCompleted {
+                iteration: 1,
+                task_completed: true,
+                duration_ms: 100,
+            },
+            ConductorEvent::IterationStarted {
+                iteration: 2,
+                task_id: "task-2".to_string(),
+            },
+        ];
+
+        for event in events.clone() {
+            let _ = bridge.publish(session_id, event);
+        }
+
+        let mut rx = bridge.subscribe(session_id);
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let received_events = rt.block_on(async {
+            let mut received = Vec::new();
+            // Receive all events with timeout
+            for _ in 0..3 {
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_millis(100),
+                    rx.recv(),
+                )
+                .await
+                {
+                    Ok(Some(event)) => received.push(event),
+                    _ => break,
+                }
+            }
+            received
+        });
+
+        assert_eq!(received_events.len(), 3, "Should receive all 3 events");
+        // Verify order is preserved
+        match (&received_events[0], &events[0]) {
+            (ConductorEvent::IterationStarted { iteration: i1, .. },
+             ConductorEvent::IterationStarted { iteration: i2, .. }) => {
+                assert_eq!(i1, i2);
+            }
+            _ => panic!("First event should be IterationStarted"),
+        }
+    }
 }

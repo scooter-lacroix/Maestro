@@ -43,6 +43,9 @@ pub enum InputMode {
     // Memory creation
     NewMemoryContent,
     NewMemoryCategory,
+    // Memory detail view
+    MemoryDetail,
+    MemoryDetailFocus,
 }
 
 /// Focus areas within the Session Hub
@@ -115,12 +118,40 @@ pub struct ProjectInfo {
     pub _track_count: usize,
 }
 
-/// Memory information
+/// Memory information with full metadata for expandable details
 #[derive(Clone)]
 pub struct MemoryInfo {
-    pub _id: i64,
+    pub id: i64,
     pub content: String,
     pub category: String,
+    /// Short summary for preview
+    pub summary: Option<String>,
+    /// Importance level (critical, high, normal, low)
+    pub importance: String,
+    /// Source that created this memory
+    pub source: Option<String>,
+    /// Session ID that owns this memory
+    pub session_id: Option<String>,
+    /// Project ID if associated with a project
+    pub project_id: Option<i64>,
+    /// Track ID if associated with a track
+    pub track_id: Option<i64>,
+    /// When the memory was created
+    pub created_at: String,
+    /// When the memory expires (if temporary)
+    pub expires_at: Option<String>,
+    /// When the memory was last accessed
+    pub last_accessed: Option<String>,
+    /// Access count (number of times retrieved)
+    pub access_count: usize,
+    /// Agent IDs that have accessed this memory
+    pub accessed_by: Vec<String>,
+    /// Tags associated with this memory
+    pub tags: Vec<String>,
+    /// Whether this entry is expanded in the UI
+    pub is_expanded: bool,
+    /// Vector similarity score (when from search results)
+    pub similarity_score: Option<f32>,
 }
 
 /// Dashboard statistics
@@ -219,4 +250,107 @@ pub struct DiagnosticViewState {
     pub selected_index: usize,
     pub expanded_files: std::collections::HashSet<String>,
     pub show_send_prompt: bool,
+}
+
+/// Readiness check strategy for MaesterClaw setup steps
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub enum MaesterClawSetupCheck {
+    ManualAcknowledge,
+    CronConfigured,
+    McpConnected,
+    MemoryVisualizationAvailable,
+    SandboxPolicyVisible,
+}
+/// Setup step for MaesterClaw capability onboarding
+#[derive(Clone, Debug)]
+pub struct MaesterClawSetupStep {
+    pub title: String,
+    pub description: String,
+    pub verification: String,
+    pub check: MaesterClawSetupCheck,
+    pub is_ready: bool,
+}
+/// Setup wizard state for MaesterClaw tab
+#[derive(Clone, Debug)]
+pub struct MaesterClawSetupState {
+    pub is_open: bool,
+    pub current_step: usize,
+    pub steps: Vec<MaesterClawSetupStep>,
+}
+impl Default for MaesterClawSetupState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            current_step: 0,
+            steps: vec![
+                MaesterClawSetupStep {
+                    title: "Capability Blueprint Review".to_string(),
+                    description: "Use IronClaw/ZeroClaw/Moltis as source references only. MaesterClaw must reimplement behavior in Maestro + leindex-core, not depend on external repo paths.".to_string(),
+                    verification: "Confirm parity mapping exists for onboarding, channels/gateway auth, agent loop, routines/cron, and provider routing.".to_string(),
+                    check: MaesterClawSetupCheck::ManualAcknowledge,
+                    is_ready: false,
+                },
+                MaesterClawSetupStep {
+                    title: "Cron / Routine Runtime".to_string(),
+                    description: "Create or load at least one routine in the Cron section to verify scheduler plumbing is active in this runtime.".to_string(),
+                    verification: "Expected signal: Cron Jobs count > 0 in MaesterClaw tab.".to_string(),
+                    check: MaesterClawSetupCheck::CronConfigured,
+                    is_ready: false,
+                },
+                MaesterClawSetupStep {
+                    title: "MCP / Provider Runtime".to_string(),
+                    description: "Attach at least one MCP server or provider bridge so tool dispatch and model wiring can be exercised.".to_string(),
+                    verification: "Expected signal: MCP pool state is connected/initialized.".to_string(),
+                    check: MaesterClawSetupCheck::McpConnected,
+                    is_ready: false,
+                },
+                MaesterClawSetupStep {
+                    title: "Memory Graph Tree Visualization".to_string(),
+                    description: "Memory tab must render in-pane vector graph/tree relationships when an entry is expanded.".to_string(),
+                    verification: "Expected signal: related-memory ASCII graph/tree pane is visible for expanded memory entry.".to_string(),
+                    check: MaesterClawSetupCheck::MemoryVisualizationAvailable,
+                    is_ready: false,
+                },
+                MaesterClawSetupStep {
+                    title: "Sandbox + Validation Commands".to_string(),
+                    description: "Confirm sandbox policy controls are visible, then validate runtime health from shell.".to_string(),
+                    verification: "Sandbox panel in MaesterClaw tab shows policy controls and available runtimes.".to_string(),
+                    check: MaesterClawSetupCheck::SandboxPolicyVisible,
+                    is_ready: false,
+                },
+            ],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MaesterClawSetupCheck, MaesterClawSetupState};
+
+    #[test]
+    fn setup_wizard_includes_runtime_sandbox_signal_step() {
+        let state = MaesterClawSetupState::default();
+        assert!(
+            state
+                .steps
+                .iter()
+                .any(|step| step.check == MaesterClawSetupCheck::SandboxPolicyVisible),
+            "setup wizard must include at least one SandboxPolicyVisible runtime-check step"
+        );
+    }
+
+    #[test]
+    fn final_setup_step_requires_runtime_sandbox_signal_not_manual_ack() {
+        let state = MaesterClawSetupState::default();
+        let last_step = state
+            .steps
+            .last()
+            .expect("setup wizard must include at least one step");
+
+        assert_eq!(
+            last_step.check,
+            MaesterClawSetupCheck::SandboxPolicyVisible,
+            "final setup step must use runtime sandbox visibility signal"
+        );
+    }
 }

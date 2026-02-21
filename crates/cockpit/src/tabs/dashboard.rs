@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::state::{DashFocus, DashSessionEntry};
-use leindex_core::memory::LspStatus;
+use leindex_core::memory::turso_backend::LspStatus;
 
 pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
@@ -30,7 +30,8 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(" ⚡ Quick Stats ")
-        .title_style(Style::default().fg(Color::Yellow));
+        .title_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(theme.panel_bg));
 
     let stats_text = vec![
         Line::from(""),
@@ -84,7 +85,8 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(" Welcome ")
-        .title_style(Style::default().fg(Color::Magenta));
+        .title_style(Style::default().fg(Color::Magenta))
+        .style(Style::default().bg(theme.panel_bg));
 
     // Updated welcome section with multi-layer architecture diagram & ANIMATION
     let anim_char = match (app.frame_count / 10) % 4 {
@@ -93,7 +95,7 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         2 => "⠹",
         _ => "⠸",
     };
-    let welcome_color = if (app.frame_count / 20) % 2 == 0 {
+    let welcome_color = if (app.frame_count / 20).is_multiple_of(2) {
         Color::Magenta
     } else {
         Color::LightMagenta
@@ -214,7 +216,8 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
             } else {
                 Style::default().fg(Color::Blue)
             },
-        );
+        )
+        .style(Style::default().bg(theme.panel_bg));
 
     let mut session_items = Vec::new();
     if app.dash_session_entries.is_empty() {
@@ -337,7 +340,8 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(theme.accent).bold()
         } else {
             Style::default().fg(theme.accent)
-        });
+        })
+        .style(Style::default().bg(theme.panel_bg));
 
     let mcp_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -368,7 +372,7 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
             ListItem::new(vec![Line::from(vec![
                 Span::styled(format!("  {} ", s.name), Style::default().bold()),
                 Span::styled(
-                    format!(" [{}] ", s.status.to_string()),
+                    format!(" [{}] ", s.status),
                     Style::default().fg(status_color),
                 ),
                 Span::styled(

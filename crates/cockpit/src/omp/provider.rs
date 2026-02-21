@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-use super::bridge::{OmpBridge, ALL_TOOLS, TOOL_EDIT, TOOL_FIND, TOOL_GREP, TOOL_PYTHON, TOOL_READ, TOOL_WRITE};
+use super::bridge::{
+    OmpBridge, ALL_TOOLS, TOOL_EDIT, TOOL_FIND, TOOL_GREP, TOOL_PYTHON, TOOL_READ, TOOL_WRITE,
+};
 
 /// Tool definition for OMP tools
 #[derive(Debug, Clone)]

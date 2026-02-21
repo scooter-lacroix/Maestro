@@ -502,7 +502,7 @@ impl SubagentRunner {
                 Ok((out, exit_code)) => {
                     // Success only if exit code is Some(0)
                     // Signal termination (None) is treated as failure
-                    if exit_code.map_or(false, |code| code == 0) {
+                    if exit_code == Some(0) {
                         let duration = start_time.elapsed();
                         let result = SubagentResult::success(
                             task.clone(),
@@ -710,7 +710,7 @@ impl SubagentRunner {
 
                 // Return Option<i32> to properly handle signal termination (None)
                 // and normal exit codes (Some(code))
-                if exit_code.map_or(false, |code| code != 0) {
+                if exit_code.is_some_and(|code| code != 0) {
                     return Err(Error::Execution(
                         crate::error::ExecutionError::NonZeroExit {
                             command: format!("{:?}", cmd),
@@ -767,7 +767,7 @@ impl SubagentRunner {
                 let _permit = permit.acquire().await.unwrap();
                 let agent_type = task.agent_type;
                 let task_desc = task.task.clone();
-                let prompt = task.prompt.map(|p| p.clone());
+                let prompt = task.prompt;
 
                 // Create a temporary runner for this task
                 let temp_runner = SubagentRunner { config: config_arc };
@@ -1422,7 +1422,7 @@ exit 1
             .unwrap();
 
         assert!(result.is_success());
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
 
         // Verify we got start and complete events
         let event_types: Vec<_> = events.iter().map(|e| e.event_type.clone()).collect();
@@ -2660,7 +2660,7 @@ exit 1
                 || subagent_result
                     .error
                     .as_ref()
-                    .map_or(false, |e| e.contains("cancelled")
+                    .is_some_and(|e| e.contains("cancelled")
                         || e.contains("timed out"))
         );
     }

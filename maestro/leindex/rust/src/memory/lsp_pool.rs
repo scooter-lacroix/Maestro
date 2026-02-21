@@ -161,7 +161,7 @@ impl LspPool {
     /// Create a new LSP pool
     pub fn new(storage: TursoStorageBackend, config: LspPoolConfig) -> Self {
         let (stop_tx, _) = watch::channel(false);
-        
+
         Self {
             config,
             storage,
@@ -176,16 +176,16 @@ impl LspPool {
             cache_misses: AtomicU64::new(0),
         }
     }
-    
+
     /// Start the background idle monitor
     pub fn start_monitor(&self) -> JoinHandle<()> {
         let pools = self.pools.clone();
         let config = self.config.clone();
         let mut stop_rx = self.stop_tx.subscribe();
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(config.monitor_interval);
-            
+
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -193,23 +193,23 @@ impl LspPool {
                             Ok(g) => g,
                             Err(_) => continue,
                         };
-                        
+
                         let idle_timeout = config.idle_timeout;
                         let mut to_stop = Vec::new();
-                        
+
                         for (lsp_type, pooled) in pools_guard.iter() {
                             if pooled.status == LspStatus::Running && pooled.is_idle(idle_timeout) {
-                                info!("Stopping idle LSP '{}' after {:?} of inactivity", 
+                                info!("Stopping idle LSP '{}' after {:?} of inactivity",
                                     lsp_type.display_name(), pooled.idle_duration());
                                 to_stop.push(*lsp_type);
                             }
                         }
-                        
+
                         for lsp_type in to_stop {
                             if let Some(pooled) = pools_guard.get_mut(&lsp_type) {
                                 if pooled.status == LspStatus::Running {
                                     pooled.shutting_down.store(true, Ordering::Relaxed);
-                                    
+
                                     if let Some(ref mut child) = pooled.child {
                                         #[cfg(unix)]
                                         {
@@ -223,12 +223,12 @@ impl LspPool {
                                         let _ = child.kill().await;
                                         let _ = child.wait().await;
                                     }
-                                    
+
                                     pooled.child = None;
                                     pooled.pid = None;
                                     pooled.status = LspStatus::Stopped;
                                     pooled.shutting_down.store(false, Ordering::Relaxed);
-                                    
+
                                     info!("Pooled LSP '{}' stopped (idle)", lsp_type.display_name());
                                 }
                             }
@@ -243,38 +243,48 @@ impl LspPool {
             }
         })
     }
-    
+
     /// Subscribe a session to an LSP type
-    pub async fn subscribe(&self, session_id: &str, lsp_type: LspType, project_path: Option<&PathBuf>) -> Result<bool> {
+    pub async fn subscribe(
+        &self,
+        session_id: &str,
+        lsp_type: LspType,
+        project_path: Option<&PathBuf>,
+    ) -> Result<bool> {
         if self.is_shutting_down.load(Ordering::Relaxed) {
             return Err(anyhow!("LSP pool is shutting down"));
         }
-        
+
         if !self.check_resources_available().await? {
             return Err(anyhow!("Insufficient system resources to start LSP"));
         }
-        
+
         if self.config.max_instances > 0 {
             let pools = self.pools.read().await;
-            let running = pools.values().filter(|p| p.status == LspStatus::Running).count();
+            let running = pools
+                .values()
+                .filter(|p| p.status == LspStatus::Running)
+                .count();
             if running >= self.config.max_instances && !pools.contains_key(&lsp_type) {
                 drop(pools);
                 self.evict_idle_lsp().await?;
             }
         }
-        
+
         let mut pools = self.pools.write().await;
         let mut subscriptions = self.subscriptions.write().await;
-        
-        let pooled = pools.entry(lsp_type).or_insert_with(|| PooledLsp::new(lsp_type));
-        
+
+        let pooled = pools
+            .entry(lsp_type)
+            .or_insert_with(|| PooledLsp::new(lsp_type));
+
         pooled.sessions.insert(session_id.to_string());
-        
+
         subscriptions
             .entry(session_id.to_string())
             .or_insert_with(HashSet::new)
             .insert(lsp_type);
-        
+
         if pooled.status != LspStatus::Running {
             self.cache_misses.fetch_add(1, Ordering::Relaxed);
             self.start_pooled_lsp_internal(pooled, project_path).await?;
@@ -286,32 +296,32 @@ impl LspPool {
             Ok(false)
         }
     }
-    
+
     /// Unsubscribe a session from an LSP type
     pub async fn unsubscribe(&self, session_id: &str, lsp_type: LspType) -> Result<bool> {
         let mut pools = self.pools.write().await;
         let mut subscriptions = self.subscriptions.write().await;
-        
+
         if let Some(lsps) = subscriptions.get_mut(session_id) {
             lsps.remove(&lsp_type);
             if lsps.is_empty() {
                 subscriptions.remove(session_id);
             }
         }
-        
+
         if let Some(pooled) = pools.get_mut(&lsp_type) {
             pooled.sessions.remove(session_id);
-            
+
             if pooled.sessions.is_empty() && self.config.idle_timeout == Duration::ZERO {
                 self.stop_pooled_lsp_internal(pooled).await?;
                 self.total_stops.fetch_add(1, Ordering::Relaxed);
                 return Ok(true);
             }
         }
-        
+
         Ok(false)
     }
-    
+
     /// Unsubscribe a session from all LSPs
     pub async fn unsubscribe_all(&self, session_id: &str) -> Result<Vec<LspType>> {
         let subscriptions = self.subscriptions.read().await;
@@ -320,19 +330,20 @@ impl LspPool {
             .map(|s| s.iter().copied().collect())
             .unwrap_or_default();
         drop(subscriptions);
-        
+
         for lsp_type in &lsps {
             self.unsubscribe(session_id, *lsp_type).await?;
         }
-        
+
         Ok(lsps)
     }
-    
+
     /// Get an LSP for use (marks as active)
     pub async fn get(&self, lsp_type: LspType) -> Option<LspHandle> {
         let mut pools = self.pools.write().await;
         if let Some(pooled) = pools.get_mut(&lsp_type) {
-            if pooled.status == LspStatus::Running && !pooled.shutting_down.load(Ordering::Relaxed) {
+            if pooled.status == LspStatus::Running && !pooled.shutting_down.load(Ordering::Relaxed)
+            {
                 pooled.touch();
                 return Some(LspHandle {
                     lsp_type,
@@ -342,36 +353,44 @@ impl LspPool {
         }
         None
     }
-    
+
     /// Check if an LSP is running
     pub async fn is_running(&self, lsp_type: LspType) -> bool {
         let pools = self.pools.read().await;
-        pools.get(&lsp_type).map(|p| p.status == LspStatus::Running).unwrap_or(false)
+        pools
+            .get(&lsp_type)
+            .map(|p| p.status == LspStatus::Running)
+            .unwrap_or(false)
     }
-    
+
     /// Get all running LSP types
     pub async fn running_types(&self) -> Vec<LspType> {
         let pools = self.pools.read().await;
-        pools.iter()
+        pools
+            .iter()
             .filter(|(_, p)| p.status == LspStatus::Running)
             .map(|(t, _)| *t)
             .collect()
     }
-    
+
     /// Get sessions subscribed to a specific LSP
     pub async fn get_subscribers(&self, lsp_type: LspType) -> Vec<String> {
         let pools = self.pools.read().await;
-        pools.get(&lsp_type)
+        pools
+            .get(&lsp_type)
             .map(|p| p.sessions.iter().cloned().collect())
             .unwrap_or_default()
     }
-    
+
     /// Get pool statistics
     pub async fn stats(&self) -> LspPoolStats {
         let pools = self.pools.read().await;
-        let running = pools.values().filter(|p| p.status == LspStatus::Running).count();
+        let running = pools
+            .values()
+            .filter(|p| p.status == LspStatus::Running)
+            .count();
         let total_subscribers: usize = pools.values().map(|p| p.sessions.len()).sum();
-        
+
         LspPoolStats {
             running_instances: running,
             total_subscribers,
@@ -382,36 +401,40 @@ impl LspPool {
             cache_misses: self.cache_misses.load(Ordering::Relaxed),
         }
     }
-    
+
     /// Check if system resources are available
     async fn check_resources_available(&self) -> Result<bool> {
         if self.config.min_free_memory_mb > 0 {
             let free_mb = get_available_memory_mb()?;
             if free_mb < self.config.min_free_memory_mb {
-                warn!("Insufficient free memory: {}MB < {}MB required", 
-                    free_mb, self.config.min_free_memory_mb);
+                warn!(
+                    "Insufficient free memory: {}MB < {}MB required",
+                    free_mb, self.config.min_free_memory_mb
+                );
                 return Ok(false);
             }
         }
-        
+
         if self.config.max_total_memory_mb > 0 {
             let current_mb = self.total_memory_bytes.load(Ordering::Relaxed) / (1024 * 1024);
             if current_mb >= self.config.max_total_memory_mb {
-                warn!("LSP memory limit reached: {}MB >= {}MB", 
-                    current_mb, self.config.max_total_memory_mb);
+                warn!(
+                    "LSP memory limit reached: {}MB >= {}MB",
+                    current_mb, self.config.max_total_memory_mb
+                );
                 return Ok(false);
             }
         }
-        
+
         Ok(true)
     }
-    
+
     /// Evict an idle LSP to make room for a new one
     async fn evict_idle_lsp(&self) -> Result<()> {
         let mut pools = self.pools.write().await;
-        
+
         let mut oldest: Option<(LspType, Duration)> = None;
-        
+
         for (lsp_type, pooled) in pools.iter() {
             if pooled.status == LspStatus::Running && pooled.sessions.is_empty() {
                 let idle = pooled.idle_duration();
@@ -420,44 +443,54 @@ impl LspPool {
                 }
             }
         }
-        
+
         if let Some((lsp_type, _)) = oldest {
-            info!("Evicting idle LSP '{}' to make room", lsp_type.display_name());
+            info!(
+                "Evicting idle LSP '{}' to make room",
+                lsp_type.display_name()
+            );
             if let Some(pooled) = pools.get_mut(&lsp_type) {
                 self.stop_pooled_lsp_internal(pooled).await?;
                 self.total_stops.fetch_add(1, Ordering::Relaxed);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Start a pooled LSP (internal, assumes lock held)
-    async fn start_pooled_lsp_internal(&self, pooled: &mut PooledLsp, project_path: Option<&PathBuf>) -> Result<()> {
+    async fn start_pooled_lsp_internal(
+        &self,
+        pooled: &mut PooledLsp,
+        project_path: Option<&PathBuf>,
+    ) -> Result<()> {
         let lsp_type = pooled.lsp_type;
-        
-        info!("Starting pooled LSP '{}' for shared use", lsp_type.display_name());
-        
+
+        info!(
+            "Starting pooled LSP '{}' for shared use",
+            lsp_type.display_name()
+        );
+
         pooled.status = LspStatus::Starting;
         pooled.started_at = Instant::now();
         pooled.started_at_instant = Instant::now();
         pooled.last_activity_secs.store(0, Ordering::Relaxed);
-        
+
         let mut cmd = Command::new(lsp_type.binary_name());
-        
+
         for arg in lsp_type.default_additional_args() {
             cmd.arg(arg);
         }
-        
+
         cmd.stdin(Stdio::piped())
-           .stdout(Stdio::piped())
-           .stderr(Stdio::piped())
-           .kill_on_drop(true);
-        
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
         if let Some(path) = project_path {
             cmd.current_dir(path);
         }
-        
+
         #[cfg(unix)]
         if self.config.low_priority {
             unsafe {
@@ -468,28 +501,29 @@ impl LspPool {
                 });
             }
         }
-        
-        let child = cmd.spawn()
+
+        let child = cmd
+            .spawn()
             .with_context(|| format!("Failed to spawn LSP: {}", lsp_type.binary_name()))?;
-        
+
         let pid = child.id();
         pooled.pid = pid;
         pooled.child = Some(child);
         pooled.status = LspStatus::Running;
-        
+
         if let Some(stdout) = pooled.child.as_mut().and_then(|c| c.stdout.take()) {
             tokio::spawn(async move {
-                use tokio::io::{BufReader, AsyncBufReadExt};
+                use tokio::io::{AsyncBufReadExt, BufReader};
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(_)) = lines.next_line().await {}
             });
         }
-        
+
         if let Some(stderr) = pooled.child.as_mut().and_then(|c| c.stderr.take()) {
             let name = lsp_type.binary_name().to_string();
             tokio::spawn(async move {
-                use tokio::io::{BufReader, AsyncBufReadExt};
+                use tokio::io::{AsyncBufReadExt, BufReader};
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -497,23 +531,27 @@ impl LspPool {
                 }
             });
         }
-        
-        info!("Pooled LSP '{}' started (PID: {:?})", lsp_type.display_name(), pid);
-        
+
+        info!(
+            "Pooled LSP '{}' started (PID: {:?})",
+            lsp_type.display_name(),
+            pid
+        );
+
         Ok(())
     }
-    
+
     /// Stop a pooled LSP (internal, assumes lock held)
     async fn stop_pooled_lsp_internal(&self, pooled: &mut PooledLsp) -> Result<()> {
         if pooled.status != LspStatus::Running {
             return Ok(());
         }
-        
+
         pooled.shutting_down.store(true, Ordering::Relaxed);
         let lsp_type = pooled.lsp_type;
-        
+
         info!("Stopping pooled LSP '{}'", lsp_type.display_name());
-        
+
         if let Some(ref mut child) = pooled.child {
             #[cfg(unix)]
             {
@@ -524,28 +562,28 @@ impl LspPool {
                     );
                 }
             }
-            
+
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
-        
+
         pooled.child = None;
         pooled.pid = None;
         pooled.status = LspStatus::Stopped;
         pooled.shutting_down.store(false, Ordering::Relaxed);
-        
+
         info!("Pooled LSP '{}' stopped", lsp_type.display_name());
-        
+
         Ok(())
     }
-    
+
     /// Stop all LSPs
     pub async fn stop_all(&self) -> Result<()> {
         self.is_shutting_down.store(true, Ordering::Relaxed);
         let _ = self.stop_tx.send(true);
-        
+
         let mut pools = self.pools.write().await;
-        
+
         for (lsp_type, pooled) in pools.iter_mut() {
             if pooled.status == LspStatus::Running {
                 if let Err(e) = self.stop_pooled_lsp_internal(pooled).await {
@@ -553,19 +591,19 @@ impl LspPool {
                 }
             }
         }
-        
+
         pools.clear();
-        
+
         let mut subscriptions = self.subscriptions.write().await;
         subscriptions.clear();
-        
+
         Ok(())
     }
-    
+
     /// Force restart an LSP
     pub async fn restart(&self, lsp_type: LspType, project_path: Option<&PathBuf>) -> Result<()> {
         let mut pools = self.pools.write().await;
-        
+
         if let Some(pooled) = pools.get_mut(&lsp_type) {
             if pooled.status == LspStatus::Running {
                 self.stop_pooled_lsp_internal(pooled).await?;
@@ -574,7 +612,7 @@ impl LspPool {
             self.start_pooled_lsp_internal(pooled, project_path).await?;
             self.total_starts.fetch_add(1, Ordering::Relaxed);
         }
-        
+
         Ok(())
     }
 }
@@ -608,7 +646,11 @@ pub struct LspPoolStats {
 impl LspPoolStats {
     pub fn cache_hit_rate(&self) -> f64 {
         let total = self.cache_hits + self.cache_misses;
-        if total == 0 { 0.0 } else { self.cache_hits as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            self.cache_hits as f64 / total as f64
+        }
     }
 }
 
@@ -637,28 +679,28 @@ fn get_available_memory_mb() -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_pool_config_default() {
         let config = LspPoolConfig::default();
         assert_eq!(config.idle_timeout, Duration::from_secs(300));
         assert!(config.low_priority);
     }
-    
+
     #[tokio::test]
     async fn test_pooled_lsp_idle_detection() {
         let mut pooled = PooledLsp::new(LspType::Rust);
         pooled.status = LspStatus::Running;
-        
+
         assert!(!pooled.is_idle(Duration::from_secs(60)));
-        
+
         pooled.sessions.insert("test-session".to_string());
         assert!(!pooled.is_idle(Duration::ZERO));
-        
+
         pooled.sessions.remove("test-session");
         // Will be idle after time passes
     }
-    
+
     #[test]
     fn test_pool_stats() {
         let stats = LspPoolStats {
@@ -670,7 +712,7 @@ mod tests {
             cache_hits: 80,
             cache_misses: 20,
         };
-        
+
         assert!((stats.cache_hit_rate() - 0.8).abs() < 0.01);
     }
 }

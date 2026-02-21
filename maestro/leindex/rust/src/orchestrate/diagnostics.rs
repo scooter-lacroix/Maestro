@@ -4,10 +4,10 @@
 //! Ensures agents return error-free code by checking diagnostics before
 //! task completion.
 
-use anyhow::{Context, Result};
 use crate::memory::lsp_manager::LspType;
 use crate::orchestrate::lsp_client::path_to_file_uri;
 use crate::orchestrate::model::LspDiagnosticConfig;
+use anyhow::{Context, Result};
 use ignore::{Walk, WalkBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -67,7 +67,12 @@ impl Diagnostic {
         let source = self.source.as_deref().unwrap_or("lsp");
         format!(
             "{}:{}:{}: {} [{}]: {}",
-            self.uri, start.line + 1, start.character + 1, severity, source, self.message
+            self.uri,
+            start.line + 1,
+            start.character + 1,
+            severity,
+            source,
+            self.message
         )
     }
 }
@@ -83,11 +88,12 @@ pub struct FileSnapshot {
 
 impl FileSnapshot {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let meta = std::fs::metadata(path)
-            .with_context(|| format!("Failed to metadata: {:?}", path))?;
+        let meta =
+            std::fs::metadata(path).with_context(|| format!("Failed to metadata: {:?}", path))?;
         Ok(Self {
             path: path.to_path_buf(),
-            modified: meta.modified()
+            modified: meta
+                .modified()
                 .with_context(|| format!("Failed to get modified time: {:?}", path))?,
             size: meta.len(),
         })
@@ -169,10 +175,7 @@ impl EditTracker {
             }
         }
 
-        tracing::debug!(
-            "Detected {} modified files",
-            self.modified_files.len()
-        );
+        tracing::debug!("Detected {} modified files", self.modified_files.len());
 
         Ok(self.modified_files.clone())
     }
@@ -220,9 +223,22 @@ impl EditTracker {
     fn is_source_file(&self, ext: &str) -> bool {
         matches!(
             ext,
-            "rs" | "py" | "ts" | "tsx" | "js" | "jsx" |
-            "go" | "java" | "c" | "cpp" | "h" | "hpp" |
-            "rb" | "php" | "swift" | "kt" | "kts"
+            "rs" | "py"
+                | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "go"
+                | "java"
+                | "c"
+                | "cpp"
+                | "h"
+                | "hpp"
+                | "rb"
+                | "php"
+                | "swift"
+                | "kt"
+                | "kts"
         )
     }
 }
@@ -280,7 +296,8 @@ pub async fn validate_diagnostics(
         Err(e) => {
             tracing::warn!(
                 "Failed to create LSP client for {:?}: {}, skipping diagnostics",
-                file_path, e
+                file_path,
+                e
             );
             // Don't fail the iteration if LSP client creation fails
             return Ok(DiagnosticValidation {
@@ -292,7 +309,10 @@ pub async fn validate_diagnostics(
     };
 
     // Validate diagnostics via the LSP
-    match client.validate_diagnostics(file_path, config.timeout_secs).await {
+    match client
+        .validate_diagnostics(file_path, config.timeout_secs)
+        .await
+    {
         Ok(validation) => {
             if !validation.passed {
                 tracing::warn!(
@@ -306,7 +326,8 @@ pub async fn validate_diagnostics(
         Err(e) => {
             tracing::warn!(
                 "LSP diagnostics communication error for {:?}: {}, skipping",
-                file_path, e
+                file_path,
+                e
             );
             // Don't fail the iteration if LSP communication fails
             Ok(DiagnosticValidation {
@@ -374,9 +395,12 @@ pub async fn validate_diagnostics_batch(
             .iter()
             .any(|d| d.severity == DiagnosticSeverity::Error)
     } else if config.fail_on_warnings {
-        !all_diagnostics
-            .iter()
-            .any(|d| matches!(d.severity, DiagnosticSeverity::Error | DiagnosticSeverity::Warning))
+        !all_diagnostics.iter().any(|d| {
+            matches!(
+                d.severity,
+                DiagnosticSeverity::Error | DiagnosticSeverity::Warning
+            )
+        })
     } else {
         true
     };
@@ -431,8 +455,14 @@ mod tests {
         let diag = Diagnostic {
             uri: "file:///tmp/test.rs".to_string(),
             range: lsp_types::Range {
-                start: lsp_types::Position { line: 10, character: 5 },
-                end: lsp_types::Position { line: 10, character: 15 },
+                start: lsp_types::Position {
+                    line: 10,
+                    character: 5,
+                },
+                end: lsp_types::Position {
+                    line: 10,
+                    character: 15,
+                },
             },
             severity: DiagnosticSeverity::Error,
             message: "expected type, found `()`".to_string(),

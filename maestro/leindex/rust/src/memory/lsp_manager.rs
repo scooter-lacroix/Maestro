@@ -2398,7 +2398,11 @@ impl LspManager {
 
             match process {
                 Some(p) if p.status == LspStatus::Running => {
-                    debug!("LSP {} is running for session {}", lsp_type.binary_name(), session_id);
+                    debug!(
+                        "LSP {} is running for session {}",
+                        lsp_type.binary_name(),
+                        session_id
+                    );
                     true
                 }
                 Some(p) => {
@@ -2410,7 +2414,11 @@ impl LspManager {
                     false
                 }
                 None => {
-                    debug!("LSP {} not found for session {}", lsp_type.binary_name(), session_id);
+                    debug!(
+                        "LSP {} not found for session {}",
+                        lsp_type.binary_name(),
+                        session_id
+                    );
                     false
                 }
             }
@@ -2499,10 +2507,7 @@ impl LspManager {
     ///
     /// Returns `Some(LspType)` if an LSP is configured, `None` otherwise
     fn detect_lsp_for_file(&self, file_path: &std::path::Path) -> Result<Option<LspType>> {
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let lsp_type = match ext {
             "rs" => Some(LspType::Rust),
@@ -2528,7 +2533,8 @@ impl LspManager {
         let running = self.running_lsps.read().await;
 
         for (key, process) in running.iter() {
-            if key.starts_with(&format!("{}:", session_id)) && process.status == LspStatus::Running {
+            if key.starts_with(&format!("{}:", session_id)) && process.status == LspStatus::Running
+            {
                 return true;
             }
         }

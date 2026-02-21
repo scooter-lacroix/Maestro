@@ -4,8 +4,8 @@
 
 use crate::error::Result;
 use crate::types::CpuMetrics;
-use sysinfo::{System, CpuRefreshKind, RefreshKind};
 use std::time::Duration;
+use sysinfo::{CpuRefreshKind, RefreshKind, System};
 
 /// Default refresh interval for CPU metrics
 const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
@@ -30,9 +30,8 @@ impl CpuCollector {
 
     /// Create a new CPU collector with a custom refresh interval
     pub fn with_refresh_interval(interval: Duration) -> Self {
-        let mut system = System::new_with_specifics(
-            RefreshKind::new().with_cpu(CpuRefreshKind::everything())
-        );
+        let mut system =
+            System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
         system.refresh_cpu_all(); // Initial refresh
 
         Self {
@@ -48,7 +47,9 @@ impl CpuCollector {
 
         let usage_percent = self.system.global_cpu_usage();
         let core_count = self.system.cpus().len();
-        let per_core_usage: Vec<f32> = self.system.cpus()
+        let per_core_usage: Vec<f32> = self
+            .system
+            .cpus()
             .iter()
             .map(|cpu| cpu.cpu_usage())
             .collect();
@@ -85,7 +86,9 @@ impl CpuCollector {
     /// Get per-core CPU usage
     pub fn collect_per_core(&mut self) -> Result<Vec<f32>> {
         self.refresh_if_needed();
-        Ok(self.system.cpus()
+        Ok(self
+            .system
+            .cpus()
             .iter()
             .map(|cpu| cpu.cpu_usage())
             .collect())
@@ -186,18 +189,22 @@ mod tests {
     #[test]
     fn test_cpu_collector_collect_usage() {
         let mut collector = CpuCollector::new();
-        let usage = collector.collect_usage().expect("Failed to collect CPU usage");
+        let usage = collector
+            .collect_usage()
+            .expect("Failed to collect CPU usage");
 
-        assert!(usage >= 0.0 && usage <= 100.0);
+        assert!((0.0..=100.0).contains(&usage));
     }
 
     #[test]
     fn test_cpu_collector_collect_per_core() {
         let mut collector = CpuCollector::new();
-        let per_core = collector.collect_per_core().expect("Failed to collect per-core usage");
+        let per_core = collector
+            .collect_per_core()
+            .expect("Failed to collect per-core usage");
 
         assert!(!per_core.is_empty());
-        assert!(per_core.iter().all(|&u| u >= 0.0 && u <= 100.0));
+        assert!(per_core.iter().all(|&u| (0.0..=100.0).contains(&u)));
     }
 
     #[test]

@@ -198,7 +198,7 @@ impl Executor {
     /// # }
     /// ```
     pub async fn execute(&self, command: &str) -> anyhow::Result<ExecutionResult> {
-        use crate::error::{ExecutionError, Error as PiError};
+        use crate::error::{Error as PiError, ExecutionError};
         use tokio::process::Command;
 
         // Parse command into arguments
@@ -217,12 +217,9 @@ impl Executor {
 
         // Retry loop with exponential backoff
         for attempt in 0..=self.config.max_retries {
-            let result = tokio::time::timeout(
-                timeout_duration,
-                Command::new(binary)
-                    .args(args)
-                    .output()
-            ).await;
+            let result =
+                tokio::time::timeout(timeout_duration, Command::new(binary).args(args).output())
+                    .await;
 
             match result {
                 Ok(Ok(output)) => {
@@ -236,8 +233,12 @@ impl Executor {
                             ExecutionError::NonZeroExit {
                                 command: command.to_string(),
                                 exit_code: code,
-                                stderr: if stderr.is_empty() { None } else { Some(stderr) },
-                            }
+                                stderr: if stderr.is_empty() {
+                                    None
+                                } else {
+                                    Some(stderr)
+                                },
+                            },
                         )));
                     }
                 }
@@ -249,7 +250,7 @@ impl Executor {
                         ExecutionError::Timeout {
                             command: command.to_string(),
                             timeout_secs: self.config.timeout_secs,
-                        }
+                        },
                     )));
                 }
             }

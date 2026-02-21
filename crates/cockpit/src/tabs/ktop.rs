@@ -231,7 +231,9 @@ impl KtopState {
 
         // Send control command
         if let Some(ref tx) = self.collector_control_tx {
-            let _ = tx.send(CollectorControl::SetRefreshInterval(self.refresh_interval_secs));
+            let _ = tx.send(CollectorControl::SetRefreshInterval(
+                self.refresh_interval_secs,
+            ));
         }
     }
 
@@ -249,7 +251,11 @@ impl KtopState {
 
                 // Update histories - extract values first to avoid multiple borrows
                 let cpu_usage = self.current_metrics.cpu.as_ref().map(|c| c.usage_percent);
-                let mem_usage = self.current_metrics.memory.as_ref().map(|m| m.usage_percent());
+                let mem_usage = self
+                    .current_metrics
+                    .memory
+                    .as_ref()
+                    .map(|m| m.usage_percent());
                 let is_paused = self.paused;
                 let is_complete = self.current_metrics.is_complete();
 
@@ -312,8 +318,8 @@ pub fn render_ktop(frame: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header with controls
-            Constraint::Min(0),     // Main content
+            Constraint::Length(3), // Header with controls
+            Constraint::Min(0),    // Main content
         ])
         .split(area);
 
@@ -329,8 +335,20 @@ pub fn render_ktop(frame: &mut Frame, area: Rect, app: &mut App) {
     render_memory_section(frame, main_chunks.memory, ktop_state, &theme);
 
     // Render two process lists - by memory and by CPU
-    render_process_section(frame, main_chunks.processes_by_mem, ktop_state, &theme, ProcessSort::Memory);
-    render_process_section(frame, main_chunks.processes_by_cpu, ktop_state, &theme, ProcessSort::Cpu);
+    render_process_section(
+        frame,
+        main_chunks.processes_by_mem,
+        ktop_state,
+        &theme,
+        ProcessSort::Memory,
+    );
+    render_process_section(
+        frame,
+        main_chunks.processes_by_cpu,
+        ktop_state,
+        &theme,
+        ProcessSort::Cpu,
+    );
 
     render_maestro_section(frame, main_chunks.maestro, ktop_state, &theme);
 }
@@ -359,11 +377,11 @@ fn create_main_layout(area: Rect, _focus: KtopFocus) -> MainChunks {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(5),   // CPU
-                Constraint::Length(5),   // Memory
-                Constraint::Length(4),   // Network
-                Constraint::Min(8),      // Processes (combined)
-                Constraint::Length(4),   // Maestro
+                Constraint::Length(5), // CPU
+                Constraint::Length(5), // Memory
+                Constraint::Length(4), // Network
+                Constraint::Min(8),    // Processes (combined)
+                Constraint::Length(4), // Maestro
             ])
             .split(Rect::new(area.x, area.y + 3, area.width, remaining));
 
@@ -440,30 +458,33 @@ fn create_main_layout(area: Rect, _focus: KtopFocus) -> MainChunks {
 fn render_header(frame: &mut Frame, area: Rect, state: &KtopState, theme: &Theme) {
     let status_text = match state.collector_status {
         CollectorStatus::Running => Span::styled("Running", Style::default().fg(Color::Green)),
-        CollectorStatus::Initializing => Span::styled("Init...", Style::default().fg(Color::Yellow)),
+        CollectorStatus::Initializing => {
+            Span::styled("Init...", Style::default().fg(Color::Yellow))
+        }
         CollectorStatus::Error => Span::styled("Error", Style::default().fg(Color::Red)),
         CollectorStatus::Paused => Span::styled("Paused", Style::default().fg(Color::Yellow)),
         CollectorStatus::Stopped => Span::styled("Stopped", Style::default().fg(Color::Red)),
     };
 
-    let header_text = vec![
-        Line::from(vec![
-            Span::styled("Alt+P:", Style::default().fg(theme.accent).bold()),
-            Span::styled(
-                if state.paused { "Resume" } else { "Pause" },
-                Style::default().fg(theme.fg),
-            ),
-            Span::styled("  Alt+R:", Style::default().fg(theme.accent).bold()),
-            Span::styled(format!("Refresh({}s)", state.refresh_interval_secs), Style::default().fg(theme.fg)),
-            Span::styled("  Alt+/-:", Style::default().fg(theme.accent).bold()),
-            Span::styled("Rate", Style::default().fg(theme.fg)),
-            Span::styled("  Alt+Tab:", Style::default().fg(theme.accent).bold()),
-            Span::styled("Focus", Style::default().fg(theme.fg)),
-            Span::raw("  "),
-            Span::styled("Status:", Style::default().fg(theme.muted)),
-            status_text,
-        ]),
-    ];
+    let header_text = vec![Line::from(vec![
+        Span::styled("Alt+P:", Style::default().fg(theme.accent).bold()),
+        Span::styled(
+            if state.paused { "Resume" } else { "Pause" },
+            Style::default().fg(theme.fg),
+        ),
+        Span::styled("  Alt+R:", Style::default().fg(theme.accent).bold()),
+        Span::styled(
+            format!("Refresh({}s)", state.refresh_interval_secs),
+            Style::default().fg(theme.fg),
+        ),
+        Span::styled("  Alt+/-:", Style::default().fg(theme.accent).bold()),
+        Span::styled("Rate", Style::default().fg(theme.fg)),
+        Span::styled("  Alt+Tab:", Style::default().fg(theme.accent).bold()),
+        Span::styled("Focus", Style::default().fg(theme.fg)),
+        Span::raw("  "),
+        Span::styled("Status:", Style::default().fg(theme.muted)),
+        status_text,
+    ])];
 
     let header = Paragraph::new(header_text)
         .block(
@@ -514,7 +535,10 @@ fn render_cpu_section(frame: &mut Frame, area: Rect, state: &KtopState, theme: &
             Line::from(vec![
                 Span::styled("Load: ", Style::default().fg(theme.muted)),
                 Span::styled(
-                    format!("{:.2} {:.2} {:.2}", cpu.load_average.0, cpu.load_average.1, cpu.load_average.2),
+                    format!(
+                        "{:.2} {:.2} {:.2}",
+                        cpu.load_average.0, cpu.load_average.1, cpu.load_average.2
+                    ),
                     Style::default().fg(theme.fg),
                 ),
             ]),
@@ -528,30 +552,39 @@ fn render_cpu_section(frame: &mut Frame, area: Rect, state: &KtopState, theme: &
                 if i > 0 {
                     core_spans.push(Span::raw(" "));
                 }
-                core_spans.push(Span::styled(format!("{}%", *u as u32), Style::default().fg(c)));
+                core_spans.push(Span::styled(
+                    format!("{}%", *u as u32),
+                    Style::default().fg(c),
+                ));
             }
             lines.push(Line::from(core_spans));
 
- // Add CPU history sparkline
- if !state.cpu_history.is_empty() {
- let sparkline_width = area.width.saturating_sub(2) as usize;
- let sparkline = render_sparkline(&state.cpu_history, sparkline_width);
- if !sparkline.is_empty() {
- lines.push(Line::from(Span::styled(
- sparkline,
- Style::default().fg(theme.accent),
- )));
- }
- }
+            // Add CPU history sparkline
+            if !state.cpu_history.is_empty() {
+                let sparkline_width = area.width.saturating_sub(2) as usize;
+                let sparkline = render_sparkline(&state.cpu_history, sparkline_width);
+                if !sparkline.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        sparkline,
+                        Style::default().fg(theme.accent),
+                    )));
+                }
+            }
         }
 
         // Add top CPU consumers inline
-        let top_cpu: Vec<_> = state.current_metrics.top_cpu_processes.iter().take(3).collect();
+        let top_cpu: Vec<_> = state
+            .current_metrics
+            .top_cpu_processes
+            .iter()
+            .take(3)
+            .collect();
         if !top_cpu.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("Top CPU:", Style::default().fg(theme.accent).bold()),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Top CPU:",
+                Style::default().fg(theme.accent).bold(),
+            )]));
             for proc in top_cpu {
                 let proc_color = color_for_percent(proc.cpu_percent);
                 let name = if proc.name.len() > 10 {
@@ -561,7 +594,10 @@ fn render_cpu_section(frame: &mut Frame, area: Rect, state: &KtopState, theme: &
                 };
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {:<10} ", name), Style::default().fg(theme.fg)),
-                    Span::styled(format!("{:>5.1}%", proc.cpu_percent), Style::default().fg(proc_color).bold()),
+                    Span::styled(
+                        format!("{:>5.1}%", proc.cpu_percent),
+                        Style::default().fg(proc_color).bold(),
+                    ),
                 ]));
             }
         }
@@ -603,11 +639,14 @@ fn render_cpu_section(frame: &mut Frame, area: Rect, state: &KtopState, theme: &
     } else {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Initializing...", Style::default().fg(theme.muted).italic()),
-            ]),
+            Line::from(vec![Span::styled(
+                "Initializing...",
+                Style::default().fg(theme.muted).italic(),
+            )]),
         ];
-        let paragraph = Paragraph::new(content).block(block).alignment(Alignment::Center);
+        let paragraph = Paragraph::new(content)
+            .block(block)
+            .alignment(Alignment::Center);
         frame.render_widget(paragraph, area);
     }
 }
@@ -654,7 +693,10 @@ fn render_memory_section(frame: &mut Frame, area: Rect, state: &KtopState, theme
                     let swap_used_gb = mem.swap_used_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                     let swap_total_gb = mem.swap_total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                     Span::styled(
-                        format!("{:.1}GB / {:.1}GB ({:.1}%)", swap_used_gb, swap_total_gb, swap_pct),
+                        format!(
+                            "{:.1}GB / {:.1}GB ({:.1}%)",
+                            swap_used_gb, swap_total_gb, swap_pct
+                        ),
                         Style::default().fg(swap_color),
                     )
                 } else {
@@ -668,31 +710,39 @@ fn render_memory_section(frame: &mut Frame, area: Rect, state: &KtopState, theme
                     Style::default().fg(Color::Green),
                 ),
                 Span::styled(
-                    format!(" Buf:{:.1}G", mem.buffers_bytes as f64 / (1024.0 * 1024.0 * 1024.0)),
+                    format!(
+                        " Buf:{:.1}G",
+                        mem.buffers_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+                    ),
                     Style::default().fg(theme.muted),
                 ),
             ]),
         ];
 
-
- // Add memory history sparkline
- if !state.memory_history.is_empty() {
- let sparkline_width = area.width.saturating_sub(2) as usize;
- let sparkline = render_sparkline(&state.memory_history, sparkline_width);
- if !sparkline.is_empty() {
- lines.push(Line::from(Span::styled(
- sparkline,
- Style::default().fg(theme.accent_alt),
- )));
- }
- }
+        // Add memory history sparkline
+        if !state.memory_history.is_empty() {
+            let sparkline_width = area.width.saturating_sub(2) as usize;
+            let sparkline = render_sparkline(&state.memory_history, sparkline_width);
+            if !sparkline.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    sparkline,
+                    Style::default().fg(theme.accent_alt),
+                )));
+            }
+        }
         // Add top memory consumers inline
-        let top_mem: Vec<_> = state.current_metrics.top_memory_processes.iter().take(3).collect();
+        let top_mem: Vec<_> = state
+            .current_metrics
+            .top_memory_processes
+            .iter()
+            .take(3)
+            .collect();
         if !top_mem.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("Top Mem:", Style::default().fg(theme.accent_alt).bold()),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Top Mem:",
+                Style::default().fg(theme.accent_alt).bold(),
+            )]));
             for proc in top_mem {
                 let mem_color = color_for_percent(proc.memory_percent);
                 let name = if proc.name.len() > 10 {
@@ -703,8 +753,14 @@ fn render_memory_section(frame: &mut Frame, area: Rect, state: &KtopState, theme
                 let mem_str = format_size(proc.rss_bytes);
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {:<10} ", name), Style::default().fg(theme.fg)),
-                    Span::styled(format!("{:>6}", mem_str), Style::default().fg(mem_color).bold()),
-                    Span::styled(format!(" ({:.0}%)", proc.memory_percent), Style::default().fg(theme.muted)),
+                    Span::styled(
+                        format!("{:>6}", mem_str),
+                        Style::default().fg(mem_color).bold(),
+                    ),
+                    Span::styled(
+                        format!(" ({:.0}%)", proc.memory_percent),
+                        Style::default().fg(theme.muted),
+                    ),
                 ]));
             }
         }
@@ -744,9 +800,10 @@ fn render_memory_section(frame: &mut Frame, area: Rect, state: &KtopState, theme
             frame.render_widget(paragraph, inner_area);
         }
     } else {
-        let paragraph = Paragraph::new(Line::from(vec![
-            Span::styled("Initializing...", Style::default().fg(theme.muted).italic()),
-        ]))
+        let paragraph = Paragraph::new(Line::from(vec![Span::styled(
+            "Initializing...",
+            Style::default().fg(theme.muted).italic(),
+        )]))
         .block(block)
         .alignment(Alignment::Center);
         frame.render_widget(paragraph, area);
@@ -754,7 +811,13 @@ fn render_memory_section(frame: &mut Frame, area: Rect, state: &KtopState, theme
 }
 
 /// Render the process list section
-fn render_process_section(frame: &mut Frame, area: Rect, state: &mut KtopState, theme: &Theme, sort: ProcessSort) {
+fn render_process_section(
+    frame: &mut Frame,
+    area: Rect,
+    state: &mut KtopState,
+    theme: &Theme,
+    sort: ProcessSort,
+) {
     let title = match sort {
         ProcessSort::Cpu => " 📋 Top CPU ",
         ProcessSort::Memory => " 📋 Top Memory ",
@@ -780,9 +843,10 @@ fn render_process_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
     if processes.is_empty() {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("No process data", Style::default().fg(theme.muted).italic()),
-            ]),
+            Line::from(vec![Span::styled(
+                "No process data",
+                Style::default().fg(theme.muted).italic(),
+            )]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Press ", Style::default().fg(theme.muted)),
@@ -790,7 +854,9 @@ fn render_process_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
                 Span::styled(" to refresh", Style::default().fg(theme.muted)),
             ]),
         ];
-        let paragraph = Paragraph::new(content).block(block).alignment(Alignment::Center);
+        let paragraph = Paragraph::new(content)
+            .block(block)
+            .alignment(Alignment::Center);
         frame.render_widget(paragraph, area);
         return;
     }
@@ -834,7 +900,8 @@ fn render_process_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
                 ktop_collectors::ProcessStatus::Unknown => "?",
             };
 
-            let command = p.command
+            let command = p
+                .command
                 .as_ref()
                 .and_then(|c| c.split_whitespace().next())
                 .unwrap_or(&p.name)
@@ -857,11 +924,20 @@ fn render_process_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
         })
         .collect();
 
-    let table = Table::new(rows, [Constraint::Length(6), Constraint::Length(6), Constraint::Length(6), Constraint::Length(4), Constraint::Min(0)])
-        .block(block)
-        .header(header)
-        .row_highlight_style(Style::default().bg(theme.highlight_bg))
-        .column_spacing(1);
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(4),
+            Constraint::Min(0),
+        ],
+    )
+    .block(block)
+    .header(header)
+    .row_highlight_style(Style::default().bg(theme.highlight_bg))
+    .column_spacing(1);
 
     frame.render_stateful_widget(table, area, &mut state.process_state);
 }
@@ -905,12 +981,13 @@ fn render_network_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
             .take(3)
             .map(|(name, stats)| {
                 Line::from(vec![
+                    Span::styled(format!("{}:", name), Style::default().fg(theme.accent)),
                     Span::styled(
-                        format!("{}:", name),
-                        Style::default().fg(theme.accent),
-                    ),
-                    Span::styled(
-                        format!(" ↓{} ↑{}", format_size(stats.recv_bytes), format_size(stats.sent_bytes)),
+                        format!(
+                            " ↓{} ↑{}",
+                            format_size(stats.recv_bytes),
+                            format_size(stats.sent_bytes)
+                        ),
                         Style::default().fg(theme.muted),
                     ),
                 ])
@@ -923,9 +1000,10 @@ fn render_network_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
     } else {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Initializing...", Style::default().fg(theme.muted).italic()),
-            ]),
+            Line::from(vec![Span::styled(
+                "Initializing...",
+                Style::default().fg(theme.muted).italic(),
+            )]),
         ];
         let paragraph = Paragraph::new(content).block(block);
         frame.render_widget(paragraph, area);
@@ -975,15 +1053,9 @@ fn render_disk_section(frame: &mut Frame, area: Rect, state: &mut KtopState, the
                         format!("{:>3.0}% ", m.usage_percent()),
                         Style::default().fg(usage_color).bold(),
                     ),
-                    Span::styled(
-                        format_size(m.used_bytes),
-                        Style::default().fg(theme.muted),
-                    ),
+                    Span::styled(format_size(m.used_bytes), Style::default().fg(theme.muted)),
                     Span::raw("/"),
-                    Span::styled(
-                        format_size(m.total_bytes),
-                        Style::default().fg(theme.muted),
-                    ),
+                    Span::styled(format_size(m.total_bytes), Style::default().fg(theme.muted)),
                 ])
             })
             .collect();
@@ -994,9 +1066,10 @@ fn render_disk_section(frame: &mut Frame, area: Rect, state: &mut KtopState, the
     } else {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Initializing...", Style::default().fg(theme.muted).italic()),
-            ]),
+            Line::from(vec![Span::styled(
+                "Initializing...",
+                Style::default().fg(theme.muted).italic(),
+            )]),
         ];
         let paragraph = Paragraph::new(content).block(block);
         frame.render_widget(paragraph, area);
@@ -1017,11 +1090,19 @@ fn render_maestro_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
 
     if let Some(ref maestro) = state.current_metrics.maestro {
         // Count LSP status
-        let lsp_running = maestro.lsp_servers.values().filter(|l| l.is_running).count();
+        let lsp_running = maestro
+            .lsp_servers
+            .values()
+            .filter(|l| l.is_running)
+            .count();
         let lsp_total = maestro.lsp_servers.len();
 
         // Count agents by status
-        let agents_working = maestro.agents.values().filter(|a| matches!(a.status, ktop_collectors::AgentStatus::Working)).count();
+        let agents_working = maestro
+            .agents
+            .values()
+            .filter(|a| matches!(a.status, ktop_collectors::AgentStatus::Working))
+            .count();
         let agents_total = maestro.agents.len();
 
         let content = vec![
@@ -1029,7 +1110,13 @@ fn render_maestro_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
                 Span::styled("LSPs: ", Style::default().fg(theme.muted)),
                 Span::styled(
                     format!("{}/{}", lsp_running, lsp_total),
-                    Style::default().fg(if lsp_running == lsp_total { Color::Green } else { Color::Yellow }).bold(),
+                    Style::default()
+                        .fg(if lsp_running == lsp_total {
+                            Color::Green
+                        } else {
+                            Color::Yellow
+                        })
+                        .bold(),
                 ),
                 Span::styled(
                     format!("  Agents: {}/{}", agents_working, agents_total),
@@ -1057,9 +1144,10 @@ fn render_maestro_section(frame: &mut Frame, area: Rect, state: &mut KtopState, 
     } else {
         let content = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Maestro metrics unavailable", Style::default().fg(theme.muted).italic()),
-            ]),
+            Line::from(vec![Span::styled(
+                "Maestro metrics unavailable",
+                Style::default().fg(theme.muted).italic(),
+            )]),
         ];
         let paragraph = Paragraph::new(content).block(block);
         frame.render_widget(paragraph, area);
@@ -1094,7 +1182,13 @@ fn initialize_collectors(app: &mut App) {
         // Spawn background collector task
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
-                run_collectors_loop(metrics_state, pause_flag, refresh_interval_atomic, control_tx).await;
+                run_collectors_loop(
+                    metrics_state,
+                    pause_flag,
+                    refresh_interval_atomic,
+                    control_tx,
+                )
+                .await;
             });
         }
     }
@@ -1205,11 +1299,7 @@ fn render_sparkline(values: &[f32], width: usize) -> String {
 
     // Sample values to fit width
     let step = values.len().div_ceil(width.max(1));
-    let sampled: Vec<_> = values
-        .iter()
-        .step_by(step)
-        .copied()
-        .collect();
+    let sampled: Vec<_> = values.iter().step_by(step).copied().collect();
 
     let bars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
     let max_val = sampled.iter().fold(0.0f32, |a, &b| a.max(b)).max(1.0);
@@ -1306,14 +1396,18 @@ pub fn handle_ktop_input(app: &mut App, key: crossterm::event::KeyCode) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{theme_from_name, Theme};
-    use ktop_collectors::{AgentInfo, AgentStatus, CpuMetrics, DiskMetrics, DiskMount, InterfaceStats, LeIndexStats, LspStatus, MaestroMetrics, MaestroMemoryStats, MemoryMetrics, NetworkMetrics, ProcessInfo, ProcessStatus};
+    use crate::theme::theme_from_name;
+    use ktop_collectors::{
+        AgentInfo, AgentStatus, CpuMetrics, DiskMetrics, DiskMount, InterfaceStats, LeIndexStats,
+        LspStatus, MaestroMemoryStats, MaestroMetrics, MemoryMetrics, NetworkMetrics, ProcessInfo,
+        ProcessStatus,
+    };
     use ratatui::{backend::TestBackend, Terminal};
     use std::collections::HashMap;
 
     #[test]
     fn test_ktop_state_default() {
-        let mut state = KtopState::default();
+        let state = KtopState::default();
         assert_eq!(state.refresh_interval_secs, 3);
         assert!(!state.paused);
         assert!(state.cpu_history.is_empty());
@@ -1378,7 +1472,7 @@ mod tests {
 
     #[test]
     fn test_ktop_state_refresh_interval_duration() {
-        let mut state = KtopState::default();
+        let state = KtopState::default();
         assert_eq!(state.refresh_interval(), Duration::from_secs(3));
 
         let mut state = KtopState::default();
@@ -1546,7 +1640,7 @@ mod tests {
         // Create mock memory metrics using the constructor
         let mem_metrics = MemoryMetrics::new(
             16 * 1024 * 1024 * 1024, // 16 GB
-            8 * 1024 * 1024 * 1024,   // 8 GB
+            8 * 1024 * 1024 * 1024,  // 8 GB
             8 * 1024 * 1024 * 1024,
             512 * 1024 * 1024,
             2 * 1024 * 1024 * 1024,
@@ -1591,13 +1685,8 @@ mod tests {
         // Create mock network metrics
         let mut interfaces = HashMap::new();
         interfaces.insert("eth0".to_string(), InterfaceStats::new("eth0".to_string()));
-        let net_metrics = NetworkMetrics::new(
-            interfaces,
-            1024 * 1024,
-            512 * 1024,
-            1024 * 1024,
-            512 * 1024,
-        );
+        let net_metrics =
+            NetworkMetrics::new(interfaces, 1024 * 1024, 512 * 1024, 1024 * 1024, 512 * 1024);
 
         // Create mock disk metrics
         let disk_metrics = DiskMetrics::new(
@@ -1618,10 +1707,20 @@ mod tests {
 
         // Create mock Maestro metrics
         let mut lsp_servers = HashMap::new();
-        lsp_servers.insert("rust-analyzer".to_string(), LspStatus::new("rust-analyzer".to_string(), true, "Ready".to_string()));
+        lsp_servers.insert(
+            "rust-analyzer".to_string(),
+            LspStatus::new("rust-analyzer".to_string(), true, "Ready".to_string()),
+        );
 
         let mut agents = HashMap::new();
-        agents.insert("agent1".to_string(), AgentInfo::new("agent1".to_string(), "general".to_string(), AgentStatus::Working));
+        agents.insert(
+            "agent1".to_string(),
+            AgentInfo::new(
+                "agent1".to_string(),
+                "general".to_string(),
+                AgentStatus::Working,
+            ),
+        );
 
         let leindex_stats = LeIndexStats {
             files_indexed: 12345,
@@ -1769,7 +1868,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut frame = terminal.get_frame();
 
-        let mut state = KtopState::default();
+        let state = KtopState::default();
         let theme = theme_from_name("default");
 
         // Should not panic with empty metrics
@@ -1782,7 +1881,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut frame = terminal.get_frame();
 
-        let mut state = KtopState::default();
+        let state = KtopState::default();
         let theme = theme_from_name("default");
 
         // Should not panic with empty metrics
@@ -1838,7 +1937,13 @@ mod tests {
         let theme = theme_from_name("default");
 
         // Should not panic with empty process list
-        render_process_section(&mut frame, Rect::new(0, 0, 50, 10), &mut state, &theme, ProcessSort::Cpu);
+        render_process_section(
+            &mut frame,
+            Rect::new(0, 0, 50, 10),
+            &mut state,
+            &theme,
+            ProcessSort::Cpu,
+        );
     }
 
     #[test]
@@ -1847,7 +1952,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut frame = terminal.get_frame();
 
-        let mut state = KtopState::default();
+        let state = KtopState::default();
         let theme = theme_from_name("default");
 
         // Should not panic
@@ -2002,8 +2107,6 @@ mod tests {
     // Tests for keyboard input handling
     #[test]
     fn test_handle_ktop_input_pause() {
-        use crossterm::event::KeyCode;
-
         // Create a mock state
         let mut state = KtopState::default();
         assert!(!state.paused);
@@ -2034,8 +2137,6 @@ mod tests {
 
     #[test]
     fn test_handle_ktop_input_focus_cycle() {
-        use crossterm::event::KeyCode;
-
         let mut state = KtopState::default();
         assert_eq!(state.focus, KtopFocus::Cpu);
 
@@ -2119,7 +2220,7 @@ mod tests {
 
     #[test]
     fn test_refresh_interval_duration() {
-        let mut state = KtopState::default();
+        let state = KtopState::default();
         assert_eq!(state.refresh_interval(), Duration::from_secs(3));
 
         let mut state = KtopState::default();

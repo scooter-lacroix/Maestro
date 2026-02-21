@@ -6,9 +6,11 @@
 //!
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
-use super::omp_agent::{OmpAgentManager, OmpAgentConfig};
-use super::model::{ConductorEvent, SelectableItem, ConductorStatus, ConductorState, OutputStream, StopReason, DependencyStatus};
 use super::modals::Modal;
+use super::model::ConductorState;
+use super::observer::{FileBasedObserver, ObserverState, SteeringCommand};
+use super::omp_agent::{OmpAgentConfig, OmpAgentManager};
+use super::agent_executor::{AgentExecutor, BackendType};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};
@@ -24,10 +26,86 @@ use leindex_core::orchestrate::{
 };
 
 use crate::maestro_paths::MaestroProject;
-use crate::omp::{is_omp_available, ToolProvider, OmpWorkerConfig, OmpBridge, create_omp_provider, ToolResult, OmpToolDefinition, OmpWorkerStatus};
+use crate::omp::{
+    create_omp_provider, is_omp_available, OmpBridge, OmpToolDefinition, OmpWorkerConfig,
+    OmpWorkerStatus, ToolProvider, ToolResult,
+};
+
+use maestro_pi_mono::agents::mapping::AgentRole;
+use tokio_util::sync::CancellationToken;
+
+/// Type-safe command arguments for safe process spawning.
+/// This avoids shell injection vulnerabilities by keeping arguments separate
+/// from the command string, preventing interpretation of track IDs/paths
+/// containing spaces or special characters like '--' as separate arguments.
+#[derive(Debug, Clone)]
+pub struct CommandArgs {
+    /// The program to execute (typically "maestro" or current exe)
+    pub program: PathBuf,
+    /// The arguments to pass, each as a separate string
+    pub args: Vec<String>,
+}
+
+impl CommandArgs {
+    /// Create a new CommandArgs with the given program
+    pub fn new(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+            args: Vec::new(),
+        }
+    }
+
+    /// Create a CommandArgs for the maestro executable
+    pub fn maestro() -> Self {
+        let program =
+            std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("maestro"));
+        Self::new(program)
+    }
+
+    /// Add an argument
+    pub fn arg(mut self, arg: impl Into<String>) -> Self {
+        self.args.push(arg.into());
+        self
+    }
+
+    /// Add multiple arguments
+    pub fn args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    /// Spawn the command as a detached process
+    pub fn spawn_detached(&self) -> std::io::Result<std::process::Child> {
+        std::process::Command::new(&self.program)
+            .args(&self.args)
+            .spawn()
+    }
+
+    /// Format as a display string (for status messages)
+    /// Note: This is for display only, NOT for execution
+    pub fn to_display_string(&self) -> String {
+        let mut result = self.program.display().to_string();
+        for arg in &self.args {
+            // Quote arguments containing spaces for display clarity
+            if arg.contains(' ') || arg.contains('\'') || arg.contains('"') {
+                result.push_str(&format!(" \"{}\"", arg));
+            } else {
+                result.push_str(&format!(" {}", arg));
+            }
+        }
+        result
+    }
+}
+
+impl std::fmt::Display for CommandArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_display_string())
+    }
+}
 
 /// Setup state for the conductor pane
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct SetupState {
     /// Setup status (cached)
     pub status: Option<SetupStatus>,
@@ -39,16 +117,6 @@ pub struct SetupState {
     pub selected_tool: Option<AgentTool>,
 }
 
-impl Default for SetupState {
-    fn default() -> Self {
-        Self {
-            status: None,
-            show_setup_wizard: false,
-            wizard_step: 0,
-            selected_tool: None,
-        }
-    }
-}
 
 /// State for the Conductor pane
 pub struct ConductorPane {
@@ -98,8 +166,8 @@ pub struct ConductorPane {
     pub current_project: Option<MaestroProject>,
     /// Last byte offset read from events.jsonl
     pub last_events_poll_offset: u64,
- /// OMP agent manager for tool execution
- pub omp_manager: Option<OmpAgentManager>,
+    /// OMP agent manager for tool execution
+    pub omp_manager: Option<Arc<OmpAgentManager>>,
     /// Steering message input modal (Ctrl+M)
     pub steering_modal: super::input_modal::InputModal,
     /// Max iterations input modal (i key)
@@ -108,6 +176,20 @@ pub struct ConductorPane {
     pub selector_modal: super::selector_modal::SelectorModal,
     /// Memory browser overlay
     pub memory_browser: super::memory_browser::MemoryBrowser,
+    /// Parallel execution view (Phase 4/5)
+    pub parallel_view: super::parallel_view::ParallelView,
+    /// Conflict resolution panel (Phase 4/5)
+    pub conflict_panel: super::conflict_panel::ConflictPanel,
+    /// Agent executor for unified Pi-Mono/OMP execution
+    pub agent_executor: Option<Arc<AgentExecutor>>,
+    /// Selected agent role for Pi-Mono
+    pub selected_agent_role: Option<AgentRole>,
+    /// Cancellation token for active execution
+    pub cancellation_token: Option<Arc<CancellationToken>>,
+    /// File-based observer for orchestrate/implement sessions
+    pub file_observer: FileBasedObserver,
+    /// Observer state for tracking observed sessions
+    pub observer_state: ObserverState,
 }
 
 impl Default for ConductorPane {
@@ -136,9 +218,19 @@ impl Default for ConductorPane {
             show_dashboard: false,
             current_project: None,
             last_events_poll_offset: 0,
- omp_manager: if is_omp_available() { Some(OmpAgentManager::new(None)) } else { None },
-            steering_modal: super::input_modal::InputModal::new("Steering Message", "Enter guidance for the next iteration:"),
-            iter_modal: super::input_modal::InputModal::new("Max Iterations", "Enter max iterations (0 = unlimited):"),
+            omp_manager: if is_omp_available() {
+                Some(Arc::new(OmpAgentManager::new(None)))
+            } else {
+                None
+            },
+            steering_modal: super::input_modal::InputModal::new(
+                "Steering Message",
+                "Enter guidance for the next iteration:",
+            ),
+            iter_modal: super::input_modal::InputModal::new(
+                "Max Iterations",
+                "Enter max iterations (0 = unlimited):",
+            ),
             selector_modal: super::selector_modal::SelectorModal {
                 title: String::new(),
                 items: Vec::new(),
@@ -146,6 +238,13 @@ impl Default for ConductorPane {
                 visible: false,
             },
             memory_browser: super::memory_browser::MemoryBrowser::default(),
+            parallel_view: super::parallel_view::ParallelView::default(),
+            conflict_panel: super::conflict_panel::ConflictPanel::default(),
+            agent_executor: None, // Initialized in auto_discover() with proper context
+            selected_agent_role: None,
+            cancellation_token: None,
+            file_observer: FileBasedObserver::new(),
+            observer_state: ObserverState::new(),
         }
     }
 }
@@ -183,7 +282,20 @@ impl ConductorPane {
             .map(|p| p.tracks_dir.clone())
             .unwrap_or_else(|| PathBuf::from("."));
         let mut pane = Self::new(tracks_dir);
-        pane.current_project = project;
+        pane.current_project = project.clone();
+
+        // Initialize agent executor with OMP manager and project context
+        let omp_manager = pane.omp_manager.as_deref();
+        let track_id = pane.state.current_track.clone();
+        let project_path = project.as_ref().map(|p| p.root_dir.clone());
+
+        let executor = AgentExecutor::new(None, omp_manager, track_id, project_path);
+        pane.state.pi_mono_available = executor.is_pi_mono_available();
+        if let Some(backend) = executor.get_preferred_backend() {
+            pane.state.active_backend = Some(backend.to_string());
+        }
+        pane.agent_executor = Some(Arc::new(executor));
+
         pane
     }
 
@@ -384,10 +496,7 @@ impl ConductorPane {
 
     /// Sync active tmux sessions from the Sessions tab as tracks
     /// This adds running tmux sessions that aren't already tracked
-    pub fn sync_sessions_as_tracks(
-        &mut self,
-        sessions: &[leindex_core::memory::models::Session],
-    ) {
+    pub fn sync_sessions_as_tracks(&mut self, sessions: &[leindex_core::memory::models::Session]) {
         use leindex_core::memory::models::SessionStatus;
 
         for session in sessions {
@@ -412,6 +521,177 @@ impl ConductorPane {
             };
 
             self.tracks.push(track);
+        }
+    }
+
+    /// Discover and sync orchestrate sessions as tracks
+    /// This polls ~/.maestro/orchestrate for active sessions and adds them to the tracks list
+    pub async fn sync_orchestrate_sessions(&mut self) {
+        use leindex_core::orchestrate::model::SessionStatus;
+
+        // Discover active orchestrate sessions
+        let active_track_ids = self.file_observer.discover_sessions().await;
+
+        for track_id in active_track_ids {
+            // Skip if already tracked
+            if self.tracks.iter().any(|t| t.id == track_id) {
+                continue;
+            }
+
+            // Try to observe the session to get its state
+            if let Ok(observed) = self.file_observer.observe_session(&track_id).await {
+                // Only add running sessions
+                if observed.status == SessionStatus::Running {
+                    let track = Track {
+                        id: track_id.clone(),
+                        description: format!("Orchestrate Session: {}", track_id),
+                        status: TrackStatus::InProgress,
+                        link_path: observed.session_dir.clone(),
+                        metadata: None,
+                        plan: None,
+                    };
+
+                    self.tracks.push(track);
+                    self.add_output(format!("Discovered orchestrate session: {}", track_id));
+                }
+            }
+        }
+    }
+
+    /// Synchronous version of sync_orchestrate_sessions for use from non-async contexts
+    /// Uses a blocking runtime for the async observer calls
+    pub fn sync_orchestrate_sessions_blocking(&mut self) {
+        use leindex_core::orchestrate::model::SessionStatus;
+
+        // Discover active orchestrate sessions synchronously
+        let active_track_ids = self.discover_orchestrate_sessions_sync();
+
+        for track_id in active_track_ids {
+            // Skip if already tracked
+            if self.tracks.iter().any(|t| t.id == track_id) {
+                continue;
+            }
+
+            // Try to observe the session to get its state
+            if let Some(observed) = self.observe_session_sync(&track_id) {
+                // Only add running sessions
+                if observed.status == SessionStatus::Running {
+                    let track = Track {
+                        id: track_id.clone(),
+                        description: format!("Orchestrate Session: {}", track_id),
+                        status: TrackStatus::InProgress,
+                        link_path: observed.session_dir.clone(),
+                        metadata: None,
+                        plan: None,
+                    };
+
+                    self.tracks.push(track);
+                    self.add_output(format!("Discovered orchestrate session: {}", track_id));
+                }
+            }
+        }
+    }
+
+    /// Discover orchestrate sessions synchronously
+    fn discover_orchestrate_sessions_sync(&self) -> Vec<String> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
+        let mut discovered = Vec::new();
+
+        if !orchestrate_base.exists() {
+            return discovered;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(&orchestrate_base) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+
+                let session_json = path.join("session.json");
+                if session_json.exists() {
+                    if let Some(track_id) = path.file_name().and_then(|n| n.to_str()) {
+                        discovered.push(track_id.to_string());
+                    }
+                }
+            }
+        }
+
+        discovered
+    }
+
+    /// Observe a session synchronously (reads session.json directly)
+    fn observe_session_sync(&self, track_id: &str) -> Option<super::observer::ObservedSession> {
+        use leindex_core::orchestrate::model::SessionState;
+
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let session_dir = PathBuf::from(home).join(".maestro").join("orchestrate").join(track_id);
+
+        let session_json = session_dir.join("session.json");
+        if !session_json.exists() {
+            return None;
+        }
+
+        let content = std::fs::read_to_string(&session_json).ok()?;
+        let session_state: SessionState = serde_json::from_str(&content).ok()?;
+
+        Some(super::observer::ObservedSession {
+            session_id: session_state.session_id,
+            track_id: track_id.to_string(),
+            status: session_state.status,
+            current_iteration: session_state.current_iteration,
+            current_task: session_state.current_task_id,
+            last_observed: chrono::Utc::now(),
+            tmux_session: None, // Not checked in sync version
+            session_dir,
+        })
+    }
+
+    /// Poll observed sessions for state updates
+    /// This should be called periodically to update the state of observed sessions
+    pub async fn poll_observed_sessions(&mut self) {
+        let updated_sessions = self.refresh_observed_sessions().await;
+
+        for session in updated_sessions {
+            // Update track runtime status
+            self.state.track_runtime_statuses.insert(
+                session.track_id.clone(),
+                super::polling::map_session_status(session.status),
+            );
+
+            // Update current iteration if this is the active track
+            if self.state.current_track.as_ref() == Some(&session.track_id) {
+                self.state.current_iteration = session.current_iteration;
+                self.state.current_task = session.current_task.clone();
+            }
+        }
+    }
+
+    /// Synchronous version of poll_observed_sessions for use from non-async contexts
+    pub fn poll_observed_sessions_sync(&mut self) {
+        
+
+        // Get current track IDs
+        let track_ids: Vec<String> = self.tracks.iter()
+            .filter(|t| t.description.contains("Orchestrate Session"))
+            .map(|t| t.id.clone())
+            .collect();
+
+        for track_id in track_ids {
+            if let Some(observed) = self.observe_session_sync(&track_id) {
+                // Update track runtime status
+                self.state.track_runtime_statuses.insert(
+                    track_id.clone(),
+                    super::polling::map_session_status(observed.status),
+                );
+
+                // Update current iteration if this is the active track
+                if self.state.current_track.as_ref() == Some(&track_id) {
+                    self.state.current_iteration = observed.current_iteration;
+                    self.state.current_task = observed.current_task;
+                }
+            }
         }
     }
 
@@ -460,11 +740,10 @@ impl ConductorPane {
         };
 
         let external_scan_due = self.last_external_scan.elapsed() >= Duration::from_secs(2);
-        if external_scan_due {
-            if self.refresh_project_from_tmux() {
+        if external_scan_due
+            && self.refresh_project_from_tmux() {
                 return;
             }
-        }
 
         if !tracks_changed && !external_scan_due {
             return;
@@ -503,8 +782,9 @@ impl ConductorPane {
                 let session_path = orchestrate_dir.join("session.json");
                 if session_path.exists() {
                     if let Ok(content) = std::fs::read_to_string(&session_path) {
-                        if let Ok(session) =
-                            serde_json::from_str::<leindex_core::orchestrate::model::SessionState>(&content)
+                        if let Ok(session) = serde_json::from_str::<
+                            leindex_core::orchestrate::model::SessionState,
+                        >(&content)
                         {
                             // Only keep tracks with Running or Paused status
                             return matches!(
@@ -517,37 +797,36 @@ impl ConductorPane {
                 }
             }
             // No session.json found - could be a planned track not yet started
-            // Keep it but don't mark as external
-            false
+            // Keep it so pending/planned tracks remain visible in the UI
+            true
         });
 
         self.tracks = loaded_tracks;
-        
+
         // Update external_track_ids to only include tracks that survived filtering
-        self.external_track_ids = self.tracks
+        self.external_track_ids = self
+            .tracks
             .iter()
             .filter(|t| external_ids.contains(&t.id))
             .map(|t| t.id.clone())
             .collect();
-        
+
         self.last_tracks_mtime = tracks_mtime;
         self.last_external_scan = std::time::Instant::now();
         self.invalidate_plan_cache();
 
         // Get current selected item before adjusting selection
         let current_selection = self.get_current_selection_id();
-        
+
         // Only change selection if the previously selected item no longer exists
         // This prevents focus jumping on every refresh
         let items = self.get_selectable_items();
         if let Some(current_id) = current_selection {
-            let current_still_exists = items.iter().any(|item| {
-                match item {
-                    crate::conductor::model::SelectableItem::Track { id, .. } => id == &current_id,
-                    crate::conductor::model::SelectableItem::Task { id, .. } => id == &current_id,
-                }
+            let current_still_exists = items.iter().any(|item| match item {
+                crate::conductor::model::SelectableItem::Track { id, .. } => id == &current_id,
+                crate::conductor::model::SelectableItem::Task { id, .. } => id == &current_id,
             });
-            
+
             if !current_still_exists {
                 // Current selection was removed, clamp to valid range
                 if items.is_empty() {
@@ -669,7 +948,9 @@ impl ConductorPane {
                 let is_completed = completed_tasks.get(&dep.task_id).copied().unwrap_or(false);
                 if is_completed {
                     crate::conductor::model::DependencyStatus::Completed
-                } else if dep.dependency_type == leindex_core::orchestrate::model::TaskDependencyType::Hard {
+                } else if dep.dependency_type
+                    == leindex_core::orchestrate::model::TaskDependencyType::Hard
+                {
                     crate::conductor::model::DependencyStatus::Blocked
                 } else {
                     crate::conductor::model::DependencyStatus::Pending
@@ -712,8 +993,15 @@ impl ConductorPane {
     }
 
     /// Recursively add task and its subtasks to the completed map
-    fn add_task_to_completed_map(&self, task: &Task, map: &mut std::collections::HashMap<String, bool>) {
-        map.insert(task.id.clone(), matches!(task.status, TrackStatus::Completed));
+    fn add_task_to_completed_map(
+        &self,
+        task: &Task,
+        map: &mut std::collections::HashMap<String, bool>,
+    ) {
+        map.insert(
+            task.id.clone(),
+            matches!(task.status, TrackStatus::Completed),
+        );
         for subtask in &task.subtasks {
             self.add_task_to_completed_map(subtask, map);
         }
@@ -789,7 +1077,7 @@ impl ConductorPane {
         if delta > 0 {
             self.selected_index = self.selected_index.saturating_add(delta as usize);
         } else {
-            self.selected_index = self.selected_index.saturating_sub(delta.abs() as usize);
+            self.selected_index = self.selected_index.saturating_sub(delta.unsigned_abs() as usize);
         }
 
         if self.selected_index >= items.len() {
@@ -944,17 +1232,14 @@ impl ConductorPane {
     }
 
     /// Get the recommended start command for the current track
+    /// Returns a CommandArgs struct for safe process spawning (avoids shell injection)
     pub fn get_start_command(
         &mut self,
         tool: Option<&str>,
         dangerous: bool,
         sandbox: bool,
-    ) -> String {
-        let track_idx = match self.get_selected_track_index() {
-            Some(idx) => idx,
-            None => return "// No track selected".to_string(),
-        };
-
+    ) -> Option<CommandArgs> {
+        let track_idx = self.get_selected_track_index()?;
         let track_id = &self.tracks[track_idx].id;
         let tool = tool.unwrap_or("claude");
         let mode_str = match self.loop_mode {
@@ -962,72 +1247,76 @@ impl ConductorPane {
             LoopMode::Building => "building",
         };
 
-        let mut cmd = format!(
-            "maestro orchestrate start {} --mode {} --tool {}",
-            track_id, mode_str, tool
-        );
+        let mut cmd = CommandArgs::maestro()
+            .arg("orchestrate")
+            .arg("start")
+            .arg(track_id.as_str())
+            .arg("--mode")
+            .arg(mode_str)
+            .arg("--tool")
+            .arg(tool);
 
         if dangerous {
-            cmd.push_str(" --dangerous");
+            cmd = cmd.arg("--dangerous");
         }
 
         if sandbox {
-            cmd.push_str(" --sandbox");
+            cmd = cmd.arg("--sandbox");
         }
 
-        cmd.push_str(&format!(" --tracks-dir {}", self.tracks_dir.display()));
+        cmd = cmd
+            .arg("--tracks-dir")
+            .arg(self.tracks_dir.display().to_string());
 
-        cmd
+        Some(cmd)
     }
 
     /// Get the recommended pause command for the current track
-    pub fn get_pause_command(&mut self) -> String {
-        let track_idx = match self.get_selected_track_index() {
-            Some(idx) => idx,
-            None => return "// No track selected".to_string(),
-        };
-
+    /// Returns a CommandArgs struct for safe process spawning (avoids shell injection)
+    pub fn get_pause_command(&mut self) -> Option<CommandArgs> {
+        let track_idx = self.get_selected_track_index()?;
         let track_id = &self.tracks[track_idx].id;
-        format!(
-            "maestro orchestrate pause {} --tracks-dir {}",
-            track_id,
-            self.tracks_dir.display()
+
+        Some(
+            CommandArgs::maestro()
+                .arg("orchestrate")
+                .arg("pause")
+                .arg(track_id.as_str())
+                .arg("--tracks-dir")
+                .arg(self.tracks_dir.display().to_string()),
         )
     }
 
     /// Get the recommended resume command for the current track
-    pub fn get_resume_command(&mut self) -> String {
-        let track_idx = match self.get_selected_track_index() {
-            Some(idx) => idx,
-            None => return "// No track selected".to_string(),
-        };
-
+    /// Returns a CommandArgs struct for safe process spawning (avoids shell injection)
+    pub fn get_resume_command(&mut self) -> Option<CommandArgs> {
+        let track_idx = self.get_selected_track_index()?;
         let track_id = &self.tracks[track_idx].id;
-        format!(
-            "maestro orchestrate resume {} --tracks-dir {}",
-            track_id,
-            self.tracks_dir.display()
+
+        Some(
+            CommandArgs::maestro()
+                .arg("orchestrate")
+                .arg("resume")
+                .arg(track_id.as_str())
+                .arg("--tracks-dir")
+                .arg(self.tracks_dir.display().to_string()),
         )
     }
 
     /// Get the recommended status command for the current track
-    pub fn get_status_command(&mut self) -> String {
-        let track_idx = match self.get_selected_track_index() {
-            Some(idx) => idx,
-            None => {
-                return format!(
-                    "maestro orchestrate status --tracks-dir {}",
-                    self.tracks_dir.display()
-                )
-            }
-        };
+    /// Returns a CommandArgs struct for safe process spawning (avoids shell injection)
+    pub fn get_status_command(&mut self) -> CommandArgs {
+        let track_idx = self.get_selected_track_index();
 
-        let track_id = &self.tracks[track_idx].id;
-        format!(
-            "maestro orchestrate status {} --tracks-dir {}",
-            track_id,
-            self.tracks_dir.display()
-        )
+        let mut cmd = CommandArgs::maestro().arg("orchestrate").arg("status");
+
+        if let Some(idx) = track_idx {
+            let track_id = &self.tracks[idx].id;
+            cmd = cmd.arg(track_id.as_str());
+        }
+
+        cmd.arg("--tracks-dir")
+            .arg(self.tracks_dir.display().to_string())
     }
 
     /// Get the command to create a new track
@@ -1035,7 +1324,7 @@ impl ConductorPane {
         "maestro newTrack".to_string()
     }
 
- /// Check if OMP is available
+    /// Check if OMP is available
     pub fn is_omp_available(&self) -> bool {
         if let Some(ref manager) = self.omp_manager {
             return manager.is_available();
@@ -1045,7 +1334,7 @@ impl ConductorPane {
 
     /// Get the OMP agent manager
     pub fn omp_manager(&self) -> Option<&OmpAgentManager> {
-        self.omp_manager.as_ref()
+        self.omp_manager.as_deref()
     }
 
     /// Get the default OMP agent configuration
@@ -1120,26 +1409,68 @@ impl ConductorPane {
     }
 
     /// Get OMP tool definitions for display in UI
- pub fn get_omp_tools(&self) -> Vec<OmpToolDefinition> {
- if !self.is_omp_available() {
- return Vec::new();
- }
- vec![
- OmpToolDefinition::new("python", "Execute Python code", serde_json::json!({})),
- OmpToolDefinition::new("edit", "Apply patch edits", serde_json::json!({})),
- OmpToolDefinition::new("grep", "Search with ripgrep", serde_json::json!({})),
- OmpToolDefinition::new("find", "Find files", serde_json::json!({})),
- ]
- }
+    pub fn get_omp_tools(&self) -> Vec<OmpToolDefinition> {
+        if !self.is_omp_available() {
+            return Vec::new();
+        }
+        vec![
+            OmpToolDefinition::new("python", "Execute Python code", serde_json::json!({})),
+            OmpToolDefinition::new("edit", "Apply patch edits", serde_json::json!({})),
+            OmpToolDefinition::new("grep", "Search with ripgrep", serde_json::json!({})),
+            OmpToolDefinition::new("find", "Find files", serde_json::json!({})),
+        ]
+    }
 
- /// Get OMP agent status for a track
- pub async fn get_omp_agent_status(&self, track_id: &str) -> Option<OmpWorkerStatus> {
- let manager = self.omp_manager.as_ref()?;
- if let Ok(status) = manager.get_agent_status(track_id).await {
- return Some(status);
- }
- None
- }
+    /// Get OMP agent status for a track
+    pub async fn get_omp_agent_status(&self, track_id: &str) -> Option<OmpWorkerStatus> {
+        let manager = self.omp_manager.as_ref()?;
+        if let Ok(status) = manager.get_agent_status(track_id).await {
+            return Some(status);
+        }
+        None
+    }
+
+    /// Cycle to the next agent role
+    pub fn cycle_agent_role(&mut self) -> AgentRole {
+        let next_role = super::agent_executor::role_utils::cycle_role(&self.selected_agent_role);
+        self.selected_agent_role = Some(next_role.clone());
+        self.state.selected_agent_role = Some(format!("{:?}", next_role));
+        next_role
+    }
+
+    /// Get the current agent role name
+    pub fn get_agent_role_name(&self) -> Option<&'static str> {
+        self.selected_agent_role
+            .as_ref()
+            .map(super::agent_executor::role_utils::role_display_name)
+    }
+
+    /// Cancel the current agent execution
+    pub async fn cancel_execution(&mut self) -> bool {
+        if let Some(ref executor) = self.agent_executor {
+            executor.cancel_execution().await
+        } else {
+            false
+        }
+    }
+
+    /// Get the active backend type
+    pub fn get_active_backend(&self) -> Option<BackendType> {
+        self.agent_executor
+            .as_ref()
+            .and_then(|e| e.get_preferred_backend())
+    }
+
+    /// Update agent executor with new track/project context
+    pub fn update_agent_executor_context(&mut self, track_id: Option<String>, project_path: Option<PathBuf>) {
+        let omp_manager = self.omp_manager.as_deref();
+        let executor = AgentExecutor::new(None, omp_manager, track_id, project_path);
+        self.state.pi_mono_available = executor.is_pi_mono_available();
+        if let Some(backend) = executor.get_preferred_backend() {
+            self.state.active_backend = Some(backend.to_string());
+        }
+        self.agent_executor = Some(Arc::new(executor));
+    }
 }
 
 /// Render the Conductor pane
@@ -1263,27 +1594,15 @@ pub fn render_conductor(
         || pane.memory_browser.search_modal.is_visible()
         || pane.memory_browser.category_modal.is_visible()
         || pane.memory_browser.store_modal.is_visible()
-        || pane.memory_browser.delete_modal.is_visible() {
+        || pane.memory_browser.delete_modal.is_visible()
+    {
         let conductor_theme = super::theme::ConductorTheme::default();
-        super::memory_browser::MemoryBrowser::render(&pane.memory_browser, frame, area, &conductor_theme);
-    }
-    // Render Footer
-    super::footer::render_footer(frame, chunks[2], &pane.state);
-
-    // Render Memory Browser overlay if any modal is visible
-    if pane.memory_browser.is_visible() || pane.memory_browser.search_modal.is_visible()
-        || pane.memory_browser.category_modal.is_visible() || pane.memory_browser.store_modal.is_visible() || pane.memory_browser.delete_modal.is_visible() {
-        let conductor_theme = super::theme::ConductorTheme::default();
-        super::memory_browser::MemoryBrowser::render(&pane.memory_browser, frame, area, &conductor_theme);
-    }
-    // Render Memory Browser overlay if open
-    if pane.memory_browser.is_visible()
-        || pane.memory_browser.search_modal.is_visible()
-        || pane.memory_browser.category_modal.is_visible()
-        || pane.memory_browser.store_modal.is_visible()
-        || pane.memory_browser.delete_modal.is_visible() {
-        let conductor_theme = super::theme::ConductorTheme::default();
-        super::memory_browser::MemoryBrowser::render(&pane.memory_browser, frame, area, &conductor_theme);
+        super::memory_browser::MemoryBrowser::render(
+            &pane.memory_browser,
+            frame,
+            area,
+            &conductor_theme,
+        );
     }
 
     // Render Footer
@@ -1319,7 +1638,8 @@ fn render_logs_pane(
             Style::default().fg(theme.accent)
         } else {
             Style::default().fg(theme.muted)
-        });
+        })
+        .style(Style::default().bg(theme.panel_bg));
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
@@ -1351,4 +1671,122 @@ fn render_logs_pane(
 
     let paragraph = Paragraph::new(logs_text).wrap(ratatui::widgets::Wrap { trim: true });
     frame.render_widget(paragraph, inner_area);
+}
+
+// Observer/Steering integration for Phase 6
+
+impl ConductorPane {
+    /// Start observing a track/session
+    pub async fn start_observing(&mut self, track_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        match self.file_observer.observe_session(track_id).await {
+            Ok(observed) => {
+                self.observer_state.start_observing(observed.session_id.clone());
+                self.add_output(format!("Started observing session: {}", observed.session_id));
+                Ok(())
+            }
+            Err(e) => {
+                self.add_output(format!("Failed to observe session {}: {}", track_id, e));
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Stop observing the current session
+    pub async fn stop_observing(&mut self) {
+        if let Some(session_id) = self.observer_state.session_id.clone() {
+            self.file_observer.unobserve_session(&session_id).await;
+            self.observer_state.stop_observing();
+            self.add_output(format!("Stopped observing session: {}", session_id));
+        }
+    }
+
+    /// Send a steering command to the observed session
+    pub async fn send_steering(&mut self, command: SteeringCommand) -> Result<(), Box<dyn std::error::Error>> {
+        let session_id = self.observer_state.session_id.clone()
+            .ok_or("No session being observed")?;
+
+        self.file_observer.send_steering(&session_id, command).await?;
+        self.add_output(format!("Sent steering command to session: {}", session_id));
+        Ok(())
+    }
+
+    /// Send a steering message from the modal input
+    pub async fn submit_steering_message(&mut self, message: String) -> Result<(), Box<dyn std::error::Error>> {
+        let session_id = self.observer_state.session_id.clone()
+            .ok_or("No session being observed")?;
+
+        let command = SteeringCommand::Message { content: message };
+        self.file_observer.send_steering(&session_id, command).await?;
+        self.add_output(format!("Sent steering message to session: {}", session_id));
+        Ok(())
+    }
+
+    /// Get tmux content from the observed session
+    pub async fn get_tmux_content(&self, lines: usize) -> Result<String, Box<dyn std::error::Error>> {
+        let session_id = self.observer_state.session_id.clone()
+            .ok_or("No session being observed")?;
+
+        self.file_observer.get_tmux_content(&session_id, lines).await
+            .map_err(|e| e.into())
+    }
+
+    /// Attach to the observed session's tmux session
+    pub async fn attach_to_tmux(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let session_id = self.observer_state.session_id.clone()
+            .ok_or("No session being observed")?;
+
+        self.file_observer.attach_tmux(&session_id).await
+            .map_err(|e| e.into())
+    }
+
+    /// Refresh observed sessions state
+    pub async fn refresh_observed_sessions(&mut self) -> Vec<super::observer::ObservedSession> {
+        self.file_observer.poll_sessions().await
+    }
+
+    /// Discover active sessions from orchestrate directory
+    pub async fn discover_active_sessions(&self) -> Vec<String> {
+        self.file_observer.discover_sessions().await
+    }
+
+    /// Get the current observed session info
+    pub async fn get_observed_session(&self) -> Option<super::observer::ObservedSession> {
+        let session_id = self.observer_state.session_id.as_ref()?;
+        self.file_observer.get_session(session_id).await
+    }
+
+    /// Cancel the observed session
+    pub async fn cancel_observed_session(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::Cancel).await
+    }
+
+    /// Pause the observed session
+    pub async fn pause_observed_session(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::Pause).await
+    }
+
+    /// Resume the observed session
+    pub async fn resume_observed_session(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::Resume).await
+    }
+
+    /// Retry current task of observed session
+    pub async fn retry_observed_task(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::Retry).await
+    }
+
+    /// Skip current task of observed session
+    pub async fn skip_observed_task(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::Skip).await
+    }
+
+    /// Switch agent for observed session
+    pub async fn switch_agent_observed(&mut self, tool: String) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::SwitchAgent { tool }).await
+    }
+
+    /// Set max iterations for observed session
+    pub async fn set_max_iterations_observed(&mut self, count: u64) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::SetMaxIterations { count }).await
+    }
 }

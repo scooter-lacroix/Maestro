@@ -103,6 +103,15 @@ impl HnswIndex {
         lane_type: Option<MemoryLaneType>,
         priority: u8,
     ) -> Result<()> {
+        // Validate vector dimension matches index configuration
+        if vector.len() != self.dimension {
+            return Err(anyhow::anyhow!(
+                "Vector dimension mismatch: index expects {}, got {}",
+                self.dimension,
+                vector.len()
+            ));
+        }
+
         // Determine layer using exponential distribution
         let layer = self.random_layer();
 
@@ -140,7 +149,7 @@ impl HnswIndex {
 
         // Insert at each layer from insertion layer down to 0
         for l in (0..=layer.min(self.max_layer)).rev() {
-            let neighbors = self.search_layer(&self.nodes[&current].vector, l, self.m, current);
+            let neighbors = self.search_layer(&self.nodes[&current].vector, l, self.ef_construction, current);
             node.neighbors[l] = neighbors.iter().cloned().collect();
 
             // Connect neighbors back to this node
@@ -205,9 +214,12 @@ impl HnswIndex {
                 if node.namespace_id != namespace_id {
                     return None;
                 }
+                if node.id != id {
+                    debug!("HNSW node id mismatch: key={} node.id={}", id, node.id);
+                }
                 let sim = cosine_similarity(query, &node.vector);
                 if sim >= threshold {
-                    Some((id, sim))
+                    Some((node.id, sim))
                 } else {
                     None
                 }
@@ -391,6 +403,11 @@ impl GraphTreeNode {
             parent_id: None,
         }
     }
+
+    fn with_parent(mut self, parent_id: Option<i64>) -> Self {
+        self.parent_id = parent_id;
+        self
+    }
 }
 
 /// Graph tree for hierarchical relevance boosting
@@ -407,7 +424,15 @@ impl GraphTree {
     }
 
     fn add_node(&mut self, id: i64, category: MemoryCategory, lane_type: Option<MemoryLaneType>, priority: u8) {
-        let node = GraphTreeNode::new(id, category, lane_type, priority);
+        // Build a lightweight hierarchy: attach to the latest node from the same category.
+        let parent_id = self
+            .nodes
+            .values()
+            .filter(|node| node.category == category)
+            .max_by_key(|node| node.id)
+            .map(|node| node.id);
+
+        let node = GraphTreeNode::new(id, category, lane_type, priority).with_parent(parent_id);
         self.nodes.insert(id, node);
     }
 
@@ -417,23 +442,60 @@ impl GraphTree {
 
     fn calculate_boosted_score(&self, id: i64, base_similarity: f32) -> f32 {
         if let Some(node) = self.nodes.get(&id) {
-            // Apply priority weight
+            // Base weight from explicit priority assigned at insertion time.
             let weighted = base_similarity * node.weight;
 
-            // Apply lane type boost
             let lane_boost = node.lane_type.as_ref().map(|lt| lt.boost_factor()).unwrap_or(1.0);
 
-            weighted * lane_boost
+            // Category-specific boost nudges critical categories higher.
+            let category_boost = match node.category {
+                MemoryCategory::Decisions | MemoryCategory::Specifications => 1.1,
+                MemoryCategory::Patterns | MemoryCategory::Facts | MemoryCategory::Preferences => 1.05,
+                _ => 1.0,
+            };
+
+            // Reward priorities that align with category defaults.
+            let priority_alignment_boost = if node.priority <= node.category.default_priority() {
+                1.05
+            } else {
+                1.0
+            };
+
+            // Include dampened ancestor influence from the same category chain.
+            let hierarchy_boost = self.hierarchical_parent_boost(node.parent_id);
+
+            weighted * lane_boost * category_boost * priority_alignment_boost * hierarchy_boost
         } else {
             base_similarity
         }
+    }
+
+    fn hierarchical_parent_boost(&self, mut parent_id: Option<i64>) -> f32 {
+        let mut boost = 1.0;
+        let mut depth = 0u32;
+
+        while let Some(id) = parent_id {
+            if depth >= 3 {
+                break;
+            }
+
+            let Some(parent) = self.nodes.get(&id) else {
+                break;
+            };
+
+            let decay = 0.1 / (depth + 1) as f32;
+            boost += (parent.weight - 1.0) * decay;
+            parent_id = parent.parent_id;
+            depth += 1;
+        }
+
+        boost
     }
 
     fn len(&self) -> usize {
         self.nodes.len()
     }
 }
-
 /// Statistics about the vector store
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VectorStoreStats {
@@ -459,6 +521,8 @@ pub struct NexusVectorStore {
     tree: Arc<RwLock<GraphTree>>,
     /// Namespace counter
     namespace_counter: Arc<RwLock<i64>>,
+    /// Namespace name to ID mapping (for name-based lookup)
+    namespaces: Arc<RwLock<HashMap<String, i64>>>,
     /// Statistics
     stats: Arc<RwLock<VectorStoreStats>>,
 }
@@ -474,6 +538,7 @@ impl NexusVectorStore {
             index: Arc::new(RwLock::new(index)),
             tree: Arc::new(RwLock::new(tree)),
             namespace_counter: Arc::new(RwLock::new(1)),
+            namespaces: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(VectorStoreStats::default())),
         })
     }
@@ -481,6 +546,14 @@ impl NexusVectorStore {
     /// Create an in-memory store with default config
     pub async fn in_memory() -> Result<Self> {
         Self::new(VectorStoreConfig::default()).await
+    }
+
+    fn expected_dimension(&self) -> usize {
+        if self.config.dimension == 0 {
+            EMBEDDING_DIMENSION
+        } else {
+            self.config.dimension
+        }
     }
 
     /// Store an embedding with metadata
@@ -495,11 +568,12 @@ impl NexusVectorStore {
     ) -> Result<()> {
         let start = Instant::now();
 
-        // Validate dimension
-        if embedding.len() != self.config.dimension {
+        // Validate dimension with fallback to default embedding dimension.
+        let expected_dim = self.expected_dimension();
+        if embedding.len() != expected_dim {
             return Err(anyhow::anyhow!(
                 "Embedding dimension mismatch: expected {}, got {}",
-                self.config.dimension,
+                expected_dim,
                 embedding.len()
             ));
         }
@@ -524,7 +598,7 @@ impl NexusVectorStore {
             stats.max_layer = index.max_layer;
             let tree = self.tree.read().await;
             stats.tree_size = tree.len();
-            stats.memory_usage_estimate = stats.total_vectors * self.config.dimension * 4; // 4 bytes per f32
+            stats.memory_usage_estimate = stats.total_vectors * self.expected_dimension() * 4; // 4 bytes per f32
         }
 
         debug!(
@@ -546,11 +620,12 @@ impl NexusVectorStore {
     ) -> Result<Vec<VectorSearchResult>> {
         let start = Instant::now();
 
-        // Validate dimension
-        if query.len() != self.config.dimension {
+        // Validate dimension with fallback to default embedding dimension.
+        let expected_dim = self.expected_dimension();
+        if query.len() != expected_dim {
             return Err(anyhow::anyhow!(
                 "Query dimension mismatch: expected {}, got {}",
-                self.config.dimension,
+                expected_dim,
                 query.len()
             ));
         }
@@ -574,9 +649,10 @@ impl NexusVectorStore {
                     let mut result = VectorSearchResult::new(id, node.namespace_id, similarity);
                     result.category = node.category;
                     result.lane_type = node.lane_type;
+                    // Use node.layer as the graph depth for boosting
                     result.apply_boost(
                         node.weight(),
-                        0, // Depth not tracked in this simplified version
+                        node.layer as u32,
                         node.lane_type.as_ref().map(|lt| lt.boost_factor()),
                     );
                     result.boosted_score = boosted_score;
@@ -625,12 +701,45 @@ impl NexusVectorStore {
         index.get(memory_id).map(|n| n.vector.clone())
     }
 
+    /// Get embedding metadata by ID
+    pub async fn get_embedding_metadata(&self, memory_id: i64) -> Option<EmbeddingMetadata> {
+        let index = self.index.read().await;
+        index.get(memory_id).map(|n| {
+            EmbeddingMetadata::new(
+                memory_id,
+                n.namespace_id,
+                DEFAULT_EMBEDDING_MODEL,
+                n.vector.len(),
+            )
+        })
+    }
+
     /// Get or create a namespace
     pub async fn get_or_create_namespace(&self, name: &str) -> Result<i64> {
-        // In a full implementation, this would persist namespaces
+        // Check if namespace already exists
+        {
+            let namespaces = self.namespaces.read().await;
+            if let Some(&id) = namespaces.get(name) {
+                return Ok(id);
+            }
+        }
+        
+        // Create new namespace
         let mut counter = self.namespace_counter.write().await;
         let id = *counter;
         *counter += 1;
+        
+        // Store the name -> id mapping
+        let mut namespaces = self.namespaces.write().await;
+        namespaces.insert(name.to_string(), id);
+        
+        // Update stats
+        {
+            let mut stats = self.stats.write().await;
+            stats.namespace_count = namespaces.len();
+        }
+        
+        info!("Created namespace '{}' with id {}", name, id);
         Ok(id)
     }
 
@@ -675,7 +784,6 @@ impl HnswNode {
         }
     }
 }
-
 /// Compute cosine similarity between two vectors
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {

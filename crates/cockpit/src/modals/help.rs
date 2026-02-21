@@ -313,7 +313,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         Line::from("  ---------------------------------- "),
         Line::from(format!(
             "  Maestro TUI Cockpit v2.0-beta-8  {}",
-            if (app.frame_count / 30) % 2 == 0 {
+            if (app.frame_count / 30).is_multiple_of(2) {
                 "⚡"
             } else {
                 "  "

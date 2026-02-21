@@ -37,6 +37,8 @@ fn count_active_sessions(project_path: &str, sessions: &[crate::state::SessionEn
 }
 
 pub fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+
     // Calculate total active sessions for the header
     let total_active: usize = app
         .session_entries
@@ -63,7 +65,8 @@ pub fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(title)
-        .title_style(Style::default().fg(Color::Cyan));
+        .title_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(theme.panel_bg));
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)

@@ -26,6 +26,9 @@ which = "6"
 libc = "0.2"
 cron = "0.13"
 humantime-serde = "1.1"
+shell-words = "1.1"
+zeroize = { version = "1.8", features = ["serde", "zeroize_derive"] }
+glob = "0.3"
 
 [dev-dependencies]
 tempfile = "3.10"

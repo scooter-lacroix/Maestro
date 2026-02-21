@@ -43,9 +43,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
-use leindex_core::memory::lsp_manager::LspType;
 #[cfg(feature = "rusqlite")]
 use crate::memory::{models::MemoryCategory, MemoryService};
+use leindex_core::memory::lsp_manager::LspType;
 
 /// Maximum message size to prevent DoS (16MB)
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -772,22 +772,22 @@ impl McpBridge {
             let diagnostics_vec = diagnostics.to_vec();
 
             tokio::task::spawn_blocking(move || {
-                let (errors, warnings, infos, hints) =
-                    diagnostics_vec
-                        .iter()
-                        .fold((0usize, 0usize, 0usize, 0usize), |mut acc, diag| {
-                            match diag.severity {
-                                Some(sev) => match sev {
-                                    lsp_types::DiagnosticSeverity::ERROR => acc.0 += 1,
-                                    lsp_types::DiagnosticSeverity::WARNING => acc.1 += 1,
-                                    lsp_types::DiagnosticSeverity::INFORMATION => acc.2 += 1,
-                                    lsp_types::DiagnosticSeverity::HINT => acc.3 += 1,
-                                    _ => acc.2 += 1,
-                                },
-                                None => acc.2 += 1,
-                            }
-                            acc
-                        });
+                let (errors, warnings, infos, hints) = diagnostics_vec.iter().fold(
+                    (0usize, 0usize, 0usize, 0usize),
+                    |mut acc, diag| {
+                        match diag.severity {
+                            Some(sev) => match sev {
+                                lsp_types::DiagnosticSeverity::ERROR => acc.0 += 1,
+                                lsp_types::DiagnosticSeverity::WARNING => acc.1 += 1,
+                                lsp_types::DiagnosticSeverity::INFORMATION => acc.2 += 1,
+                                lsp_types::DiagnosticSeverity::HINT => acc.3 += 1,
+                                _ => acc.2 += 1,
+                            },
+                            None => acc.2 += 1,
+                        }
+                        acc
+                    },
+                );
 
                 let file_path = uri_str
                     .strip_prefix("file://")

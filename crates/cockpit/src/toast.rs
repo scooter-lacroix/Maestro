@@ -181,19 +181,20 @@ mod tests {
     #[test]
     fn test_toast_queue_pop_expired() {
         let mut queue = ToastQueue::new();
-        
+
         // Push an expired toast
-        let mut toast = Toast::with_duration("Expired".to_string(), ToastLevel::Info, Duration::ZERO);
+        let mut toast =
+            Toast::with_duration("Expired".to_string(), ToastLevel::Info, Duration::ZERO);
         // Manually backdate (trick it)
         toast = Toast {
             created_at: Instant::now() - Duration::from_secs(10),
             ..toast
         };
         queue.push(toast);
-        
+
         // Push a fresh toast
         queue.push(Toast::new("Fresh".to_string(), ToastLevel::Info));
-        
+
         let expired = queue.pop_expired();
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0].message, "Expired");

@@ -422,16 +422,10 @@ pub fn validate_config_ext(
     let mut warnings = Vec::new();
 
     // Validate pi-mono path
-    if let Err(e) = validate_pi_path(config, detection) {
-        // Path validation errors are critical
-        return Err(e);
-    }
+    validate_pi_path(config, detection)?;
 
     // Validate model assignments
-    if let Err(e) = validate_model_assignments(config) {
-        // Model assignment errors are critical
-        return Err(e);
-    }
+    validate_model_assignments(config)?;
 
     // Add informational warnings for non-critical issues
 

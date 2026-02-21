@@ -11,7 +11,10 @@ pub struct ThreadSession {
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SessionStateError {
     #[error("invalid state transition: expected {expected:?}, got {got:?}")]
-    InvalidState { expected: ThreadState, got: ThreadState },
+    InvalidState {
+        expected: ThreadState,
+        got: ThreadState,
+    },
     #[error("missing pending approval request id while in AwaitingApproval state")]
     MissingApprovalRequestId,
     #[error("approval request id mismatch: expected '{expected}', got '{got}'")]
@@ -48,7 +51,8 @@ impl ThreadSession {
         &mut self,
         request_id: impl Into<String>,
     ) -> Result<(), SessionStateError> {
-        if self.has_pending_approval_context() {
+        // Can only transition to AwaitingApproval from Processing state
+        if self.state != ThreadState::Processing {
             return Err(SessionStateError::InvalidState {
                 expected: ThreadState::Processing,
                 got: self.state.clone(),
@@ -103,6 +107,30 @@ impl ThreadSession {
         }
         self.pending_approval_request_id = None;
         self.state = ThreadState::AwaitingAuth;
+        Ok(())
+    }
+
+    /// Resume processing after successful authentication.
+    pub fn resume_from_auth(&mut self) -> Result<(), SessionStateError> {
+        if self.state != ThreadState::AwaitingAuth {
+            return Err(SessionStateError::InvalidState {
+                expected: ThreadState::AwaitingAuth,
+                got: self.state.clone(),
+            });
+        }
+        self.state = ThreadState::Processing;
+        Ok(())
+    }
+
+    /// Mark the session as failed due to authentication failure.
+    pub fn mark_auth_failed(&mut self) -> Result<(), SessionStateError> {
+        if self.state != ThreadState::AwaitingAuth {
+            return Err(SessionStateError::InvalidState {
+                expected: ThreadState::AwaitingAuth,
+                got: self.state.clone(),
+            });
+        }
+        self.state = ThreadState::Failed;
         Ok(())
     }
 

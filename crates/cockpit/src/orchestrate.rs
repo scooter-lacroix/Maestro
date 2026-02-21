@@ -16,6 +16,7 @@ use leindex_core::orchestrate::{
 
 /// Setup state for the orchestrate pane
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct SetupState {
     /// Setup status (cached)
     pub status: Option<SetupStatus>,
@@ -27,16 +28,6 @@ pub struct SetupState {
     pub selected_tool: Option<AgentTool>,
 }
 
-impl Default for SetupState {
-    fn default() -> Self {
-        Self {
-            status: None,
-            show_setup_wizard: false,
-            wizard_step: 0,
-            selected_tool: None,
-        }
-    }
-}
 
 /// State for the Orchestrate pane
 pub struct OrchestratePane {
@@ -453,12 +444,10 @@ fn render_task_tree_recursive(
         } else {
             "[+]"
         }
+    } else if task.status == TrackStatus::Completed {
+        "[✓]"
     } else {
-        if task.status == TrackStatus::Completed {
-            "[✓]"
-        } else {
-            "   "
-        }
+        "   "
     };
 
     // Build owned strings to avoid lifetime issues

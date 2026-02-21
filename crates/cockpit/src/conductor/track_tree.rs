@@ -22,7 +22,8 @@ pub fn render_track_tree(
             Style::default().fg(theme.accent)
         } else {
             Style::default().fg(theme.muted)
-        });
+        })
+        .style(Style::default().bg(theme.panel_bg));
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
@@ -79,7 +80,7 @@ pub fn render_track_tree(
                     ..
                 } => {
                     let runtime_status = pane.state.track_runtime_statuses.get(id);
-                    
+
                     // For tracks, use a simple indicator instead of STATUS_ACTIVE (which is ▶)
                     // to avoid duplicating the expand arrow
                     let track_indicator = match runtime_status {
@@ -148,6 +149,8 @@ pub fn render_track_tree(
                     status,
                     has_children,
                     is_expanded,
+                    is_blocked,
+                    is_actionable,
                     ..
                 } => {
                     let indent = "  ".repeat(*depth);
@@ -167,6 +170,16 @@ pub fn render_track_tree(
                         "    "
                     };
 
+                    // Blocked/actionable indicator icons
+                    // ⊘ = blocked, ○ = pending, ● = actionable/ready
+                    let (actionable_icon, actionable_color) = if *is_blocked {
+                        ("⊘", theme.error)
+                    } else if *is_actionable && matches!(status, TrackStatus::Pending) {
+                        ("●", conductor_theme.task_active)
+                    } else {
+                        (" ", conductor_theme.fg_secondary)
+                    };
+
                     let style = if is_selected {
                         Style::default()
                             .fg(conductor_theme.accent_primary)
@@ -180,6 +193,7 @@ pub fn render_track_tree(
                         Span::styled(indent, style),
                         Span::styled(expand_symbol, style),
                         Span::styled(status_symbol, Style::default().fg(status_color)),
+                        Span::styled(actionable_icon, Style::default().fg(actionable_color)),
                         Span::styled(format!(" {}", title), style),
                     ]);
                     ListItem::new(line)

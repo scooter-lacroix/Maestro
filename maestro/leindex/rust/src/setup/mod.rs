@@ -591,17 +591,101 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     // Final Maestro Components
     steps.push(Step {
         name: "The Crescendo - Core".to_string(),
-        description: "Compiling the Maestro Rust Core (Analyzers)...".to_string(),
-        action: StepAction::Shell("cargo build --release".to_string()),
+        description: "Compiling canonical Maestro CLI (crates/cli)...".to_string(),
+        action: StepAction::Internal(Box::new(|| {
+            let repo_root = find_repo_root()?;
+            let manifest_path = repo_root.join("crates").join("cli").join("Cargo.toml");
+
+            let output = std::process::Command::new("cargo")
+                .arg("build")
+                .arg("--release")
+                .arg("--manifest-path")
+                .arg(&manifest_path)
+                .arg("--bin")
+                .arg("maestro")
+                .current_dir(&repo_root)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .context("Failed to launch cargo build for crates/cli")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!(
+                    "Failed to build canonical Maestro CLI (crates/cli): {}",
+                    stderr.trim()
+                );
+            }
+
+            Ok(vec![
+                format!(
+                    "Built canonical Maestro CLI via {}",
+                    manifest_path.display()
+                ),
+                "Verified build target: crates/cli (not leindex-core shim)".to_string(),
+            ])
+        })),
     });
 
     steps.push(Step {
         name: "The Crescendo - Install CLI".to_string(),
         description: "Installing Maestro CLI binary to ~/.local/bin...".to_string(),
-        action: StepAction::Shell(
-            "mkdir -p ~/.local/bin && cp -f target/release/maestro ~/.local/bin/maestro"
-                .to_string(),
-        ),
+        action: StepAction::Internal(Box::new(|| {
+            let repo_root = find_repo_root()?;
+            let src_bin = repo_root.join("target").join("release").join("maestro");
+            if !src_bin.exists() {
+                anyhow::bail!(
+                    "Expected canonical binary at {} but it does not exist",
+                    src_bin.display()
+                );
+            }
+
+            let dst_dir = home_dir()?.join(".local").join("bin");
+            std::fs::create_dir_all(&dst_dir)?;
+            let dst_bin = dst_dir.join("maestro");
+            std::fs::copy(&src_bin, &dst_bin).with_context(|| {
+                format!(
+                    "Failed copying Maestro CLI from {} to {}",
+                    src_bin.display(),
+                    dst_bin.display()
+                )
+            })?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&dst_bin)?.permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&dst_bin, perms)?;
+            }
+
+            let help_output = std::process::Command::new(&dst_bin)
+                .arg("--help")
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .with_context(|| format!("Failed to execute {} --help", dst_bin.display()))?;
+
+            if !help_output.status.success() {
+                let stderr = String::from_utf8_lossy(&help_output.stderr);
+                anyhow::bail!("Installed maestro --help failed: {}", stderr.trim());
+            }
+
+            let help_text = String::from_utf8_lossy(&help_output.stdout);
+            for required in ["orchestrate", "pi-status", "pi-test", "pi-agents"] {
+                if !help_text.contains(required) {
+                    anyhow::bail!(
+                        "Installed binary missing '{}' command; non-canonical binary likely installed",
+                        required
+                    );
+                }
+            }
+
+            Ok(vec![
+                format!("Installed Maestro CLI to {}", dst_bin.display()),
+                "Verified command surface includes orchestrate/pi-* commands".to_string(),
+            ])
+        })),
     });
 
     // Install bundled resources (zide, layouts, etc.)
@@ -680,7 +764,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         }
                     }
                     if !out.status.success() {
-                        logs.push(format!("npm install failed: {}", String::from_utf8_lossy(&out.stderr)));
+                        logs.push(format!(
+                            "npm install failed: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        ));
                         return Ok(logs);
                     }
                 }
@@ -707,7 +794,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         }
                     }
                     if !out.status.success() {
-                        logs.push(format!("npm build failed: {}", String::from_utf8_lossy(&out.stderr)));
+                        logs.push(format!(
+                            "npm build failed: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        ));
                     } else {
                         logs.push("Frontend built successfully".to_string());
                     }
@@ -754,7 +844,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     }
-                    config.password_cache.sudo_with_password(&clean_command)
+                    config
+                        .password_cache
+                        .sudo_with_password(&clean_command)
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                 } else {
                     Command::new("bash")
@@ -783,7 +875,11 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             for line in s.lines().take(max_lines) {
                                 // Don't send password prompts to logs - they'll be handled separately
                                 if !line.contains("[sudo]") || !line.contains("password") {
-                                    let prefix = if is_long_running { "  [WARN] " } else { "  [ERR] " };
+                                    let prefix = if is_long_running {
+                                        "  [WARN] "
+                                    } else {
+                                        "  [ERR] "
+                                    };
                                     let _ = tx.send(SetupEvent::Log(format!("{}{}", prefix, line)));
                                 }
                             }
@@ -802,7 +898,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             } else {
                                 let _ = tx.send(SetupEvent::Error(format!(
                                     "Step '{}' failed with exit code: {:?}",
-                                    step.name, out.status.code()
+                                    step.name,
+                                    out.status.code()
                                 )));
                             }
                             return;
@@ -816,7 +913,6 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         return;
                     }
                 }
-
             }
             StepAction::Internal(action) => match action() {
                 Ok(lines) => {

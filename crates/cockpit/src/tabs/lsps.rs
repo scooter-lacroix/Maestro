@@ -19,7 +19,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::tabs::lsp_registry::{check_lsp_installed, get_available_lsps, get_install_command};
-use leindex_core::memory::LspStatus;
+use leindex_core::memory::turso_backend::LspStatus;
 
 pub fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
@@ -48,6 +48,11 @@ pub fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
 
     if app.lsp_installer.is_open {
         render_lsp_installer_modal(frame, area, app, &theme);
+    }
+
+    // Show installation output modal if there's output to display
+    if app.lsp_installer.install_output.is_some() {
+        render_install_output_modal(frame, area, app, &theme);
     }
 
     if app.diagnostic_view.is_open {
@@ -470,6 +475,54 @@ fn render_lsp_installer_modal(
             Span::styled(&install_cmd, Style::default().fg(Color::Cyan)),
         ]));
         frame.render_widget(footer, chunks[2]);
+    }
+}
+
+/// Render a modal showing installation output
+fn render_install_output_modal(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    theme: &crate::theme::Theme,
+) {
+    let modal_area = centered_rect(80, 80, area);
+
+    frame.render_widget(Clear, modal_area);
+
+    let modal_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Green))
+        .title(" 📋 Installation Output (press any key to close) ")
+        .title_style(Style::default().fg(Color::Green).bold())
+        .style(Style::default().bg(Color::Reset));
+
+    frame.render_widget(modal_block.clone(), modal_area);
+
+    let inner_area = modal_block.inner(modal_area);
+
+    if let Some(output) = &app.lsp_installer.install_output {
+        let lines: Vec<Line> = output
+            .lines()
+            .take(inner_area.height as usize - 2)
+            .map(|line| {
+                let color = if line.contains("SUCCESS") {
+                    Color::Green
+                } else if line.contains("FAILED") || line.contains("ERROR") {
+                    Color::Red
+                } else if line.contains("[ERR]") {
+                    Color::Yellow
+                } else if line.contains("[OUT]") {
+                    Color::Gray
+                } else {
+                    theme.fg
+                };
+                Line::from(Span::styled(line.to_string(), Style::default().fg(color)))
+            })
+            .collect();
+
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(para, inner_area);
     }
 }
 

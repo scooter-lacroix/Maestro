@@ -11,7 +11,7 @@ use leindex_core::orchestrate::model::{
     IterationLog, IterationStatus, SessionState, SessionStatus,
 };
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 impl ConductorPane {
@@ -23,7 +23,7 @@ impl ConductorPane {
         static POLL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
         let count = POLL_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let should_poll_all = (count % 4) == 0;
+        let should_poll_all = count.is_multiple_of(4);
 
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         let orchestrate_base = PathBuf::from(home).join(".maestro").join("orchestrate");
@@ -379,6 +379,11 @@ impl ConductorPane {
     }
 
     /// Poll events.jsonl for structured events from the orchestrate engine
+    ///
+    /// Uses byte-oriented incremental reads to correctly handle:
+    /// - Partial lines at end of file (in-progress writes)
+    /// - Exact byte position tracking (no line count drift)
+    /// - Robust truncation detection
     fn poll_events_jsonl(&mut self, dir: &Path) {
         let events_path = dir.join("events.jsonl");
         if !events_path.exists() {
@@ -389,42 +394,60 @@ impl ConductorPane {
             let metadata = file.metadata().ok();
             let file_len = metadata.map(|m| m.len()).unwrap_or(0);
 
-            // Handle file truncation
+            // Handle file truncation (new session started)
             if self.last_events_poll_offset > file_len {
-                // Events file was truncated (new session), reset offset
                 self.last_events_poll_offset = 0;
+                return;
+            }
+
+            // Nothing new to read
+            if self.last_events_poll_offset == file_len {
                 return;
             }
 
             if file
                 .seek(SeekFrom::Start(self.last_events_poll_offset))
-                .is_ok()
+                .is_err()
             {
-                let reader = BufReader::new(file);
-                let mut current_offset = self.last_events_poll_offset;
+                return;
+            }
 
-                for line in reader.lines() {
-                    match line {
-                        Ok(l) if l.ends_with('\n') || !l.is_empty() => {
-                            let bytes = l.len() + 1; // +1 for newline
-                            current_offset += bytes as u64;
+            // Read raw bytes from current position to end of file
+            let bytes_to_read = (file_len - self.last_events_poll_offset) as usize;
+            let mut buffer = vec![0u8; bytes_to_read];
+            if file.read_exact(&mut buffer).is_err() {
+                return;
+            }
 
-                            // Try to parse as ControlEngineEvent
-                            if let Ok(event) = serde_json::from_str::<ControlEngineEvent>(&l) {
+            // Process complete lines only (ending with \n)
+            let mut line_start = 0;
+            let mut current_offset = self.last_events_poll_offset;
+
+            for (i, &byte) in buffer.iter().enumerate() {
+                if byte == b'\n' {
+                    // Found a complete line from line_start to i (exclusive of \n)
+                    let line_bytes = &buffer[line_start..i];
+
+                    // Skip empty lines
+                    if !line_bytes.is_empty() {
+                        // Convert to string and parse
+                        if let Ok(line_str) = std::str::from_utf8(line_bytes) {
+                            if let Ok(event) = serde_json::from_str::<ControlEngineEvent>(line_str)
+                            {
                                 self.process_engine_event(event);
                             }
                         }
-                        Ok(_) => {
-                            // Line without newline might be partial, skip
-                            break;
-                        }
-                        Err(_) => break,
                     }
-                }
 
-                // Update offset
-                self.last_events_poll_offset = current_offset;
+                    // Advance offset past the newline
+                    current_offset += (i - line_start + 1) as u64;
+                    line_start = i + 1;
+                }
             }
+
+            // Only update offset for complete lines consumed
+            // Partial line at end (no trailing \n) is left for next poll
+            self.last_events_poll_offset = current_offset;
         }
     }
 
@@ -522,6 +545,36 @@ impl ConductorPane {
                 crate::conductor::telemetry::BUS.broadcast(event);
                 self.add_output(format!("PROGRESS: {}", message));
             }
+            ControlEngineEvent::ParallelGroupUpdated {
+                group_id,
+                task_ids,
+                status,
+                active_workers,
+                ..
+            } => {
+                // Update parallel view with group info
+                use leindex_core::orchestrate::model::{ParallelGroupInfo, ParallelStatus};
+
+                // Parse status string to enum
+                let parsed_status = match status.as_str() {
+                    "running" => ParallelStatus::Running,
+                    "merging" => ParallelStatus::Merging,
+                    "complete" => ParallelStatus::Complete,
+                    "paused" => ParallelStatus::Paused,
+                    _ => ParallelStatus::Idle,
+                };
+
+                let group_info = ParallelGroupInfo {
+                    group_id,
+                    task_ids,
+                    status: parsed_status,
+                    workers: vec![],     // Workers populated separately
+                    merge_queue: vec![], // Merge queue populated separately
+                };
+
+                self.parallel_view.update(group_info);
+                self.add_output(format!("PARALLEL: {} workers active", active_workers));
+            }
         }
     }
 
@@ -589,7 +642,7 @@ impl ConductorPane {
     }
 }
 
-fn map_session_status(status: SessionStatus) -> ConductorStatus {
+pub(crate) fn map_session_status(status: SessionStatus) -> ConductorStatus {
     match status {
         SessionStatus::Idle => ConductorStatus::Idle,
         SessionStatus::Running => ConductorStatus::Running,

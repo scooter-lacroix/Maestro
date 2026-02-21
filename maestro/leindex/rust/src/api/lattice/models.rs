@@ -74,7 +74,10 @@ impl std::str::FromStr for LatticeLayer {
             "cfg" | "control_flow" => Ok(LatticeLayer::Cfg),
             "dfg" | "data_flow" => Ok(LatticeLayer::Dfg),
             "slicing" | "program_slicing" => Ok(LatticeLayer::Slicing),
-            _ => Err(format!("Invalid layer: {}. Must be one of: ast, call_graph, cfg, dfg, slicing", s)),
+            _ => Err(format!(
+                "Invalid layer: {}. Must be one of: ast, call_graph, cfg, dfg, slicing",
+                s
+            )),
         }
     }
 }

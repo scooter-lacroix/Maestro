@@ -31,7 +31,8 @@ pub use models::*;
 pub use scanner::*;
 pub use schema::*;
 pub use search::*;
-pub use turso_backend::*;
+// Note: turso_backend::* not re-exported due to name conflict with models::MemoryCategoryStats
+// Use `use leindex_core::memory::turso_backend::X` when needed
 
 // Legacy rusqlite-based re-exports (only available with "rusqlite" feature)
 #[cfg(feature = "rusqlite")]

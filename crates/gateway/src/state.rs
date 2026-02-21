@@ -3,14 +3,17 @@
 //! Contains all shared state for the gateway including connections, managers, and event bus.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tracing::debug;
 
 use maestro_core::{CronJob, McpManager, SandboxManager};
 
 use crate::protocol::EventFrame;
+use crate::rate_limit::{RateLimitConfig, SlidingWindowRateLimiter};
 use crate::ws::MethodRegistry;
 
 /// Configuration for the gateway
@@ -28,6 +31,16 @@ pub struct GatewayConfig {
     pub max_body_size: usize,
     /// Event broadcast channel capacity
     pub event_channel_capacity: usize,
+    /// WebSocket rate limit config
+    pub ws_rate_limit: RateLimitConfig,
+    /// Broadcast rate limit config (per sender)
+    pub broadcast_rate_limit: RateLimitConfig,
+    /// CORS allowed origins (empty = deny all, ["*"] = allow all)
+    pub cors_allowed_origins: Vec<String>,
+    /// CORS allowed methods
+    pub cors_allowed_methods: Vec<String>,
+    /// CORS allowed headers
+    pub cors_allowed_headers: Vec<String>,
 }
 
 impl Default for GatewayConfig {
@@ -39,6 +52,25 @@ impl Default for GatewayConfig {
             request_timeout_secs: 30,
             max_body_size: 64 * 1024, // 64KB
             event_channel_capacity: 256,
+            ws_rate_limit: RateLimitConfig {
+                limit: 60,          // 60 messages per minute
+                window: Duration::from_secs(60),
+                include_retry_after: true,
+            },
+            broadcast_rate_limit: RateLimitConfig {
+                limit: 10,          // 10 broadcasts per minute
+                window: Duration::from_secs(60),
+                include_retry_after: true,
+            },
+            // SECURITY: Default to restrictive CORS (localhost only for development)
+            cors_allowed_origins: vec![
+                "http://localhost:3000".to_string(),
+                "http://localhost:8080".to_string(),
+                "http://127.0.0.1:3000".to_string(),
+                "http://127.0.0.1:8080".to_string(),
+            ],
+            cors_allowed_methods: vec!["GET".to_string(), "POST".to_string(), "OPTIONS".to_string()],
+            cors_allowed_headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
         }
     }
 }
@@ -63,6 +95,12 @@ pub struct GatewayState {
     pub sandbox_manager: SandboxManager,
     /// Cron jobs list (sync snapshot)
     pub cron_jobs: Vec<CronJob>,
+    /// WebSocket rate limiter
+    pub ws_rate_limiter: Arc<SlidingWindowRateLimiter>,
+    /// Broadcast rate limiter (per-sender)
+    pub broadcast_rate_limiter: Arc<SlidingWindowRateLimiter>,
+    /// Broadcast tracking: last broadcast time per sender
+    pub broadcast_tracking: Mutex<std::collections::HashMap<String, Instant>>,
 }
 
 impl GatewayState {
@@ -80,6 +118,9 @@ impl GatewayState {
             method_registry.register(method, handler);
         }
 
+        let ws_rate_limit = config.ws_rate_limit.clone();
+        let broadcast_rate_limit = config.broadcast_rate_limit.clone();
+
         Self {
             config,
             start_time: Instant::now(),
@@ -90,6 +131,9 @@ impl GatewayState {
             mcp_manager: McpManager::new(),
             sandbox_manager: SandboxManager::new(maestro_core::SecurityPolicy::default()),
             cron_jobs: Vec::new(),
+            ws_rate_limiter: Arc::new(SlidingWindowRateLimiter::new(ws_rate_limit)),
+            broadcast_rate_limiter: Arc::new(SlidingWindowRateLimiter::new(broadcast_rate_limit)),
+            broadcast_tracking: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -118,6 +162,18 @@ impl GatewayState {
     /// Check if we can accept more connections
     pub fn can_accept_connection(&self) -> bool {
         self.connection_count.load(Ordering::SeqCst) < self.config.max_connections
+    }
+
+    /// Check if a broadcast is allowed from the given sender
+    pub fn can_broadcast(&self, sender_id: &str) -> (bool, Option<u64>) {
+        let (allowed, _remaining, retry_after) = self.broadcast_rate_limiter.check(sender_id);
+        (allowed, retry_after)
+    }
+
+    /// Record a broadcast event for rate limiting
+    pub fn record_broadcast(&self, sender_id: &str) {
+        let mut tracking = self.broadcast_tracking.lock();
+        tracking.insert(sender_id.to_string(), Instant::now());
     }
 }
 

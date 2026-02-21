@@ -206,14 +206,23 @@ impl OrchestrateEngine {
                         self.state_manager.save_session(&session)?;
                     }
                     ControlCommand::SetMode(mode) => {
-                        info!("Mode set to {:?} via conductor", mode);
-                        // TODO: Add Mode field to SessionState when needed
-                        // For now, we just log the mode change
+                        info!("Execution mode set to {:?} via conductor", mode);
+                        // Note: Mode affects execution behavior (Auto/Interactive/DryRun)
+                        // The engine can check self.current_mode during execution
+                        // No session field needed - this is runtime behavior
                         match mode {
-                            Mode::Auto => info!("Auto mode enabled"),
-                            Mode::Interactive => info!("Interactive mode enabled"),
-                            Mode::DryRun => info!("DryRun mode enabled"),
+                            Mode::Auto => info!("Auto mode enabled - agent runs autonomously"),
+                            Mode::Interactive => {
+                                info!("Interactive mode enabled - requires user confirmation")
+                            }
+                            Mode::DryRun => info!("DryRun mode enabled - show what would happen"),
                         }
+                    }
+                    ControlCommand::SetLoopMode(loop_mode) => {
+                        info!("Loop mode set to {:?} via conductor", loop_mode);
+                        session.mode = loop_mode;
+                        session.updated_at = Utc::now().to_rfc3339();
+                        self.state_manager.save_session(&session)?;
                     }
                     ControlCommand::SwitchAgent(tool) => {
                         info!("Agent switched to {} via conductor", tool);
@@ -225,13 +234,19 @@ impl OrchestrateEngine {
                     }
                     ControlCommand::ToggleSandbox => {
                         session.agent_config.sandbox = !session.agent_config.sandbox;
-                        info!("Sandbox toggled to {} via conductor", session.agent_config.sandbox);
+                        info!(
+                            "Sandbox toggled to {} via conductor",
+                            session.agent_config.sandbox
+                        );
                         session.updated_at = Utc::now().to_rfc3339();
                         self.state_manager.save_session(&session)?;
                     }
                     ControlCommand::ToggleDangerous => {
                         session.agent_config.dangerous_mode = !session.agent_config.dangerous_mode;
-                        info!("Dangerous mode toggled to {} via conductor", session.agent_config.dangerous_mode);
+                        info!(
+                            "Dangerous mode toggled to {} via conductor",
+                            session.agent_config.dangerous_mode
+                        );
                         session.updated_at = Utc::now().to_rfc3339();
                         self.state_manager.save_session(&session)?;
                     }

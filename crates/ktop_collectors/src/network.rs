@@ -219,7 +219,7 @@ impl NetworkCollector {
     /// Get the list of network interface names
     pub fn interface_names(&mut self) -> Result<Vec<String>> {
         self.refresh_if_needed();
-        Ok(self.networks.iter().map(|(name, _)| name.clone()).collect())
+        Ok(self.networks.keys().cloned().collect())
     }
 
     /// Get the refresh interval
@@ -285,7 +285,9 @@ mod tests {
     #[test]
     fn test_network_collector_collect() {
         let mut collector = NetworkCollector::new();
-        let metrics = collector.collect().expect("Failed to collect network metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect network metrics");
 
         // Values should be non-negative
         assert!(metrics.total_recv_bytes >= 0);
@@ -360,7 +362,9 @@ mod tests {
     fn test_network_metrics_timestamp() {
         let mut collector = NetworkCollector::new();
         let before = std::time::Instant::now();
-        let metrics = collector.collect().expect("Failed to collect network metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect network metrics");
         let after = std::time::Instant::now();
 
         assert!(metrics.timestamp >= before);
@@ -370,7 +374,9 @@ mod tests {
     #[test]
     fn test_network_metrics_age() {
         let mut collector = NetworkCollector::new();
-        let metrics = collector.collect().expect("Failed to collect network metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect network metrics");
 
         std::thread::sleep(Duration::from_millis(10));
         assert!(metrics.age() >= Duration::from_millis(10));
@@ -409,7 +415,9 @@ mod tests {
         }
 
         // Get total from collector
-        let metrics = collector.collect().expect("Failed to collect network metrics");
+        let metrics = collector
+            .collect()
+            .expect("Failed to collect network metrics");
 
         // Should be approximately equal (might differ due to timing)
         assert!(
@@ -425,11 +433,15 @@ mod tests {
         let mut collector = NetworkCollector::new();
 
         // First collection
-        let metrics1 = collector.collect().expect("Failed to collect network metrics");
+        let metrics1 = collector
+            .collect()
+            .expect("Failed to collect network metrics");
         assert!(metrics1.total_recv_bytes >= 0);
 
         // Second collection
-        let metrics2 = collector.collect().expect("Failed to collect network metrics");
+        let metrics2 = collector
+            .collect()
+            .expect("Failed to collect network metrics");
         assert!(metrics2.total_recv_bytes >= 0);
 
         // Second collection should have >= bytes than first
@@ -477,12 +489,16 @@ mod tests {
         let mut collector = NetworkCollector::new();
 
         // Immediate collection might return 0 speeds
-        let _metrics1 = collector.collect().expect("Failed to collect network metrics");
+        let _metrics1 = collector
+            .collect()
+            .expect("Failed to collect network metrics");
 
         // Wait for minimum calculation duration
         std::thread::sleep(Duration::from_millis(200));
 
-        let metrics2 = collector.collect().expect("Failed to collect network metrics");
+        let metrics2 = collector
+            .collect()
+            .expect("Failed to collect network metrics");
 
         // Speeds should be valid (even if 0 for no activity)
         assert!(metrics2.download_speed_bps >= 0);

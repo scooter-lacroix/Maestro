@@ -131,10 +131,10 @@ pub struct ConductorState {
     pub iteration_logs: Vec<leindex_core::orchestrate::model::IterationLog>,
     /// Memories associated with the current track
     pub track_memories: Vec<leindex_core::memory::models::Memory>,
- /// OMP agent status for current track
- pub omp_agent_status: Option<crate::omp::OmpWorkerStatus>,
- /// Whether OMP is available on this system
- pub omp_available: bool,
+    /// OMP agent status for current track
+    pub omp_agent_status: Option<crate::omp::OmpWorkerStatus>,
+    /// Whether OMP is available on this system
+    pub omp_available: bool,
     /// LSP diagnostic errors from last check
     pub lsp_diagnostics_errors: Vec<String>,
     /// LSP diagnostic warnings from last check
@@ -143,6 +143,12 @@ pub struct ConductorState {
     pub lsp_diagnostics_enabled: bool,
     /// Running LSP servers for this session
     pub running_lsp_servers: Vec<String>,
+    /// Whether Pi-Mono is available on this system
+    pub pi_mono_available: bool,
+    /// Currently selected agent role (for Pi-Mono)
+    pub selected_agent_role: Option<String>,
+    /// Currently active backend (pi-mono or omp)
+    pub active_backend: Option<String>,
 }
 
 impl Default for ConductorState {
@@ -173,14 +179,17 @@ impl Default for ConductorState {
             available_projects: Vec::new(),
             selected_project_index: 0,
             track_runtime_statuses: std::collections::HashMap::new(),
- omp_agent_status: None,
- omp_available: crate::omp::is_omp_available(),
+            omp_agent_status: None,
+            omp_available: crate::omp::is_omp_available(),
             iteration_logs: Vec::new(),
             track_memories: Vec::new(),
             lsp_diagnostics_errors: Vec::new(),
             lsp_diagnostics_warnings: Vec::new(),
             lsp_diagnostics_enabled: true,
             running_lsp_servers: Vec::new(),
+            pi_mono_available: false,
+            selected_agent_role: None,
+            active_backend: None,
         }
     }
 }
@@ -358,6 +367,8 @@ pub enum DetailsViewMode {
     Output,
     /// Rendered prompt preview
     Prompt,
+    /// Parallel execution view with workers and merge queue
+    Parallel,
 }
 
 /// Ralph: IterationTimingInfo
@@ -386,7 +397,7 @@ pub enum SelectableItem {
         id: String,
         is_master: bool,
         is_external: bool, // Session discovered in ~/.maestro/orchestrate but not in tracks.md
-        is_expanded: bool,  // Track expansion state
+        is_expanded: bool, // Track expansion state
     },
     Task {
         id: String,

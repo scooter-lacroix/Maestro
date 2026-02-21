@@ -40,23 +40,41 @@ impl LatticeService {
         Ok(vec![])
     }
 
-    pub async fn get_file_metadata(&self, _path: &str) -> Result<Option<FileAnalysisMetadata>, String> {
+    pub async fn get_file_metadata(
+        &self,
+        _path: &str,
+    ) -> Result<Option<FileAnalysisMetadata>, String> {
         Ok(None)
     }
 
-    pub async fn get_file_analysis(&self, _path: &str) -> Result<Option<LatticeAnalysisResult>, String> {
+    pub async fn get_file_analysis(
+        &self,
+        _path: &str,
+    ) -> Result<Option<LatticeAnalysisResult>, String> {
         Ok(None)
     }
 
-    pub async fn get_layer_result(&self, _path: &str, _layer: LatticeLayer) -> Result<Option<serde_json::Value>, String> {
+    pub async fn get_layer_result(
+        &self,
+        _path: &str,
+        _layer: LatticeLayer,
+    ) -> Result<Option<serde_json::Value>, String> {
         Ok(None)
     }
 
-    pub async fn analyze_file(&self, _path: &str, _layers: &[LatticeLayer]) -> Result<serde_json::Value, String> {
+    pub async fn analyze_file(
+        &self,
+        _path: &str,
+        _layers: &[LatticeLayer],
+    ) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({"status": "pending"}))
     }
 
-    pub async fn batch_analyze(&self, _paths: &[String], _layers: &[LatticeLayer]) -> Result<BatchAnalyzeResponse, String> {
+    pub async fn batch_analyze(
+        &self,
+        _paths: &[String],
+        _layers: &[LatticeLayer],
+    ) -> Result<BatchAnalyzeResponse, String> {
         Ok(BatchAnalyzeResponse {
             completed: 0,
             failed: 0,
@@ -65,7 +83,12 @@ impl LatticeService {
         })
     }
 
-    pub async fn search(&self, _query: &str, _layer: Option<LatticeLayer>, _limit: usize) -> Result<Vec<serde_json::Value>, String> {
+    pub async fn search(
+        &self,
+        _query: &str,
+        _layer: Option<LatticeLayer>,
+        _limit: usize,
+    ) -> Result<Vec<serde_json::Value>, String> {
         Ok(vec![])
     }
 
@@ -155,10 +178,7 @@ pub async fn get_layer_result(
     let layer = match layer.parse::<LatticeLayer>() {
         Ok(l) => l,
         Err(_) => {
-            return ApiResponse::err(
-                StatusCode::BAD_REQUEST,
-                &format!("Invalid layer: {layer}"),
-            )
+            return ApiResponse::err(StatusCode::BAD_REQUEST, &format!("Invalid layer: {layer}"))
         }
     };
 
@@ -237,9 +257,7 @@ pub async fn search_lattice(
 }
 
 /// Get analysis statistics
-pub async fn get_statistics(
-    State(state): State<LatticeAppState>,
-) -> impl IntoResponse {
+pub async fn get_statistics(State(state): State<LatticeAppState>) -> impl IntoResponse {
     match state.service.get_statistics().await {
         Ok(stats) => ApiResponse::ok(stats),
         Err(e) => ApiResponse::err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),

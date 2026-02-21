@@ -1,0 +1,16 @@
+{
+  "project_id": "maestro",
+  "generation": "c5b468f110fcad31ef8cb01ebbd6fa92aecb05083186b5be985d68c1ee335444",
+  "phase": 2,
+  "options_hash": null,
+  "payload": {
+    "internal_import_edges": 3533,
+    "external_import_edges": 3986,
+    "unresolved_modules": 1281,
+    "confidence_bands": [
+      3533,
+      0,
+      3986
+    ]
+  }
+}
