@@ -4,7 +4,7 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: Maestro 2.0 - The Unified Development Framework
+## [x] Track: Maestro 2.0 - The Unified Development Framework
 *Link: [./maestro/tracks/maestro-unified_20250101/](./maestro/tracks/maestro-unified_20250101/)*
 
 ---
@@ -331,10 +331,10 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 --- 
 
-## [~] Track: Maestro Overhaul (IronClaw, ZeroClaw, Moltis Merger)
+## [~] Track: Maestro Overhaul - MaesterClaw Integration
 *Link: [./maestro/tracks/overhaul_20260217/](./maestro/tracks/overhaul_20260217/)*
 
-**Description**: A major feature overhaul track meant to build on Maestro v2.5 by merging IronClaw, Moltis, and ZeroClaw into a high-performance, low-overhead, super-capable AI assistant with enhanced TUI, web dashboard, and multi-channel support.
+**Description**: Implement MaesterClaw - a unified, high-performance AI assistant framework with enhanced TUI, web dashboard, multi-channel support, sub-agent delegation, and advanced security sandboxing.
 
 **Type**: Feature
 
@@ -362,15 +362,19 @@ This file tracks all major tracks for the project. Each track has its own detail
   - [ ] User Manual Verification
 - [~] Phase 4: Interface & Communication (4/5 tasks) - IN PROGRESS
   - [x] TUI Capabilities Tab - Phase 3 services wired (commit 8ebb46d)
-  - [x] Axum Web Gateway (commit 7908df4, 15 tests)
-  - [x] Core Channels (commit 2ab29f3, 8 channel tests)
-  - [x] Web UI Dashboard (commit a5b5cf4)
+  - [x] Axum Web Gateway (15 tests)
+  - [x] Core Channels (8 channel tests)
+  - [x] Web UI Dashboard
   - [ ] User Manual Verification
 - [~] Phase 5: Integration & Polish (1/4 tasks) - IN PROGRESS
-  - [x] Spec-Driven Workflow Integration (commit b1835db)
+  - [x] Spec-Driven Workflow Integration
   - [ ] Performance Benchmarking
   - [ ] Tzar of Excellence Review
   - [ ] User Manual Verification
+
+**Reference Documents**:
+- `maesterclaw_integration_analysis.md` - Comprehensive capability catalog
+- `cockpit_redesign.md` - MaesterClaw TUI design principles
 
 **Total Tasks**: 32 (27 complete, 5 remaining)
 **Tests**: 144 maestro-core + 15 gateway = 159 total tests passing
