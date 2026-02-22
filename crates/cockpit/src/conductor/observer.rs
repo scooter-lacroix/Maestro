@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{broadcast, mpsc, RwLock};
 
 /// Home directory for orchestrate sessions
 fn orchestrate_base() -> PathBuf {
@@ -54,14 +54,12 @@ pub enum SteeringCommand {
 impl SteeringCommand {
     /// Serialize to JSON for writing to steering file
     pub fn to_json(&self) -> AnyhowResult<String> {
-        serde_json::to_string(self)
-            .context("Failed to serialize steering command")
+        serde_json::to_string(self).context("Failed to serialize steering command")
     }
 
     /// Parse from JSON
     pub fn from_json(json: &str) -> AnyhowResult<Self> {
-        serde_json::from_str(json)
-            .context("Failed to parse steering command")
+        serde_json::from_str(json).context("Failed to parse steering command")
     }
 }
 
@@ -90,25 +88,13 @@ pub struct ObservedSession {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObserverAction {
     /// Review the current task's output and state
-    ReviewCurrentTask {
-        iteration: u64,
-        task_id: String,
-    },
+    ReviewCurrentTask { iteration: u64, task_id: String },
     /// Request retry of the current task
-    RequestRetry {
-        task_id: String,
-        reason: String,
-    },
+    RequestRetry { task_id: String, reason: String },
     /// Request skipping the current task
-    RequestSkip {
-        task_id: String,
-        reason: String,
-    },
+    RequestSkip { task_id: String, reason: String },
     /// Inject guidance into the current execution
-    InjectGuidance {
-        task_id: String,
-        guidance: String,
-    },
+    InjectGuidance { task_id: String, guidance: String },
 }
 
 impl ObserverAction {
@@ -124,7 +110,10 @@ impl ObserverAction {
 
     /// Check if this action requires stopping execution
     pub fn requires_stop(&self) -> bool {
-        matches!(self, ObserverAction::RequestRetry { .. } | ObserverAction::RequestSkip { .. })
+        matches!(
+            self,
+            ObserverAction::RequestRetry { .. } | ObserverAction::RequestSkip { .. }
+        )
     }
 }
 
@@ -135,7 +124,7 @@ const EVENT_CHANNEL_CAPACITY: usize = 100;
 const ACTION_CHANNEL_CAPACITY: usize = 50;
 
 /// Session-specific event channels
-type EventChannels = Arc<RwLock<HashMap<String, mpsc::Sender<ConductorEvent>>>>;
+type EventChannels = Arc<RwLock<HashMap<String, broadcast::Sender<ConductorEvent>>>>;
 
 /// Trait for bridging session events between the execution engine and observers
 #[async_trait::async_trait]
@@ -145,7 +134,7 @@ pub trait SessionEventBridge: Send + Sync {
     /// Returns a receiver that will get events as they are published.
     /// If the session doesn't exist yet, returns an empty channel that
     /// will start receiving events once the session is created.
-    fn subscribe(&self, session_id: &str) -> mpsc::Receiver<ConductorEvent>;
+    fn subscribe(&self, session_id: &str) -> broadcast::Receiver<ConductorEvent>;
 
     /// Publish an event to all subscribers of a session
     fn publish(&self, session_id: &str, event: ConductorEvent) -> AnyhowResult<()>;
@@ -186,10 +175,10 @@ impl InMemoryEventBridge {
     }
 
     /// Ensure an event channel exists for the given session (blocking)
-    fn ensure_event_channel_blocking(&self, session_id: &str) -> mpsc::Sender<ConductorEvent> {
+    fn ensure_event_channel_blocking(&self, session_id: &str) -> broadcast::Sender<ConductorEvent> {
         let mut channels = self.event_channels.blocking_write();
         if !channels.contains_key(session_id) {
-            let (tx, _rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
+            let (tx, _rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
             channels.insert(session_id.to_string(), tx);
         }
         channels.get(session_id).unwrap().clone()
@@ -214,23 +203,23 @@ impl Default for InMemoryEventBridge {
 
 #[async_trait::async_trait]
 impl SessionEventBridge for InMemoryEventBridge {
-    fn subscribe(&self, session_id: &str) -> mpsc::Receiver<ConductorEvent> {
+    fn subscribe(&self, session_id: &str) -> broadcast::Receiver<ConductorEvent> {
         // Ensure channel exists and get a clone of the sender
-        let _tx = self.ensure_event_channel_blocking(session_id);
+        let tx = self.ensure_event_channel_blocking(session_id);
 
-        // Create a new receiver for this subscription
-        let (_, rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-        rx
+        // Subscribe by getting a new receiver from the broadcast channel
+        tx.subscribe()
     }
 
     fn publish(&self, session_id: &str, event: ConductorEvent) -> AnyhowResult<()> {
         let channels = self.event_channels.try_read()?;
         if let Some(tx) = channels.get(session_id) {
-            // Try to send the event, but don't block if channel is full
-            if tx.try_send(event).is_err() {
-                // Channel is full or closed, log but don't fail
+            // Send the event to all subscribers
+            // broadcast::send doesn't block, it returns the number of receivers
+            if tx.send(event).is_err() {
+                // No receivers are listening, log but don't fail
                 tracing::debug!(
-                    "Failed to send event to session {}: channel full or closed",
+                    "Failed to send event to session {}: no receivers listening",
                     session_id
                 );
             }
@@ -245,8 +234,14 @@ impl SessionEventBridge for InMemoryEventBridge {
         // Use blocking version to avoid creating a new runtime
         let tx = self.ensure_action_channel_blocking(session_id);
         if let Err(_) = tx.blocking_send(action) {
-            tracing::warn!("Failed to send action to session {}: channel closed", session_id);
-            Err(anyhow::anyhow!("Action channel closed for session {}", session_id))
+            tracing::warn!(
+                "Failed to send action to session {}: channel closed",
+                session_id
+            );
+            Err(anyhow::anyhow!(
+                "Action channel closed for session {}",
+                session_id
+            ))
         } else {
             Ok(())
         }
@@ -254,7 +249,10 @@ impl SessionEventBridge for InMemoryEventBridge {
 
     fn has_subscribers(&self, session_id: &str) -> bool {
         let channels = self.event_channels.blocking_read();
-        channels.contains_key(session_id)
+        channels
+            .get(session_id)
+            .map(|tx| tx.receiver_count() > 0)
+            .unwrap_or(false)
     }
 
     fn close_session(&self, session_id: &str) -> AnyhowResult<()> {
@@ -382,20 +380,25 @@ impl FileBasedObserver {
         let session_dir = self.base_dir.join(track_id);
 
         if !session_dir.exists() {
-            return Err(anyhow!("Session directory does not exist: {:?}", session_dir));
+            return Err(anyhow!(
+                "Session directory does not exist: {:?}",
+                session_dir
+            ));
         }
 
         let session_json = session_dir.join("session.json");
         if !session_json.exists() {
-            return Err(anyhow!("session.json does not exist for track: {}", track_id));
+            return Err(anyhow!(
+                "session.json does not exist for track: {}",
+                track_id
+            ));
         }
 
         // Read session state
-        let content = std::fs::read_to_string(&session_json)
-            .context("Failed to read session.json")?;
+        let content =
+            std::fs::read_to_string(&session_json).context("Failed to read session.json")?;
         let session_state: leindex_core::orchestrate::model::SessionState =
-            serde_json::from_str(&content)
-                .context("Failed to parse session.json")?;
+            serde_json::from_str(&content).context("Failed to parse session.json")?;
 
         // Check for tmux session
         let tmux_session = self.find_tmux_session(track_id).await;
@@ -425,10 +428,15 @@ impl FileBasedObserver {
     }
 
     /// Send a steering command to a session
-    pub async fn send_steering(&self, session_id: &str, command: SteeringCommand) -> AnyhowResult<()> {
+    pub async fn send_steering(
+        &self,
+        session_id: &str,
+        command: SteeringCommand,
+    ) -> AnyhowResult<()> {
         let session_dir = {
             let sessions = self.sessions.read().await;
-            let session = sessions.get(session_id)
+            let session = sessions
+                .get(session_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", session_id))?;
             session.session_dir.clone()
         };
@@ -450,10 +458,13 @@ impl FileBasedObserver {
             .context("Failed to open steering file")?;
 
         use std::io::Write;
-        writeln!(file, "{}", command_json)
-            .context("Failed to write steering command")?;
+        writeln!(file, "{}", command_json).context("Failed to write steering command")?;
 
-        tracing::info!("Sent steering command to session {}: {:?}", session_id, command);
+        tracing::info!(
+            "Sent steering command to session {}: {:?}",
+            session_id,
+            command
+        );
         Ok(())
     }
 
@@ -461,9 +472,12 @@ impl FileBasedObserver {
     pub async fn attach_tmux(&self, session_id: &str) -> AnyhowResult<String> {
         let tmux_session = {
             let sessions = self.sessions.read().await;
-            let session = sessions.get(session_id)
+            let session = sessions
+                .get(session_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", session_id))?;
-            session.tmux_session.clone()
+            session
+                .tmux_session
+                .clone()
                 .ok_or_else(|| anyhow!("No tmux session for: {}", session_id))?
         };
 
@@ -492,7 +506,8 @@ impl FileBasedObserver {
         // Look for a session that contains our track_id
         for session_name in maestro_sessions {
             // Session names are like "maestro_track-id_12345678"
-            if session_name.contains(track_id) || session_name.replace('_', "-").contains(track_id) {
+            if session_name.contains(track_id) || session_name.replace('_', "-").contains(track_id)
+            {
                 return Some(session_name);
             }
         }
@@ -547,11 +562,9 @@ impl ToSteeringCommand for ObserverAction {
         match self {
             ObserverAction::RequestRetry { .. } => Some(SteeringCommand::Retry),
             ObserverAction::RequestSkip { .. } => Some(SteeringCommand::Skip),
-            ObserverAction::InjectGuidance { guidance, .. } => {
-                Some(SteeringCommand::Message {
-                    content: guidance.clone(),
-                })
-            }
+            ObserverAction::InjectGuidance { guidance, .. } => Some(SteeringCommand::Message {
+                content: guidance.clone(),
+            }),
             ObserverAction::ReviewCurrentTask { .. } => None,
         }
     }
@@ -620,8 +633,8 @@ mod tests {
         assert!(state.pending_actions.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_event_bridge_has_subscribers() {
+    #[test]
+    fn test_event_bridge_has_subscribers() {
         let bridge = InMemoryEventBridge::new();
         assert!(!bridge.has_subscribers("nonexistent"));
 
@@ -698,13 +711,19 @@ mod tests {
             task_id: "task-1".to_string(),
             reason: "Error".to_string(),
         };
-        assert!(matches!(retry.to_steering_command(), Some(SteeringCommand::Retry)));
+        assert!(matches!(
+            retry.to_steering_command(),
+            Some(SteeringCommand::Retry)
+        ));
 
         let skip = ObserverAction::RequestSkip {
             task_id: "task-1".to_string(),
             reason: "Blocked".to_string(),
         };
-        assert!(matches!(skip.to_steering_command(), Some(SteeringCommand::Skip)));
+        assert!(matches!(
+            skip.to_steering_command(),
+            Some(SteeringCommand::Skip)
+        ));
 
         let guidance = ObserverAction::InjectGuidance {
             task_id: "task-1".to_string(),
@@ -831,7 +850,10 @@ mod tests {
         observer.observe_session("test-track").await.unwrap();
 
         // Send a steering command
-        observer.send_steering("test-session", SteeringCommand::Retry).await.unwrap();
+        observer
+            .send_steering("test-session", SteeringCommand::Retry)
+            .await
+            .unwrap();
 
         // Check that steering.jsonl was created with the command
         let steering_path = track_dir.join("steering.jsonl");

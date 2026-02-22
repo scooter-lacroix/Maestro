@@ -8,13 +8,10 @@ use maestro_pi_mono::{
         role_to_pi_agent_type, AgentMapping, AgentRegistry, AgentRole, PiAgentType, TaskComplexity,
         ToolAccess,
     },
-    ModelConfig,
     detection::PiDetection,
     discovery::ModelDiscovery,
-    execution::{
-        ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType,
-    },
-    SubagentResult, SubagentRunner, UsageMetrics,
+    execution::{ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType},
+    ModelConfig, SubagentResult, SubagentRunner, UsageMetrics,
 };
 use std::time::Duration;
 

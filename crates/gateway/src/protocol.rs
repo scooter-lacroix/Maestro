@@ -112,7 +112,11 @@ pub struct EventFrame {
 
 impl EventFrame {
     /// Create a new event frame
-    pub fn new(event: impl Into<String>, payload: Option<serde_json::Value>, seq: Option<u64>) -> Self {
+    pub fn new(
+        event: impl Into<String>,
+        payload: Option<serde_json::Value>,
+        seq: Option<u64>,
+    ) -> Self {
         Self {
             r#type: "event".to_string(),
             event: event.into(),
@@ -177,7 +181,11 @@ mod tests {
 
     #[test]
     fn test_event_frame() {
-        let event = EventFrame::new("tool.call", Some(serde_json::json!({"tool": "bash"})), Some(1));
+        let event = EventFrame::new(
+            "tool.call",
+            Some(serde_json::json!({"tool": "bash"})),
+            Some(1),
+        );
         let json = event.to_json().unwrap();
         assert!(json.contains(r#""type":"event""#));
         assert!(json.contains("tool.call"));

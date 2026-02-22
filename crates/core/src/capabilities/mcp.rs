@@ -112,7 +112,10 @@ pub enum McpContent {
     /// Image content.
     Image { data: String, mime_type: String },
     /// Resource reference.
-    Resource { uri: String, mime_type: Option<String> },
+    Resource {
+        uri: String,
+        mime_type: Option<String>,
+    },
 }
 
 /// Trait for MCP client implementations.
@@ -154,11 +157,7 @@ pub struct McpToolBridge {
 
 impl McpToolBridge {
     /// Create a new MCP tool bridge.
-    pub fn new(
-        server_name: &str,
-        tool_def: &McpToolDef,
-        client: Arc<dyn McpClient>,
-    ) -> Self {
+    pub fn new(server_name: &str, tool_def: &McpToolDef, client: Arc<dyn McpClient>) -> Self {
         Self {
             prefixed_name: format!("mcp__{}__{}", server_name, tool_def.name),
             original_name: tool_def.name.clone(),
@@ -208,7 +207,9 @@ impl Tool for McpToolBridge {
                 .content
                 .iter()
                 .map(|c| match c {
-                    McpContent::Text { text } => serde_json::json!({ "type": "text", "text": text }),
+                    McpContent::Text { text } => {
+                        serde_json::json!({ "type": "text", "text": text })
+                    }
                     McpContent::Image { data, mime_type } => {
                         serde_json::json!({ "type": "image", "data": data, "mimeType": mime_type })
                     }
@@ -339,7 +340,10 @@ impl McpManager {
     }
 
     /// Create tool bridges for all tools from a server.
-    pub async fn create_tool_bridges(&self, server_name: &str) -> anyhow::Result<Vec<McpToolBridge>> {
+    pub async fn create_tool_bridges(
+        &self,
+        server_name: &str,
+    ) -> anyhow::Result<Vec<McpToolBridge>> {
         let inner = self.inner.read().await;
 
         let client = inner
@@ -348,11 +352,7 @@ impl McpManager {
             .ok_or_else(|| anyhow::anyhow!("Server not connected: {}", server_name))?
             .clone();
 
-        let tools = inner
-            .tools
-            .get(server_name)
-            .cloned()
-            .unwrap_or_default();
+        let tools = inner.tools.get(server_name).cloned().unwrap_or_default();
 
         drop(inner);
 

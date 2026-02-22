@@ -3,8 +3,7 @@
 use leindex_core::orchestrate::model::ConflictInfo;
 
 /// Resolution method for a conflict
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResolutionMethod {
     #[default]
     AcceptOurs,
@@ -12,7 +11,6 @@ pub enum ResolutionMethod {
     AiResolve,
     Skip,
 }
-
 
 /// Conflict resolution panel
 #[derive(Debug, Clone)]

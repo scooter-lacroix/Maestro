@@ -145,7 +145,8 @@ impl WelcomeScreen {
             .map(|(id, _)| *id)
             .unwrap_or("system");
 
-        self.state.advance(&self.input_buffer, self.selected_editor, theme_name);
+        self.state
+            .advance(&self.input_buffer, self.selected_editor, theme_name);
 
         // Update state fields based on new state
         if let WelcomeState::WorkspaceSetup { path } = &self.state {
@@ -208,10 +209,10 @@ impl WelcomeScreen {
             .direction(Direction::Vertical)
             .margin(2)
             .constraints([
-                Constraint::Length(8),  // ASCII art
-                Constraint::Length(3),  // Step indicator
-                Constraint::Min(10),    // Content
-                Constraint::Length(2),  // Help
+                Constraint::Length(8), // ASCII art
+                Constraint::Length(3), // Step indicator
+                Constraint::Min(10),   // Content
+                Constraint::Length(2), // Help
             ])
             .split(inner_area);
 
@@ -252,21 +253,25 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 /// Render the ASCII art logo
 fn render_logo(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let logo = ["     ███████╗ █████╗  ██████╗ ██████╗ ██████╗ ███████╗",
+    let logo = [
+        "     ███████╗ █████╗  ██████╗ ██████╗ ██████╗ ███████╗",
         "     ██╔════╝██╔══██╗██╔════╝██╔═══██╗██╔══██╗██╔════╝",
         "     █████╗  ███████║██║     ██║   ██║██║  ██║█████╗  ",
         "     ██╔══╝  ██╔══██║██║     ██║   ██║██║  ██║██╔══╝  ",
         "     ██║     ██║  ██║╚██████╗╚██████╔╝██████╔╝███████╗",
         "     ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝",
         "",
-        "     Autonomous Development Cockpit v2.5"];
+        "     Autonomous Development Cockpit v2.5",
+    ];
 
     let lines: Vec<Line> = logo
         .iter()
         .map(|line| {
             Line::from(Span::styled(
                 *line,
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ))
         })
         .collect();
@@ -297,10 +302,15 @@ fn render_step_indicator(frame: &mut Frame, area: Rect, state: &WelcomeState, th
     let line = Line::from(vec![
         Span::styled(
             step_text,
-            Style::default().fg(theme.muted).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.muted)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
-        Span::styled(title, Style::default().fg(theme.fg).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title,
+            Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     let paragraph = Paragraph::new(line)
@@ -312,24 +322,12 @@ fn render_step_indicator(frame: &mut Frame, area: Rect, state: &WelcomeState, th
 /// Render content based on current step
 fn render_step_content(frame: &mut Frame, area: Rect, screen: &WelcomeScreen, theme: &Theme) {
     let content = match &screen.state {
-        WelcomeState::WorkspaceSetup { .. } => {
-            render_workspace_content(screen, theme)
-        }
-        WelcomeState::EditorSelection { .. } => {
-            render_editor_content(screen, theme)
-        }
-        WelcomeState::ProviderSetup { .. } => {
-            render_provider_content(screen, theme)
-        }
-        WelcomeState::ThemeSelection { .. } => {
-            render_theme_content(screen, theme)
-        }
-        WelcomeState::Completed => {
-            render_completed_content(theme)
-        }
-        WelcomeState::NotStarted => {
-            Paragraph::new("")
-        }
+        WelcomeState::WorkspaceSetup { .. } => render_workspace_content(screen, theme),
+        WelcomeState::EditorSelection { .. } => render_editor_content(screen, theme),
+        WelcomeState::ProviderSetup { .. } => render_provider_content(screen, theme),
+        WelcomeState::ThemeSelection { .. } => render_theme_content(screen, theme),
+        WelcomeState::Completed => render_completed_content(theme),
+        WelcomeState::NotStarted => Paragraph::new(""),
     };
 
     frame.render_widget(content, area);
@@ -353,7 +351,9 @@ fn render_workspace_content(screen: &WelcomeScreen, theme: &Theme) -> Paragraph<
             Span::styled("[", Style::default().fg(theme.muted)),
             Span::styled(
                 input,
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("]", Style::default().fg(theme.muted)),
         ]),
@@ -381,7 +381,9 @@ fn render_editor_content(screen: &WelcomeScreen, theme: &Theme) -> Paragraph<'st
             "  "
         };
         let style = if i == screen.selected_editor {
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.fg)
         };
@@ -411,7 +413,11 @@ fn render_provider_content(screen: &WelcomeScreen, theme: &Theme) -> Paragraph<'
         Line::from(vec![
             Span::styled(
                 if screen.use_env_key { "●" } else { "○" },
-                Style::default().fg(if screen.use_env_key { theme.success } else { theme.muted }),
+                Style::default().fg(if screen.use_env_key {
+                    theme.success
+                } else {
+                    theme.muted
+                }),
             ),
             Span::styled(
                 " Use environment variable (ANTHROPIC_API_KEY)",
@@ -442,7 +448,9 @@ fn render_theme_content(screen: &WelcomeScreen, theme: &Theme) -> Paragraph<'sta
             "  "
         };
         let style = if i == screen.selected_theme {
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.fg)
         };
@@ -461,7 +469,9 @@ fn render_completed_content(theme: &Theme) -> Paragraph<'static> {
         Line::from(""),
         Line::from(Span::styled(
             "✓ Setup Complete!",
-            Style::default().fg(theme.success).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.success)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(

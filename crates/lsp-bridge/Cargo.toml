@@ -19,7 +19,7 @@ rusqlite = ["leindex-core/rusqlite"]
 
 [dependencies]
 # Core library - provides LSP type definitions and LspManager
-leindex-core = { path = "../../maestro/leindex/rust" }
+leindex-core = { path = "../../src/leindex" }
 
 # CLI argument parsing
 clap = { version = "4.5", features = ["derive"] }

@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "maestro/leindex/rust",
+    "src/leindex",
     "crates/cockpit",
     "crates/cli",
     "crates/lsp-bridge",

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State, ConnectInfo,
+        ConnectInfo, State,
     },
     response::Response,
 };
@@ -128,7 +128,10 @@ async fn handle_text_message(
         );
         let response = ResponseFrame::error(
             "unknown",
-            format!("Message too large. Maximum size is {} bytes", MAX_MESSAGE_SIZE),
+            format!(
+                "Message too large. Maximum size is {} bytes",
+                MAX_MESSAGE_SIZE
+            ),
             Some(413), // HTTP 413 Payload Too Large
         );
         if let Ok(json) = response.to_json() {
@@ -143,7 +146,10 @@ async fn handle_text_message(
         warn!("WebSocket rate limit exceeded for client: {}", client_id);
         let response = ResponseFrame::error(
             "unknown",
-            format!("Rate limit exceeded. Try again in {} ms", retry_after.unwrap_or(1000)),
+            format!(
+                "Rate limit exceeded. Try again in {} ms",
+                retry_after.unwrap_or(1000)
+            ),
             Some(429), // HTTP 429 Too Many Requests
         );
         if let Ok(json) = response.to_json() {
@@ -192,7 +198,15 @@ async fn handle_text_message(
 }
 
 /// Method handler type - uses Arc for cloning
-pub type MethodHandler = Arc<dyn Fn(RequestFrame, &Arc<GatewayState>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ResponseFrame> + Send + '_>> + Send + Sync>;
+pub type MethodHandler = Arc<
+    dyn Fn(
+            RequestFrame,
+            &Arc<GatewayState>,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = ResponseFrame> + Send + '_>>
+        + Send
+        + Sync,
+>;
 
 /// Registry of method handlers
 #[derive(Default, Clone)]
@@ -235,7 +249,13 @@ impl MethodRegistry {
 }
 
 /// Built-in method handlers
-pub fn builtin_handlers() -> Vec<(&'static str, fn(RequestFrame, Arc<GatewayState>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ResponseFrame> + Send + 'static>>)> {
+pub fn builtin_handlers() -> Vec<(
+    &'static str,
+    fn(
+        RequestFrame,
+        Arc<GatewayState>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ResponseFrame> + Send + 'static>>,
+)> {
     vec![
         ("ping", |req, _| {
             Box::pin(async move {
@@ -243,9 +263,7 @@ pub fn builtin_handlers() -> Vec<(&'static str, fn(RequestFrame, Arc<GatewayStat
             })
         }),
         ("echo", |req, _| {
-            Box::pin(async move {
-                ResponseFrame::success(&req.id, req.params)
-            })
+            Box::pin(async move { ResponseFrame::success(&req.id, req.params) })
         }),
         ("methods/list", |req, state| {
             Box::pin(async move {
@@ -256,13 +274,16 @@ pub fn builtin_handlers() -> Vec<(&'static str, fn(RequestFrame, Arc<GatewayStat
         ("session/status", |req, state| {
             Box::pin(async move {
                 let (registered, connected) = state.mcp_manager.try_get_status();
-                ResponseFrame::success(&req.id, Some(serde_json::json!({
-                    "mcp_servers": {
-                        "registered": registered,
-                        "connected": connected,
-                    },
-                    "cron_jobs": state.cron_jobs.len(),
-                })))
+                ResponseFrame::success(
+                    &req.id,
+                    Some(serde_json::json!({
+                        "mcp_servers": {
+                            "registered": registered,
+                            "connected": connected,
+                        },
+                        "cron_jobs": state.cron_jobs.len(),
+                    })),
+                )
             })
         }),
     ]

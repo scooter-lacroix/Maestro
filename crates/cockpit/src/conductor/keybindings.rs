@@ -473,7 +473,11 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
             // Note: This conflicts with Ctrl+C for abort. We handle it specially here.
             // Use async runtime to cancel
-            let cancelled = pane.cancellation_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false);
+            let cancelled = pane
+                .cancellation_token
+                .as_ref()
+                .map(|t| t.is_cancelled())
+                .unwrap_or(false);
             if cancelled {
                 ConductorAction::warning("Execution already cancelled")
             } else if let Some(ref token) = pane.cancellation_token {
@@ -515,9 +519,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         }
 
         // Theme cycle (Shift+T)
-        (KeyModifiers::SHIFT, KeyCode::Char('T')) => {
-            ConductorAction::CycleTheme
-        }
+        (KeyModifiers::SHIFT, KeyCode::Char('T')) => ConductorAction::CycleTheme,
 
         // Memory Browser (Shift+M) - always available
         (KeyModifiers::SHIFT, KeyCode::Char('M')) => {

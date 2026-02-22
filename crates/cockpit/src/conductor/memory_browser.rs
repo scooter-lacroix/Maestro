@@ -621,9 +621,11 @@ impl MemoryBrowser {
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect, theme: &ConductorTheme) {
-        let hints = ["[↑/k] Up [↓/j] Down [PgUp/u] Prev Pg [PgDown/d] Next",
+        let hints = [
+            "[↑/k] Up [↓/j] Down [PgUp/u] Prev Pg [PgDown/d] Next",
             "[/] Focus Search [c] Category Filter [n] New Memory",
-            "[Del] Delete [Esc] Close"];
+            "[Del] Delete [Esc] Close",
+        ];
 
         let hint_text = hints.join("  ");
         let para = Paragraph::new(hint_text)

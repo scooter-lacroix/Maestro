@@ -4,9 +4,9 @@
 //! following MaesterClaw design principles.
 
 mod screen;
-mod wizard;
 #[cfg(test)]
 mod tests;
+mod wizard;
 
 pub use screen::WelcomeScreen;
 pub use wizard::{WelcomeState, WelcomeStep};
@@ -16,7 +16,9 @@ use std::path::PathBuf;
 /// Marker file path for first-time detection
 pub fn cockpit_initialized_marker() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-    PathBuf::from(home).join(".maestro").join(".cockpit_initialized")
+    PathBuf::from(home)
+        .join(".maestro")
+        .join(".cockpit_initialized")
 }
 
 /// Check if this is a first-time user

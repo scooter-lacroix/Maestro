@@ -115,7 +115,10 @@ impl Schedule {
                     None
                 }
             }
-            Self::Every { every_ms, anchor_ms } => {
+            Self::Every {
+                every_ms,
+                anchor_ms,
+            } => {
                 let interval_ms = *every_ms;
                 let anchor = anchor_ms.unwrap_or_else(|| after.timestamp_millis() as u64);
 
@@ -430,9 +433,9 @@ impl CronJobBuilder {
 
     /// Build the cron job.
     pub fn build(self) -> anyhow::Result<CronJob> {
-        let schedule = self.schedule.ok_or_else(|| {
-            anyhow::anyhow!("Schedule is required")
-        })?;
+        let schedule = self
+            .schedule
+            .ok_or_else(|| anyhow::anyhow!("Schedule is required"))?;
 
         Ok(CronJob {
             id: self.id,
@@ -529,7 +532,8 @@ impl JobStore for InMemoryJobStore {
     }
 
     fn record_run(&mut self, result: JobResult) {
-        self.last_runs.insert(result.job_id.clone(), result.finished_at);
+        self.last_runs
+            .insert(result.job_id.clone(), result.finished_at);
         self.results.push(result);
     }
 }
@@ -577,7 +581,8 @@ impl<S: JobStore + 'static> CronService<S> {
 
     /// Start the scheduler loop.
     pub async fn start(&self) {
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let mut interval = tokio::time::interval(self.config.poll_interval);
 
@@ -589,7 +594,8 @@ impl<S: JobStore + 'static> CronService<S> {
 
     /// Stop the scheduler.
     pub fn stop(&self) {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Check for and execute due jobs.
@@ -856,7 +862,10 @@ mod tests {
 
         let result = safe_lock(&poisoned_mutex);
         assert!(result.is_err(), "Should return error for poisoned mutex");
-        assert!(result.unwrap_err().contains("poisoned"), "Error should mention poisoning");
+        assert!(
+            result.unwrap_err().contains("poisoned"),
+            "Error should mention poisoning"
+        );
     }
 
     #[test]
@@ -868,12 +877,21 @@ mod tests {
         let now = Utc::now();
         let next = schedule.next_run(&now);
 
-        assert!(next.is_some(), "Should return a next time even when before anchor");
+        assert!(
+            next.is_some(),
+            "Should return a next time even when before anchor"
+        );
         let next_time = next.unwrap();
         // When before anchor, next run should be at the anchor time
         // They should be very close (same millisecond timestamp)
         let diff = (next_time - anchor_time).num_milliseconds().abs();
-        assert!(diff <= 1, "Next run should be at anchor time, but got {} ms difference (next: {}, anchor: {})", diff, next_time, anchor_time);
+        assert!(
+            diff <= 1,
+            "Next run should be at anchor time, but got {} ms difference (next: {}, anchor: {})",
+            diff,
+            next_time,
+            anchor_time
+        );
     }
 
     #[test]
@@ -885,12 +903,18 @@ mod tests {
         let now = Utc::now();
         let next = schedule.next_run(&now);
 
-        assert!(next.is_some(), "Should return a next time when after anchor");
+        assert!(
+            next.is_some(),
+            "Should return a next time when after anchor"
+        );
         let next_time = next.unwrap();
         // Next run should be in the future
         assert!(next_time > now, "Next run should be in the future");
         // Next run should be within one interval from now
-        assert!(next_time <= now + chrono::Duration::seconds(120), "Next run should be within reasonable time");
+        assert!(
+            next_time <= now + chrono::Duration::seconds(120),
+            "Next run should be within reasonable time"
+        );
     }
 
     #[test]
@@ -904,7 +928,10 @@ mod tests {
         assert!(next.is_some(), "Should return a next time");
         let next_time = next.unwrap();
         assert!(next_time > now, "Next run should be in the future");
-        assert!(next_time <= now + chrono::Duration::seconds(120), "Next run should be within two intervals");
+        assert!(
+            next_time <= now + chrono::Duration::seconds(120),
+            "Next run should be within two intervals"
+        );
     }
 
     #[test]
@@ -915,6 +942,9 @@ mod tests {
 
         // Should handle negative timestamps gracefully
         let next = schedule.next_run(&past_time);
-        assert!(next.is_some() || next.is_none(), "Should not panic with negative timestamp");
+        assert!(
+            next.is_some() || next.is_none(),
+            "Should not panic with negative timestamp"
+        );
     }
 }

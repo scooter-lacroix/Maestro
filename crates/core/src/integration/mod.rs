@@ -3,8 +3,8 @@
 //! Wires together the approval flow, memory search, and track task completion
 //! for spec-driven development workflow.
 
-use std::sync::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
 
 /// Track task status for approval workflow
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,9 +119,7 @@ impl MemorySearchContext {
         if let Some(ref track) = self.track {
             format!(
                 "track:{} task:{} {}",
-                track.track_id,
-                track.task_id,
-                self.query
+                track.track_id, track.task_id, self.query
             )
         } else {
             self.query.clone()
@@ -175,7 +173,10 @@ impl ApprovalTrackIntegration {
     /// List all pending approvals
     pub fn list_pending(&self) -> Vec<(String, TrackContext)> {
         let pending = self.pending_approvals.read().unwrap();
-        pending.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        pending
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// Clear stale pending approvals (older than specified duration)
@@ -184,9 +185,7 @@ impl ApprovalTrackIntegration {
         let now = chrono::Utc::now();
         let initial_len = pending.len();
 
-        pending.retain(|_, ctx| {
-            now.signed_duration_since(ctx.updated_at) < max_age
-        });
+        pending.retain(|_, ctx| now.signed_duration_since(ctx.updated_at) < max_age);
 
         initial_len - pending.len()
     }
@@ -220,8 +219,7 @@ mod tests {
     #[test]
     fn test_memory_search_context_augmented_query() {
         let track = TrackContext::new("overhaul_20260217", "task_4_1");
-        let search = MemorySearchContext::new("approval flow")
-            .with_track(track);
+        let search = MemorySearchContext::new("approval flow").with_track(track);
 
         let augmented = search.augmented_query();
         assert!(augmented.contains("track:overhaul_20260217"));
@@ -233,8 +231,7 @@ mod tests {
     fn test_approval_track_integration() {
         let integration = ApprovalTrackIntegration::new();
 
-        let ctx = TrackContext::new("test_track", "task_1")
-            .with_description("Test task");
+        let ctx = TrackContext::new("test_track", "task_1").with_description("Test task");
         integration.register_approval("req_123", ctx);
 
         let pending = integration.get_pending("req_123");

@@ -27,9 +27,9 @@
 //! ```
 
 pub mod executable;
-pub mod xdg_dirs;
 pub mod paths;
+pub mod xdg_dirs;
 
 pub use executable::*;
-pub use xdg_dirs::*;
 pub use paths::*;
+pub use xdg_dirs::*;

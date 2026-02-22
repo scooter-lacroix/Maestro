@@ -7,8 +7,8 @@
 
 #[cfg(test)]
 mod onboarding_tests {
-    use crate::welcome::{cockpit_initialized_marker, WelcomeScreen};
     use crate::welcome::wizard::WelcomeState;
+    use crate::welcome::{cockpit_initialized_marker, WelcomeScreen};
     use std::fs;
 
     /// Test that marker file path is correct
@@ -227,17 +227,42 @@ mod welcome_state_tests {
     #[test]
     fn test_state_current_step() {
         assert_eq!(WelcomeState::NotStarted.current_step(), 0);
-        assert_eq!(WelcomeState::WorkspaceSetup { path: String::new() }.current_step(), 1);
-        assert_eq!(WelcomeState::EditorSelection { selected: 0 }.current_step(), 2);
-        assert_eq!(WelcomeState::ProviderSetup { use_env: true, custom_key: None }.current_step(), 3);
-        assert_eq!(WelcomeState::ThemeSelection { preview: String::new() }.current_step(), 4);
+        assert_eq!(
+            WelcomeState::WorkspaceSetup {
+                path: String::new()
+            }
+            .current_step(),
+            1
+        );
+        assert_eq!(
+            WelcomeState::EditorSelection { selected: 0 }.current_step(),
+            2
+        );
+        assert_eq!(
+            WelcomeState::ProviderSetup {
+                use_env: true,
+                custom_key: None
+            }
+            .current_step(),
+            3
+        );
+        assert_eq!(
+            WelcomeState::ThemeSelection {
+                preview: String::new()
+            }
+            .current_step(),
+            4
+        );
         assert_eq!(WelcomeState::Completed.current_step(), 5);
     }
 
     #[test]
     fn test_state_is_complete() {
         assert!(!WelcomeState::NotStarted.is_complete());
-        assert!(!WelcomeState::WorkspaceSetup { path: String::new() }.is_complete());
+        assert!(!WelcomeState::WorkspaceSetup {
+            path: String::new()
+        }
+        .is_complete());
         assert!(WelcomeState::Completed.is_complete());
     }
 
@@ -274,10 +299,17 @@ mod welcome_state_tests {
     #[test]
     fn test_all_step_info_present() {
         let states = vec![
-            WelcomeState::WorkspaceSetup { path: String::new() },
+            WelcomeState::WorkspaceSetup {
+                path: String::new(),
+            },
             WelcomeState::EditorSelection { selected: 0 },
-            WelcomeState::ProviderSetup { use_env: true, custom_key: None },
-            WelcomeState::ThemeSelection { preview: String::new() },
+            WelcomeState::ProviderSetup {
+                use_env: true,
+                custom_key: None,
+            },
+            WelcomeState::ThemeSelection {
+                preview: String::new(),
+            },
             WelcomeState::Completed,
         ];
 

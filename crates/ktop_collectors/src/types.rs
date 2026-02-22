@@ -535,8 +535,7 @@ impl AgentInfo {
 }
 
 /// LeIndex statistics
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LeIndexStats {
     /// Number of indexed files
     pub files_indexed: usize,
@@ -551,10 +550,8 @@ pub struct LeIndexStats {
     pub last_update: Option<String>,
 }
 
-
 /// Maestro memory statistics
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MaestroMemoryStats {
     /// Total memory allocated by Maestro
     pub total_bytes: u64,
@@ -568,7 +565,6 @@ pub struct MaestroMemoryStats {
     /// Memory used by active sessions
     pub session_bytes: u64,
 }
-
 
 impl MaestroMetrics {
     /// Create new Maestro metrics

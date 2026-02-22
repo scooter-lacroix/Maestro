@@ -53,12 +53,12 @@ impl Default for GatewayConfig {
             max_body_size: 64 * 1024, // 64KB
             event_channel_capacity: 256,
             ws_rate_limit: RateLimitConfig {
-                limit: 60,          // 60 messages per minute
+                limit: 60, // 60 messages per minute
                 window: Duration::from_secs(60),
                 include_retry_after: true,
             },
             broadcast_rate_limit: RateLimitConfig {
-                limit: 10,          // 10 broadcasts per minute
+                limit: 10, // 10 broadcasts per minute
                 window: Duration::from_secs(60),
                 include_retry_after: true,
             },
@@ -69,7 +69,11 @@ impl Default for GatewayConfig {
                 "http://127.0.0.1:3000".to_string(),
                 "http://127.0.0.1:8080".to_string(),
             ],
-            cors_allowed_methods: vec!["GET".to_string(), "POST".to_string(), "OPTIONS".to_string()],
+            cors_allowed_methods: vec![
+                "GET".to_string(),
+                "POST".to_string(),
+                "OPTIONS".to_string(),
+            ],
             cors_allowed_headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
         }
     }
@@ -218,12 +222,24 @@ pub mod scopes {
 /// Scope guards for event routing
 pub fn event_scope_guards() -> std::collections::HashMap<&'static str, &'static [&'static str]> {
     let mut m = std::collections::HashMap::new();
-    m.insert("exec.approval.requested", &[scopes::APPROVALS, scopes::SESSIONS] as &[&str]);
-    m.insert("exec.approval.resolved", &[scopes::APPROVALS, scopes::SESSIONS] as &[&str]);
+    m.insert(
+        "exec.approval.requested",
+        &[scopes::APPROVALS, scopes::SESSIONS] as &[&str],
+    );
+    m.insert(
+        "exec.approval.resolved",
+        &[scopes::APPROVALS, scopes::SESSIONS] as &[&str],
+    );
     m.insert("cron.job.started", &[scopes::CRON] as &[&str]);
     m.insert("cron.job.completed", &[scopes::CRON] as &[&str]);
-    m.insert("tool.call.started", &[scopes::TOOLS, scopes::SESSIONS] as &[&str]);
-    m.insert("tool.call.completed", &[scopes::TOOLS, scopes::SESSIONS] as &[&str]);
+    m.insert(
+        "tool.call.started",
+        &[scopes::TOOLS, scopes::SESSIONS] as &[&str],
+    );
+    m.insert(
+        "tool.call.completed",
+        &[scopes::TOOLS, scopes::SESSIONS] as &[&str],
+    );
     m
 }
 

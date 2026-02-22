@@ -16,7 +16,8 @@ use std::path::PathBuf;
 ///
 /// Falls back to the current directory if home cannot be determined.
 pub fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    dirs::home_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 /// Get user-local bin directory
@@ -62,9 +63,7 @@ pub fn maestro_home() -> PathBuf {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(|s| super::executable::expand_tilde(&s))
-        .unwrap_or_else(|| {
-            home_dir().join(".maestro")
-        })
+        .unwrap_or_else(|| home_dir().join(".maestro"))
 }
 
 /// Get Maestro resources directory
@@ -137,9 +136,18 @@ pub fn claude_skills_dir() -> PathBuf {
 pub fn expand_path_template(template: &str) -> PathBuf {
     let result = template
         .replace("$MAESTRO_HOME", &maestro_home().to_string_lossy())
-        .replace("$XDG_DATA_HOME", &super::xdg_dirs::data_home().to_string_lossy())
-        .replace("$XDG_CONFIG_HOME", &super::xdg_dirs::config_home().to_string_lossy())
-        .replace("$XDG_CACHE_HOME", &super::xdg_dirs::cache_home().to_string_lossy());
+        .replace(
+            "$XDG_DATA_HOME",
+            &super::xdg_dirs::data_home().to_string_lossy(),
+        )
+        .replace(
+            "$XDG_CONFIG_HOME",
+            &super::xdg_dirs::config_home().to_string_lossy(),
+        )
+        .replace(
+            "$XDG_CACHE_HOME",
+            &super::xdg_dirs::cache_home().to_string_lossy(),
+        );
 
     super::executable::expand_tilde(&result)
 }

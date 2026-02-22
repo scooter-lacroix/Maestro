@@ -260,10 +260,15 @@ mod tests {
         assert!(!paths.is_empty());
 
         // Should include common locations
-        let _path_strings: Vec<String> = paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        let _path_strings: Vec<String> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
 
         // At least one path should exist
-        assert!(paths.iter().any(|p| p.exists() || p.to_string_lossy().contains("bin")));
+        assert!(paths
+            .iter()
+            .any(|p| p.exists() || p.to_string_lossy().contains("bin")));
     }
 
     #[test]
@@ -279,6 +284,8 @@ mod tests {
         assert!(is_executable_available("sh"));
 
         // This should not exist
-        assert!(!is_executable_available("this_executable_definitely_does_not_exist_12345"));
+        assert!(!is_executable_available(
+            "this_executable_definitely_does_not_exist_12345"
+        ));
     }
 }

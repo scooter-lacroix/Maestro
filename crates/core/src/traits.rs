@@ -35,7 +35,9 @@ pub trait Provider: Send + Sync {
 #[async_trait]
 pub trait SimpleChannel: Send + Sync {
     fn name(&self) -> &str;
-    async fn listen(&self) -> Result<futures::stream::BoxStream<'static, Result<SimpleIncomingMessage>>>;
+    async fn listen(
+        &self,
+    ) -> Result<futures::stream::BoxStream<'static, Result<SimpleIncomingMessage>>>;
     async fn send(&self, target_id: &str, message: &Message) -> Result<()>;
 }
 

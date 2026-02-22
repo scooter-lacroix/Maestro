@@ -24,23 +24,16 @@ use serde::{Deserialize, Serialize};
 /// Command allowlist for safe execution
 const COMMAND_ALLOWLIST: &[&str] = &[
     // Common safe commands
-    "echo", "cat", "head", "tail", "grep", "sort", "uniq", "wc",
-    "ls", "find", "file", "stat", "dirname", "basename",
-    "date", "sleep", "true", "false", "yes", "seq",
+    "echo", "cat", "head", "tail", "grep", "sort", "uniq", "wc", "ls", "find", "file", "stat",
+    "dirname", "basename", "date", "sleep", "true", "false", "yes", "seq",
     // Build tools
-    "cargo", "rustc", "gcc", "clang", "make", "cmake", "ninja",
-    "python", "python3", "node", "npm", "pnpm", "yarn", "bun",
-    // Git operations
-    "git",
-    // File operations
-    "cp", "mv", "rm", "mkdir", "touch", "chmod", "chown",
-    // Compression
-    "tar", "gzip", "gunzip", "zip", "unzip", "xz",
-    // Text processing
-    "sed", "awk", "cut", "tr", "diff",
-    // Network (restricted)
-    "curl", "wget", "ssh",
-    // System info
+    "cargo", "rustc", "gcc", "clang", "make", "cmake", "ninja", "python", "python3", "node", "npm",
+    "pnpm", "yarn", "bun", // Git operations
+    "git", // File operations
+    "cp", "mv", "rm", "mkdir", "touch", "chmod", "chown", // Compression
+    "tar", "gzip", "gunzip", "zip", "unzip", "xz", // Text processing
+    "sed", "awk", "cut", "tr", "diff", // Network (restricted)
+    "curl", "wget", "ssh", // System info
     "ps", "top", "htop", "df", "du", "free", "uname",
 ];
 
@@ -100,9 +93,7 @@ pub fn validate_command_safe(command: &str, args: &[String]) -> anyhow::Result<(
 /// Uses canonicalize to resolve symlinks and relative paths
 pub fn validate_path_safe(path: &Path, allowed_roots: &[PathBuf]) -> anyhow::Result<()> {
     // Canonicalize the path to resolve any symlinks or relative components
-    let canonical = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
     // If no allowed roots, deny all
     if allowed_roots.is_empty() {
@@ -112,9 +103,7 @@ pub fn validate_path_safe(path: &Path, allowed_roots: &[PathBuf]) -> anyhow::Res
     // Check if the canonical path is within any allowed root
     let mut is_allowed = false;
     for root in allowed_roots {
-        let root_canonical = root
-            .canonicalize()
-            .unwrap_or_else(|_| root.clone());
+        let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
 
         if canonical.starts_with(&root_canonical) {
             is_allowed = true;
@@ -137,8 +126,7 @@ pub fn validate_path_safe(path: &Path, allowed_roots: &[PathBuf]) -> anyhow::Res
 pub fn is_safe_env_key(key: &str) -> bool {
     // Environment variable keys should be alphanumeric with underscores
     // No spaces, quotes, or special characters
-    key.chars()
-        .all(|c| c.is_alphanumeric() || c == '_')
+    key.chars().all(|c| c.is_alphanumeric() || c == '_')
         && !key.is_empty()
         && !key.starts_with(|c: char| c.is_ascii_digit())
 }
@@ -165,11 +153,7 @@ impl AutonomyLevel {
                 // Dangerous operations require approval
                 matches!(
                     operation,
-                    "file_write"
-                        | "file_delete"
-                        | "shell_exec"
-                        | "network_request"
-                        | "spawn_agent"
+                    "file_write" | "file_delete" | "shell_exec" | "network_request" | "spawn_agent"
                 )
             }
             Self::Autonomous => false,
@@ -270,9 +254,10 @@ impl SecurityPolicy {
             Err(_) => {
                 // Path doesn't exist, so we can't fully validate it
                 // Fall back to prefix check on the raw path
-                return self.allowed_read_paths.iter().any(|allowed| {
-                    path.starts_with(allowed) || path == allowed
-                });
+                return self
+                    .allowed_read_paths
+                    .iter()
+                    .any(|allowed| path.starts_with(allowed) || path == allowed);
             }
         };
 
@@ -295,9 +280,10 @@ impl SecurityPolicy {
             Err(_) => {
                 // Path doesn't exist, so we can't fully validate it
                 // Fall back to prefix check on the raw path
-                return self.allowed_write_paths.iter().any(|allowed| {
-                    path.starts_with(allowed) || path == allowed
-                });
+                return self
+                    .allowed_write_paths
+                    .iter()
+                    .any(|allowed| path.starts_with(allowed) || path == allowed);
             }
         };
 
@@ -437,7 +423,10 @@ impl RuntimeAdapter for NativeRuntime {
         // Set environment (validate keys are safe)
         for (key, value) in &request.env {
             if !is_safe_env_key(key) {
-                anyhow::bail!("Environment variable key '{}' contains unsafe characters", key);
+                anyhow::bail!(
+                    "Environment variable key '{}' contains unsafe characters",
+                    key
+                );
             }
             cmd.env(key, value);
         }
@@ -503,7 +492,9 @@ impl RuntimeAdapter for NativeRuntime {
         }
 
         // Verify memory limits are compatible
-        if self.policy.max_memory_bytes > 0 && policy.max_memory_bytes > self.policy.max_memory_bytes {
+        if self.policy.max_memory_bytes > 0
+            && policy.max_memory_bytes > self.policy.max_memory_bytes
+        {
             anyhow::bail!(
                 "Requested memory limit {} exceeds runtime limit {}",
                 policy.max_memory_bytes,
@@ -857,7 +848,10 @@ mod tests {
             "grep",
             &["-r".to_string(), "pattern".to_string(), "/path".to_string()],
         );
-        assert!(result.is_ok(), "Should allow safe commands with multiple args");
+        assert!(
+            result.is_ok(),
+            "Should allow safe commands with multiple args"
+        );
     }
 
     #[test]
@@ -891,7 +885,11 @@ mod tests {
         // Try to access via .. traversal
         let traversal = safe_base.join("../maestro_test_outside/outside.txt");
         let result = validate_path_safe(&traversal, &allowed_paths);
-        assert!(result.is_err(), "Should reject path traversal via ..: {:?}", result.err());
+        assert!(
+            result.is_err(),
+            "Should reject path traversal via ..: {:?}",
+            result.err()
+        );
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&safe_base);
@@ -928,7 +926,10 @@ mod tests {
         let result = validate_path_safe(&symlink, &allowed_paths);
         // Symlinks are resolved by canonicalize, so if it points outside,
         // it should be rejected
-        assert!(result.is_err(), "Should reject symlink pointing outside allowed path");
+        assert!(
+            result.is_err(),
+            "Should reject symlink pointing outside allowed path"
+        );
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&safe_base);
@@ -939,14 +940,26 @@ mod tests {
     fn test_path_validation_empty_roots() {
         let path = PathBuf::from("/etc/passwd");
         let result = validate_path_safe(&path, &[]);
-        assert!(result.is_err(), "Should reject when no allowed roots configured");
+        assert!(
+            result.is_err(),
+            "Should reject when no allowed roots configured"
+        );
     }
 
     #[test]
     fn test_env_key_validation_unsafe_chars() {
-        assert!(!is_safe_env_key("TEST;VAR"), "Should reject semicolon in env key");
-        assert!(!is_safe_env_key("TEST VAR"), "Should reject space in env key");
-        assert!(!is_safe_env_key("TEST|VAR"), "Should reject pipe in env key");
+        assert!(
+            !is_safe_env_key("TEST;VAR"),
+            "Should reject semicolon in env key"
+        );
+        assert!(
+            !is_safe_env_key("TEST VAR"),
+            "Should reject space in env key"
+        );
+        assert!(
+            !is_safe_env_key("TEST|VAR"),
+            "Should reject pipe in env key"
+        );
     }
 
     #[test]
@@ -963,8 +976,14 @@ mod tests {
 
     #[test]
     fn test_env_key_validation_leading_digit() {
-        assert!(!is_safe_env_key("1VAR"), "Should reject env key starting with digit");
-        assert!(is_safe_env_key("V1AR"), "Should allow env key with digit not at start");
+        assert!(
+            !is_safe_env_key("1VAR"),
+            "Should reject env key starting with digit"
+        );
+        assert!(
+            is_safe_env_key("V1AR"),
+            "Should allow env key with digit not at start"
+        );
     }
 
     // Test that NativeRuntime validates commands

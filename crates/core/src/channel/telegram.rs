@@ -69,7 +69,11 @@ impl ChannelPlugin for TelegramChannel {
         "Telegram"
     }
 
-    async fn start_account(&mut self, account_id: &str, config: serde_json::Value) -> anyhow::Result<()> {
+    async fn start_account(
+        &mut self,
+        account_id: &str,
+        config: serde_json::Value,
+    ) -> anyhow::Result<()> {
         let config: TelegramConfig = serde_json::from_value(config)
             .map_err(|e| anyhow::anyhow!("Invalid Telegram config: {}", e))?;
 
@@ -172,7 +176,10 @@ impl ChannelOutbound for TelegramChannel {
             return Err(anyhow::anyhow!("Account not running: {}", account_id));
         }
 
-        debug!("Sending Telegram typing indicator to {} via account {}", to, account_id);
+        debug!(
+            "Sending Telegram typing indicator to {} via account {}",
+            to, account_id
+        );
         Ok(())
     }
 }

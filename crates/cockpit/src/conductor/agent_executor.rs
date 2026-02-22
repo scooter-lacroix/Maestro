@@ -129,7 +129,10 @@ pub enum StreamEvent {
     /// Output text chunk
     Output(String),
     /// Progress update
-    Progress { message: String, percent: Option<u8> },
+    Progress {
+        message: String,
+        percent: Option<u8>,
+    },
     /// Error occurred
     Error(String),
     /// Execution completed
@@ -265,12 +268,16 @@ impl AgentBackend for PiMonoBackend {
             .map(|r| self.get_agent_type(r))
             .unwrap_or(PiAgentType::Worker);
 
-        info!("Executing task via Pi-Mono backend with agent type: {:?}", agent_type);
+        info!(
+            "Executing task via Pi-Mono backend with agent type: {:?}",
+            agent_type
+        );
 
         // Use the prompt parameter for additional context from working_dir if set
-        let prompt = config.working_dir.as_ref().map(|p| {
-            format!("Working directory: {}", p.display())
-        });
+        let prompt = config
+            .working_dir
+            .as_ref()
+            .map(|p| format!("Working directory: {}", p.display()));
         let prompt_str = prompt.as_deref();
 
         let result = if let Some(ref token) = cancel {
@@ -301,12 +308,16 @@ impl AgentBackend for PiMonoBackend {
             .map(|r| self.get_agent_type(r))
             .unwrap_or(PiAgentType::Worker);
 
-        info!("Executing task via Pi-Mono backend with streaming, agent type: {:?}", agent_type);
+        info!(
+            "Executing task via Pi-Mono backend with streaming, agent type: {:?}",
+            agent_type
+        );
 
         // Use the prompt parameter for additional context from working_dir if set
-        let prompt = config.working_dir.as_ref().map(|p| {
-            format!("Working directory: {}", p.display())
-        });
+        let prompt = config
+            .working_dir
+            .as_ref()
+            .map(|p| format!("Working directory: {}", p.display()));
         let prompt_str = prompt.as_deref();
 
         callback(StreamEvent::Started);
@@ -379,7 +390,11 @@ impl AgentBackend for OmpBackend {
 
         let agent = self
             .manager
-            .get_or_create_agent(self.track_id.clone(), self.project_path.clone(), Some(omp_config))
+            .get_or_create_agent(
+                self.track_id.clone(),
+                self.project_path.clone(),
+                Some(omp_config),
+            )
             .await?;
 
         match agent.execute_task(task).await {
@@ -523,11 +538,7 @@ impl AgentExecutor {
     }
 
     /// Execute a task using the preferred available backend
-    pub async fn execute(
-        &self,
-        task: &str,
-        config: &AgentConfig,
-    ) -> Result<AgentResult> {
+    pub async fn execute(&self, task: &str, config: &AgentConfig) -> Result<AgentResult> {
         let cancel = {
             let guard = self.cancellation_token.read().await;
             guard.as_ref().map(|t| (**t).clone())
@@ -689,7 +700,10 @@ mod tests {
     #[test]
     fn test_role_utils_display_name() {
         assert_eq!(role_utils::role_display_name(&AgentRole::Scout), "Scout");
-        assert_eq!(role_utils::role_display_name(&AgentRole::Architect), "Architect");
+        assert_eq!(
+            role_utils::role_display_name(&AgentRole::Architect),
+            "Architect"
+        );
         assert_eq!(role_utils::role_display_name(&AgentRole::Critic), "Critic");
         assert_eq!(role_utils::role_display_name(&AgentRole::Kraken), "Kraken");
     }

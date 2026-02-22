@@ -321,10 +321,7 @@ pub fn is_omp_available() -> bool {
         }
 
         // Check 4: Check for oh-my-pi directory in user locations
-        let omp_dir_paths = vec![
-            home.join("oh-my-pi"),
-            home.join(".oh-my-pi"),
-        ];
+        let omp_dir_paths = vec![home.join("oh-my-pi"), home.join(".oh-my-pi")];
 
         for omp_dir in omp_dir_paths {
             let worker = omp_dir.join("packages/coding-agent/src/worker.ts");

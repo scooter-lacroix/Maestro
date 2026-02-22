@@ -42,7 +42,10 @@ pub use iteration_history::*;
 pub use keybindings::*;
 pub use modals::{ListSelectorModal, Modal, ModalCancelled, ModalResult, TextInputModal};
 pub use model::*;
-pub use observer::{FileBasedObserver, ObservedSession, ObserverAction, ObserverState, SessionEventBridge, SteeringCommand, ToSteeringCommand};
+pub use observer::{
+    FileBasedObserver, ObservedSession, ObserverAction, ObserverState, SessionEventBridge,
+    SteeringCommand, ToSteeringCommand,
+};
 pub use pane::*;
 pub use parallel_view::*;
 pub use project_selector::*;

@@ -425,15 +425,13 @@ impl Default for MaestroCollector {
 }
 
 /// JSON representation of LSP info
-#[derive(Debug, Clone, serde::Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 struct LspInfo {
     #[serde(default)]
     files_tracked: usize,
     #[serde(default)]
     diagnostics_count: usize,
 }
-
 
 /// JSON representation of an agent
 #[derive(Debug, Clone, serde::Deserialize)]

@@ -73,5 +73,5 @@ fmt:
 # Install from local source (force reinstall)
 install-local:
 	$(CARGO) install --path crates/cli --force
-	$(CARGO) install --path maestro/leindex/rust --bin maestro-setup --force
+	$(CARGO) install --path src/leindex --bin maestro-setup --force
 	@echo "✅ Maestro binaries installed to $(INSTALL_DIR)/"
