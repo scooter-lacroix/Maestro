@@ -169,7 +169,11 @@ impl MaestroTabMultiplexer {
     }
 
     /// Start a new session
-    pub fn start_session(&self, session: &mut MaestroTabSession, command: Option<&str>) -> Result<()> {
+    pub fn start_session(
+        &self,
+        session: &mut MaestroTabSession,
+        command: Option<&str>,
+    ) -> Result<()> {
         let mut tmux_session: TmuxSession = session.clone().into();
         self.inner.start_session(&mut tmux_session, command)?;
         // Update the original session with any changes made during start
