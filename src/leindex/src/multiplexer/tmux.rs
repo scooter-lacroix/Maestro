@@ -1142,7 +1142,7 @@ __maestro_reset_background
 }
 
 /// Sanitize a display name to a valid tmux session name
-fn sanitize_name(name: &str) -> String {
+pub fn sanitize_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
         .map(|c| {
@@ -1193,7 +1193,7 @@ fn generate_short_id() -> String {
 }
 
 /// Shell-quote a string for safe use in shell commands
-fn shell_quote(s: &str) -> String {
+pub fn shell_quote(s: &str) -> String {
     if !s.contains(|c: char| {
         c == '\''
             || c == '\\'
