@@ -10,6 +10,10 @@ default = ["rusqlite"]
 # Enable rusqlite for legacy memory service and migration support
 # Disable with --no-default-features for pure libsql/turso backend
 rusqlite = ["dep:rusqlite"]
+# Use MaestroTabMultiplexer (default when feature is enabled)
+# This delegates to tmux with tab-rs integration hooks
+# To rollback: use --no-default-features --features rusqlite
+maestro-tab = []
 
 [lib]
 name = "leindex_core"
