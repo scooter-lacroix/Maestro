@@ -202,17 +202,17 @@
 
 ### Task 2.7: Implement Environment and Configuration
 
-- [ ] Task 2.7.1: Implement `get_environment()` - get env var
-- [ ] Task 2.7.2: Implement `set_environment()` - set env var
+- [x] Task 2.7.1: Implement `get_environment()` - get env var (delegated)
+- [x] Task 2.7.2: Implement `set_environment()` - set env var (delegated)
 - [ ] Task 2.7.3: Implement `configure_session_options()` - mouse, clipboard, etc.
 - [ ] Task 2.7.4: Implement `configure_status_bar()` - status bar setup
 - [ ] Task 2.7.5: Implement `enable_pipe_pane()` - logging setup
 
 ### Task 2.8: Implement Transparency Support
 
-- [ ] Task 2.8.1: Define OSC 111 transparency sequence
-- [ ] Task 2.8.2: Implement `apply_transparency()` - direct PTY output
-- [ ] Task 2.8.3: Implement shell hooks (fish, bash, zsh)
+- [x] Task 2.8.1: Define OSC 111 transparency sequence
+- [x] Task 2.8.2: Implement `apply_transparency()` - direct PTY output
+- [x] Task 2.8.3: Implement shell hooks (fish, bash, zsh)
 - [ ] Task 2.8.4: Integrate transparency into `start_session()`
 - [ ] Task 2.8.5: Test transparency on foot terminal
 
