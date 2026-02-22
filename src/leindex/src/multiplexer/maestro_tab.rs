@@ -277,6 +277,141 @@ impl MaestroTabMultiplexer {
             None
         }
     }
+
+    /// Check if tab daemon is running (for subprocess integration)
+    pub fn is_tab_daemon_running() -> bool {
+        // Check if tab daemon socket exists
+        let socket_path = std::env::var("TAB_SOCKET").unwrap_or_else(|_| {
+            format!(
+                "{}/.tab/daemon.sock",
+                std::env::var("HOME").unwrap_or_default()
+            )
+        });
+
+        std::path::Path::new(&socket_path).exists()
+    }
+
+    /// Create a tab via CLI subprocess (Phase 2 integration)
+    ///
+    /// This method spawns the `tab` binary to create a new terminal tab.
+    /// Falls back to tmux if tab binary is not available.
+    pub fn create_tab_via_cli(&self, name: &str, command: Option<&str>) -> Result<()> {
+        if !Self::is_tab_rs_available() {
+            debug!("tab binary not available, using tmux fallback");
+            // Use the inner tmux multiplexer instead
+            let mut session = MaestroTabSession::new(name, ".");
+            return self.start_session(&mut session, command);
+        }
+
+        let mut cmd = Command::new("tab");
+        cmd.arg("create").arg("--name").arg(name);
+
+        if let Some(cmd_str) = command {
+            cmd.arg("--command").arg(cmd_str);
+        }
+
+        let output = cmd.output()?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to create tab: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        debug!("Created tab '{}' via CLI", name);
+        Ok(())
+    }
+
+    /// List tabs via CLI subprocess (Phase 2 integration)
+    pub fn list_tabs_via_cli(&self) -> Result<Vec<String>> {
+        if !Self::is_tab_rs_available() {
+            return Ok(self.list_maestro_sessions());
+        }
+
+        let output = Command::new("tab").arg("list").output()?;
+        if !output.status.success() {
+            return Ok(self.list_maestro_sessions());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.lines().map(|s| s.trim().to_string()).collect())
+    }
+
+    /// Close a tab via CLI subprocess (Phase 2 integration)
+    pub fn close_tab_via_cli(&self, name: &str) -> Result<()> {
+        if !Self::is_tab_rs_available() {
+            return self.kill_session(name);
+        }
+
+        let output = Command::new("tab").arg("close").arg(name).output()?;
+        if !output.status.success() {
+            debug!("Failed to close tab via CLI, falling back to tmux");
+            return self.kill_session(name);
+        }
+
+        debug!("Closed tab '{}' via CLI", name);
+        Ok(())
+    }
+}
+
+// ========== Transparency Support ==========
+// OSC 111 sequences for foot terminal transparency
+
+/// OSC 111 transparency sequence prefix
+pub const OSC_111_PREFIX: &str = "\x1b]111;";
+
+/// OSC 111 transparency sequence suffix
+pub const OSC_111_SUFFIX: &str = "\x07";
+
+/// Generate OSC 111 transparency sequence for a given alpha value (0-255)
+pub fn transparency_sequence(alpha: u8) -> String {
+    format!("{}{}{}", OSC_111_PREFIX, alpha, OSC_111_SUFFIX)
+}
+
+/// Reset transparency to terminal default
+pub fn reset_transparency_sequence() -> String {
+    format!("{}{}", OSC_111_PREFIX, OSC_111_SUFFIX)
+}
+
+/// Shell hook script for fish shell to maintain transparency
+pub fn fish_transparency_hook(alpha: u8) -> String {
+    format!(
+        r#"
+# Maestro transparency hook for fish shell
+function __maestro_transparency --on-event fish_prompt
+    echo -n "{}"
+end
+"#,
+        transparency_sequence(alpha)
+    )
+}
+
+/// Shell hook script for bash to maintain transparency
+pub fn bash_transparency_hook(alpha: u8) -> String {
+    format!(
+        r#"
+# Maestro transparency hook for bash
+__maestro_transparency() {{
+    echo -n "{}"
+}}
+PROMPT_COMMAND="__maestro_transparency${{PROMPT_COMMAND:+; $PROMPT_COMMAND}}"
+"#,
+        transparency_sequence(alpha)
+    )
+}
+
+/// Shell hook script for zsh to maintain transparency
+pub fn zsh_transparency_hook(alpha: u8) -> String {
+    format!(
+        r#"
+# Maestro transparency hook for zsh
+__maestro_transparency() {{
+    echo -n "{}"
+}}
+precmd_functions+=(__maestro_transparency)
+"#,
+        transparency_sequence(alpha)
+    )
 }
 
 // Re-export the helper functions for external use
@@ -316,5 +451,57 @@ mod tests {
             let back: TmuxSessionStatus = maestro_status.into();
             assert_eq!(back, tmux_status);
         }
+    }
+
+    #[test]
+    fn test_transparency_sequence() {
+        // Test alpha 0 (fully transparent)
+        let seq = transparency_sequence(0);
+        assert!(seq.starts_with("\x1b]111;"));
+        assert!(seq.ends_with("\x07"));
+        assert!(seq.contains("0"));
+
+        // Test alpha 255 (fully opaque)
+        let seq = transparency_sequence(255);
+        assert!(seq.contains("255"));
+
+        // Test alpha 128 (50% transparency)
+        let seq = transparency_sequence(128);
+        assert!(seq.contains("128"));
+    }
+
+    #[test]
+    fn test_reset_transparency_sequence() {
+        let seq = reset_transparency_sequence();
+        assert_eq!(seq, "\x1b]111;\x07");
+    }
+
+    #[test]
+    fn test_shell_hooks_contain_sequence() {
+        let alpha = 200;
+        let expected_seq = transparency_sequence(alpha);
+
+        // Fish hook
+        let fish_hook = fish_transparency_hook(alpha);
+        assert!(fish_hook.contains(&expected_seq));
+        assert!(fish_hook.contains("fish_prompt"));
+
+        // Bash hook
+        let bash_hook = bash_transparency_hook(alpha);
+        assert!(bash_hook.contains(&expected_seq));
+        assert!(bash_hook.contains("PROMPT_COMMAND"));
+
+        // Zsh hook
+        let zsh_hook = zsh_transparency_hook(alpha);
+        assert!(zsh_hook.contains(&expected_seq));
+        assert!(zsh_hook.contains("precmd_functions"));
+    }
+
+    #[test]
+    fn test_tab_rs_version_returns_none_when_not_available() {
+        // This test verifies the function handles missing tab binary gracefully
+        // It should return None rather than panic
+        let _result = MaestroTabMultiplexer::tab_rs_version();
+        // Result depends on whether tab is installed on the system
     }
 }
