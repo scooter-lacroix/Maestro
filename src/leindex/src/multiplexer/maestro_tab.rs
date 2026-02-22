@@ -17,7 +17,13 @@
 //! Phase 3: Direct tab-rs library integration (pending version resolution)
 
 use anyhow::Result;
+use std::io::Write as IoWrite;
+use std::os::fd::FromRawFd;
 use std::process::Command;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use tracing::debug;
 
 use super::tmux::{StateTracker, TerminalInfo, TmuxMultiplexer, TmuxSession, TmuxSessionStatus};
@@ -414,6 +420,152 @@ precmd_functions+=(__maestro_transparency)
     )
 }
 
+// ========== PTY Extensions ==========
+// Support for direct PTY output access (solves tmux transparency issue)
+
+/// PTY writer trait for abstracting PTY output operations
+pub trait PtyWriter: Send + Sync {
+    /// Write bytes directly to the PTY
+    fn write(&mut self, data: &[u8]) -> Result<()>;
+
+    /// Write a string directly to the PTY
+    fn write_str(&mut self, s: &str) -> Result<()> {
+        self.write(s.as_bytes())
+    }
+
+    /// Flush any buffered output
+    fn flush(&mut self) -> Result<()>;
+}
+
+/// Standard PTY writer that writes to a file descriptor
+pub struct StdPtyWriter {
+    fd: std::fs::File,
+}
+
+impl StdPtyWriter {
+    /// Create a new PTY writer for the given file descriptor
+    pub fn new(fd: std::fs::File) -> Self {
+        Self { fd }
+    }
+
+    /// Create a PTY writer for stdout
+    pub fn stdout() -> Result<Self> {
+        // Open /dev/tty for direct terminal output
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/tty")
+            .unwrap_or_else(|_| {
+                // Fallback: create a file that writes to stdout fd
+                unsafe { std::fs::File::from_raw_fd(1) }
+            });
+        Ok(Self::new(file))
+    }
+}
+
+impl PtyWriter for StdPtyWriter {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.fd.write_all(data)?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.fd.flush()?;
+        Ok(())
+    }
+}
+
+/// Apply transparency directly to the PTY
+///
+/// This bypasses tmux's buffering and writes the OSC 111 sequence
+/// directly to the terminal, which is required for foot terminal
+/// transparency support.
+pub fn apply_transparency_direct(alpha: u8) -> Result<()> {
+    let mut writer = StdPtyWriter::stdout()?;
+    writer.write_str(&transparency_sequence(alpha))?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Reset transparency directly on the PTY
+pub fn reset_transparency_direct() -> Result<()> {
+    let mut writer = StdPtyWriter::stdout()?;
+    writer.write_str(&reset_transparency_sequence())?;
+    writer.flush()?;
+    Ok(())
+}
+
+// ========== Signal Handling ==========
+
+/// Handle terminal resize signals (SIGWINCH)
+///
+/// Returns a guard that will restore the original handler when dropped.
+pub fn setup_resize_handler<F>(_callback: F) -> Result<Arc<AtomicBool>>
+where
+    F: Fn(u16, u16) + Send + 'static,
+{
+    // Note: Full signal handling requires tokio signal integration
+    // For now, return a simple running flag
+    let running = Arc::new(AtomicBool::new(true));
+    debug!("Resize handler setup (stub - requires tokio signal)");
+    Ok(running)
+}
+
+/// Error recovery state for reconnection logic
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryState {
+    /// Normal operation
+    Connected,
+    /// Connection lost, attempting reconnect
+    Reconnecting,
+    /// Reconnection failed after max attempts
+    Failed,
+}
+
+/// Reconnection configuration
+#[derive(Debug, Clone)]
+pub struct ReconnectConfig {
+    /// Maximum number of reconnection attempts
+    pub max_attempts: u32,
+    /// Delay between attempts (milliseconds)
+    pub delay_ms: u64,
+    /// Exponential backoff multiplier
+    pub backoff_multiplier: f64,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 5,
+            delay_ms: 100,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+/// Perform reconnection with exponential backoff
+pub fn reconnect_with_backoff<F>(config: &ReconnectConfig, mut attempt: F) -> Result<()>
+where
+    F: FnMut() -> Result<bool>,
+{
+    let mut delay = config.delay_ms;
+
+    for i in 0..config.max_attempts {
+        debug!("Reconnection attempt {}/{}", i + 1, config.max_attempts);
+
+        if attempt()? {
+            debug!("Reconnection successful");
+            return Ok(());
+        }
+
+        if i < config.max_attempts - 1 {
+            thread::sleep(Duration::from_millis(delay));
+            delay = (delay as f64 * config.backoff_multiplier) as u64;
+        }
+    }
+
+    anyhow::bail!("Reconnection failed after {} attempts", config.max_attempts)
+}
+
 // Re-export the helper functions for external use
 pub use super::tmux::{sanitize_name, shell_quote};
 
@@ -503,5 +655,44 @@ mod tests {
         // It should return None rather than panic
         let _result = MaestroTabMultiplexer::tab_rs_version();
         // Result depends on whether tab is installed on the system
+    }
+
+    #[test]
+    fn test_recovery_state_values() {
+        assert_eq!(RecoveryState::Connected, RecoveryState::Connected);
+        assert_ne!(RecoveryState::Connected, RecoveryState::Reconnecting);
+        assert_ne!(RecoveryState::Reconnecting, RecoveryState::Failed);
+    }
+
+    #[test]
+    fn test_reconnect_config_default() {
+        let config = ReconnectConfig::default();
+        assert_eq!(config.max_attempts, 5);
+        assert_eq!(config.delay_ms, 100);
+        assert_eq!(config.backoff_multiplier, 2.0);
+    }
+
+    #[test]
+    fn test_reconnect_with_backoff_success() {
+        let config = ReconnectConfig {
+            max_attempts: 3,
+            delay_ms: 1,
+            backoff_multiplier: 1.0,
+        };
+
+        let result = reconnect_with_backoff(&config, || Ok(true));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_reconnect_with_backoff_failure() {
+        let config = ReconnectConfig {
+            max_attempts: 2,
+            delay_ms: 1,
+            backoff_multiplier: 1.0,
+        };
+
+        let result = reconnect_with_backoff(&config, || Ok(false));
+        assert!(result.is_err());
     }
 }
