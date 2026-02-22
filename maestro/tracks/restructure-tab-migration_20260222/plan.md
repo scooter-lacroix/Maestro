@@ -11,10 +11,10 @@
 
 ### Task 1.1: Analysis and Planning
 
-- [ ] Task 1.1.1: Map all files in `maestro/leindex/rust/src/` to new locations
-- [ ] Task 1.1.2: Identify all import paths requiring updates (grep `leindex_core::`)
-- [ ] Task 1.1.3: Document workspace dependency graph
-- [ ] Task 1.1.4: Create backup branch for rollback safety
+- [x] Task 1.1.1: Map all files in `maestro/leindex/rust/src/` to new locations
+- [x] Task 1.1.2: Identify all import paths requiring updates (grep `leindex_core::`)
+- [x] Task 1.1.3: Document workspace dependency graph
+- [~] Task 1.1.4: Create backup branch for rollback safety
 
 ### Task 1.2: Create New Directory Structure
 
