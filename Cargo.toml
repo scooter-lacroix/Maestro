@@ -8,6 +8,14 @@ members = [
     "crates/ktop_collectors",
     "crates/core",
     "crates/gateway",
+    # maestro-tab members excluded due to dependency conflicts
+    # Will use tab-rs via subprocess/CLI instead of library integration
+    # "src/maestro-tab/tab",
+    # "src/maestro-tab/tab-command",
+    # "src/maestro-tab/tab-daemon",
+    # "src/maestro-tab/tab-pty",
+    # "src/maestro-tab/common/tab-api",
+    # "src/maestro-tab/common/tab-websocket",
 ]
 resolver = "2"
 
