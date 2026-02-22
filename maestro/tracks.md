@@ -358,3 +358,41 @@ This file tracks all major tracks for the project. Each track has its own detail
 **Total Tasks**: 63 (63 complete, 0 remaining)
 **Tests**: 144 maestro-core + 15 gateway = 159 total tests passing
 **Execution**: `/maestro:implement overhaul_20260217`
+
+---
+
+## [ ] Track: Maestro Restructure & Tab Multiplexer Migration
+*Link: [./maestro/tracks/restructure-tab-migration_20260222/](./maestro/tracks/restructure-tab-migration_20260222/)*
+
+**Description**: Comprehensive two-phase track: (1) Restructure Maestro project to surface LeIndex core and CLI from the deeply nested maestro/leindex/rust/ folder into a unified, proper package structure at the root level (src/). The maestro/ folder should ONLY contain templates for AI tools and maestro tracks. (2) Complete migration from tmux to forked tab-rs terminal multiplexer using the detailed plan in multiplexer-migration-plan.md, ensuring no functionality is lost and the migration is seamless.
+
+**Type**: Feature / Refactoring
+
+**Status**: NEW
+
+**Phases**:
+- Phase 1: Project Restructuring (15 tasks)
+  - Surface LeIndex core and CLI to src/ hierarchy
+  - Update all import paths across codebase
+  - Verify all tests pass
+- Phase 2: Tab Multiplexer Migration (24 tasks)
+  - Fork and customize tab-rs as maestro-tab
+  - Implement API compatibility layer
+  - Fix transparency with direct PTY output
+- Phase 3: Final Integration and Polish (6 tasks)
+  - Cross-phase integration testing
+  - Documentation updates
+  - Tzar review
+
+**Total Tasks**: 45
+
+**Estimated Duration**: 17-25 days
+
+**Success Criteria**:
+- All 193+ tests pass after restructuring
+- maestro/ folder contains only templates and tracks
+- Transparency works on session creation
+- Session creation <100ms, keyboard latency <10ms
+- Zero breaking changes to Cockpit
+
+**Execution**: `/maestro:implement restructure-tab-migration_20260222`
