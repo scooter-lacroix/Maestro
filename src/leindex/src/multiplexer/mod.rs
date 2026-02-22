@@ -8,15 +8,30 @@ pub use tmux::{
     TmuxSessionStatus as TmuxSessionStatusImpl,
 };
 
-// Re-export MaestroTab multiplexer as the primary multiplexer
-// This provides a compatibility layer that will eventually use tab-rs
-pub use maestro_tab::{MaestroTabMultiplexer, MaestroTabSession, MaestroTabSessionStatus};
-
 // Re-export helper functions from tmux module
 pub use tmux::{sanitize_name, shell_quote};
 
-// Type aliases for backward compatibility
-// These allow existing code to work with minimal changes
+// Feature-gated multiplexer selection
+// Default: Use MaestroTabMultiplexer (delegates to tmux with tab-rs integration hooks)
+// tmux-only: Use TmuxMultiplexer directly (for rollback)
+#[cfg(feature = "maestro-tab")]
+pub use maestro_tab::{MaestroTabMultiplexer, MaestroTabSession, MaestroTabSessionStatus};
+
+#[cfg(feature = "maestro-tab")]
 pub type TmuxMultiplexer = MaestroTabMultiplexer;
+
+#[cfg(feature = "maestro-tab")]
 pub type TmuxSession = MaestroTabSession;
+
+#[cfg(feature = "maestro-tab")]
 pub type TmuxSessionStatus = MaestroTabSessionStatus;
+
+// tmux-only mode: Direct use of TmuxMultiplexer
+#[cfg(not(feature = "maestro-tab"))]
+pub type TmuxMultiplexer = tmux::TmuxMultiplexer;
+
+#[cfg(not(feature = "maestro-tab"))]
+pub type TmuxSession = tmux::TmuxSession;
+
+#[cfg(not(feature = "maestro-tab"))]
+pub type TmuxSessionStatus = tmux::TmuxSessionStatus;
