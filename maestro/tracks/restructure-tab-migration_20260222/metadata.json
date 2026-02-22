@@ -1,0 +1,11 @@
+{
+  "track_id": "restructure-tab-migration_20260222",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-02-22T05:00:00Z",
+  "updated_at": "2026-02-22T05:00:00Z",
+  "description": "Comprehensive two-phase track: (1) Restructure Maestro to surface LeIndex core and CLI from maestro/leindex/rust/ to unified src/ structure. The maestro/ folder should ONLY contain AI tool templates and maestro tracks. (2) Complete migration from tmux to forked tab-rs terminal multiplexer for better transparency and performance.",
+  "phases": 3,
+  "total_tasks": 45,
+  "estimated_duration_days": "17-25"
+}
