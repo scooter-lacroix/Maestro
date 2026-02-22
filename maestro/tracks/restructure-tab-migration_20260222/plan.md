@@ -149,11 +149,14 @@
 
 ### Task 2.1: Fork and Setup tab-rs
 
-- [ ] Task 2.1.1: Create `src/maestro-tab/` directory for forked tab-rs
-- [ ] Task 2.1.2: Clone tab-rs from `https://github.com/austinjones/tab-rs.git`
-- [ ] Task 2.1.3: Initialize git repository with proper remotes
-- [ ] Task 2.1.4: Verify tab-rs builds standalone
-- [ ] Task 2.1.5: Document tab-rs dependencies
+- [x] Task 2.1.1: Create `src/maestro-tab/` directory for forked tab-rs
+- [x] Task 2.1.2: Clone tab-rs from `https://github.com/austinjones/tab-rs.git`
+- [x] Task 2.1.3: Initialize git repository with proper remotes
+- [ ] Task 2.1.4: Verify tab-rs builds standalone (blocked: lifeline version conflicts)
+- [x] Task 2.1.5: Document tab-rs dependencies (see api-compatibility-layer.md)
+
+**Note:** Direct library integration blocked due to lifeline version conflicts (0.4.0 vs 0.6.1).
+**Resolution:** Using subprocess/CLI integration approach instead (see fork-agent report).
 
 ### Task 2.2: Create Maestro Integration Layer
 
@@ -165,37 +168,37 @@
 
 ### Task 2.3: Implement MaestroTabMultiplexer Core
 
-- [ ] Task 2.3.1: Define `MaestroTabMultiplexer` struct
-- [ ] Task 2.3.2: Define `MaestroTabSession` struct (compatible with TmuxSession)
-- [ ] Task 2.3.3: Implement `new()` constructor (daemon connection)
-- [ ] Task 2.3.4: Implement session cache (DashMap)
-- [ ] Task 2.3.5: Implement cache TTL and refresh logic
+- [x] Task 2.3.1: Define `MaestroTabMultiplexer` struct
+- [x] Task 2.3.2: Define `MaestroTabSession` struct (compatible with TmuxSession)
+- [x] Task 2.3.3: Implement `new()` constructor (daemon connection)
+- [x] Task 2.3.4: Implement session cache (DashMap) - delegates to TmuxMultiplexer
+- [x] Task 2.3.5: Implement cache TTL and refresh logic - delegates to TmuxMultiplexer
 
 ### Task 2.4: Implement Session Management Methods
 
-- [ ] Task 2.4.1: Implement `session_exists()` - check tab exists
-- [ ] Task 2.4.2: Implement `session_exists_from_cache()` - cached check
-- [ ] Task 2.4.3: Implement `session_activity_from_cache()` - cached activity
-- [ ] Task 2.4.4: Implement `register_session_in_cache()` - cache registration
-- [ ] Task 2.4.5: Implement `refresh_session_cache()` - cache refresh
+- [x] Task 2.4.1: Implement `session_exists()` - check tab exists
+- [x] Task 2.4.2: Implement `session_exists_from_cache()` - cached check
+- [x] Task 2.4.3: Implement `session_activity_from_cache()` - cached activity
+- [x] Task 2.4.4: Implement `register_session_in_cache()` - cache registration
+- [x] Task 2.4.5: Implement `refresh_session_cache()` - cache refresh
 
 ### Task 2.5: Implement Session Lifecycle Methods
 
-- [ ] Task 2.5.1: Implement `start_session()` - create new tab
-- [ ] Task 2.5.2: Implement `attach()` - attach to existing tab
-- [ ] Task 2.5.3: Implement `kill_session()` - terminate tab
-- [ ] Task 2.5.4: Implement `list_maestro_sessions()` - list all tabs
-- [ ] Task 2.5.5: Implement `rename_session()` - rename tab
-- [ ] Task 2.5.6: Implement `fork_session()` - duplicate tab
+- [x] Task 2.5.1: Implement `start_session()` - create new tab
+- [x] Task 2.5.2: Implement `attach()` - attach to existing tab
+- [x] Task 2.5.3: Implement `kill_session()` - terminate tab
+- [x] Task 2.5.4: Implement `list_maestro_sessions()` - list all tabs
+- [x] Task 2.5.5: Implement `rename_session()` - rename tab
+- [x] Task 2.5.6: Implement `fork_session()` - duplicate tab
 
 ### Task 2.6: Implement Content and State Methods
 
-- [ ] Task 2.6.1: Implement `get_pane_content()` - capture buffer
-- [ ] Task 2.6.2: Implement `send_keys()` - send input to tab
-- [ ] Task 2.6.3: Implement `send_enter()` - send Enter key
-- [ ] Task 2.6.4: Implement `get_window_activity()` - get activity timestamp
-- [ ] Task 2.6.5: Implement `get_all_pane_paths()` - get working directories
-- [ ] Task 2.6.6: Implement `get_active_pane_path()` - get active path
+- [x] Task 2.6.1: Implement `get_pane_content()` - capture buffer
+- [x] Task 2.6.2: Implement `send_keys()` - send input to tab
+- [x] Task 2.6.3: Implement `send_enter()` - send Enter key
+- [x] Task 2.6.4: Implement `get_window_activity()` - get activity timestamp
+- [x] Task 2.6.5: Implement `get_all_pane_paths()` - get working directories
+- [x] Task 2.6.6: Implement `get_active_pane_path()` - get active path
 
 ### Task 2.7: Implement Environment and Configuration
 
@@ -222,28 +225,28 @@
 
 ### Task 2.10: Implement Helper Functions
 
-- [ ] Task 2.10.1: Implement `sanitize_name()` - from tmux.rs
-- [ ] Task 2.10.2: Implement `generate_short_id()` - unique IDs
-- [ ] Task 2.10.3: Implement `shell_quote()` - shell escaping
-- [ ] Task 2.10.4: Implement `detect_terminal()` - terminal detection
+- [x] Task 2.10.1: Implement `sanitize_name()` - from tmux.rs (re-exported)
+- [x] Task 2.10.2: Implement `generate_short_id()` - unique IDs (delegated)
+- [x] Task 2.10.3: Implement `shell_quote()` - shell escaping (re-exported)
+- [x] Task 2.10.4: Implement `detect_terminal()` - terminal detection (delegated)
 
 ### Task 2.11: Create Unit Tests
 
-- [ ] Task 2.11.1: Test `sanitize_name()` (port from tmux.rs)
-- [ ] Task 2.11.2: Test `generate_short_id()` uniqueness
-- [ ] Task 2.11.3: Test `shell_quote()` escaping
-- [ ] Task 2.11.4: Test session creation (naming convention)
+- [x] Task 2.11.1: Test `sanitize_name()` (port from tmux.rs)
+- [x] Task 2.11.2: Test `generate_short_id()` uniqueness
+- [x] Task 2.11.3: Test `shell_quote()` escaping
+- [x] Task 2.11.4: Test session creation (naming convention)
 - [ ] Task 2.11.5: Test transparency sequence validity
 - [ ] Task 2.11.6: Test cache TTL logic
 - [ ] Task 2.11.7: Test terminal detection
 
 ### Task 2.12: Update Multiplexer Module
 
-- [ ] Task 2.12.1: Move existing `src/leindex/multiplexer/tmux.rs` content to compatibility layer
-- [ ] Task 2.12.2: Update `src/leindex/multiplexer/mod.rs` with maestro_tab exports
-- [ ] Task 2.12.3: Add type aliases for backward compatibility
+- [x] Task 2.12.1: Move existing `src/leindex/multiplexer/tmux.rs` content to compatibility layer
+- [x] Task 2.12.2: Update `src/leindex/multiplexer/mod.rs` with maestro_tab exports
+- [x] Task 2.12.3: Add type aliases for backward compatibility
 - [ ] Task 2.12.4: Add feature flag `use-maestro-tab` for rollback
-- [ ] Task 2.12.5: Verify module compiles
+- [x] Task 2.12.5: Verify module compiles
 
 ### Task 2.13: Update Workspace Dependencies
 
