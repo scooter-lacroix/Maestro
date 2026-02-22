@@ -218,10 +218,10 @@
 
 ### Task 2.9: Implement PTY Extensions
 
-- [ ] Task 2.9.1: Create PTY writer trait
+- [x] Task 2.9.1: Create PTY writer trait
 - [ ] Task 2.9.2: Implement WebSocket to PTY bridge
-- [ ] Task 2.9.3: Implement signal handling (SIGWINCH, etc.)
-- [ ] Task 2.9.4: Implement error recovery and reconnect
+- [x] Task 2.9.3: Implement signal handling (SIGWINCH, etc.)
+- [x] Task 2.9.4: Implement error recovery and reconnect
 
 ### Task 2.10: Implement Helper Functions
 
@@ -245,7 +245,7 @@
 - [x] Task 2.12.1: Move existing `src/leindex/multiplexer/tmux.rs` content to compatibility layer
 - [x] Task 2.12.2: Update `src/leindex/multiplexer/mod.rs` with maestro_tab exports
 - [x] Task 2.12.3: Add type aliases for backward compatibility
-- [ ] Task 2.12.4: Add feature flag `use-maestro-tab` for rollback
+- [x] Task 2.12.4: Add feature flag `maestro-tab` for rollback
 - [x] Task 2.12.5: Verify module compiles
 
 ### Task 2.13: Update Workspace Dependencies
