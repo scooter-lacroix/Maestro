@@ -251,7 +251,10 @@ impl TextIndex {
 
     fn search(&self, query: &str, limit: usize) -> Vec<(String, f32)> {
         let query_lower = query.to_lowercase();
-        let query_terms: Vec<String> = query_lower.split_whitespace().map(|s| s.to_string()).collect();
+        let query_terms: Vec<String> = query_lower
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
 
         let mut scored: Vec<_> = self
             .documents

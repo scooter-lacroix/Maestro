@@ -5,10 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{
-    routing::get,
-    Router,
-};
+use axum::{routing::get, Router};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -32,10 +29,7 @@ pub async fn run(config: GatewayConfig) -> anyhow::Result<()> {
 }
 
 /// Run the gateway server with existing state
-pub async fn run_with_state(
-    config: GatewayConfig,
-    state: Arc<GatewayState>,
-) -> anyhow::Result<()> {
+pub async fn run_with_state(config: GatewayConfig, state: Arc<GatewayState>) -> anyhow::Result<()> {
     // Build the router
     let app = create_app(state.clone(), config.clone());
 
@@ -63,7 +57,9 @@ pub fn create_app(state: Arc<GatewayState>, config: GatewayConfig) -> Router {
         // Deny all CORS requests
         CorsLayer::new()
     } else if config.cors_allowed_origins.iter().any(|o| o == "*") {
-        warn!("CORS: Permissive mode enabled - allowing all origins. NOT RECOMMENDED FOR PRODUCTION!");
+        warn!(
+            "CORS: Permissive mode enabled - allowing all origins. NOT RECOMMENDED FOR PRODUCTION!"
+        );
         CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
@@ -95,12 +91,10 @@ pub fn create_app(state: Arc<GatewayState>, config: GatewayConfig) -> Router {
                     .collect();
 
                 match (methods, headers) {
-                    (Ok(methods), Ok(headers)) => {
-                        CorsLayer::new()
-                            .allow_origin(parsed_origins)
-                            .allow_methods(methods)
-                            .allow_headers(headers)
-                    }
+                    (Ok(methods), Ok(headers)) => CorsLayer::new()
+                        .allow_origin(parsed_origins)
+                        .allow_methods(methods)
+                        .allow_headers(headers),
                     _ => {
                         warn!("CORS: Invalid methods or headers configuration, using restrictive defaults");
                         CorsLayer::new()
@@ -129,18 +123,14 @@ pub fn create_app(state: Arc<GatewayState>, config: GatewayConfig) -> Router {
     Router::new()
         // WebSocket endpoint
         .route("/ws", get(ws_handler))
-
         // SSE endpoints
         .route("/events", get(sse_handler))
         .route("/events/{types}", get(crate::sse::sse_events_handler))
         .route("/heartbeat", get(sse_heartbeat))
-
         // Merge HTTP API routes
         .merge(create_routes())
-
         // Apply middleware
         .layer(middleware)
-
         // State
         .with_state(state)
 }

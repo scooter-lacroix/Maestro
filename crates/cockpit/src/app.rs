@@ -38,8 +38,9 @@ use crate::conductor::omp_agent::OmpAgentManager;
 use crate::modals;
 use crate::omp::{is_omp_available, OmpWorkerStatus};
 use crate::state::{
-    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, MaesterClawSetupCheck, MaesterClawSetupState,
-    McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
+    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, MaesterClawSetupCheck,
+    MaesterClawSetupState, McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind,
+    SettingsOption, Stats,
 };
 use crate::tabs::{
     render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
@@ -1711,9 +1712,9 @@ async fn run_app<B: Backend>(
                                                                     Some(new_path.clone()),
                                                                 )
                                                                 .is_ok()
-                                                            {
-                                                                moved += 1;
-                                                            }
+                                                        {
+                                                            moved += 1;
+                                                        }
                                                     }
                                                 }
 
@@ -2368,8 +2369,10 @@ async fn run_app<B: Backend>(
                                                 .output();
                                             match exec_result {
                                                 Ok(output) => {
-                                                    let stdout = String::from_utf8_lossy(&output.stdout);
-                                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                                    let stdout =
+                                                        String::from_utf8_lossy(&output.stdout);
+                                                    let stderr =
+                                                        String::from_utf8_lossy(&output.stderr);
                                                     let mut combined_output = String::new();
 
                                                     if !stdout.trim().is_empty() {
@@ -2407,11 +2410,13 @@ async fn run_app<B: Backend>(
                                                     }
 
                                                     if combined_output.trim().is_empty() {
-                                                        combined_output
-                                                            .push_str("No installer output captured.");
+                                                        combined_output.push_str(
+                                                            "No installer output captured.",
+                                                        );
                                                     }
 
-                                                    app.lsp_installer.install_output = Some(combined_output);
+                                                    app.lsp_installer.install_output =
+                                                        Some(combined_output);
                                                 }
                                                 Err(e) => {
                                                     app.status_message =
@@ -2707,7 +2712,9 @@ async fn run_app<B: Backend>(
                                     InputMode::NewSessionPath => app.new_session_path.push(c),
                                     InputMode::NewSessionTool => {
                                         // Cycle tools
-                                        let tools = ["claude", "gemini", "shell", "codex", "opencode", "amp"];
+                                        let tools = [
+                                            "claude", "gemini", "shell", "codex", "opencode", "amp",
+                                        ];
                                         if let Some(pos) =
                                             tools.iter().position(|&t| t == app.new_session_tool)
                                         {
@@ -2789,7 +2796,8 @@ async fn run_app<B: Backend>(
                                                 // Group delete logic
                                                 if let Some(path) = app.target_group_path.take() {
                                                     let _ = svc.delete_group(&path);
-                                                    app.status_message = "Group deleted".to_string();
+                                                    app.status_message =
+                                                        "Group deleted".to_string();
                                                     if let Ok(groups) = svc.list_session_groups() {
                                                         app.groups = groups;
                                                     }
@@ -3008,9 +3016,15 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::MAESTERCLAW {
                                     // MaesterClaw - cycle through sections
                                     app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::McpServers),
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::CronJobs),
+                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
+                                            Some(crate::tabs::CapabilitiesSection::McpServers)
+                                        }
+                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
+                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
+                                        }
+                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
+                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
+                                        }
                                         None => Some(crate::tabs::CapabilitiesSection::CronJobs),
                                     };
                                 } else if app.tab_index == tabs::SETTINGS {
@@ -3146,9 +3160,15 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::MAESTERCLAW {
                                     // MaesterClaw - cycle through sections (reverse)
                                     app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::McpServers),
+                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
+                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
+                                        }
+                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
+                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
+                                        }
+                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
+                                            Some(crate::tabs::CapabilitiesSection::McpServers)
+                                        }
                                         None => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                     };
                                 } else if app.tab_index == tabs::SETTINGS {
@@ -3226,19 +3246,27 @@ async fn run_app<B: Backend>(
                             }
 
                             // 2. Conductor Specific Alt Keys (must be before global tab switching)
-                            (KeyModifiers::ALT, KeyCode::Char('1')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::ALT, KeyCode::Char('1'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 app.conductor.details_mode =
                                     crate::conductor::model::DetailsViewMode::Details;
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('2')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::ALT, KeyCode::Char('2'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 app.conductor.details_mode =
                                     crate::conductor::model::DetailsViewMode::Output;
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('3')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::ALT, KeyCode::Char('3'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 app.conductor.details_mode =
                                     crate::conductor::model::DetailsViewMode::Prompt;
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::ALT, KeyCode::Char('p'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 app.conductor.output_focused = !app.conductor.output_focused;
                                 app.status_message = if app.conductor.output_focused {
                                     "Output focused. Scroll with Arrows/PgUp/PgDn."
@@ -3249,23 +3277,40 @@ async fn run_app<B: Backend>(
                             }
 
                             // 3. Global Tab Switching - Alt+N
-                            (KeyModifiers::ALT, KeyCode::Char('1')) => app.tab_index = tabs::DASHBOARD,
-                            (KeyModifiers::ALT, KeyCode::Char('2')) => app.tab_index = tabs::MAESTERCLAW,
-                            (KeyModifiers::ALT, KeyCode::Char('3')) => app.tab_index = tabs::SESSIONS,
-                            (KeyModifiers::ALT, KeyCode::Char('4')) => app.tab_index = tabs::PROJECTS,
-                            (KeyModifiers::ALT, KeyCode::Char('5')) => app.tab_index = tabs::CONDUCTOR,
+                            (KeyModifiers::ALT, KeyCode::Char('1')) => {
+                                app.tab_index = tabs::DASHBOARD
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('2')) => {
+                                app.tab_index = tabs::MAESTERCLAW
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('3')) => {
+                                app.tab_index = tabs::SESSIONS
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('4')) => {
+                                app.tab_index = tabs::PROJECTS
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('5')) => {
+                                app.tab_index = tabs::CONDUCTOR
+                            }
                             (KeyModifiers::ALT, KeyCode::Char('6')) => app.tab_index = tabs::MEMORY,
-                            (KeyModifiers::ALT, KeyCode::Char('7')) => app.tab_index = tabs::ANALYSIS,
-                            (KeyModifiers::ALT, KeyCode::Char('8')) => app.tab_index = tabs::KRUSTOP,
+                            (KeyModifiers::ALT, KeyCode::Char('7')) => {
+                                app.tab_index = tabs::ANALYSIS
+                            }
+                            (KeyModifiers::ALT, KeyCode::Char('8')) => {
+                                app.tab_index = tabs::KRUSTOP
+                            }
                             (KeyModifiers::ALT, KeyCode::Char('9')) => app.tab_index = tabs::LSPS,
-                            (KeyModifiers::ALT, KeyCode::Char('0')) => app.tab_index = tabs::SETTINGS,
+                            (KeyModifiers::ALT, KeyCode::Char('0')) => {
+                                app.tab_index = tabs::SETTINGS
+                            }
                             // 3b. MaesterClaw setup wizard controls
                             (KeyModifiers::NONE, KeyCode::Char('w'))
                                 if app.tab_index == tabs::MAESTERCLAW =>
                             {
                                 if app.maesterclaw_setup.is_open {
                                     app.close_maesterclaw_setup();
-                                    app.status_message = "MaesterClaw setup wizard closed".to_string();
+                                    app.status_message =
+                                        "MaesterClaw setup wizard closed".to_string();
                                 } else {
                                     app.open_maesterclaw_setup();
                                     app.status_message =
@@ -3297,7 +3342,6 @@ async fn run_app<B: Backend>(
                             {
                                 app.advance_maesterclaw_setup();
                             }
-
 
                             // 4. Conductor Catch-All
                             _ if app.tab_index == tabs::CONDUCTOR => {
@@ -3381,7 +3425,9 @@ async fn run_app<B: Backend>(
                             }
 
                             // 5b. Ralph Loop Keys for Conductor (explicit handling for s, p, r, ?)
-                            (KeyModifiers::NONE, KeyCode::Char('s')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::NONE, KeyCode::Char('s'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 // Start/Run track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3461,7 +3507,9 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (KeyModifiers::NONE, KeyCode::Char('p')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::NONE, KeyCode::Char('p'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 // Pause track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3541,7 +3589,9 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (KeyModifiers::NONE, KeyCode::Char('r')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::NONE, KeyCode::Char('r'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 // Resume track
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3621,7 +3671,9 @@ async fn run_app<B: Backend>(
                                 }
                             }
 
-                            (KeyModifiers::NONE, KeyCode::Char('?')) if app.tab_index == tabs::CONDUCTOR => {
+                            (KeyModifiers::NONE, KeyCode::Char('?'))
+                                if app.tab_index == tabs::CONDUCTOR =>
+                            {
                                 // Show status/help
                                 use crate::conductor::keybindings::{
                                     handle_key_event, ConductorAction,
@@ -3735,7 +3787,9 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == tabs::PROJECTS => {
+                            (KeyModifiers::ALT, KeyCode::Char('p'))
+                                if app.tab_index == tabs::PROJECTS =>
+                            {
                                 app.preview_focused = !app.preview_focused;
                                 app.status_message = if app.preview_focused {
                                     "Preview focused. Scroll with Arrows/PgUp/PgDn."
@@ -4053,7 +4107,9 @@ async fn run_app<B: Backend>(
                                     "LSP Installer - Select an LSP to install".to_string();
                             }
                             // Ktop-specific keybindings (use Alt to avoid conflicts)
-                            (KeyModifiers::ALT, KeyCode::Char('p')) if app.tab_index == tabs::KRUSTOP => {
+                            (KeyModifiers::ALT, KeyCode::Char('p'))
+                                if app.tab_index == tabs::KRUSTOP =>
+                            {
                                 // Ktop tab - pause/resume
                                 if let Some(ref mut ktop) = app.ktop_state {
                                     ktop.toggle_pause();
@@ -4525,9 +4581,15 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::MAESTERCLAW {
                                     // MaesterClaw - cycle through sections (reverse)
                                     app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => Some(crate::tabs::CapabilitiesSection::CronJobs),
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => Some(crate::tabs::CapabilitiesSection::McpServers),
+                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
+                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
+                                        }
+                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
+                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
+                                        }
+                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
+                                            Some(crate::tabs::CapabilitiesSection::McpServers)
+                                        }
                                         None => Some(crate::tabs::CapabilitiesSection::Sandbox),
                                     };
                                 } else if app.tab_index == tabs::SETTINGS {
@@ -5062,23 +5124,23 @@ fn ui(frame: &mut Frame, app: &mut App) {
     // Header with tabs
     let is_focused = app.tab_index == tabs::DASHBOARD && app.dash_focus == DashFocus::Tabs;
     let tabs = Tabs::new(tabs::all_titles())
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(if is_focused {
-                BorderType::Double
-            } else {
-                BorderType::Rounded
-            })
-            .border_style(if is_focused {
-                Style::default().fg(theme.warning).bold()
-            } else {
-                Style::default().fg(theme.muted)
-            })
-            .title(" Maestro Cockpit v2.0 "),
-    )
-    .select(app.tab_index)
-    .highlight_style(Style::default().fg(theme.accent).bold());
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(if is_focused {
+                    BorderType::Double
+                } else {
+                    BorderType::Rounded
+                })
+                .border_style(if is_focused {
+                    Style::default().fg(theme.warning).bold()
+                } else {
+                    Style::default().fg(theme.muted)
+                })
+                .title(" Maestro Cockpit v2.0 "),
+        )
+        .select(app.tab_index)
+        .highlight_style(Style::default().fg(theme.accent).bold());
 
     frame.render_widget(tabs, chunks[0]);
 

@@ -1605,7 +1605,10 @@ exit 1
 
         assert!(result.is_success());
         // Duration should be valid - use microseconds for sub-millisecond precision
-        assert!(result.duration.as_micros() > 0, "Duration should be greater than 0 microseconds");
+        assert!(
+            result.duration.as_micros() > 0,
+            "Duration should be greater than 0 microseconds"
+        );
     }
 
     #[tokio::test]
@@ -2263,7 +2266,11 @@ exit 1
         let result = runner.execute_chain(steps).await.unwrap();
 
         // Single step should succeed
-        assert!(result.steps[0].is_success(), "First step should succeed but got: {:?}", result.steps[0].output);
+        assert!(
+            result.steps[0].is_success(),
+            "First step should succeed but got: {:?}",
+            result.steps[0].output
+        );
         assert_eq!(result.steps.len(), 1);
         assert!(result.failed_at_step.is_none());
     }
@@ -2660,8 +2667,7 @@ exit 1
                 || subagent_result
                     .error
                     .as_ref()
-                    .is_some_and(|e| e.contains("cancelled")
-                        || e.contains("timed out"))
+                    .is_some_and(|e| e.contains("cancelled") || e.contains("timed out"))
         );
     }
 

@@ -58,7 +58,11 @@ pub struct IncomingMessage {
 
 impl IncomingMessage {
     /// Create a new incoming message
-    pub fn new(channel: impl Into<String>, user_id: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn new(
+        channel: impl Into<String>,
+        user_id: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             id: MessageId::new(),
             channel: channel.into(),
@@ -92,9 +96,15 @@ pub enum ResponseContent {
     /// Markdown response
     Markdown { text: String },
     /// Media attachment
-    Media { url: String, caption: Option<String> },
+    Media {
+        url: String,
+        caption: Option<String>,
+    },
     /// Code block
-    Code { code: String, language: Option<String> },
+    Code {
+        code: String,
+        language: Option<String>,
+    },
 }
 
 /// Stream of incoming messages
@@ -126,7 +136,11 @@ pub trait ChannelPlugin: Send + Sync {
     fn name(&self) -> &str;
 
     /// Start an account with the given configuration
-    async fn start_account(&mut self, account_id: &str, config: serde_json::Value) -> anyhow::Result<()>;
+    async fn start_account(
+        &mut self,
+        account_id: &str,
+        config: serde_json::Value,
+    ) -> anyhow::Result<()>;
 
     /// Stop an account
     async fn stop_account(&mut self, account_id: &str) -> anyhow::Result<()>;

@@ -8,9 +8,7 @@ use ratatui::{
     prelude::*,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, List, ListItem, Paragraph, Wrap,
-    },
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
@@ -63,18 +61,38 @@ pub fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
             ])
             .split(chunks[1]);
 
-        (chunks[0], None, Some(main_chunks[0]), None, Some(main_chunks[1]))
+        (
+            chunks[0],
+            None,
+            Some(main_chunks[0]),
+            None,
+            Some(main_chunks[1]),
+        )
     } else {
         // Original layout with optional suggestion hint: search (3 lines), hint (optional, 2 lines), memories (rest)
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
-                if has_suggestions { Constraint::Length(2) } else { Constraint::Length(0) },
+                if has_suggestions {
+                    Constraint::Length(2)
+                } else {
+                    Constraint::Length(0)
+                },
                 Constraint::Min(0),
             ])
             .split(area);
-        (chunks[0], if has_suggestions { Some(chunks[1]) } else { None }, Some(chunks[2]), None, None)
+        (
+            chunks[0],
+            if has_suggestions {
+                Some(chunks[1])
+            } else {
+                None
+            },
+            Some(chunks[2]),
+            None,
+            None,
+        )
     };
 
     // Render search bar
@@ -218,7 +236,10 @@ fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
                 lines.push(Line::from(vec![
                     Span::raw("      "),
                     Span::styled(
-                        format!("Created: {} | Access: {} times", m.created_at, m.access_count),
+                        format!(
+                            "Created: {} | Access: {} times",
+                            m.created_at, m.access_count
+                        ),
                         Style::default().fg(Color::DarkGray),
                     ),
                 ]));
@@ -305,7 +326,12 @@ fn render_memory_detail(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render the content and metadata section of the detail panel
-fn render_detail_content(frame: &mut Frame, area: Rect, memory: &crate::state::MemoryInfo, theme: &crate::theme::Theme) {
+fn render_detail_content(
+    frame: &mut Frame,
+    area: Rect,
+    memory: &crate::state::MemoryInfo,
+    theme: &crate::theme::Theme,
+) {
     let (category_color, category_icon) = category_style(&memory.category);
 
     let mut lines = vec![
@@ -464,7 +490,11 @@ fn render_vector_visualization(
 }
 
 /// Generate ASCII art for vector space visualization
-fn generate_vector_visualization(memory: &crate::state::MemoryInfo, width: u16, height: u16) -> Vec<Line<'static>> {
+fn generate_vector_visualization(
+    memory: &crate::state::MemoryInfo,
+    width: u16,
+    height: u16,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     // Create a grid representation
@@ -651,10 +681,7 @@ fn render_suggestion_hints(frame: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::BOTTOM | Borders::TOP)
         .border_style(Style::default().fg(theme.muted));
 
-    frame.render_widget(
-        Paragraph::new(hint_lines).block(hint_block),
-        area,
-    );
+    frame.render_widget(Paragraph::new(hint_lines).block(hint_block), area);
 }
 
 #[cfg(test)]

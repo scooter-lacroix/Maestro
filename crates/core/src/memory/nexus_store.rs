@@ -36,7 +36,7 @@ use tracing::{debug, info};
 
 use super::types::{
     EmbeddingMetadata, MemoryCategory, MemoryLaneType, VectorSearchResult, VectorStoreConfig,
-    EMBEDDING_DIMENSION, DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSION,
 };
 
 /// Node in the HNSW graph
@@ -149,7 +149,12 @@ impl HnswIndex {
 
         // Insert at each layer from insertion layer down to 0
         for l in (0..=layer.min(self.max_layer)).rev() {
-            let neighbors = self.search_layer(&self.nodes[&current].vector, l, self.ef_construction, current);
+            let neighbors = self.search_layer(
+                &self.nodes[&current].vector,
+                l,
+                self.ef_construction,
+                current,
+            );
             node.neighbors[l] = neighbors.iter().cloned().collect();
 
             // Connect neighbors back to this node
@@ -388,7 +393,12 @@ struct GraphTreeNode {
 }
 
 impl GraphTreeNode {
-    fn new(id: i64, category: MemoryCategory, lane_type: Option<MemoryLaneType>, priority: u8) -> Self {
+    fn new(
+        id: i64,
+        category: MemoryCategory,
+        lane_type: Option<MemoryLaneType>,
+        priority: u8,
+    ) -> Self {
         let weight = match priority {
             1 => 1.5,
             2 => 1.2,
@@ -423,7 +433,13 @@ impl GraphTree {
         }
     }
 
-    fn add_node(&mut self, id: i64, category: MemoryCategory, lane_type: Option<MemoryLaneType>, priority: u8) {
+    fn add_node(
+        &mut self,
+        id: i64,
+        category: MemoryCategory,
+        lane_type: Option<MemoryLaneType>,
+        priority: u8,
+    ) {
         // Build a lightweight hierarchy: attach to the latest node from the same category.
         let parent_id = self
             .nodes
@@ -445,12 +461,18 @@ impl GraphTree {
             // Base weight from explicit priority assigned at insertion time.
             let weighted = base_similarity * node.weight;
 
-            let lane_boost = node.lane_type.as_ref().map(|lt| lt.boost_factor()).unwrap_or(1.0);
+            let lane_boost = node
+                .lane_type
+                .as_ref()
+                .map(|lt| lt.boost_factor())
+                .unwrap_or(1.0);
 
             // Category-specific boost nudges critical categories higher.
             let category_boost = match node.category {
                 MemoryCategory::Decisions | MemoryCategory::Specifications => 1.1,
-                MemoryCategory::Patterns | MemoryCategory::Facts | MemoryCategory::Preferences => 1.05,
+                MemoryCategory::Patterns | MemoryCategory::Facts | MemoryCategory::Preferences => {
+                    1.05
+                }
                 _ => 1.0,
             };
 
@@ -581,7 +603,14 @@ impl NexusVectorStore {
         // Add to HNSW index
         {
             let mut index = self.index.write().await;
-            index.insert(memory_id, embedding, namespace_id, category, lane_type, priority)?;
+            index.insert(
+                memory_id,
+                embedding,
+                namespace_id,
+                category,
+                lane_type,
+                priority,
+            )?;
         }
 
         // Add to graph tree
@@ -598,7 +627,8 @@ impl NexusVectorStore {
             stats.max_layer = index.max_layer;
             let tree = self.tree.read().await;
             stats.tree_size = tree.len();
-            stats.memory_usage_estimate = stats.total_vectors * self.expected_dimension() * 4; // 4 bytes per f32
+            stats.memory_usage_estimate = stats.total_vectors * self.expected_dimension() * 4;
+            // 4 bytes per f32
         }
 
         debug!(
@@ -723,22 +753,22 @@ impl NexusVectorStore {
                 return Ok(id);
             }
         }
-        
+
         // Create new namespace
         let mut counter = self.namespace_counter.write().await;
         let id = *counter;
         *counter += 1;
-        
+
         // Store the name -> id mapping
         let mut namespaces = self.namespaces.write().await;
         namespaces.insert(name.to_string(), id);
-        
+
         // Update stats
         {
             let mut stats = self.stats.write().await;
             stats.namespace_count = namespaces.len();
         }
-        
+
         info!("Created namespace '{}' with id {}", name, id);
         Ok(id)
     }
@@ -818,24 +848,14 @@ mod tests {
         // Store a vector
         let embedding = vec![0.5; EMBEDDING_DIMENSION];
         store
-            .store_embedding(
-                1,
-                embedding.clone(),
-                1,
-                MemoryCategory::General,
-                None,
-                3,
-            )
+            .store_embedding(1, embedding.clone(), 1, MemoryCategory::General, None, 3)
             .await
             .unwrap();
 
         assert_eq!(store.len().await, 1);
 
         // Search with same vector
-        let results = store
-            .search_similar(&embedding, 1, 10, 0.0)
-            .await
-            .unwrap();
+        let results = store.search_similar(&embedding, 1, 10, 0.0).await.unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, 1);
@@ -924,14 +944,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .store_embedding(
-                2,
-                embedding.clone(),
-                1,
-                MemoryCategory::General,
-                None,
-                3,
-            )
+            .store_embedding(2, embedding.clone(), 1, MemoryCategory::General, None, 3)
             .await
             .unwrap();
 

@@ -514,9 +514,10 @@ pub fn get_languages_needing_lsp(
     for ext in detected_extensions {
         for lsp in get_lsp_for_extension(ext) {
             if !installed_set.contains(lsp.name)
-                && !needed.iter().any(|l: &LspInfo| l.name == lsp.name) {
-                    needed.push(lsp.clone());
-                }
+                && !needed.iter().any(|l: &LspInfo| l.name == lsp.name)
+            {
+                needed.push(lsp.clone());
+            }
         }
     }
 

@@ -13,8 +13,8 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::theme::theme_from_name;
 use crate::state::MaesterClawSetupCheck;
+use crate::theme::theme_from_name;
 
 /// Capabilities section selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,9 +56,10 @@ pub fn render_capabilities(frame: &mut Frame, app: &App) {
 
     // Render content based on selected section
     render_section_content(frame, app, chunks[1]);
-    let iflow_hint = Paragraph::new(" [W] Setup Wizard   |   iFlow non-interactive: iflow -p \"<prompt>\" ")
-        .alignment(Alignment::Center)
-        .style(ratatui::style::Style::default().fg(theme.muted));
+    let iflow_hint =
+        Paragraph::new(" [W] Setup Wizard   |   iFlow non-interactive: iflow -p \"<prompt>\" ")
+            .alignment(Alignment::Center)
+            .style(ratatui::style::Style::default().fg(theme.muted));
     frame.render_widget(iflow_hint, chunks[2]);
 
     if app.maesterclaw_setup.is_open {
@@ -90,13 +91,21 @@ fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
         ratatui::style::Style::default().fg(theme.fg)
     };
     let cron_count = app.cron_jobs.len();
-    let cron_tab = Paragraph::new(format!(" {} ⏰ Cron Jobs ({}) ", if section == CapabilitiesSection::CronJobs { "▶" } else { " " }, cron_count))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(cron_style),
-        );
+    let cron_tab = Paragraph::new(format!(
+        " {} ⏰ Cron Jobs ({}) ",
+        if section == CapabilitiesSection::CronJobs {
+            "▶"
+        } else {
+            " "
+        },
+        cron_count
+    ))
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(cron_style),
+    );
     frame.render_widget(cron_tab, tabs[0]);
 
     // MCP Servers tab
@@ -108,13 +117,20 @@ fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         ratatui::style::Style::default().fg(theme.fg)
     };
-    let mcp_tab = Paragraph::new(format!(" {} 🔌 MCP Servers ", if section == CapabilitiesSection::McpServers { "▶" } else { " " }))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(mcp_style),
-        );
+    let mcp_tab = Paragraph::new(format!(
+        " {} 🔌 MCP Servers ",
+        if section == CapabilitiesSection::McpServers {
+            "▶"
+        } else {
+            " "
+        }
+    ))
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(mcp_style),
+    );
     frame.render_widget(mcp_tab, tabs[1]);
 
     // Sandbox tab
@@ -126,13 +142,20 @@ fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         ratatui::style::Style::default().fg(theme.fg)
     };
-    let sandbox_tab = Paragraph::new(format!(" {} 🔒 Sandbox ", if section == CapabilitiesSection::Sandbox { "▶" } else { " " }))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(sandbox_style),
-        );
+    let sandbox_tab = Paragraph::new(format!(
+        " {} 🔒 Sandbox ",
+        if section == CapabilitiesSection::Sandbox {
+            "▶"
+        } else {
+            " "
+        }
+    ))
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(sandbox_style),
+    );
     frame.render_widget(sandbox_tab, tabs[2]);
 }
 
@@ -199,7 +222,9 @@ fn render_setup_wizard(frame: &mut Frame, app: &App) {
         lines.push(Line::from(format!("{} {}", marker, step.title)));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from("Controls: Enter/Right next • Left back • Esc close"));
+    lines.push(Line::from(
+        "Controls: Enter/Right next • Left back • Esc close",
+    ));
 
     let paragraph = Paragraph::new(lines)
         .block(

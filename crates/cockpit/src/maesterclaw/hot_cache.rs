@@ -179,7 +179,11 @@ impl HotCache {
     /// Add a new suggestion to the cache
     pub fn insert(&mut self, suggestion: MemorySuggestion) {
         // Check if we already have this memory
-        if let Some(existing) = self.suggestions.iter_mut().find(|s| s.suggestion.memory_id == suggestion.memory_id) {
+        if let Some(existing) = self
+            .suggestions
+            .iter_mut()
+            .find(|s| s.suggestion.memory_id == suggestion.memory_id)
+        {
             // Update existing suggestion with new relevance
             existing.suggestion = suggestion;
             existing.ttl = SuggestionTtl::from_secs(DEFAULT_TTL_SECS);
@@ -205,7 +209,8 @@ impl HotCache {
 
         // Sort by priority
         self.suggestions.sort_by(|a, b| {
-            b.suggestion.priority()
+            b.suggestion
+                .priority()
                 .partial_cmp(&a.suggestion.priority())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -241,7 +246,8 @@ impl HotCache {
         if self.suggestions.len() > self.max_suggestions {
             // Sort by relevance and keep top N
             self.suggestions.sort_by(|a, b| {
-                b.suggestion.relevance_score
+                b.suggestion
+                    .relevance_score
                     .partial_cmp(&a.suggestion.relevance_score)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
@@ -277,11 +283,7 @@ mod tests {
 
     #[test]
     fn test_memory_suggestion_new() {
-        let suggestion = MemorySuggestion::new(
-            123,
-            "User prefers Vim editor".to_string(),
-            0.85,
-        );
+        let suggestion = MemorySuggestion::new(123, "User prefers Vim editor".to_string(), 0.85);
 
         assert_eq!(suggestion.memory_id, 123);
         assert!(!suggestion.preview.is_empty());
@@ -411,7 +413,12 @@ mod tests {
     fn test_memory_suggestion_priority() {
         let suggestion = MemorySuggestion::new(1, "test".to_string(), 0.8);
         let priority = suggestion.priority();
-        assert_eq!(priority, 0.64); // 0.8 * 0.8
+        // Use approximate comparison for floating point (0.8 * 0.8 = 0.64)
+        assert!(
+            (priority - 0.64).abs() < 0.001,
+            "Priority {} should be close to 0.64",
+            priority
+        );
     }
 
     #[test]

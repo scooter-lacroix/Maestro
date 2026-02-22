@@ -107,7 +107,9 @@ impl DetectedPattern {
         }
 
         // File reference patterns
-        if text.contains('/') && (text.contains(".rs") || text.contains(".py") || text.contains(".ts")) {
+        if text.contains('/')
+            && (text.contains(".rs") || text.contains(".py") || text.contains(".ts"))
+        {
             patterns.push(Self::FileReference);
         }
 
@@ -375,9 +377,9 @@ impl HotCache {
             stats.total_processed += 1;
             stats.total_suggestions += 1;
             let latency = start.elapsed().as_millis() as f64;
-            stats.avg_latency_ms =
-                (stats.avg_latency_ms * (stats.total_processed - 1) as f64 + latency)
-                    / stats.total_processed as f64;
+            stats.avg_latency_ms = (stats.avg_latency_ms * (stats.total_processed - 1) as f64
+                + latency)
+                / stats.total_processed as f64;
         }
 
         // Broadcast suggestion
@@ -605,15 +607,39 @@ mod tests {
         let cache = HotCache::new(config, embedding_service).await.unwrap();
 
         cache
-            .add_suggestion(MemorySuggestion::new(1, 1, "a", 0.5, 0.5, 0.5, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                1,
+                1,
+                "a",
+                0.5,
+                0.5,
+                0.5,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
         cache
-            .add_suggestion(MemorySuggestion::new(2, 1, "b", 0.5, 0.5, 0.5, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                2,
+                1,
+                "b",
+                0.5,
+                0.5,
+                0.5,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
         cache
-            .add_suggestion(MemorySuggestion::new(3, 1, "c", 0.5, 0.5, 0.5, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                3,
+                1,
+                "c",
+                0.5,
+                0.5,
+                0.5,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
 
@@ -633,7 +659,15 @@ mod tests {
         let cache = HotCache::new(config, embedding_service).await.unwrap();
 
         cache
-            .add_suggestion(MemorySuggestion::new(1, 1, "test", 0.5, 0.5, 0.5, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                1,
+                1,
+                "test",
+                0.5,
+                0.5,
+                0.5,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
 
@@ -666,7 +700,8 @@ mod tests {
     async fn test_mark_viewed() {
         let cache = create_test_cache().await;
 
-        let suggestion = MemorySuggestion::new(1, 1, "test", 0.5, 0.5, 0.5, MemoryCategory::General);
+        let suggestion =
+            MemorySuggestion::new(1, 1, "test", 0.5, 0.5, 0.5, MemoryCategory::General);
         cache.add_suggestion(suggestion).await.unwrap();
 
         assert!(cache.get_suggestions().await[0].is_new);
@@ -681,15 +716,39 @@ mod tests {
         let cache = create_test_cache().await;
 
         cache
-            .add_suggestion(MemorySuggestion::new(1, 1, "a", 0.5, 0.5, 0.5, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                1,
+                1,
+                "a",
+                0.5,
+                0.5,
+                0.5,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
         cache
-            .add_suggestion(MemorySuggestion::new(2, 1, "b", 0.9, 0.9, 0.9, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                2,
+                1,
+                "b",
+                0.9,
+                0.9,
+                0.9,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
         cache
-            .add_suggestion(MemorySuggestion::new(3, 1, "c", 0.7, 0.7, 0.7, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                3,
+                1,
+                "c",
+                0.7,
+                0.7,
+                0.7,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
 
@@ -703,7 +762,15 @@ mod tests {
         let cache = create_test_cache().await;
 
         cache
-            .add_suggestion(MemorySuggestion::new(1, 1, "test", 0.5, 0.5, 0.5, MemoryCategory::General))
+            .add_suggestion(MemorySuggestion::new(
+                1,
+                1,
+                "test",
+                0.5,
+                0.5,
+                0.5,
+                MemoryCategory::General,
+            ))
             .await
             .unwrap();
         assert!(!cache.get_suggestions().await.is_empty());

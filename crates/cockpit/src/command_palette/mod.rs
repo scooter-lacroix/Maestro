@@ -294,8 +294,7 @@ impl CommandPalette {
 
             // Also include substring matches for shortcuts
             for cmd in &self.commands {
-                if cmd.shortcut.to_lowercase().contains(&query) && seen_ids.insert(cmd.id.clone())
-                {
+                if cmd.shortcut.to_lowercase().contains(&query) && seen_ids.insert(cmd.id.clone()) {
                     ranked.push(cmd.clone());
                 }
             }
@@ -382,10 +381,19 @@ impl CommandPalette {
             Line::from(vec![
                 Span::styled("> ", Style::default().fg(theme.accent)),
                 Span::styled(&self.query, Style::default().fg(theme.fg)),
-                Span::styled("_", Style::default().fg(theme.accent).add_modifier(Modifier::SLOW_BLINK)),
+                Span::styled(
+                    "_",
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ),
             ]),
         ])
-        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(theme.muted)));
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.muted)),
+        );
         frame.render_widget(input, chunks[0]);
 
         // Render command list grouped by category
@@ -402,7 +410,10 @@ impl CommandPalette {
                 };
 
                 let shortcut_style = if is_selected {
-                    Style::default().fg(theme.bg).bg(theme.accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme.bg)
+                        .bg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme.muted)
                 };
@@ -416,8 +427,7 @@ impl CommandPalette {
             })
             .collect();
 
-        let list = List::new(items)
-            .highlight_style(Style::default().bg(theme.accent).fg(theme.bg));
+        let list = List::new(items).highlight_style(Style::default().bg(theme.accent).fg(theme.bg));
         frame.render_stateful_widget(list, chunks[1], &mut self.list_state.clone());
     }
 }
@@ -550,12 +560,16 @@ mod tests {
     fn test_command_categories() {
         let palette = CommandPalette::new();
 
-        let tabs: Vec<_> = palette.commands.iter()
+        let tabs: Vec<_> = palette
+            .commands
+            .iter()
             .filter(|c| c.category == CommandCategory::Tabs)
             .collect();
         assert!(!tabs.is_empty());
 
-        let caps: Vec<_> = palette.commands.iter()
+        let caps: Vec<_> = palette
+            .commands
+            .iter()
             .filter(|c| c.category == CommandCategory::Capabilities)
             .collect();
         assert!(!caps.is_empty());

@@ -14,88 +14,88 @@
 - [x] Task 1.1.1: Map all files in `maestro/leindex/rust/src/` to new locations
 - [x] Task 1.1.2: Identify all import paths requiring updates (grep `leindex_core::`)
 - [x] Task 1.1.3: Document workspace dependency graph
-- [~] Task 1.1.4: Create backup branch for rollback safety
+- [x] Task 1.1.4: Create backup branch for rollback safety
 
 ### Task 1.2: Create New Directory Structure
 
-- [ ] Task 1.2.1: Create `src/` directory at repository root
-- [ ] Task 1.2.2: Create `src/leindex/` for LeIndex core
-- [ ] Task 1.2.3: Create `src/cli/` for CLI entry point (if separate from leindex)
-- [ ] Task 1.2.4: Create `src/multiplexer/` for terminal multiplexers
-- [ ] Task 1.2.5: Create `src/orchestrate/` for conductor engine
-- [ ] Task 1.2.6: Create `src/memory/` for memory service
+- [x] Task 1.2.1: Create `src/` directory at repository root
+- [x] Task 1.2.2: Create `src/leindex/` for LeIndex core
+- [x] Task 1.2.3: Create `src/cli/` for CLI entry point (if separate from leindex)
+- [x] Task 1.2.4: Create `src/multiplexer/` for terminal multiplexers
+- [x] Task 1.2.5: Create `src/orchestrate/` for conductor engine
+- [x] Task 1.2.6: Create `src/memory/` for memory service
 
 ### Task 1.3: Relocate LeIndex Core
 
-- [ ] Task 1.3.1: Move `maestro/leindex/rust/src/lib.rs` → `src/leindex/lib.rs`
-- [ ] Task 1.3.2: Move `maestro/leindex/rust/src/memory/` → `src/leindex/memory/`
-- [ ] Task 1.3.3: Move `maestro/leindex/rust/src/orchestrate/` → `src/leindex/orchestrate/`
-- [ ] Task 1.3.4: Move `maestro/leindex/rust/src/multiplexer/` → `src/leindex/multiplexer/`
-- [ ] Task 1.3.5: Move `maestro/leindex/rust/src/lsp/` → `src/leindex/lsp/`
-- [ ] Task 1.3.6: Move `maestro/leindex/rust/src/analyze/` → `src/leindex/analyze/`
-- [ ] Task 1.3.7: Verify all files moved correctly
+- [x] Task 1.3.1: Move `maestro/leindex/rust/src/lib.rs` → `src/leindex/lib.rs`
+- [x] Task 1.3.2: Move `maestro/leindex/rust/src/memory/` → `src/leindex/memory/`
+- [x] Task 1.3.3: Move `maestro/leindex/rust/src/orchestrate/` → `src/leindex/orchestrate/`
+- [x] Task 1.3.4: Move `maestro/leindex/rust/src/multiplexer/` → `src/leindex/multiplexer/`
+- [x] Task 1.3.5: Move `maestro/leindex/rust/src/lsp/` → `src/leindex/lsp/`
+- [x] Task 1.3.6: Move `maestro/leindex/rust/src/analyze/` → `src/leindex/analyze/`
+- [x] Task 1.3.7: Verify all files moved correctly
 
 ### Task 1.4: Update LeIndex Cargo.toml
 
-- [ ] Task 1.4.1: Create `src/leindex/Cargo.toml` from `maestro/leindex/rust/Cargo.toml`
-- [ ] Task 1.4.2: Update `[package]` section with new paths
-- [ ] Task 1.4.3: Update `[dependencies]` for relative path changes
-- [ ] Task 1.4.4: Update `[dev-dependencies]` if applicable
+- [x] Task 1.4.1: Create `src/leindex/Cargo.toml` from `maestro/leindex/rust/Cargo.toml`
+- [x] Task 1.4.2: Update `[package]` section with new paths
+- [x] Task 1.4.3: Update `[dependencies]` for relative path changes
+- [x] Task 1.4.4: Update `[dev-dependencies]` if applicable
 
 ### Task 1.5: Update Root Workspace Configuration
 
-- [ ] Task 1.5.1: Update root `Cargo.toml` workspace members
-- [ ] Task 1.5.2: Add `src/leindex` to workspace members
-- [ ] Task 1.5.3: Add `src/cli` (if separate) to workspace members
-- [ ] Task 1.5.4: Remove `maestro/leindex/rust` from workspace members
-- [ ] Task 1.5.5: Verify `cargo build --workspace` succeeds
+- [x] Task 1.5.1: Update root `Cargo.toml` workspace members
+- [x] Task 1.5.2: Add `src/leindex` to workspace members
+- [x] Task 1.5.3: Add `src/cli` (if separate) to workspace members
+- [x] Task 1.5.4: Remove `maestro/leindex/rust` from workspace members
+- [x] Task 1.5.5: Verify `cargo build --workspace` succeeds
 
 ### Task 1.6: Update Import Paths in Cockpit
 
-- [ ] Task 1.6.1: Update `crates/cockpit/src/app.rs:32` (`use leindex_core::multiplexer::TmuxMultiplexer`)
-- [ ] Task 1.6.2: Update all other imports in `crates/cockpit/src/app.rs`
-- [ ] Task 1.6.3: Update `crates/cockpit/src/maestro_paths.rs:167,177`
-- [ ] Task 1.6.4: Update `crates/cockpit/src/conductor/pane.rs:19,705`
-- [ ] Task 1.6.5: Update `crates/cockpit/src/conductor/observer.rs:328-481`
-- [ ] Task 1.6.6: Update `crates/cockpit/src/conductor/tests.rs`
-- [ ] Task 1.6.7: Update all remaining cockpit imports
-- [ ] Task 1.6.8: Verify cockpit compiles
+- [x] Task 1.6.1: Update `crates/cockpit/src/app.rs:32` (`use leindex_core::multiplexer::TmuxMultiplexer`)
+- [x] Task 1.6.2: Update all other imports in `crates/cockpit/src/app.rs`
+- [x] Task 1.6.3: Update `crates/cockpit/src/maestro_paths.rs:167,177`
+- [x] Task 1.6.4: Update `crates/cockpit/src/conductor/pane.rs:19,705`
+- [x] Task 1.6.5: Update `crates/cockpit/src/conductor/observer.rs:328-481`
+- [x] Task 1.6.6: Update `crates/cockpit/src/conductor/tests.rs`
+- [x] Task 1.6.7: Update all remaining cockpit imports
+- [x] Task 1.6.8: Verify cockpit compiles
 
 ### Task 1.7: Update Import Paths in CLI
 
-- [ ] Task 1.7.1: Update `crates/cli/src/main.rs` imports
-- [ ] Task 1.7.2: Update CLI subcommand modules
-- [ ] Task 1.7.3: Verify `maestro` binary commands work
+- [x] Task 1.7.1: Update `crates/cli/src/main.rs` imports
+- [x] Task 1.7.2: Update CLI subcommand modules
+- [x] Task 1.7.3: Verify `maestro` binary commands work
 
 ### Task 1.8: Update Import Paths in Other Crates
 
-- [ ] Task 1.8.1: Update `crates/pi-mono/` imports
-- [ ] Task 1.8.2: Update `crates/lsp-bridge/` imports
-- [ ] Task 1.8.3: Update any other crate imports
-- [ ] Task 1.8.4: Run `cargo build --workspace` to verify all
+- [x] Task 1.8.1: Update `crates/pi-mono/` imports
+- [x] Task 1.8.2: Update `crates/lsp-bridge/` imports
+- [x] Task 1.8.3: Update any other crate imports
+- [x] Task 1.8.4: Run `cargo build --workspace` to verify all
 
 ### Task 1.9: Update Makefile Build Targets
 
-- [ ] Task 1.9.1: Update `make build` target for new paths
-- [ ] Task 1.9.2: Update `make test` target
-- [ ] Task 1.9.3: Update `make lint` target
-- [ ] Task 1.9.4: Update `make check` target
-- [ ] Task 1.9.5: Test all Makefile commands
+- [x] Task 1.9.1: Update `make build` target for new paths
+- [x] Task 1.9.2: Update `make test` target
+- [x] Task 1.9.3: Update `make lint` target
+- [x] Task 1.9.4: Update `make check` target
+- [x] Task 1.9.5: Test all Makefile commands
 
 ### Task 1.10: Update Documentation
 
-- [ ] Task 1.10.1: Update `README.md` with new project structure
-- [ ] Task 1.10.2: Update `CLAUDE.md` with new paths
-- [ ] Task 1.10.3: Update `docs/` directory contents
-- [ ] Task 1.10.4: Update ADRs (Architecture Decision Records) if any
-- [ ] Task 1.10.5: Update skill definitions that reference paths
+- [x] Task 1.10.1: Update `README.md` with new project structure
+- [x] Task 1.10.2: Update `CLAUDE.md` with new paths
+- [x] Task 1.10.3: Update `docs/` directory contents
+- [x] Task 1.10.4: Update ADRs (Architecture Decision Records) if any
+- [x] Task 1.10.5: Update skill definitions that reference paths
 
 ### Task 1.11: Clean Up maestro Directory
 
-- [ ] Task 1.11.1: Verify `maestro/` now only contains tracks and templates
-- [ ] Task 1.11.2: Remove empty `maestro/leindex/` directory
-- [ ] Task 1.11.3: Create `.gitkeep` in `maestro/tracks/` if needed
-- [ ] Task 1.11.4: Verify maestro templates intact
+- [x] Task 1.11.1: Verify `maestro/` now only contains tracks and templates
+- [x] Task 1.11.2: Remove empty `maestro/leindex/` directory
+- [x] Task 1.11.3: Create `.gitkeep` in `maestro/tracks/` if needed
+- [x] Task 1.11.4: Verify maestro templates intact
 
 ### Task 1.12: Testing and Verification
 

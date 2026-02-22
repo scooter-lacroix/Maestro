@@ -361,7 +361,7 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [ ] Track: Maestro Restructure & Tab Multiplexer Migration
+## [~] Track: Maestro Restructure & Tab Multiplexer Migration
 *Link: [./maestro/tracks/restructure-tab-migration_20260222/](./maestro/tracks/restructure-tab-migration_20260222/)*
 
 **Description**: Comprehensive two-phase track: (1) Restructure Maestro project to surface LeIndex core and CLI from the deeply nested maestro/leindex/rust/ folder into a unified, proper package structure at the root level (src/). The maestro/ folder should ONLY contain templates for AI tools and maestro tracks. (2) Complete migration from tmux to forked tab-rs terminal multiplexer using the detailed plan in multiplexer-migration-plan.md, ensuring no functionality is lost and the migration is seamless.

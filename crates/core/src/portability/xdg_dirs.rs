@@ -200,7 +200,10 @@ mod tests {
     fn test_maestro_data_dir() {
         let path = maestro_data_dir();
         assert!(path.ends_with("maestro"));
-        assert!(path.to_string_lossy().contains("share") || path.to_string_lossy().contains("XDG_DATA_HOME"));
+        assert!(
+            path.to_string_lossy().contains("share")
+                || path.to_string_lossy().contains("XDG_DATA_HOME")
+        );
     }
 
     #[test]

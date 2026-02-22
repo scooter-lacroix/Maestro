@@ -122,8 +122,7 @@ impl MemorySuggestion {
 }
 
 /// Memory category types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MemoryCategory {
     /// General information
     #[default]
@@ -181,15 +180,15 @@ impl MemoryCategory {
     /// Get default priority for this category
     pub fn default_priority(&self) -> u8 {
         match self {
-            Self::Decisions => 1,       // High priority
-            Self::Specifications => 1,  // High priority
-            Self::Patterns => 2,        // Medium priority
-            Self::Facts => 2,           // Medium priority
-            Self::Preferences => 2,     // Medium priority
-            Self::Context => 3,         // Low priority
-            Self::Observations => 3,    // Low priority
-            Self::General => 3,         // Low priority
-            Self::Temporary => 3,       // Low priority
+            Self::Decisions => 1,      // High priority
+            Self::Specifications => 1, // High priority
+            Self::Patterns => 2,       // Medium priority
+            Self::Facts => 2,          // Medium priority
+            Self::Preferences => 2,    // Medium priority
+            Self::Context => 3,        // Low priority
+            Self::Observations => 3,   // Low priority
+            Self::General => 3,        // Low priority
+            Self::Temporary => 3,      // Low priority
         }
     }
 }
@@ -199,7 +198,6 @@ impl std::fmt::Display for MemoryCategory {
         write!(f, "{}", self.as_str())
     }
 }
-
 
 /// Memory lane type for specialized retrieval
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -514,40 +512,33 @@ mod tests {
 
     #[test]
     fn test_memory_suggestion_priority_boost() {
-        let base = MemorySuggestion::new(
-            1,
-            1,
-            "test",
-            0.5,
-            0.5,
-            0.5,
-            MemoryCategory::General,
-        );
+        let base = MemorySuggestion::new(1, 1, "test", 0.5, 0.5, 0.5, MemoryCategory::General);
 
-        let high_priority = MemorySuggestion::new(
-            1,
-            1,
-            "test",
-            0.5,
-            0.5,
-            0.5,
-            MemoryCategory::General,
-        )
-        .with_priority(1);
+        let high_priority =
+            MemorySuggestion::new(1, 1, "test", 0.5, 0.5, 0.5, MemoryCategory::General)
+                .with_priority(1);
 
         assert!(high_priority.flash_intensity > base.flash_intensity);
     }
 
     #[test]
     fn test_memory_category_parsing() {
-        assert_eq!(MemoryCategory::from_str("facts"), Some(MemoryCategory::Facts));
-        assert_eq!(MemoryCategory::from_str("FACT"), Some(MemoryCategory::Facts));
+        assert_eq!(
+            MemoryCategory::from_str("facts"),
+            Some(MemoryCategory::Facts)
+        );
+        assert_eq!(
+            MemoryCategory::from_str("FACT"),
+            Some(MemoryCategory::Facts)
+        );
         assert_eq!(MemoryCategory::from_str("unknown"), None);
     }
 
     #[test]
     fn test_memory_lane_type_boost() {
-        assert!(MemoryLaneType::Correction.boost_factor() > MemoryLaneType::Reference.boost_factor());
+        assert!(
+            MemoryLaneType::Correction.boost_factor() > MemoryLaneType::Reference.boost_factor()
+        );
     }
 
     #[test]

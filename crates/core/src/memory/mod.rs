@@ -74,14 +74,12 @@ pub use nexus_store::{cosine_similarity, NexusVectorStore, VectorStoreStats};
 
 // Re-exports from embedding
 pub use embedding::{
-    EmbeddingConfig, EmbeddingService, EmbeddingStats, BatchProcessor as EmbeddingBatchProcessor,
+    BatchProcessor as EmbeddingBatchProcessor, EmbeddingConfig, EmbeddingService, EmbeddingStats,
 };
 
 // Conditional re-exports from hot_cache
 #[cfg(feature = "hot-cache")]
-pub use hot_cache::{
-    DetectedPattern, HotCache, HotCacheStats, SemanticDetector,
-};
+pub use hot_cache::{DetectedPattern, HotCache, HotCacheStats, SemanticDetector};
 
 #[cfg(test)]
 mod tests {
@@ -162,13 +160,18 @@ mod tests {
             MemoryCategory::from_str("facts"),
             Some(MemoryCategory::Facts)
         );
-        assert_eq!(MemoryCategory::from_str("preferences"), Some(MemoryCategory::Preferences));
+        assert_eq!(
+            MemoryCategory::from_str("preferences"),
+            Some(MemoryCategory::Preferences)
+        );
         assert_eq!(MemoryCategory::from_str("unknown"), None);
     }
 
     #[test]
     fn memory_lane_type_boost() {
-        assert!(MemoryLaneType::Correction.boost_factor() > MemoryLaneType::Reference.boost_factor());
+        assert!(
+            MemoryLaneType::Correction.boost_factor() > MemoryLaneType::Reference.boost_factor()
+        );
     }
 
     #[test]

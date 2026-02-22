@@ -544,7 +544,10 @@ mod tests {
         // Special characters should not crash - they should be handled gracefully
         // by returning empty results when query parsing fails
         let result = memory.search("foo()", 10).await;
-        assert!(result.is_ok(), "Search with special characters should not error");
+        assert!(
+            result.is_ok(),
+            "Search with special characters should not error"
+        );
 
         // Try a simpler query that should work
         let result = memory.search("function", 10).await;

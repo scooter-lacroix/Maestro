@@ -39,8 +39,7 @@ impl ChannelType {
 }
 
 /// Channel connection status
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum ChannelStatus {
     /// Not configured
     #[default]
@@ -54,7 +53,6 @@ pub enum ChannelStatus {
     /// Error state
     Error { message: String },
 }
-
 
 /// Channel configuration
 #[derive(Clone, Debug)]
@@ -196,12 +194,16 @@ impl ChannelControlPlane {
 
     /// Get channel by type
     pub fn get_channel(&self, channel_type: &ChannelType) -> Option<&ChannelConfig> {
-        self.channels.iter().find(|c| &c.channel_type == channel_type)
+        self.channels
+            .iter()
+            .find(|c| &c.channel_type == channel_type)
     }
 
     /// Get channel by type mutably
     pub fn get_channel_mut(&mut self, channel_type: &ChannelType) -> Option<&mut ChannelConfig> {
-        self.channels.iter_mut().find(|c| &c.channel_type == channel_type)
+        self.channels
+            .iter_mut()
+            .find(|c| &c.channel_type == channel_type)
     }
 
     /// Count connected channels
@@ -274,7 +276,11 @@ impl ChannelControlPlane {
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{} ", status_icon), status_style),
                     Span::styled(
-                        format!("{} {}", channel.channel_type.icon(), channel.channel_type.label()),
+                        format!(
+                            "{} {}",
+                            channel.channel_type.icon(),
+                            channel.channel_type.label()
+                        ),
                         style,
                     ),
                 ]))
@@ -321,8 +327,16 @@ impl ChannelControlPlane {
             Line::from(vec![
                 Span::styled("Credentials: ", Style::default().fg(theme.muted)),
                 Span::styled(
-                    if channel.has_credentials { "Configured" } else { "Not set" },
-                    Style::default().fg(if channel.has_credentials { theme.success } else { theme.warning }),
+                    if channel.has_credentials {
+                        "Configured"
+                    } else {
+                        "Not set"
+                    },
+                    Style::default().fg(if channel.has_credentials {
+                        theme.success
+                    } else {
+                        theme.warning
+                    }),
                 ),
             ]),
             Line::from(""),

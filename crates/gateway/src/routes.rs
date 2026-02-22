@@ -23,7 +23,10 @@ use crate::state::GatewayState;
 /// divide the random number generator's output space.
 fn random_uniform(upper: u32) -> u32 {
     assert!(upper > 0, "upper bound must be positive");
-    assert!(upper <= u32::MAX / 2, "upper bound too large for rejection sampling");
+    assert!(
+        upper <= u32::MAX / 2,
+        "upper bound too large for rejection sampling"
+    );
 
     // Calculate the threshold for rejection
     // We want to reject any value >= threshold to avoid bias
@@ -109,28 +112,25 @@ pub fn create_routes() -> Router<Arc<GatewayState>> {
         // Health and status
         .route("/health", get(handle_health))
         .route("/api/status", get(handle_api_status))
-
         // Dashboard
         .route("/api/dashboard", get(handle_dashboard))
         .route("/api/dashboard/jobs", get(handle_dashboard_jobs))
         .route("/api/dashboard/approvals", get(handle_dashboard_approvals))
-
         // Pairing
         .route("/pair", post(handle_pair))
         .route("/pair/verify", post(handle_pair_verify))
-
         // Webhooks
         .route("/webhook", post(handle_webhook))
-
         // Session API
         .route("/api/session", get(handle_session_list))
         .route("/api/session/{id}", get(handle_session_get))
-
         // MCP API
         .route("/api/mcp/servers", get(handle_mcp_servers))
         .route("/api/mcp/servers/{name}/connect", post(handle_mcp_connect))
-        .route("/api/mcp/servers/{name}/disconnect", post(handle_mcp_disconnect))
-
+        .route(
+            "/api/mcp/servers/{name}/disconnect",
+            post(handle_mcp_disconnect),
+        )
         // Cron API
         .route("/api/cron/jobs", get(handle_cron_jobs))
         .route("/api/cron/jobs", post(handle_cron_create))
@@ -149,8 +149,15 @@ pub async fn handle_health(State(state): State<Arc<GatewayState>>) -> impl IntoR
 
 /// API status endpoint
 pub async fn handle_api_status(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
-    let methods: Vec<String> = state.method_registry.list_methods().iter().map(|s| s.to_string()).collect();
-    let connections = state.connection_count.load(std::sync::atomic::Ordering::Relaxed);
+    let methods: Vec<String> = state
+        .method_registry
+        .list_methods()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let connections = state
+        .connection_count
+        .load(std::sync::atomic::Ordering::Relaxed);
 
     Json(ApiStatus {
         gateway: "maestro-gateway",
@@ -180,7 +187,10 @@ pub async fn handle_pair(
     Json(PairResponse {
         paired: false,
         session_id: None,
-        message: format!("Pairing initiated. Enter code {} on the device to confirm.", code),
+        message: format!(
+            "Pairing initiated. Enter code {} on the device to confirm.",
+            code
+        ),
     })
 }
 
@@ -205,7 +215,10 @@ pub async fn handle_webhook(
     State(state): State<Arc<GatewayState>>,
     Json(payload): Json<WebhookPayload>,
 ) -> impl IntoResponse {
-    debug!("Webhook received: {} from {}", payload.event, payload.source);
+    debug!(
+        "Webhook received: {} from {}",
+        payload.event, payload.source
+    );
 
     // Broadcast the webhook as an event
     let event = crate::protocol::EventFrame::new(
@@ -220,9 +233,7 @@ pub async fn handle_webhook(
 }
 
 /// List sessions
-pub async fn handle_session_list(
-    State(_state): State<Arc<GatewayState>>,
-) -> impl IntoResponse {
+pub async fn handle_session_list(State(_state): State<Arc<GatewayState>>) -> impl IntoResponse {
     // TODO: Implement session listing from persistence
     Json(Vec::<serde_json::Value>::new())
 }
@@ -233,13 +244,14 @@ pub async fn handle_session_get(
     axum::extract::Path(_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     // TODO: Implement session retrieval from persistence
-    (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Not found"})))
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "Not found"})),
+    )
 }
 
 /// List MCP servers
-pub async fn handle_mcp_servers(
-    State(state): State<Arc<GatewayState>>,
-) -> impl IntoResponse {
+pub async fn handle_mcp_servers(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
     let (registered, connected) = state.mcp_manager.try_get_status();
 
     Json(serde_json::json!({
@@ -268,7 +280,10 @@ pub async fn handle_mcp_disconnect(
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     match state.mcp_manager.disconnect(&name).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"disconnected": true}))),
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"disconnected": true})),
+        ),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": e.to_string()})),
@@ -277,9 +292,7 @@ pub async fn handle_mcp_disconnect(
 }
 
 /// List cron jobs
-pub async fn handle_cron_jobs(
-    State(state): State<Arc<GatewayState>>,
-) -> impl IntoResponse {
+pub async fn handle_cron_jobs(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
     Json(state.cron_jobs.clone())
 }
 
@@ -296,9 +309,7 @@ pub async fn handle_cron_create(
 }
 
 /// Dashboard overview
-pub async fn handle_dashboard(
-    State(state): State<Arc<GatewayState>>,
-) -> impl IntoResponse {
+pub async fn handle_dashboard(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
     let (registered, connected) = state.mcp_manager.try_get_status();
     let policy = state.sandbox_manager.default_policy();
 
@@ -310,7 +321,9 @@ pub async fn handle_dashboard(
 
     Json(DashboardOverview {
         uptime_secs: state.start_time.elapsed().as_secs(),
-        connections: state.connection_count.load(std::sync::atomic::Ordering::Relaxed),
+        connections: state
+            .connection_count
+            .load(std::sync::atomic::Ordering::Relaxed),
         cron_jobs: state.cron_jobs.len(),
         mcp_servers: McpServersStatus {
             registered: registered.len(),
@@ -319,37 +332,44 @@ pub async fn handle_dashboard(
         sandbox: SandboxStatus {
             autonomy_level: autonomy_str.to_string(),
             network_enabled: policy.allow_network,
-            runtimes: state.sandbox_manager.available_runtimes().iter().map(|s| s.to_string()).collect(),
+            runtimes: state
+                .sandbox_manager
+                .available_runtimes()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         },
     })
 }
 
 /// Dashboard job monitoring
-pub async fn handle_dashboard_jobs(
-    State(state): State<Arc<GatewayState>>,
-) -> impl IntoResponse {
+pub async fn handle_dashboard_jobs(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
     // Return cron jobs with additional monitoring info
-    let jobs: Vec<serde_json::Value> = state.cron_jobs.iter().map(|job| {
-        let schedule_str = match &job.schedule {
-            maestro_core::Schedule::Cron { expr, .. } => expr.clone(),
-            maestro_core::Schedule::At { at } => at.format("%Y-%m-%d %H:%M").to_string(),
-            maestro_core::Schedule::Every { every_ms, .. } => format!("every {}ms", every_ms),
-        };
+    let jobs: Vec<serde_json::Value> = state
+        .cron_jobs
+        .iter()
+        .map(|job| {
+            let schedule_str = match &job.schedule {
+                maestro_core::Schedule::Cron { expr, .. } => expr.clone(),
+                maestro_core::Schedule::At { at } => at.format("%Y-%m-%d %H:%M").to_string(),
+                maestro_core::Schedule::Every { every_ms, .. } => format!("every {}ms", every_ms),
+            };
 
-        serde_json::json!({
-            "id": job.id,
-            "name": job.name,
-            "schedule": schedule_str,
-            "enabled": job.enabled,
-            "job_type": match job.job_type {
-                maestro_core::JobType::Shell => "shell",
-                maestro_core::JobType::Agent => "agent",
-            },
-            "last_run": null,  // TODO: Track actual runs
-            "next_run": null,  // TODO: Calculate next run
-            "status": if job.enabled { "scheduled" } else { "paused" },
+            serde_json::json!({
+                "id": job.id,
+                "name": job.name,
+                "schedule": schedule_str,
+                "enabled": job.enabled,
+                "job_type": match job.job_type {
+                    maestro_core::JobType::Shell => "shell",
+                    maestro_core::JobType::Agent => "agent",
+                },
+                "last_run": null,  // TODO: Track actual runs
+                "next_run": null,  // TODO: Calculate next run
+                "status": if job.enabled { "scheduled" } else { "paused" },
+            })
         })
-    }).collect();
+        .collect();
 
     Json(jobs)
 }
@@ -381,7 +401,11 @@ mod tests {
         // Test with 1,000,000 (pairing code range)
         for _ in 0..100 {
             let val = random_uniform(1_000_000);
-            assert!(val < 1_000_000, "Value {} should be less than 1,000,000", val);
+            assert!(
+                val < 1_000_000,
+                "Value {} should be less than 1,000,000",
+                val
+            );
         }
     }
 
@@ -415,7 +439,10 @@ mod tests {
             assert!(
                 diff.abs() < tolerance,
                 "Bin {} has {} samples, expected around {} (diff: {:.2})",
-                i, count, expected, diff
+                i,
+                count,
+                expected,
+                diff
             );
         }
     }

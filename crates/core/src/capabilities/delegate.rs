@@ -190,19 +190,19 @@ impl DelegateTool {
         }
 
         // Get agent configuration
-        let agent_config = self.agents.get(agent_name).ok_or_else(|| {
-            anyhow::anyhow!("Unknown agent: {}", agent_name)
-        })?;
+        let agent_config = self
+            .agents
+            .get(agent_name)
+            .ok_or_else(|| anyhow::anyhow!("Unknown agent: {}", agent_name))?;
 
         // Build context
         let mut exec_context = context.cloned().unwrap_or_default();
 
         // Inject system prompt if provided
         if let Some(ref system_prompt) = agent_config.system_prompt {
-            exec_context.metadata.insert(
-                "system_prompt".to_string(),
-                system_prompt.clone(),
-            );
+            exec_context
+                .metadata
+                .insert("system_prompt".to_string(), system_prompt.clone());
         }
 
         // Add task as user message
@@ -265,7 +265,8 @@ impl DelegateTool {
 
             if content.contains("task complete")
                 || content.contains("done")
-                || content.contains("finished") {
+                || content.contains("finished")
+            {
                 return Ok(SubAgentResult {
                     success: true,
                     output: response.content,
@@ -277,7 +278,9 @@ impl DelegateTool {
         }
 
         // Max iterations reached
-        let last_message = context.messages.last()
+        let last_message = context
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -510,12 +513,13 @@ mod tests {
     #[tokio::test]
     async fn test_execute_missing_agent() {
         let tool = DelegateTool::with_agents(HashMap::new());
-        let result = tool.execute(serde_json::json!({
-            "agent": "unknown",
-            "task": "test"
-        }))
-        .await
-        .unwrap();
+        let result = tool
+            .execute(serde_json::json!({
+                "agent": "unknown",
+                "task": "test"
+            }))
+            .await
+            .unwrap();
 
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["error"].as_str().unwrap().contains("Unknown agent"));
@@ -524,12 +528,13 @@ mod tests {
     #[tokio::test]
     async fn test_execute_depth_exceeded() {
         let tool = DelegateTool::with_agents(HashMap::new()).with_depth(3);
-        let result = tool.execute(serde_json::json!({
-            "agent": "test",
-            "task": "test"
-        }))
-        .await
-        .unwrap();
+        let result = tool
+            .execute(serde_json::json!({
+                "agent": "test",
+                "task": "test"
+            }))
+            .await
+            .unwrap();
 
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["error"].as_str().unwrap().contains("depth"));
@@ -579,12 +584,13 @@ mod tests {
         );
 
         let tool = DelegateTool::with_agents(agents);
-        let result = tool.execute(serde_json::json!({
-            "agent": "test_agent",
-            "task": "Do something"
-        }))
-        .await
-        .unwrap();
+        let result = tool
+            .execute(serde_json::json!({
+                "agent": "test_agent",
+                "task": "Do something"
+            }))
+            .await
+            .unwrap();
 
         assert!(result["success"].as_bool().unwrap());
         assert!(result["delegation_request"].is_object());

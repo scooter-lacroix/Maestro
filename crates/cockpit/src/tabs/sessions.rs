@@ -410,8 +410,7 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
 
         // Terminal output styling - unique aesthetic for tmux sessions
         // Uses a subtle green-tinted style reminiscent of classic terminals
-        let terminal_style = Style::default()
-            .fg(Color::Rgb(152, 195, 121)); // Soft green (like terminal output)
+        let terminal_style = Style::default().fg(Color::Rgb(152, 195, 121)); // Soft green (like terminal output)
 
         if app.session_preview_content.is_empty() {
             preview_lines.push(Line::from(Span::styled(
@@ -424,15 +423,29 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                 let styled_line = if line.starts_with('$') || line.starts_with('>') {
                     // Command lines - highlight in accent color
                     Span::styled(format!("  {}", line), terminal_style.bold())
-                } else if line.contains("error") || line.contains("Error") || line.contains("ERROR") {
+                } else if line.contains("error") || line.contains("Error") || line.contains("ERROR")
+                {
                     // Error lines - red tint
-                    Span::styled(format!("  {}", line), Style::default().fg(Color::Rgb(224, 108, 117)))
-                } else if line.contains("warning") || line.contains("Warning") || line.contains("WARN") {
+                    Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(Color::Rgb(224, 108, 117)),
+                    )
+                } else if line.contains("warning")
+                    || line.contains("Warning")
+                    || line.contains("WARN")
+                {
                     // Warning lines - yellow tint
-                    Span::styled(format!("  {}", line), Style::default().fg(Color::Rgb(229, 192, 123)))
-                } else if line.contains("success") || line.contains("Success") || line.contains("✓") {
+                    Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(Color::Rgb(229, 192, 123)),
+                    )
+                } else if line.contains("success") || line.contains("Success") || line.contains("✓")
+                {
                     // Success lines - bright green
-                    Span::styled(format!("  {}", line), Style::default().fg(Color::Rgb(134, 179, 98)))
+                    Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(Color::Rgb(134, 179, 98)),
+                    )
                 } else if line.trim().is_empty() {
                     // Empty lines - just spacing
                     Span::raw("")

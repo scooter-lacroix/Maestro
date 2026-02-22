@@ -6,11 +6,11 @@
 //!
 //! Inspired by Ralph TUI (https://ghuntley.com/ralph/)
 
+use super::agent_executor::{AgentExecutor, BackendType};
 use super::modals::Modal;
 use super::model::ConductorState;
 use super::observer::{FileBasedObserver, ObserverState, SteeringCommand};
 use super::omp_agent::{OmpAgentConfig, OmpAgentManager};
-use super::agent_executor::{AgentExecutor, BackendType};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use std::path::{Path, PathBuf};
@@ -104,8 +104,7 @@ impl std::fmt::Display for CommandArgs {
 }
 
 /// Setup state for the conductor pane
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SetupState {
     /// Setup status (cached)
     pub status: Option<SetupStatus>,
@@ -116,7 +115,6 @@ pub struct SetupState {
     /// Selected tool in wizard
     pub selected_tool: Option<AgentTool>,
 }
-
 
 /// State for the Conductor pane
 pub struct ConductorPane {
@@ -626,7 +624,10 @@ impl ConductorPane {
         use leindex_core::orchestrate::model::SessionState;
 
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let session_dir = PathBuf::from(home).join(".maestro").join("orchestrate").join(track_id);
+        let session_dir = PathBuf::from(home)
+            .join(".maestro")
+            .join("orchestrate")
+            .join(track_id);
 
         let session_json = session_dir.join("session.json");
         if !session_json.exists() {
@@ -670,10 +671,10 @@ impl ConductorPane {
 
     /// Synchronous version of poll_observed_sessions for use from non-async contexts
     pub fn poll_observed_sessions_sync(&mut self) {
-        
-
         // Get current track IDs
-        let track_ids: Vec<String> = self.tracks.iter()
+        let track_ids: Vec<String> = self
+            .tracks
+            .iter()
             .filter(|t| t.description.contains("Orchestrate Session"))
             .map(|t| t.id.clone())
             .collect();
@@ -740,10 +741,9 @@ impl ConductorPane {
         };
 
         let external_scan_due = self.last_external_scan.elapsed() >= Duration::from_secs(2);
-        if external_scan_due
-            && self.refresh_project_from_tmux() {
-                return;
-            }
+        if external_scan_due && self.refresh_project_from_tmux() {
+            return;
+        }
 
         if !tracks_changed && !external_scan_due {
             return;
@@ -1077,7 +1077,9 @@ impl ConductorPane {
         if delta > 0 {
             self.selected_index = self.selected_index.saturating_add(delta as usize);
         } else {
-            self.selected_index = self.selected_index.saturating_sub(delta.unsigned_abs() as usize);
+            self.selected_index = self
+                .selected_index
+                .saturating_sub(delta.unsigned_abs() as usize);
         }
 
         if self.selected_index >= items.len() {
@@ -1462,7 +1464,11 @@ impl ConductorPane {
     }
 
     /// Update agent executor with new track/project context
-    pub fn update_agent_executor_context(&mut self, track_id: Option<String>, project_path: Option<PathBuf>) {
+    pub fn update_agent_executor_context(
+        &mut self,
+        track_id: Option<String>,
+        project_path: Option<PathBuf>,
+    ) {
         let omp_manager = self.omp_manager.as_deref();
         let executor = AgentExecutor::new(None, omp_manager, track_id, project_path);
         self.state.pi_mono_available = executor.is_pi_mono_available();
@@ -1677,11 +1683,18 @@ fn render_logs_pane(
 
 impl ConductorPane {
     /// Start observing a track/session
-    pub async fn start_observing(&mut self, track_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start_observing(
+        &mut self,
+        track_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match self.file_observer.observe_session(track_id).await {
             Ok(observed) => {
-                self.observer_state.start_observing(observed.session_id.clone());
-                self.add_output(format!("Started observing session: {}", observed.session_id));
+                self.observer_state
+                    .start_observing(observed.session_id.clone());
+                self.add_output(format!(
+                    "Started observing session: {}",
+                    observed.session_id
+                ));
                 Ok(())
             }
             Err(e) => {
@@ -1701,41 +1714,70 @@ impl ConductorPane {
     }
 
     /// Send a steering command to the observed session
-    pub async fn send_steering(&mut self, command: SteeringCommand) -> Result<(), Box<dyn std::error::Error>> {
-        let session_id = self.observer_state.session_id.clone()
+    pub async fn send_steering(
+        &mut self,
+        command: SteeringCommand,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let session_id = self
+            .observer_state
+            .session_id
+            .clone()
             .ok_or("No session being observed")?;
 
-        self.file_observer.send_steering(&session_id, command).await?;
+        self.file_observer
+            .send_steering(&session_id, command)
+            .await?;
         self.add_output(format!("Sent steering command to session: {}", session_id));
         Ok(())
     }
 
     /// Send a steering message from the modal input
-    pub async fn submit_steering_message(&mut self, message: String) -> Result<(), Box<dyn std::error::Error>> {
-        let session_id = self.observer_state.session_id.clone()
+    pub async fn submit_steering_message(
+        &mut self,
+        message: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let session_id = self
+            .observer_state
+            .session_id
+            .clone()
             .ok_or("No session being observed")?;
 
         let command = SteeringCommand::Message { content: message };
-        self.file_observer.send_steering(&session_id, command).await?;
+        self.file_observer
+            .send_steering(&session_id, command)
+            .await?;
         self.add_output(format!("Sent steering message to session: {}", session_id));
         Ok(())
     }
 
     /// Get tmux content from the observed session
-    pub async fn get_tmux_content(&self, lines: usize) -> Result<String, Box<dyn std::error::Error>> {
-        let session_id = self.observer_state.session_id.clone()
+    pub async fn get_tmux_content(
+        &self,
+        lines: usize,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let session_id = self
+            .observer_state
+            .session_id
+            .clone()
             .ok_or("No session being observed")?;
 
-        self.file_observer.get_tmux_content(&session_id, lines).await
+        self.file_observer
+            .get_tmux_content(&session_id, lines)
+            .await
             .map_err(|e| e.into())
     }
 
     /// Attach to the observed session's tmux session
     pub async fn attach_to_tmux(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let session_id = self.observer_state.session_id.clone()
+        let session_id = self
+            .observer_state
+            .session_id
+            .clone()
             .ok_or("No session being observed")?;
 
-        self.file_observer.attach_tmux(&session_id).await
+        self.file_observer
+            .attach_tmux(&session_id)
+            .await
             .map_err(|e| e.into())
     }
 
@@ -1781,12 +1823,20 @@ impl ConductorPane {
     }
 
     /// Switch agent for observed session
-    pub async fn switch_agent_observed(&mut self, tool: String) -> Result<(), Box<dyn std::error::Error>> {
-        self.send_steering(SteeringCommand::SwitchAgent { tool }).await
+    pub async fn switch_agent_observed(
+        &mut self,
+        tool: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::SwitchAgent { tool })
+            .await
     }
 
     /// Set max iterations for observed session
-    pub async fn set_max_iterations_observed(&mut self, count: u64) -> Result<(), Box<dyn std::error::Error>> {
-        self.send_steering(SteeringCommand::SetMaxIterations { count }).await
+    pub async fn set_max_iterations_observed(
+        &mut self,
+        count: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.send_steering(SteeringCommand::SetMaxIterations { count })
+            .await
     }
 }

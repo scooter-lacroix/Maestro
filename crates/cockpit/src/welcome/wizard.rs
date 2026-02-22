@@ -3,8 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Welcome wizard state machine
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum WelcomeState {
     /// Wizard has not started
     #[default]
@@ -14,13 +13,15 @@ pub enum WelcomeState {
     /// Step 2: Editor selection
     EditorSelection { selected: usize },
     /// Step 3: AI Provider setup (optional)
-    ProviderSetup { use_env: bool, custom_key: Option<String> },
+    ProviderSetup {
+        use_env: bool,
+        custom_key: Option<String>,
+    },
     /// Step 4: Theme selection
     ThemeSelection { preview: String },
     /// Wizard completed
     Completed,
 }
-
 
 /// Welcome wizard step definition
 #[derive(Clone, Debug)]
@@ -32,7 +33,12 @@ pub struct WelcomeStep {
 }
 
 impl WelcomeStep {
-    pub fn new(number: usize, title: impl Into<String>, description: impl Into<String>, help_text: impl Into<String>) -> Self {
+    pub fn new(
+        number: usize,
+        title: impl Into<String>,
+        description: impl Into<String>,
+        help_text: impl Into<String>,
+    ) -> Self {
         Self {
             number,
             title: title.into(),
@@ -108,9 +114,7 @@ impl WelcomeState {
             Self::NotStarted => Self::WorkspaceSetup {
                 path: workspace_path.to_string(),
             },
-            Self::WorkspaceSetup { .. } => Self::EditorSelection {
-                selected: 0,
-            },
+            Self::WorkspaceSetup { .. } => Self::EditorSelection { selected: 0 },
             Self::EditorSelection { .. } => Self::ProviderSetup {
                 use_env: true,
                 custom_key: None,

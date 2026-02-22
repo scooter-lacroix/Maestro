@@ -36,7 +36,9 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
         ])
         .split(inner_area);
 
-    let editor_style = if app.tab_index == crate::app::tabs::SETTINGS && app.settings_option == SettingsOption::Editor {
+    let editor_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Editor
+    {
         ratatui::style::Style::default()
             .fg(theme.warning)
             .bold()
@@ -52,7 +54,9 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(editor, chunks[0]);
 
-    let theme_style = if app.tab_index == crate::app::tabs::SETTINGS && app.settings_option == SettingsOption::Theme {
+    let theme_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Theme
+    {
         ratatui::style::Style::default()
             .fg(theme.warning)
             .bold()
@@ -73,15 +77,16 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(theme_field, chunks[1]);
 
-    let transparent_style =
-        if app.tab_index == crate::app::tabs::SETTINGS && app.settings_option == SettingsOption::Transparent {
-            ratatui::style::Style::default()
-                .fg(theme.warning)
-                .bold()
-                .bg(theme.highlight_bg)
-        } else {
-            ratatui::style::Style::default()
-        };
+    let transparent_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Transparent
+    {
+        ratatui::style::Style::default()
+            .fg(theme.warning)
+            .bold()
+            .bg(theme.highlight_bg)
+    } else {
+        ratatui::style::Style::default()
+    };
     let transparent_text = if app.config.transparent {
         "ON (terminal background visible)"
     } else {
@@ -95,7 +100,9 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(transparent, chunks[2]);
 
-    let path_style = if app.tab_index == crate::app::tabs::SETTINGS && app.settings_option == SettingsOption::InstallPath {
+    let path_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::InstallPath
+    {
         ratatui::style::Style::default()
             .fg(theme.warning)
             .bold()
@@ -111,7 +118,9 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(path, chunks[3]);
 
-    let save_style = if app.tab_index == crate::app::tabs::SETTINGS && app.settings_option == SettingsOption::Save {
+    let save_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Save
+    {
         ratatui::style::Style::default()
             .bg(theme.success)
             .fg(ratatui::style::Color::Black)

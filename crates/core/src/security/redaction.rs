@@ -51,12 +51,11 @@ impl SecretRedactor {
         let patterns = SECRET_PATTERNS
             .iter()
             .map(|rp| {
-                let regex = Regex::new(rp.pattern)
-                    .unwrap_or_else(|e| {
-                        tracing::warn!("Invalid redaction regex '{}': {}", rp.pattern, e);
-                        // Return a regex that never matches
-                        Regex::new(r"(?!x)x").unwrap()
-                    });
+                let regex = Regex::new(rp.pattern).unwrap_or_else(|e| {
+                    tracing::warn!("Invalid redaction regex '{}': {}", rp.pattern, e);
+                    // Return a regex that never matches
+                    Regex::new(r"(?!x)x").unwrap()
+                });
                 (regex, rp.replacement.to_string())
             })
             .collect();
@@ -115,8 +114,14 @@ mod tests {
         let redactor = SecretRedactor::new();
         let input = "api_key=sk_1234567890abcdef";
         let output = redactor.redact(input);
-        assert!(!output.contains("sk_1234567890abcdef"), "API key should be redacted");
-        assert!(output.contains("***REDACTED***"), "Should show redaction marker");
+        assert!(
+            !output.contains("sk_1234567890abcdef"),
+            "API key should be redacted"
+        );
+        assert!(
+            output.contains("***REDACTED***"),
+            "Should show redaction marker"
+        );
     }
 
     #[test]
@@ -124,7 +129,10 @@ mod tests {
         let redactor = SecretRedactor::new();
         let input = "password: supersecret123";
         let output = redactor.redact(input);
-        assert!(!output.contains("supersecret123"), "Password should be redacted");
+        assert!(
+            !output.contains("supersecret123"),
+            "Password should be redacted"
+        );
     }
 
     #[test]
@@ -132,7 +140,10 @@ mod tests {
         let redactor = SecretRedactor::new();
         let input = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
         let output = redactor.redact(input);
-        assert!(!output.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"), "Token should be redacted");
+        assert!(
+            !output.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"),
+            "Token should be redacted"
+        );
     }
 
     #[test]
@@ -141,8 +152,14 @@ mod tests {
         // Test with format that matches our patterns
         let input = r#"api_key=sk_1234567890abcdef"#;
         let output = redactor.redact(input);
-        assert!(!output.contains("sk_1234567890abcdef"), "API key should be redacted");
-        assert!(output.contains("***REDACTED***"), "Should show redaction marker");
+        assert!(
+            !output.contains("sk_1234567890abcdef"),
+            "API key should be redacted"
+        );
+        assert!(
+            output.contains("***REDACTED***"),
+            "Should show redaction marker"
+        );
     }
 
     #[test]
@@ -165,15 +182,22 @@ mod tests {
         let redactor = SecretRedactor::new();
         let input = "https://user:password@api.example.com/endpoint";
         let output = redactor.redact(input);
-        assert!(!output.contains("password"), "URL password should be redacted");
+        assert!(
+            !output.contains("password"),
+            "URL password should be redacted"
+        );
         assert!(output.contains("https://"), "Protocol should remain");
     }
 
     #[test]
     fn test_redact_jwt_token() {
         let redactor = SecretRedactor::new();
-        let input = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturehere";
+        let input =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturehere";
         let output = redactor.redact(input);
-        assert!(!output.contains("signaturehere"), "JWT signature should be redacted");
+        assert!(
+            !output.contains("signaturehere"),
+            "JWT signature should be redacted"
+        );
     }
 }

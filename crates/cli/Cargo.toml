@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Core library
-leindex-core = { path = "../../maestro/leindex/rust" }
+leindex-core = { path = "../../src/leindex" }
 
 # Cockpit TUI
 maestro-cockpit = { path = "../cockpit" }

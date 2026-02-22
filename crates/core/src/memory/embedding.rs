@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, warn};
 
-use super::types::{EMBEDDING_DIMENSION, DEFAULT_EMBEDDING_MODEL};
+use super::types::{DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSION};
 
 /// Default batch size for embedding requests
 const DEFAULT_BATCH_SIZE: usize = 32;
@@ -252,7 +252,7 @@ impl EmbeddingService {
 
         // Create channel for batch processing
         let (request_tx, request_rx) = mpsc::channel(config.batch_size);
-        
+
         // Store both sender and receiver
         let request_tx = Some(request_tx);
         let request_rx = Some(request_rx);
@@ -268,7 +268,10 @@ impl EmbeddingService {
     }
 
     /// Queue a text for asynchronous batch embedding
-    pub async fn queue_embedding_request(&self, text: String) -> Result<mpsc::Receiver<EmbeddingResponse>> {
+    pub async fn queue_embedding_request(
+        &self,
+        text: String,
+    ) -> Result<mpsc::Receiver<EmbeddingResponse>> {
         let request_id = self.next_request_id().await;
         let request_tx = self
             .request_tx
@@ -380,9 +383,9 @@ impl EmbeddingService {
             stats.cache_misses += 1;
             stats.total_generated += 1;
             let latency = start.elapsed().as_millis() as f64;
-            stats.avg_latency_ms =
-                (stats.avg_latency_ms * (stats.total_generated - 1) as f64 + latency)
-                    / stats.total_generated as f64;
+            stats.avg_latency_ms = (stats.avg_latency_ms * (stats.total_generated - 1) as f64
+                + latency)
+                / stats.total_generated as f64;
         }
 
         debug!(
@@ -470,11 +473,7 @@ impl EmbeddingService {
     /// Compute cache key for text
     fn compute_cache_key(&self, text: &str) -> String {
         // Use first 100 chars + hash for cache key
-        let prefix = if text.len() > 100 {
-            &text[..100]
-        } else {
-            text
-        };
+        let prefix = if text.len() > 100 { &text[..100] } else { text };
         let hash = self.compute_hash(text);
         format!("{}:{:016x}", prefix, hash)
     }

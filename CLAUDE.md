@@ -63,7 +63,8 @@ crates/
 ├── lsp-bridge/       # LSP protocol bridge
 └── ktop_collectors/  # System metrics collection
 
-maestro/leindex/rust/ # leindex-core - Code analysis engine + memory service
+src/
+└── leindex/          # leindex-core - Code analysis engine + memory service
 ```
 
 ### Dependency Rules (STRICT - One-Way)
@@ -79,7 +80,7 @@ leindex-core ↛ cockpit (FORBIDDEN)
 
 ### Key Modules
 
-#### LeIndex Core (`maestro/leindex/rust/src/`)
+#### LeIndex Core (`src/leindex/src/`)
 
 - **5-Layer Code Analysis**: AST, Call Graph, CFG, DFG, Slicing
 - **Multi-language support**: Python, TypeScript, JavaScript, Rust, Go, Java, C, C++
@@ -152,7 +153,10 @@ maestro/
 ├── hooks/              # Session and tool hooks
 ├── agents/             # Agent definitions
 ├── memory/             # Nexus Memory System
-└── leindex/            # LeIndex code analysis
+└── [templates only]    # AI tool templates
+
+src/
+└── leindex/            # LeIndex code analysis engine
 ```
 
 ## Testing

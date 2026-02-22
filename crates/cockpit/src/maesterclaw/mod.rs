@@ -12,7 +12,7 @@ mod tests;
 
 pub use channels::{ChannelConfig, ChannelControlPlane, ChannelStatus, ChannelType};
 pub use gateway::{ConnectedClient, GatewayAuthStatus, GatewayConfig, GatewayControlPlane};
-pub use hot_cache::{
-    BufferedSuggestion, clamp_flash, HotCache, MemorySuggestion, SuggestionTtl,
+pub use hot_cache::{clamp_flash, BufferedSuggestion, HotCache, MemorySuggestion, SuggestionTtl};
+pub use readiness::{
+    evaluate_readiness, is_setup_complete, update_step_readiness, ReadinessResult,
 };
-pub use readiness::{evaluate_readiness, is_setup_complete, update_step_readiness, ReadinessResult};

@@ -160,8 +160,7 @@ impl OmpWorker {
         cmd.arg("run")
             .arg("--silent")
             .arg(
-                self
-                    .config
+                self.config
                     .omp_path
                     .join("packages/coding-agent/src/worker.ts"),
             )

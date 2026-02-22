@@ -268,9 +268,8 @@ mod tests {
     // Phase 7.6: Observer event bridge tests (RED - expected to fail before implementation)
     #[test]
     fn test_observer_can_subscribe_to_session_events() {
-        use super::super::observer::SessionEventBridge;
         use super::super::model::ConductorEvent;
-        
+        use super::super::observer::SessionEventBridge;
 
         // This test will fail until SessionEventBridge is implemented
         let bridge = crate::conductor::observer::InMemoryEventBridge::new();
@@ -286,14 +285,17 @@ mod tests {
         };
 
         // This will fail until publish is implemented
-        assert!(bridge.publish(session_id, event).is_ok(), "Should publish event to bridge");
+        assert!(
+            bridge.publish(session_id, event).is_ok(),
+            "Should publish event to bridge"
+        );
 
         // This will fail until subscribe channel receives events
         let received = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async { rx.recv().await });
 
-        assert!(received.is_some(), "Should receive event from subscription");
+        assert!(received.is_ok(), "Should receive event from subscription");
     }
 
     #[test]
@@ -353,8 +355,8 @@ mod tests {
 
     #[test]
     fn test_parallel_updates_preserve_task_focus() {
-        use super::super::observer::SessionEventBridge;
         use super::super::model::{ConductorEvent, ConductorState};
+        use super::super::observer::SessionEventBridge;
         use std::sync::Arc;
         use tokio::sync::RwLock;
 
@@ -411,12 +413,15 @@ mod tests {
 
     #[test]
     fn test_event_deterministic_ordering() {
-        use super::super::observer::SessionEventBridge;
         use super::super::model::ConductorEvent;
+        use super::super::observer::SessionEventBridge;
 
         // Verify events are delivered in the order they were published
         let bridge = crate::conductor::observer::InMemoryEventBridge::new();
         let session_id = "order-test-session";
+
+        // Subscribe FIRST - broadcast channels only deliver events published after subscription
+        let mut rx = bridge.subscribe(session_id);
 
         let events = vec![
             ConductorEvent::IterationStarted {
@@ -434,24 +439,19 @@ mod tests {
             },
         ];
 
+        // Publish events AFTER subscribing
         for event in events.clone() {
             let _ = bridge.publish(session_id, event);
         }
-
-        let mut rx = bridge.subscribe(session_id);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let received_events = rt.block_on(async {
             let mut received = Vec::new();
             // Receive all events with timeout
             for _ in 0..3 {
-                match tokio::time::timeout(
-                    tokio::time::Duration::from_millis(100),
-                    rx.recv(),
-                )
-                .await
+                match tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await
                 {
-                    Ok(Some(event)) => received.push(event),
+                    Ok(Ok(event)) => received.push(event),
                     _ => break,
                 }
             }
@@ -461,8 +461,10 @@ mod tests {
         assert_eq!(received_events.len(), 3, "Should receive all 3 events");
         // Verify order is preserved
         match (&received_events[0], &events[0]) {
-            (ConductorEvent::IterationStarted { iteration: i1, .. },
-             ConductorEvent::IterationStarted { iteration: i2, .. }) => {
+            (
+                ConductorEvent::IterationStarted { iteration: i1, .. },
+                ConductorEvent::IterationStarted { iteration: i2, .. },
+            ) => {
                 assert_eq!(i1, i2);
             }
             _ => panic!("First event should be IterationStarted"),

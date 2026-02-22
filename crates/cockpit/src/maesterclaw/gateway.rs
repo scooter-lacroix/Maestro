@@ -13,8 +13,7 @@ use ratatui::{
 };
 
 /// Gateway authentication status
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum GatewayAuthStatus {
     /// Gateway not started
     #[default]
@@ -28,7 +27,6 @@ pub enum GatewayAuthStatus {
     /// Error state
     Error { message: String },
 }
-
 
 /// Gateway configuration
 #[derive(Clone, Debug)]
@@ -187,7 +185,12 @@ impl GatewayControlPlane {
             vec![
                 Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(theme.muted)),
-                    Span::styled("● Running", Style::default().fg(theme.success).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "● Running",
+                        Style::default()
+                            .fg(theme.success)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("Port: ", Style::default().fg(theme.muted)),
@@ -198,14 +201,30 @@ impl GatewayControlPlane {
                     Span::raw("  "),
                     Span::styled("SSE: ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        if self.config.sse_enabled { "●" } else { "○" },
-                        Style::default().fg(if self.config.sse_enabled { theme.success } else { theme.muted }),
+                        if self.config.sse_enabled {
+                            "●"
+                        } else {
+                            "○"
+                        },
+                        Style::default().fg(if self.config.sse_enabled {
+                            theme.success
+                        } else {
+                            theme.muted
+                        }),
                     ),
                     Span::raw("  "),
                     Span::styled("WS: ", Style::default().fg(theme.muted)),
                     Span::styled(
-                        if self.config.websocket_enabled { "●" } else { "○" },
-                        Style::default().fg(if self.config.websocket_enabled { theme.success } else { theme.muted }),
+                        if self.config.websocket_enabled {
+                            "●"
+                        } else {
+                            "○"
+                        },
+                        Style::default().fg(if self.config.websocket_enabled {
+                            theme.success
+                        } else {
+                            theme.muted
+                        }),
                     ),
                 ]),
             ]
@@ -256,7 +275,9 @@ impl GatewayControlPlane {
                         Span::styled("Code: ", Style::default().fg(theme.muted)),
                         Span::styled(
                             code,
-                            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(theme.accent)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
                             format!(" ({}s)", expires_in),
@@ -308,7 +329,11 @@ impl GatewayControlPlane {
         );
 
         let gauge = Gauge::default()
-            .block(Block::default().title(" Connections ").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(" Connections ")
+                    .borders(Borders::ALL),
+            )
             .gauge_style(Style::default().fg(color))
             .label(label)
             .ratio(ratio);
@@ -382,7 +407,10 @@ mod tests {
         assert!(plane.needs_pairing());
 
         plane.start_pairing("123456".to_string());
-        assert!(matches!(plane.auth_status, GatewayAuthStatus::Pairing { .. }));
+        assert!(matches!(
+            plane.auth_status,
+            GatewayAuthStatus::Pairing { .. }
+        ));
 
         plane.complete_pairing("test-client".to_string());
         assert!(plane.is_ready());

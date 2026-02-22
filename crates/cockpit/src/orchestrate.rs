@@ -15,8 +15,7 @@ use leindex_core::orchestrate::{
 };
 
 /// Setup state for the orchestrate pane
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SetupState {
     /// Setup status (cached)
     pub status: Option<SetupStatus>,
@@ -27,7 +26,6 @@ pub struct SetupState {
     /// Selected tool in wizard
     pub selected_tool: Option<AgentTool>,
 }
-
 
 /// State for the Orchestrate pane
 pub struct OrchestratePane {

@@ -728,7 +728,9 @@ mod tests {
     fn test_select_by_tier_with_fallback_lower_tier() {
         let mut config = create_test_config();
         // Remove Vision tier models so we test fallback
-        config.model_preferences.retain(|m| m.tier != ModelTier::Vision);
+        config
+            .model_preferences
+            .retain(|m| m.tier != ModelTier::Vision);
 
         let selector = ModelSelector::new(&config);
 
@@ -1048,7 +1050,9 @@ mod tests {
     fn test_fallback_chain_reasoning_to_fast() {
         let mut config = create_test_config();
         // Remove Reasoning tier models
-        config.model_preferences.retain(|m| m.tier != ModelTier::Reasoning);
+        config
+            .model_preferences
+            .retain(|m| m.tier != ModelTier::Reasoning);
 
         let selector = ModelSelector::new(&config);
 

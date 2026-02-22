@@ -34,7 +34,8 @@ pub fn evaluate_readiness(check: MaesterClawSetupCheck, app: &App) -> ReadinessR
             // Check if at least one cron job exists
             if app.cron_jobs.is_empty() {
                 ReadinessResult::NotReady {
-                    reason: "No cron jobs configured. Create a routine in the Cron section.".to_string(),
+                    reason: "No cron jobs configured. Create a routine in the Cron section."
+                        .to_string(),
                 }
             } else {
                 ReadinessResult::Ready
@@ -138,7 +139,7 @@ pub fn is_setup_complete(steps: &[crate::state::MaesterClawSetupStep]) -> bool {
 mod tests {
     use super::*;
     use crate::state::{MaesterClawSetupCheck, MaesterClawSetupState};
-    use maestro_core::{SecurityPolicy, SandboxManager, McpManager, CronJob};
+    use maestro_core::{CronJob, McpManager, SandboxManager, SecurityPolicy};
 
     #[test]
     fn test_manual_acknowledge_never_auto_ready() {
@@ -158,7 +159,10 @@ mod tests {
         let manager = SandboxManager::new(SecurityPolicy::default());
         let runtimes = manager.available_runtimes();
         // Sandbox manager should always have at least "native" runtime
-        assert!(!runtimes.is_empty(), "Sandbox manager should have native runtime");
+        assert!(
+            !runtimes.is_empty(),
+            "Sandbox manager should have native runtime"
+        );
         assert!(runtimes.contains(&"native"), "Should have native runtime");
     }
 
@@ -167,8 +171,14 @@ mod tests {
         let manager = McpManager::new();
         let (registered, connected) = manager.try_get_status();
         // MCP manager starts with no servers
-        assert!(registered.is_empty(), "MCP manager should start with no registered servers");
-        assert!(connected.is_empty(), "MCP manager should start with no connected servers");
+        assert!(
+            registered.is_empty(),
+            "MCP manager should start with no registered servers"
+        );
+        assert!(
+            connected.is_empty(),
+            "MCP manager should start with no connected servers"
+        );
     }
 
     #[test]

@@ -72,7 +72,8 @@ pub enum SecretValue {
 impl fmt::Debug for SecretValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SecretValue::Plain(_) => f.debug_tuple("SecretValue::Plain")
+            SecretValue::Plain(_) => f
+                .debug_tuple("SecretValue::Plain")
                 .field(&"<REDACTED>")
                 .finish(),
             SecretValue::Encrypted(enc) => {
@@ -361,8 +362,14 @@ mod tests {
     fn test_secret_value_debug_redaction() {
         let plain = SecretValue::Plain("super-secret".to_string());
         let debug_str = format!("{:?}", plain);
-        assert!(!debug_str.contains("super-secret"), "Debug should not leak plain secrets");
-        assert!(debug_str.contains("REDACTED"), "Debug should show REDACTED placeholder");
+        assert!(
+            !debug_str.contains("super-secret"),
+            "Debug should not leak plain secrets"
+        );
+        assert!(
+            debug_str.contains("REDACTED"),
+            "Debug should show REDACTED placeholder"
+        );
     }
 
     #[test]

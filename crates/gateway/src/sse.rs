@@ -6,10 +6,8 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::{
-    response::{
-        sse::{Event, KeepAlive, Sse},
-    },
     extract::State,
+    response::sse::{Event, KeepAlive, Sse},
 };
 use futures_util::stream::{self, Stream};
 use tokio_stream::StreamExt as _;
