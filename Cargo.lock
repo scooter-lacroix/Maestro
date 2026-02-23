@@ -2830,6 +2830,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "maestro-integration"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "dashmap 5.5.3",
+ "futures 0.3.32",
+ "serde",
+ "tab-api",
+ "tab-websocket",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "maestro-lsp-mcp-bridge"
 version = "2.5.0"
 dependencies = [

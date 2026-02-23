@@ -15,6 +15,7 @@ members = [
     "src/maestro-tab/tab-pty",
     "src/maestro-tab/common/tab-api",
     "src/maestro-tab/common/tab-websocket",
+    "src/maestro-tab/maestro-integration",
 ]
 resolver = "2"
 
