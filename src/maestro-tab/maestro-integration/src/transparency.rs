@@ -86,9 +86,7 @@ fn write_to_tty(s: &str) -> Result<()> {
         .open("/dev/tty")
         .or_else(|_| {
             // Fallback: try stdout
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open("/dev/stdout")
+            std::fs::OpenOptions::new().write(true).open("/dev/stdout")
         })?;
 
     file.write_all(s.as_bytes())?;

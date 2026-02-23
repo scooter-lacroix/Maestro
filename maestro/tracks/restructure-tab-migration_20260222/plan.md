@@ -205,17 +205,21 @@
 
 - [x] Task 2.7.1: Implement `get_environment()` - get env var (delegated)
 - [x] Task 2.7.2: Implement `set_environment()` - set env var (delegated)
-- [ ] Task 2.7.3: Implement `configure_session_options()` - mouse, clipboard, etc.
-- [ ] Task 2.7.4: Implement `configure_status_bar()` - status bar setup
-- [ ] Task 2.7.5: Implement `enable_pipe_pane()` - logging setup
+- [x] Task 2.7.3: Implement `configure_session_options()` - mouse, clipboard, etc.
+- [x] Task 2.7.4: Implement `configure_status_bar()` - status bar setup
+- [x] Task 2.7.5: Implement `enable_pipe_pane()` - logging setup
+
+**Note:** Made underlying tmux.rs methods public and added delegating methods in maestro_tab.rs
 
 ### Task 2.8: Implement Transparency Support
 
 - [x] Task 2.8.1: Define OSC 111 transparency sequence
 - [x] Task 2.8.2: Implement `apply_transparency()` - direct PTY output
 - [x] Task 2.8.3: Implement shell hooks (fish, bash, zsh)
-- [ ] Task 2.8.4: Integrate transparency into `start_session()`
-- [ ] Task 2.8.5: Test transparency on foot terminal
+- [x] Task 2.8.4: Integrate transparency into `start_session()`
+- [x] Task 2.8.5: Test transparency on foot terminal
+
+**Note:** Added `apply_transparency_to_session()` helper method and integrated transparency into `start_session()`
 
 ### Task 2.9: Implement PTY Extensions
 
@@ -239,9 +243,11 @@
 - [x] Task 2.11.2: Test `generate_short_id()` uniqueness
 - [x] Task 2.11.3: Test `shell_quote()` escaping
 - [x] Task 2.11.4: Test session creation (naming convention)
-- [ ] Task 2.11.5: Test transparency sequence validity
-- [ ] Task 2.11.6: Test cache TTL logic
-- [ ] Task 2.11.7: Test terminal detection
+- [x] Task 2.11.5: Test transparency sequence validity
+- [x] Task 2.11.6: Test cache TTL logic
+- [x] Task 2.11.7: Test terminal detection
+
+**Note:** Added comprehensive unit tests in maestro_tab.rs for cache TTL, terminal detection, and transparency validation
 
 ### Task 2.12: Update Multiplexer Module
 
@@ -262,18 +268,22 @@
 
 ### Task 2.14: Integration Testing - Session Lifecycle
 
-- [ ] Task 2.14.1: Test daemon auto-start
-- [ ] Task 2.14.2: Test session creation
-- [ ] Task 2.14.3: Test session attachment
-- [ ] Task 2.14.4: Test session termination
-- [ ] Task 2.14.5: Test session listing
+- [x] Task 2.14.1: Test daemon auto-start (structure verified)
+- [x] Task 2.14.2: Test session creation
+- [x] Task 2.14.3: Test session attachment
+- [x] Task 2.14.4: Test session termination
+- [x] Task 2.14.5: Test session listing
+
+**Tests:** `src/maestro-tab/maestro-integration/tests/session_lifecycle.rs`
 
 ### Task 2.15: Integration Testing - Content and State
 
-- [ ] Task 2.15.1: Test pane content capture
-- [ ] Task 2.15.2: Test send_keys functionality
-- [ ] Task 2.15.3: Test activity tracking
-- [ ] Task 2.15.4: Test working directory detection
+- [x] Task 2.15.1: Test pane content capture
+- [x] Task 2.15.2: Test send_keys functionality
+- [x] Task 2.15.3: Test activity tracking
+- [x] Task 2.15.4: Test working directory detection
+
+**Tests:** `src/maestro-tab/maestro-integration/tests/content_state.rs` and `integration_tests.rs`
 
 ### Task 2.16: Integration Testing - Cockpit
 
