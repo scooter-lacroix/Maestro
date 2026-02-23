@@ -220,9 +220,11 @@
 ### Task 2.9: Implement PTY Extensions
 
 - [x] Task 2.9.1: Create PTY writer trait
-- [ ] Task 2.9.2: Implement WebSocket to PTY bridge
+- [x] Task 2.9.2: Implement WebSocket to PTY bridge
 - [x] Task 2.9.3: Implement signal handling (SIGWINCH, etc.)
 - [x] Task 2.9.4: Implement error recovery and reconnect
+
+**Commit:** c412856
 
 ### Task 2.10: Implement Helper Functions
 
