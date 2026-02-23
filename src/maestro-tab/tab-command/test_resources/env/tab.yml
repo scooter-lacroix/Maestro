@@ -1,0 +1,10 @@
+env:
+    inherit: inherit
+    override: base
+
+workspace:
+    - tab: workspace-tab
+      env:
+        override: override
+        unique: unique
+    - repo: project
