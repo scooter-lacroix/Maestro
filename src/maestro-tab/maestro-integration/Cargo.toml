@@ -14,6 +14,10 @@ tab-websocket = { path = "../common/tab-websocket" }
 tokio = { version = "1.0", features = ["full"] }
 futures = "0.3"
 
+# WebSocket - must match tab-websocket versions
+tungstenite = { version = "0.15", default-features = false }
+async-tungstenite = { version = "0.15", features = ["tokio-runtime"] }
+
 # Serialization
 bincode = "1.3"
 serde = { version = "1.0", features = ["derive"] }
