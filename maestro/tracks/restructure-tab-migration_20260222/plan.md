@@ -152,11 +152,10 @@
 - [x] Task 2.1.1: Create `src/maestro-tab/` directory for forked tab-rs
 - [x] Task 2.1.2: Clone tab-rs from `https://github.com/austinjones/tab-rs.git`
 - [x] Task 2.1.3: Initialize git repository with proper remotes
-- [ ] Task 2.1.4: Verify tab-rs builds standalone (blocked: lifeline version conflicts)
+- [x] Task 2.1.4: Verify tab-rs builds standalone
 - [x] Task 2.1.5: Document tab-rs dependencies (see api-compatibility-layer.md)
 
-**Note:** Direct library integration blocked due to lifeline version conflicts (0.4.0 vs 0.6.1).
-**Resolution:** Using subprocess/CLI integration approach instead (see fork-agent report).
+**Resolved:** Lifeline version conflicts fixed by regenerating Cargo.lock with unified 0.6.1.
 
 ### Task 2.2: Create Maestro Integration Layer
 
@@ -250,10 +249,12 @@
 
 ### Task 2.13: Update Workspace Dependencies
 
-- [ ] Task 2.13.1: Add `src/maestro-tab` to root `Cargo.toml` workspace
-- [ ] Task 2.13.2: Add maestro-tab dependencies to workspace
-- [ ] Task 2.13.3: Pin dependency versions (tokio, lifeline, etc.)
-- [ ] Task 2.13.4: Verify `cargo build --workspace` succeeds
+- [x] Task 2.13.1: Add `src/maestro-tab` to root `Cargo.toml` workspace
+- [x] Task 2.13.2: Add maestro-tab dependencies to workspace
+- [x] Task 2.13.3: Pin dependency versions (tokio, lifeline, etc.)
+- [x] Task 2.13.4: Verify `cargo build --workspace` succeeds
+
+**Commit:** 3acbf28
 
 ### Task 2.14: Integration Testing - Session Lifecycle
 
