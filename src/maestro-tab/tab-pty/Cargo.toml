@@ -1,0 +1,42 @@
+[package]
+name = "tab-pty"
+version = "0.5.3"
+authors = ["Austin Jones <implAustin@gmail.com>"]
+description = "the pty module for the tab terminal multiplexer"
+homepage = "https://github.com/austinjones/tab-rs"
+repository = "https://github.com/austinjones/tab-rs"
+license = "MIT"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tab-api = "0.5.3"
+tab-websocket = "0.5.0"
+lifeline = "0.6"
+postage = "0.4"
+
+dirs = "4.0"
+serde_yaml = "0.8"
+bincode = "1.3"
+
+# async / websockets
+tokio = { version = "1.0", features = ["macros", "sync", "time", "io-util", "rt-multi-thread"] }
+tokio-io = "0.1"
+tab-pty-process = { version = "0.2", path = "../tab-pty-process"}
+futures = { version = "0.3", features = [] }
+
+async-trait = "0.1"
+
+# authentication / tokens
+rand = "0.8"
+base64 = "0.13"
+
+# logging
+log = "0.4"
+simplelog = "0.10"
+log-panics = "2.0"
+
+# error management
+anyhow = "1.0"
+thiserror = "1.0"

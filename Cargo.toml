@@ -8,14 +8,13 @@ members = [
     "crates/ktop_collectors",
     "crates/core",
     "crates/gateway",
-    # maestro-tab members excluded due to dependency conflicts
-    # Will use tab-rs via subprocess/CLI instead of library integration
-    # "src/maestro-tab/tab",
-    # "src/maestro-tab/tab-command",
-    # "src/maestro-tab/tab-daemon",
-    # "src/maestro-tab/tab-pty",
-    # "src/maestro-tab/common/tab-api",
-    # "src/maestro-tab/common/tab-websocket",
+    # maestro-tab: Forked tab-rs terminal multiplexer
+    "src/maestro-tab/tab",
+    "src/maestro-tab/tab-command",
+    "src/maestro-tab/tab-daemon",
+    "src/maestro-tab/tab-pty",
+    "src/maestro-tab/common/tab-api",
+    "src/maestro-tab/common/tab-websocket",
 ]
 resolver = "2"
 
@@ -43,3 +42,10 @@ panic = "abort"
 
 [patch.crates-io]
 libsql = { path = "vendor/libsql" }
+
+# Use local maestro-tab fork instead of crates.io
+tab-api = { path = "src/maestro-tab/common/tab-api" }
+tab-websocket = { path = "src/maestro-tab/common/tab-websocket" }
+tab-command = { path = "src/maestro-tab/tab-command" }
+tab-daemon = { path = "src/maestro-tab/tab-daemon" }
+tab-pty = { path = "src/maestro-tab/tab-pty" }
