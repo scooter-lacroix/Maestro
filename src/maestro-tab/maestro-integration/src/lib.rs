@@ -25,10 +25,12 @@
 pub mod session;
 pub mod transparency;
 pub mod pty;
+pub mod websocket_bridge;
 
 pub use session::{MaestroSession, SessionManager};
 pub use transparency::{apply_transparency, TransparencyConfig};
 pub use pty::PtyBridge;
+pub use websocket_bridge::WebSocketPtyBridge;
 
 use anyhow::Result;
 use tab_api::config::DaemonConfig;

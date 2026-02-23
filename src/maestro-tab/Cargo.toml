@@ -6,6 +6,7 @@ members = [
     "tab-pty",
     "common/tab-api",
     "common/tab-websocket",
+    "maestro-integration",
 ]
 
 [patch.crates-io]

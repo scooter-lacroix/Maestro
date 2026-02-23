@@ -159,11 +159,13 @@
 
 ### Task 2.2: Create Maestro Integration Layer
 
-- [ ] Task 2.2.1: Create `src/maestro-tab/maestro-integration/Cargo.toml`
-- [ ] Task 2.2.2: Create `src/maestro-tab/maestro-integration/src/lib.rs`
-- [ ] Task 2.2.3: Create `src/maestro-tab/maestro-integration/src/session.rs`
-- [ ] Task 2.2.4: Create `src/maestro-tab/maestro-integration/src/transparency.rs`
-- [ ] Task 2.2.5: Create `src/maestro-tab/maestro-integration/src/pty.rs`
+- [x] Task 2.2.1: Create `src/maestro-tab/maestro-integration/Cargo.toml`
+- [x] Task 2.2.2: Create `src/maestro-tab/maestro-integration/src/lib.rs`
+- [x] Task 2.2.3: Create `src/maestro-tab/maestro-integration/src/session.rs`
+- [x] Task 2.2.4: Create `src/maestro-tab/maestro-integration/src/transparency.rs`
+- [x] Task 2.2.5: Create `src/maestro-tab/maestro-integration/src/pty.rs`
+
+**Commit:** 0d5ec1d
 
 ### Task 2.3: Implement MaestroTabMultiplexer Core
 

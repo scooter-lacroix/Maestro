@@ -2324,6 +2324,7 @@ name = "maestro-integration"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-tungstenite",
  "bincode",
  "dashmap 5.5.3",
  "futures 0.3.32",
@@ -2333,6 +2334,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tungstenite 0.15.0",
 ]
 
 [[package]]
