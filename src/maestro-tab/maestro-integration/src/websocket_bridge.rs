@@ -102,7 +102,9 @@ impl WebSocketPtyBridge {
     /// Initialize the PTY with tab metadata
     pub async fn init(&self, metadata: TabMetadata) -> Result<()> {
         let request = PtyWebsocketRequest::Init(metadata.clone());
-        self.request_tx.send(request).await
+        self.request_tx
+            .send(request)
+            .await
             .context("Failed to send PTY init request")?;
 
         // Store metadata
@@ -117,7 +119,9 @@ impl WebSocketPtyBridge {
         use tab_api::chunk::InputChunk;
         let chunk = InputChunk { data };
         let request = PtyWebsocketRequest::Input(chunk);
-        self.request_tx.send(request).await
+        self.request_tx
+            .send(request)
+            .await
             .context("Failed to send PTY input")?;
         Ok(())
     }
@@ -125,7 +129,9 @@ impl WebSocketPtyBridge {
     /// Resize the PTY
     pub async fn resize(&self, cols: u16, rows: u16) -> Result<()> {
         let request = PtyWebsocketRequest::Resize((cols, rows));
-        self.request_tx.send(request).await
+        self.request_tx
+            .send(request)
+            .await
             .context("Failed to send PTY resize request")?;
         Ok(())
     }
@@ -133,7 +139,9 @@ impl WebSocketPtyBridge {
     /// Terminate the PTY
     pub async fn terminate(&self) -> Result<()> {
         let request = PtyWebsocketRequest::Terminate;
-        self.request_tx.send(request).await
+        self.request_tx
+            .send(request)
+            .await
             .context("Failed to send PTY terminate request")?;
         Ok(())
     }
@@ -153,7 +161,7 @@ impl WebSocketPtyBridge {
     /// Shutdown the bridge gracefully
     pub async fn shutdown(&self) -> Result<()> {
         tracing::info!("Shutting down WebSocket PTY bridge");
-        
+
         // Send shutdown signal to tasks
         if let Some(tx) = &self.shutdown_tx {
             let _ = tx.send(()).await;
@@ -161,7 +169,7 @@ impl WebSocketPtyBridge {
 
         // Close request channel to signal writer task to stop
         // (channel is closed when all senders are dropped)
-        
+
         Ok(())
     }
 
@@ -178,7 +186,11 @@ impl WebSocketPtyBridge {
         loop {
             match self.recv_response().await {
                 Some(PtyWebsocketResponse::Started(metadata)) => {
-                    tracing::info!("PTY started for tab: {} (id: {:?})", metadata.name, metadata.id);
+                    tracing::info!(
+                        "PTY started for tab: {} (id: {:?})",
+                        metadata.name,
+                        metadata.id
+                    );
                     // Update metadata
                     let mut meta = self.metadata.lock().await;
                     *meta = Some(metadata);
@@ -359,9 +371,7 @@ pub struct WebSocketPtyBridgeBuilder {
 impl WebSocketPtyBridgeBuilder {
     /// Create a new builder with default settings
     pub fn new() -> Self {
-        Self {
-            buffer_size: 64,
-        }
+        Self { buffer_size: 64 }
     }
 
     /// Set the channel buffer size (default: 64)

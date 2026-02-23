@@ -16,10 +16,7 @@ pub struct PtyBridge {
 impl PtyBridge {
     /// Create a new PTY bridge using /dev/tty
     pub fn new() -> Result<Self> {
-        let fd = match std::fs::OpenOptions::new()
-            .write(true)
-            .open("/dev/tty")
-        {
+        let fd = match std::fs::OpenOptions::new().write(true).open("/dev/tty") {
             Ok(f) => f,
             Err(_) => {
                 // Fallback: use stdout fd

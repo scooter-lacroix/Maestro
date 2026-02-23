@@ -499,7 +499,7 @@ impl TmuxMultiplexer {
     }
 
     /// Configure session options (mouse, clipboard, etc.)
-    fn configure_session_options(&self, session_name: &str) -> Result<()> {
+    pub fn configure_session_options(&self, session_name: &str) -> Result<()> {
         // FIRST: Create shell transparency hooks BEFORE the session starts
         // This ensures they're available when the shell initializes
         if let Some(home) = dirs::home_dir() {
@@ -729,7 +729,7 @@ __maestro_reset_background
     }
 
     /// Configure status bar with session info
-    fn configure_status_bar(&self, session: &TmuxSession) -> Result<()> {
+    pub fn configure_status_bar(&self, session: &TmuxSession) -> Result<()> {
         let folder_name = std::path::Path::new(&session.work_dir)
             .file_name()
             .and_then(|n| n.to_str())
@@ -798,7 +798,7 @@ __maestro_reset_background
     }
 
     /// Enable pipe-pane to log output
-    fn enable_pipe_pane(&self, session: &TmuxSession) -> Result<()> {
+    pub fn enable_pipe_pane(&self, session: &TmuxSession) -> Result<()> {
         let log_file = session.log_file();
 
         // Ensure log directory exists

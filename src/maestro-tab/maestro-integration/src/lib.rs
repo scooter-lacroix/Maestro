@@ -22,20 +22,20 @@
 //!           tab-daemon (via WebSocket)
 //! ```
 
+pub mod pty;
 pub mod session;
 pub mod transparency;
-pub mod pty;
 pub mod websocket_bridge;
 
+pub use pty::PtyBridge;
 pub use session::{MaestroSession, SessionManager};
 pub use transparency::{apply_transparency, TransparencyConfig};
-pub use pty::PtyBridge;
 pub use websocket_bridge::WebSocketPtyBridge;
 
 use anyhow::Result;
+use tab_api::client::Request;
 use tab_api::config::DaemonConfig;
 use tab_api::launch::launch_daemon;
-use tab_api::client::Request;
 use tokio::sync::mpsc;
 
 /// The main integration client for Maestro-tab communication

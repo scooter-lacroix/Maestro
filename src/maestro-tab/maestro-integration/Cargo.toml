@@ -31,3 +31,7 @@ tracing = "0.1"
 
 # Utilities
 dashmap = "5.5"
+
+[dev-dependencies]
+# Testing utilities
+tokio-test = "0.4"
