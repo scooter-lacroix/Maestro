@@ -13,7 +13,6 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::state::MaesterClawSetupCheck;
 use crate::theme::theme_from_name;
 
 /// Capabilities section selection
@@ -32,7 +31,7 @@ pub fn render_capabilities(frame: &mut Frame, app: &App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" ⚡ MAESTERCLAW COMMAND CENTER ")
+        .title(" MAESTERCLAW COMMAND CENTER ")
         .border_type(BorderType::Rounded)
         .border_style(ratatui::style::Style::default().fg(theme.accent))
         .style(ratatui::style::Style::default().bg(theme.panel_bg));
@@ -57,14 +56,10 @@ pub fn render_capabilities(frame: &mut Frame, app: &App) {
     // Render content based on selected section
     render_section_content(frame, app, chunks[1]);
     let iflow_hint =
-        Paragraph::new(" [W] Setup Wizard   |   iFlow non-interactive: iflow -p \"<prompt>\" ")
+        Paragraph::new(" iFlow non-interactive: iflow -p \"<prompt>\" ")
             .alignment(Alignment::Center)
             .style(ratatui::style::Style::default().fg(theme.muted));
     frame.render_widget(iflow_hint, chunks[2]);
-
-    if app.maesterclaw_setup.is_open {
-        render_setup_wizard(frame, app);
-    }
 }
 
 fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
@@ -92,9 +87,9 @@ fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
     };
     let cron_count = app.cron_jobs.len();
     let cron_tab = Paragraph::new(format!(
-        " {} ⏰ Cron Jobs ({}) ",
+        " {} Cron Jobs ({}) ",
         if section == CapabilitiesSection::CronJobs {
-            "▶"
+            ">"
         } else {
             " "
         },
@@ -118,9 +113,9 @@ fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
         ratatui::style::Style::default().fg(theme.fg)
     };
     let mcp_tab = Paragraph::new(format!(
-        " {} 🔌 MCP Servers ",
+        " {} MCP Servers ",
         if section == CapabilitiesSection::McpServers {
-            "▶"
+            ">"
         } else {
             " "
         }
@@ -143,9 +138,9 @@ fn render_section_tabs(frame: &mut Frame, app: &App, area: Rect) {
         ratatui::style::Style::default().fg(theme.fg)
     };
     let sandbox_tab = Paragraph::new(format!(
-        " {} 🔒 Sandbox ",
+        " {} Sandbox ",
         if section == CapabilitiesSection::Sandbox {
-            "▶"
+            ">"
         } else {
             " "
         }
@@ -168,74 +163,6 @@ fn render_section_content(frame: &mut Frame, app: &App, area: Rect) {
         CapabilitiesSection::McpServers => render_mcp_servers(frame, app, area, theme),
         CapabilitiesSection::Sandbox => render_sandbox(frame, app, area, theme),
     }
-}
-
-fn render_setup_wizard(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let width = area.width.min(96).max(60);
-    let height = area.height.min(24).max(14);
-    let popup = Rect::new(
-        area.x + (area.width.saturating_sub(width)) / 2,
-        area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    );
-
-    let current = app
-        .maesterclaw_setup
-        .steps
-        .get(app.maesterclaw_setup.current_step)
-        .cloned();
-
-    let mut lines = vec![
-        Line::from(""),
-        Line::from(format!(
-            "Step {}/{}",
-            app.maesterclaw_setup.current_step + 1,
-            app.maesterclaw_setup.steps.len()
-        )),
-        Line::from(""),
-    ];
-
-    if let Some(step) = current {
-        lines.push(Line::from(step.title.to_string()));
-        lines.push(Line::from(step.description));
-        lines.push(Line::from(""));
-        lines.push(Line::from(format!("Verification: {}", step.verification)));
-        lines.push(Line::from(format!(
-            "Status: {}",
-            match (step.check, step.is_ready) {
-                (_, true) => "READY",
-                (MaesterClawSetupCheck::ManualAcknowledge, false) => "AWAITING ACK",
-                (MaesterClawSetupCheck::CronConfigured, false) => "ADD CRON JOB",
-                (MaesterClawSetupCheck::McpConnected, false) => "CONNECT MCP/PROVIDER",
-                (MaesterClawSetupCheck::MemoryVisualizationAvailable, false) => "VERIFY MEMORY TAB",
-                (MaesterClawSetupCheck::SandboxPolicyVisible, false) => "VERIFY SANDBOX PANEL",
-            }
-        )));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from("Checklist:"));
-    for step in &app.maesterclaw_setup.steps {
-        let marker = if step.is_ready { "[x]" } else { "[ ]" };
-        lines.push(Line::from(format!("{} {}", marker, step.title)));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(
-        "Controls: Enter/Right next • Left back • Esc close",
-    ));
-
-    let paragraph = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .title(" MaesterClaw Setup Wizard ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Double),
-        )
-        .wrap(ratatui::widgets::Wrap { trim: true });
-
-    frame.render_widget(paragraph, popup);
 }
 
 fn render_cron_jobs(frame: &mut Frame, app: &App, area: Rect, theme: crate::theme::Theme) {
@@ -277,7 +204,7 @@ fn render_cron_jobs(frame: &mut Frame, app: &App, area: Rect, theme: crate::them
                 maestro_core::JobType::Agent => "Agent",
             };
 
-            let enabled_str = if job.enabled { "●" } else { "○" };
+            let enabled_str = if job.enabled { "*" } else { "o" };
             let enabled_style = if job.enabled {
                 ratatui::style::Style::default().fg(theme.success)
             } else {
@@ -347,7 +274,7 @@ fn render_mcp_servers(frame: &mut Frame, app: &App, area: Rect, theme: crate::th
             .iter()
             .map(|name| {
                 let is_connected = connected.contains(name);
-                let status = if is_connected { "●" } else { "○" };
+                let status = if is_connected { "*" } else { "o" };
                 let status_text = if is_connected {
                     "Ready"
                 } else {
@@ -492,16 +419,16 @@ fn render_sandbox(frame: &mut Frame, app: &App, area: Rect, theme: crate::theme:
         .iter()
         .map(|r| match *r {
             "native" => {
-                ListItem::new(" ● native      Native process execution (trusted code only)")
+                ListItem::new(" * native      Native process execution (trusted code only)")
                     .style(ratatui::style::Style::default().fg(theme.success))
             }
-            "wasm" => ListItem::new(" ○ wasm        WASM sandbox (experimental)")
+            "wasm" => ListItem::new(" o wasm        WASM sandbox (experimental)")
                 .style(ratatui::style::Style::default().fg(theme.muted)),
             "docker" => {
-                ListItem::new(" ○ docker      Docker container isolation (requires Docker)")
+                ListItem::new(" o docker      Docker container isolation (requires Docker)")
                     .style(ratatui::style::Style::default().fg(theme.muted))
             }
-            _ => ListItem::new(format!(" ○ {}      Available", r))
+            _ => ListItem::new(format!(" o {}      Available", r))
                 .style(ratatui::style::Style::default().fg(theme.muted)),
         })
         .collect();

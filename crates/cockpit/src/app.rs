@@ -5,9 +5,10 @@
 
 use anyhow::Result;
 use crossterm::{
+    cursor::MoveTo,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     prelude::*,
@@ -18,6 +19,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     collections::{HashMap, HashSet},
     io,
+    io::Write,
     sync::Arc,
     time::Instant,
 };
@@ -38,9 +40,8 @@ use crate::conductor::omp_agent::OmpAgentManager;
 use crate::modals;
 use crate::omp::{is_omp_available, OmpWorkerStatus};
 use crate::state::{
-    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, MaesterClawSetupCheck,
-    MaesterClawSetupState, McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind,
-    SettingsOption, Stats,
+    AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
+    ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };
 use crate::tabs::{
     render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
@@ -209,7 +210,6 @@ pub struct App {
     pub settings_option: SettingsOption,
     // Phase 3: Capabilities tab state
     pub capabilities_section: Option<crate::tabs::CapabilitiesSection>,
-    pub maesterclaw_setup: MaesterClawSetupState,
     // Phase 3: Capabilities services
     pub cron_jobs: Vec<CronJob>,
     pub cron_job_state: ratatui::widgets::ListState,
@@ -338,7 +338,6 @@ impl App {
             config,
             settings_option: SettingsOption::Editor,
             capabilities_section: Some(crate::tabs::CapabilitiesSection::CronJobs),
-            maesterclaw_setup: MaesterClawSetupState::default(),
             // Phase 3: Capabilities services
             cron_jobs: Vec::new(),
             cron_job_state: ratatui::widgets::ListState::default(),
@@ -416,7 +415,6 @@ impl App {
 
         // Check LSP availability on startup
         app.check_lsp_availability();
-        app.refresh_maesterclaw_setup();
         app.mcp_state.select(Some(0));
         app.dash_session_state.select(Some(0));
         app.memory_state.select(Some(0));
@@ -466,66 +464,6 @@ impl App {
             .unwrap_or(0);
         self.settings_menu_state.select(Some(selected));
         self.input_mode = InputMode::SettingsMenu;
-    }
-
-    fn refresh_maesterclaw_setup(&mut self) {
-        // Use the readiness reducer to evaluate runtime state
-        // Collect evaluations first to avoid borrow checker issues
-        let mut evaluations = Vec::with_capacity(self.maesterclaw_setup.steps.len());
-
-        for step in self.maesterclaw_setup.steps.iter() {
-            let is_ready = match step.check {
-                MaesterClawSetupCheck::ManualAcknowledge => step.is_ready,
-                MaesterClawSetupCheck::CronConfigured => !self.cron_jobs.is_empty(),
-                MaesterClawSetupCheck::McpConnected => {
-                    let (registered, connected) = self.mcp_manager.try_get_status();
-                    !registered.is_empty() && !connected.is_empty()
-                }
-                MaesterClawSetupCheck::MemoryVisualizationAvailable => true, // Always available
-                MaesterClawSetupCheck::SandboxPolicyVisible => {
-                    !self.sandbox_manager.available_runtimes().is_empty()
-                }
-            };
-            evaluations.push(is_ready);
-        }
-
-        // Apply the evaluations
-        for (i, step) in self.maesterclaw_setup.steps.iter_mut().enumerate() {
-            if let Some(&is_ready) = evaluations.get(i) {
-                step.is_ready = is_ready;
-            }
-        }
-    }
-    fn open_maesterclaw_setup(&mut self) {
-        self.maesterclaw_setup.is_open = true;
-        self.maesterclaw_setup.current_step = 0;
-        self.refresh_maesterclaw_setup();
-    }
-    fn close_maesterclaw_setup(&mut self) {
-        self.maesterclaw_setup.is_open = false;
-    }
-    fn advance_maesterclaw_setup(&mut self) {
-        if let Some(step) = self
-            .maesterclaw_setup
-            .steps
-            .get_mut(self.maesterclaw_setup.current_step)
-        {
-            if step.check == MaesterClawSetupCheck::ManualAcknowledge {
-                step.is_ready = true;
-            }
-        }
-        let max_step = self.maesterclaw_setup.steps.len().saturating_sub(1);
-        if self.maesterclaw_setup.current_step >= max_step {
-            self.close_maesterclaw_setup();
-            self.status_message = "MaesterClaw setup checklist complete. Reference repos are source-only; runtime parity is validated inside Maestro.".to_string();
-            return;
-        }
-        self.maesterclaw_setup.current_step += 1;
-        self.refresh_maesterclaw_setup();
-    }
-
-    fn rewind_maesterclaw_setup(&mut self) {
-        self.maesterclaw_setup.current_step = self.maesterclaw_setup.current_step.saturating_sub(1);
     }
 
     fn dash_selected_session_id(&self) -> Option<String> {
@@ -1448,9 +1386,29 @@ fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> 
     if std::env::var("ZELLIJ").is_ok() {
         return Ok(());
     }
-    disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+
+    // CRITICAL: Order matters for proper terminal handoff to external TUI apps
+    // 1. First show cursor while still in alternate screen
     terminal.show_cursor()?;
+
+    // 2. Leave alternate screen - this returns us to the main screen buffer
+    execute!(io::stdout(), LeaveAlternateScreen)?;
+
+    // 3. Clear the main screen to ensure clean state for spawned app
+    execute!(io::stdout(), Clear(ClearType::All))?;
+
+    // 4. Move cursor to home position
+    execute!(io::stdout(), MoveTo(0, 0))?;
+
+    // 5. NOW disable raw mode - this gives the spawned app proper terminal control
+    disable_raw_mode()?;
+
+    // 6. Ensure all output is flushed before returning
+    io::stdout().flush()?;
+
+    // 7. Allow terminal to process all sequences (increased delay for reliability)
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
     Ok(())
 }
 
@@ -2714,6 +2672,7 @@ async fn run_app<B: Backend>(
                                         // Cycle tools
                                         let tools = [
                                             "claude", "gemini", "shell", "codex", "opencode", "amp",
+                                            "qwen", "pi", "omp", "iflow",
                                         ];
                                         if let Some(pos) =
                                             tools.iter().position(|&t| t == app.new_session_tool)
@@ -3302,45 +3261,6 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::ALT, KeyCode::Char('9')) => app.tab_index = tabs::LSPS,
                             (KeyModifiers::ALT, KeyCode::Char('0')) => {
                                 app.tab_index = tabs::SETTINGS
-                            }
-                            // 3b. MaesterClaw setup wizard controls
-                            (KeyModifiers::NONE, KeyCode::Char('w'))
-                                if app.tab_index == tabs::MAESTERCLAW =>
-                            {
-                                if app.maesterclaw_setup.is_open {
-                                    app.close_maesterclaw_setup();
-                                    app.status_message =
-                                        "MaesterClaw setup wizard closed".to_string();
-                                } else {
-                                    app.open_maesterclaw_setup();
-                                    app.status_message =
-                                        "MaesterClaw setup wizard opened (Left/Right/Enter to navigate)"
-                                            .to_string();
-                                }
-                            }
-                            (_, KeyCode::Esc)
-                                if app.tab_index == tabs::MAESTERCLAW
-                                    && app.maesterclaw_setup.is_open =>
-                            {
-                                app.close_maesterclaw_setup();
-                            }
-                            (_, KeyCode::Right)
-                                if app.tab_index == tabs::MAESTERCLAW
-                                    && app.maesterclaw_setup.is_open =>
-                            {
-                                app.advance_maesterclaw_setup();
-                            }
-                            (_, KeyCode::Left)
-                                if app.tab_index == tabs::MAESTERCLAW
-                                    && app.maesterclaw_setup.is_open =>
-                            {
-                                app.rewind_maesterclaw_setup();
-                            }
-                            (_, KeyCode::Enter)
-                                if app.tab_index == tabs::MAESTERCLAW
-                                    && app.maesterclaw_setup.is_open =>
-                            {
-                                app.advance_maesterclaw_setup();
                             }
 
                             // 4. Conductor Catch-All
@@ -4815,23 +4735,44 @@ async fn run_app<B: Backend>(
                                         }
                                     }
                                 } else if app.tab_index == tabs::PROJECTS {
-                                    // Projects Tab
+                                    // Projects Tab - Launch Yazi via maestro-tab
                                     if let Some(i) = app.project_state.selected() {
                                         let project = &app.projects[i].clone();
+
+                                        // Check if Yazi launcher is ready
+                                        let status = crate::yazi_launcher::get_status_report();
+                                        if !status.is_ready() {
+                                            app.status_message = status.status_message();
+                                            continue;
+                                        }
+
                                         app.status_message =
-                                            format!("Launching Zide for {}...", project.name);
+                                            format!("Launching Yazi for {}...", project.name);
                                         let _ = terminal.draw(|frame| ui(frame, &mut app));
 
-                                        let _ = suspend_fullscreen_app(terminal);
-                                        let res = leindex_core::multiplexer::zellij::ZellijMultiplexer::spawn_zide(&project.path, &project.name);
-                                        let _ = resume_fullscreen_app(terminal);
+                                        // Properly handle suspend errors
+                                        if let Err(e) = suspend_fullscreen_app(terminal) {
+                                            app.status_message = format!("Failed to suspend TUI: {}", e);
+                                            continue;
+                                        }
+
+                                        // Small delay to ensure terminal state is synced
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+
+                                        let res = crate::yazi_launcher::launch_yazi(&project.path, &project.name);
+
+                                        // Resume TUI
+                                        if let Err(e) = resume_fullscreen_app(terminal) {
+                                            app.status_message = format!("Failed to resume TUI: {}", e);
+                                            continue;
+                                        }
 
                                         match res {
                                             Ok(_) => {
-                                                let _ = terminal.clear(); // Ensure screen is clear after Zellij exit
+                                                let _ = terminal.clear(); // Ensure screen is clear after Yazi exit
                                                 let _ = terminal.draw(|frame| ui(frame, &mut app));
                                                 app.status_message = format!(
-                                                    "Returned from Zide for {}.",
+                                                    "Returned from Yazi for {}.",
                                                     project.name
                                                 );
                                             }

@@ -1,18 +1,18 @@
-//! MaesterClaw command center and setup wizard modules
+//! MaesterClaw command center modules
 //!
-//! This module provides the setup wizard readiness checking and
-//! command center functionality for the MaesterClaw tab.
+//! This module provides the command center functionality for the MaesterClaw tab,
+//! including channel management, gateway connections, and hot cache for suggestions.
 
 pub mod channels;
 pub mod gateway;
 pub mod hot_cache;
-pub mod readiness;
+pub mod agent_status;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ui_integration_tests;
 
 pub use channels::{ChannelConfig, ChannelControlPlane, ChannelStatus, ChannelType};
 pub use gateway::{ConnectedClient, GatewayAuthStatus, GatewayConfig, GatewayControlPlane};
 pub use hot_cache::{clamp_flash, BufferedSuggestion, HotCache, MemorySuggestion, SuggestionTtl};
-pub use readiness::{
-    evaluate_readiness, is_setup_complete, update_step_readiness, ReadinessResult,
-};
+pub use agent_status::{AgentStatus, SessionDisplay, TurnDisplay};

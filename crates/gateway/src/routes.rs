@@ -8,7 +8,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Json},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -121,7 +121,13 @@ pub fn create_routes() -> Router<Arc<GatewayState>> {
         .route("/pair/verify", post(handle_pair_verify))
         // Webhooks
         .route("/webhook", post(handle_webhook))
-        // Session API
+        // Agent Session API (new agent endpoints)
+        .route("/api/agent/sessions", get(handle_agent_session_list))
+        .route("/api/agent/sessions", post(handle_agent_session_create))
+        .route("/api/agent/sessions/{id}", get(handle_agent_session_get))
+        .route("/api/agent/sessions/{id}", delete(handle_agent_session_delete))
+        .route("/api/agent/execute", post(handle_agent_execute))
+        // Legacy Session API
         .route("/api/session", get(handle_session_list))
         .route("/api/session/{id}", get(handle_session_get))
         // MCP API
@@ -384,6 +390,91 @@ pub async fn handle_dashboard_approvals(
         "pending": [],
         "count": 0,
     }))
+}
+
+// ============================================================================
+// Agent API Handlers
+// ============================================================================
+
+/// List agent sessions
+pub async fn handle_agent_session_list(
+    State(_state): State<Arc<GatewayState>>,
+) -> impl IntoResponse {
+    // TODO: Implement session listing from maestro-claw session store
+    Json(crate::agent::SessionListResponse::empty())
+}
+
+/// Create a new agent session
+pub async fn handle_agent_session_create(
+    State(_state): State<Arc<GatewayState>>,
+    Json(_req): Json<crate::agent::SessionCreateRequest>,
+) -> impl IntoResponse {
+    // TODO: Implement session creation with maestro-claw
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({
+            "error": "Agent session creation not yet implemented",
+            "hint": "Use agent/execute endpoint to auto-create sessions"
+        })),
+    )
+}
+
+/// Get a specific agent session
+pub async fn handle_agent_session_get(
+    State(_state): State<Arc<GatewayState>>,
+    axum::extract::Path(_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    // TODO: Implement session retrieval from maestro-claw
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "Session not found"})),
+    )
+}
+
+/// Delete an agent session
+pub async fn handle_agent_session_delete(
+    State(_state): State<Arc<GatewayState>>,
+    axum::extract::Path(_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    // TODO: Implement session deletion
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({"error": "Session deletion not yet implemented"})),
+    )
+}
+
+/// Execute an agent prompt
+pub async fn handle_agent_execute(
+    State(state): State<Arc<GatewayState>>,
+    Json(req): Json<crate::agent::AgentExecuteRequest>,
+) -> impl IntoResponse {
+    debug!("Agent execute request: {:?}", req.prompt);
+
+    // Broadcast agent execution event
+    let event = crate::protocol::EventFrame::new(
+        "agent.execute.started",
+        Some(serde_json::json!({
+            "prompt_preview": if req.prompt.len() > 100 {
+                format!("{}...", &req.prompt[..97])
+            } else {
+                req.prompt.clone()
+            },
+            "provider": req.provider,
+            "stream": req.stream,
+        })),
+        Some(state.next_seq()),
+    );
+    let _ = state.event_bus.send(event);
+
+    // TODO: Implement actual agent execution with maestro-claw
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(serde_json::json!({
+            "error": "Agent execution not yet wired to maestro-claw",
+            "request_received": true,
+            "prompt_length": req.prompt.len()
+        })),
+    )
 }
 
 #[cfg(test)]

@@ -20,6 +20,9 @@ leindex-core = { path = "../../src/leindex" }
 # Maestro core capabilities (Phase 3)
 maestro-core = { path = "../core" }
 
+# Maestro Claw agent framework
+maestro-claw = { path = "../maestro-claw" }
+
 # Pi-Mono agent integration
 maestro-pi-mono = { path = "../pi-mono" }
 

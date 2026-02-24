@@ -1,0 +1,260 @@
+//! Thread model - Conversation branch
+//!
+//! A Thread represents a sequence of related turns within a session,
+//! with optional summarization support for long conversations.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::{Turn, TurnRole};
+
+/// Default threshold for auto-summarization
+const DEFAULT_SUMMARY_THRESHOLD: usize = 20;
+
+/// Message format for provider APIs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderMessage {
+    /// Role: "user", "assistant", "system", or "tool"
+    pub role: String,
+    /// Message content
+    pub content: String,
+    /// Tool calls (for assistant messages with tool calls)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallMessage>>,
+    /// Tool call ID (for tool response messages)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+/// Tool call in provider message format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallMessage {
+    /// Tool call ID
+    pub id: String,
+    /// Tool type (usually "function")
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    /// Function details
+    pub function: FunctionCall,
+}
+
+/// Function call details
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    /// Function name
+    pub name: String,
+    /// Function arguments as JSON string
+    pub arguments: String,
+}
+
+/// A conversation thread containing ordered turns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Thread {
+    /// Unique identifier for this thread
+    pub id: String,
+    /// ID of the parent session
+    pub session_id: String,
+    /// Ordered list of turns in this thread
+    pub turns: Vec<Turn>,
+    /// Optional summary of the conversation
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// When this thread was created
+    #[serde(default = "Utc::now")]
+    pub created_at: DateTime<Utc>,
+    /// Turn count threshold for requesting summarization
+    #[serde(skip)]
+    summary_threshold: usize,
+}
+
+impl Thread {
+    /// Create a new thread belonging to the given session
+    pub fn new(session_id: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            session_id,
+            turns: Vec::new(),
+            summary: None,
+            created_at: Utc::now(),
+            summary_threshold: DEFAULT_SUMMARY_THRESHOLD,
+        }
+    }
+
+    /// Create a new thread with a specific ID
+    pub fn with_id(id: String, session_id: String) -> Self {
+        Self {
+            id,
+            session_id,
+            turns: Vec::new(),
+            summary: None,
+            created_at: Utc::now(),
+            summary_threshold: DEFAULT_SUMMARY_THRESHOLD,
+        }
+    }
+
+    /// Get the thread ID
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Get the session ID
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Get an iterator over the turns
+    pub fn turns(&self) -> impl Iterator<Item = &Turn> {
+        self.turns.iter()
+    }
+
+    /// Get the number of turns
+    pub fn turn_count(&self) -> usize {
+        self.turns.len()
+    }
+
+    /// Get the summary, if any
+    pub fn summary(&self) -> Option<&String> {
+        self.summary.as_ref()
+    }
+
+    /// Set the summary
+    pub fn set_summary(&mut self, summary: String) {
+        self.summary = Some(summary);
+    }
+
+    /// Set the summary threshold
+    pub fn set_summary_threshold(&mut self, threshold: usize) {
+        self.summary_threshold = threshold;
+    }
+
+    /// Check if this thread needs summarization
+    pub fn needs_summary(&self) -> bool {
+        self.turns.len() >= self.summary_threshold
+    }
+
+    /// Add a turn to this thread
+    pub fn add_turn(&mut self, turn: Turn) {
+        self.turns.push(turn);
+    }
+
+    /// Build and add a new turn, returning a reference to it
+    pub fn build_next_turn(&mut self, role: TurnRole, content: String) -> &Turn {
+        let turn = Turn::new(role, content);
+        self.turns.push(turn);
+        self.turns.last().unwrap()
+    }
+
+    /// Convert thread history to provider message format
+    ///
+    /// This creates messages suitable for sending to LLM providers,
+    /// including proper formatting of tool calls and results.
+    pub fn to_messages(&self) -> Vec<ProviderMessage> {
+        let mut messages = Vec::with_capacity(self.turns.len());
+
+        for turn in &self.turns {
+            let msg = match turn.role {
+                TurnRole::System => ProviderMessage {
+                    role: "system".to_string(),
+                    content: turn.content.clone(),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+                TurnRole::User => ProviderMessage {
+                    role: "user".to_string(),
+                    content: turn.content.clone(),
+                    tool_calls: None,
+                    tool_call_id: None,
+                },
+                TurnRole::Assistant => {
+                    // If there are tool calls, include them
+                    let tool_calls = if turn.tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            turn.tool_calls
+                                .iter()
+                                .map(|tc| ToolCallMessage {
+                                    id: tc.id.clone(),
+                                    tool_type: "function".to_string(),
+                                    function: FunctionCall {
+                                        name: tc.name.clone(),
+                                        arguments: tc.arguments.to_string(),
+                                    },
+                                })
+                                .collect(),
+                        )
+                    };
+
+                    ProviderMessage {
+                        role: "assistant".to_string(),
+                        content: turn.content.clone(),
+                        tool_calls,
+                        tool_call_id: None,
+                    }
+                }
+                TurnRole::Tool => ProviderMessage {
+                    role: "tool".to_string(),
+                    content: turn.content.clone(),
+                    tool_calls: None,
+                    tool_call_id: turn.tool_call_id.clone(),
+                },
+            };
+            messages.push(msg);
+        }
+
+        messages
+    }
+}
+
+impl Default for Thread {
+    fn default() -> Self {
+        Self::new(String::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_creation() {
+        let thread = Thread::new("session-123".to_string());
+        assert!(!thread.id().is_empty());
+        assert_eq!(thread.session_id(), "session-123");
+        assert_eq!(thread.turn_count(), 0);
+    }
+
+    #[test]
+    fn test_thread_add_turn() {
+        let mut thread = Thread::new("session-123".to_string());
+        let turn = Turn::new(TurnRole::User, "Hello".to_string());
+        thread.add_turn(turn);
+        assert_eq!(thread.turn_count(), 1);
+    }
+
+    #[test]
+    fn test_thread_to_messages() {
+        let mut thread = Thread::new("session-123".to_string());
+        thread.build_next_turn(TurnRole::System, "You are helpful".to_string());
+        thread.build_next_turn(TurnRole::User, "Hello".to_string());
+
+        let messages = thread.to_messages();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "system");
+        assert_eq!(messages[1].role, "user");
+    }
+
+    #[test]
+    fn test_thread_needs_summary() {
+        let mut thread = Thread::new("session-123".to_string());
+        thread.set_summary_threshold(3);
+
+        thread.build_next_turn(TurnRole::User, "1".to_string());
+        thread.build_next_turn(TurnRole::Assistant, "2".to_string());
+        assert!(!thread.needs_summary());
+
+        thread.build_next_turn(TurnRole::User, "3".to_string());
+        assert!(thread.needs_summary());
+    }
+}

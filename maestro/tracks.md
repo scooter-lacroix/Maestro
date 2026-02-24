@@ -409,3 +409,40 @@ This file tracks all major tracks for the project. Each track has its own detail
   - Tests pass: 406 library tests ✅
   - Import paths work correctly (crate name unchanged) ✅
 - **Next phase:** Tab Multiplexer Migration (Phase 2)
+
+---
+
+## [x] Track: MaesterClaw Rebuild - Claw Agent Framework (MASTER TRACK)
+*Link: [./maestro/tracks/maesterclaw-rebuild_20260223/](./maestro/tracks/maesterclaw-rebuild_20260223/)*
+
+**Description**: Rebuild MaesterClaw as a complete AI agent framework following Claw Agent patterns (IronClaw/ZeroClaw/Moltis), with deep integration into existing maestro-core. This master track orchestrates 7 subtracks via `/maestro:orchestrate`.
+
+**Type**: Feature (Master Track with 7 Subtracks)
+
+**Status**: COMPLETE ✅ - All 7 subtracks finished, Tzar Review: PASS
+
+**Subtracks**:
+1. **Session** (`maestroclaw-session_20260223`) - Session/Thread/Turn models
+2. **Tools** (`maestroclaw-tools_20260223`) - Tool trait, Registry, built-in tools
+3. **Engine** (`maestroclaw-engine_20260223`) - Agent loop, Hook system
+4. **Providers** (`maestroclaw-providers_20260223`) - OpenAI, Anthropic, Ollama, OpenRouter
+5. **Core Integration** (`maestroclaw-core-integration_20260223`) - Bridge to maestro-core
+6. **UI Integration** (`maestroclaw-ui-integration_20260223`) - Cockpit/Gateway integration
+7. **Cleanup** (`maestroclaw-cleanup_20260223`) - Remove non-functional wizard code
+
+**Dependencies**:
+```
+Session → Tools → Engine → Providers → Core-Integration → UI-Integration
+   └────────────────────────────────────────────────────────────────────┘
+Cleanup (parallel, no dependencies)
+```
+
+**Analysis Document**: [maesterclaw_verified_analysis.md](./overhaul_20260217/maesterclaw_verified_analysis.md)
+
+**Success Criteria**:
+- [x] All 7 subtracks complete
+- [x] End-to-end agent execution working (test_agent_loop_text_response)
+- [x] 98%+ code coverage (no mocks) - 208 maestro-claw tests
+- [x] No regressions in existing functionality (934 total tests pass)
+
+**Execution**: `/maestro:orchestrate maesterclaw-rebuild_20260223`

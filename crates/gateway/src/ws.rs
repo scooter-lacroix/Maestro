@@ -286,6 +286,92 @@ pub fn builtin_handlers() -> Vec<(
                 )
             })
         }),
+        // Agent WebSocket methods
+        ("agent/execute", |req, state| {
+            Box::pin(async move {
+                // Parse the request
+                let exec_req: Result<crate::agent::AgentExecuteRequest, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match exec_req {
+                    Ok(exec_req) => {
+                        // Broadcast event
+                        let event = crate::protocol::EventFrame::new(
+                            "agent.execute.started",
+                            Some(serde_json::json!({
+                                "prompt_preview": if exec_req.prompt.len() > 100 {
+                                    format!("{}...", &exec_req.prompt[..97])
+                                } else {
+                                    exec_req.prompt.clone()
+                                },
+                                "provider": exec_req.provider,
+                            })),
+                            Some(state.next_seq()),
+                        );
+                        let _ = state.event_bus.send(event);
+
+                        // TODO: Wire to maestro-claw agent_loop
+                        ResponseFrame::success(
+                            &req.id,
+                            Some(serde_json::json!({
+                                "status": "accepted",
+                                "message": "Agent execution queued (not yet wired to maestro-claw)",
+                            })),
+                        )
+                    }
+                    Err(e) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", e), None)
+                    }
+                }
+            })
+        }),
+        ("agent/session/list", |req, state| {
+            Box::pin(async move {
+                // TODO: Wire to maestro-claw session store
+                ResponseFrame::success(
+                    &req.id,
+                    Some(serde_json::to_value(crate::agent::SessionListResponse::empty()).unwrap()),
+                )
+            })
+        }),
+        ("agent/session/create", |req, state| {
+            Box::pin(async move {
+                // Parse the request
+                let create_req: Result<crate::agent::SessionCreateRequest, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match create_req {
+                    Ok(create_req) => {
+                        // TODO: Wire to maestro-claw session creation
+                        ResponseFrame::success(
+                            &req.id,
+                            Some(serde_json::json!({
+                                "session_id": uuid::Uuid::new_v4().to_string(),
+                                "provider": create_req.provider,
+                                "model": create_req.model,
+                                "status": "created",
+                            })),
+                        )
+                    }
+                    Err(e) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", e), None)
+                    }
+                }
+            })
+        }),
+        ("agent/status", |req, _state| {
+            Box::pin(async move {
+                // TODO: Wire to actual agent status
+                ResponseFrame::success(
+                    &req.id,
+                    Some(serde_json::json!({
+                        "status": "idle",
+                        "sessions": 0,
+                        "active_runs": 0,
+                    })),
+                )
+            })
+        }),
     ]
 }
 

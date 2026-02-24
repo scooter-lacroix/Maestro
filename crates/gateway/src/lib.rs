@@ -4,6 +4,7 @@
 //! - WebSocket-based RPC communication
 //! - Server-Sent Events (SSE) for real-time updates
 //! - REST API for session, MCP, and cron management
+//! - Agent execution endpoints for AI assistant sessions
 //! - Rate limiting and security middleware
 //!
 //! # Architecture
@@ -18,7 +19,7 @@
 //! │              (Request/Response/Event Frames)               │
 //! ├─────────────────────────────────────────────────────────────┤
 //! │                    Gateway State                            │
-//! │         (McpManager, SandboxManager, EventBus)             │
+//! │         (McpManager, SandboxManager, EventBus, Agent)      │
 //! ├─────────────────────────────────────────────────────────────┤
 //! │                    maestro-core                             │
 //! └─────────────────────────────────────────────────────────────┘
@@ -40,6 +41,7 @@
 //! }
 //! ```
 
+pub mod agent;
 pub mod protocol;
 pub mod rate_limit;
 pub mod routes;
@@ -51,3 +53,8 @@ pub mod ws;
 pub use protocol::{EventFrame, RequestFrame, ResponseFrame};
 pub use server::run;
 pub use state::{GatewayConfig, GatewayState};
+pub use agent::{
+    AgentExecuteRequest, AgentExecuteResponse, AgentStatusEvent, AgentTurnEvent,
+    SessionCreateRequest, SessionDeleteRequest, SessionInfo, SessionListResponse,
+    StreamingChunk, ToolExecutionEvent,
+};
