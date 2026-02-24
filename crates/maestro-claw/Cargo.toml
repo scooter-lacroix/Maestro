@@ -1,0 +1,34 @@
+[package]
+name = "maestro-claw"
+version = "0.1.0"
+edition = "2021"
+description = "Maestro Claw - AI Agent Framework with Session/Thread/Turn models"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+# Provider dependencies
+reqwest = { version = "0.11", features = ["json", "stream", "native-tls"], default-features = false, optional = true }
+futures = { version = "0.3", optional = true }
+tokio-stream = { version = "0.1", optional = true }
+futures-util = { version = "0.3", optional = true }
+# Core integration
+maestro-core = { path = "../core", optional = true }
+
+[features]
+default = ["providers"]
+providers = ["dep:reqwest", "dep:futures", "dep:tokio-stream"]
+# Enable integration with maestro-core
+core-integration = ["dep:maestro-core", "dep:futures-util"]
+
+[dev-dependencies]
+tempfile = "3.10"
+tokio-test = "0.4"
+wiremock = "0.5"

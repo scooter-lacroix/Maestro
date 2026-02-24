@@ -1,256 +1,10 @@
-//! Comprehensive tests for MaesterClaw setup wizard and readiness reducers
+//! Comprehensive tests for MaesterClaw hot cache and utilities
 //!
-//! These tests verify the test-first requirements for Phase 7.1:
-//! - Runtime readiness signal integrity
-//! - Wizard state transitions
-//! - MCP/Cron/Sandbox runtime validation
+//! These tests verify the hot cache functionality for memory suggestions.
+//! UI integration tests are in the sibling module `ui_integration_tests`
+//! (declared in maesterclaw/mod.rs).
 
-#[cfg(test)]
-mod readiness_tests {
-    use crate::maesterclaw::ReadinessResult;
-    use crate::state::MaesterClawSetupCheck;
-
-    // NOTE: These tests require a full App struct which has private fields.
-    // Integration tests should be run against the full app state.
-    // These unit tests verify the reducer logic in isolation where possible.
-
-    /// Test that ManualAcknowledge is never auto-ready
-    #[test]
-    fn test_manual_acknowledge_always_not_ready() {
-        // This test verifies the logic conceptually
-        // ManualAcknowledge should always return NotReady until user confirms
-        let check = MaesterClawSetupCheck::ManualAcknowledge;
-        assert_eq!(format!("{:?}", check), "ManualAcknowledge");
-    }
-
-    /// Test that CronConfigured check exists
-    #[test]
-    fn test_cron_configured_check_exists() {
-        let check = MaesterClawSetupCheck::CronConfigured;
-        assert_eq!(format!("{:?}", check), "CronConfigured");
-    }
-
-    /// Test that McpConnected check exists
-    #[test]
-    fn test_mcp_connected_check_exists() {
-        let check = MaesterClawSetupCheck::McpConnected;
-        assert_eq!(format!("{:?}", check), "McpConnected");
-    }
-
-    /// Test that MemoryVisualizationAvailable check exists
-    #[test]
-    fn test_memory_visualization_check_exists() {
-        let check = MaesterClawSetupCheck::MemoryVisualizationAvailable;
-        assert_eq!(format!("{:?}", check), "MemoryVisualizationAvailable");
-    }
-
-    /// Test that SandboxPolicyVisible check exists
-    #[test]
-    fn test_sandbox_policy_check_exists() {
-        let check = MaesterClawSetupCheck::SandboxPolicyVisible;
-        assert_eq!(format!("{:?}", check), "SandboxPolicyVisible");
-    }
-
-    /// Test ReadinessResult variants
-    #[test]
-    fn test_readiness_result_ready() {
-        let result = ReadinessResult::Ready;
-        assert!(matches!(result, ReadinessResult::Ready));
-    }
-
-    #[test]
-    fn test_readiness_result_not_ready() {
-        let result = ReadinessResult::NotReady {
-            reason: "test reason".to_string(),
-        };
-        assert!(matches!(result, ReadinessResult::NotReady { .. }));
-
-        if let ReadinessResult::NotReady { reason } = result {
-            assert_eq!(reason, "test reason");
-        }
-    }
-}
-
-#[cfg(test)]
-mod setup_state_tests {
-    use crate::state::{MaesterClawSetupCheck, MaesterClawSetupState};
-
-    #[test]
-    fn test_default_setup_state_has_five_steps() {
-        let state = MaesterClawSetupState::default();
-        assert_eq!(state.steps.len(), 5, "Setup wizard should have 5 steps");
-    }
-
-    #[test]
-    fn test_default_setup_state_is_closed() {
-        let state = MaesterClawSetupState::default();
-        assert!(!state.is_open, "Setup wizard should start closed");
-    }
-
-    #[test]
-    fn test_default_setup_state_starts_at_step_zero() {
-        let state = MaesterClawSetupState::default();
-        assert_eq!(state.current_step, 0, "Setup wizard should start at step 0");
-    }
-
-    #[test]
-    fn test_all_steps_start_not_ready() {
-        let state = MaesterClawSetupState::default();
-        for (i, step) in state.steps.iter().enumerate() {
-            assert!(
-                !step.is_ready,
-                "Step {} '{}' should start as not ready",
-                i, step.title
-            );
-        }
-    }
-
-    #[test]
-    fn test_steps_have_titles() {
-        let state = MaesterClawSetupState::default();
-        for (i, step) in state.steps.iter().enumerate() {
-            assert!(!step.title.is_empty(), "Step {} should have a title", i);
-        }
-    }
-
-    #[test]
-    fn test_steps_have_descriptions() {
-        let state = MaesterClawSetupState::default();
-        for (i, step) in state.steps.iter().enumerate() {
-            assert!(
-                !step.description.is_empty(),
-                "Step {} should have a description",
-                i
-            );
-        }
-    }
-
-    #[test]
-    fn test_steps_have_verifications() {
-        let state = MaesterClawSetupState::default();
-        for (i, step) in state.steps.iter().enumerate() {
-            assert!(
-                !step.verification.is_empty(),
-                "Step {} should have verification text",
-                i
-            );
-        }
-    }
-
-    #[test]
-    fn test_first_step_is_capability_blueprint() {
-        let state = MaesterClawSetupState::default();
-        let first_step = &state.steps[0];
-        assert!(
-            first_step.title.contains("Blueprint"),
-            "First step should be capability blueprint review"
-        );
-        assert_eq!(
-            first_step.check,
-            MaesterClawSetupCheck::ManualAcknowledge,
-            "First step should be manual acknowledge"
-        );
-    }
-
-    #[test]
-    fn test_last_step_is_sandbox_policy() {
-        let state = MaesterClawSetupState::default();
-        let last_step = state.steps.last().expect("Should have at least one step");
-        assert_eq!(
-            last_step.check,
-            MaesterClawSetupCheck::SandboxPolicyVisible,
-            "Last step should be sandbox policy visible"
-        );
-    }
-
-    #[test]
-    fn test_cron_step_is_second() {
-        let state = MaesterClawSetupState::default();
-        let cron_step = &state.steps[1];
-        assert!(
-            cron_step.title.contains("Cron") || cron_step.title.contains("Routine"),
-            "Second step should be about Cron/Routine"
-        );
-        assert_eq!(
-            cron_step.check,
-            MaesterClawSetupCheck::CronConfigured,
-            "Second step should check cron configuration"
-        );
-    }
-
-    #[test]
-    fn test_mcp_step_is_third() {
-        let state = MaesterClawSetupState::default();
-        let mcp_step = &state.steps[2];
-        assert!(
-            mcp_step.title.contains("MCP") || mcp_step.title.contains("Provider"),
-            "Third step should be about MCP/Provider"
-        );
-        assert_eq!(
-            mcp_step.check,
-            MaesterClawSetupCheck::McpConnected,
-            "Third step should check MCP connection"
-        );
-    }
-
-    #[test]
-    fn test_memory_step_is_fourth() {
-        let state = MaesterClawSetupState::default();
-        let memory_step = &state.steps[3];
-        assert!(
-            memory_step.title.contains("Memory"),
-            "Fourth step should be about Memory"
-        );
-        assert_eq!(
-            memory_step.check,
-            MaesterClawSetupCheck::MemoryVisualizationAvailable,
-            "Fourth step should check memory visualization"
-        );
-    }
-}
-
-#[cfg(test)]
-mod runtime_validation_tests {
-    use maestro_core::{McpManager, SandboxManager, SecurityPolicy};
-
-    #[test]
-    fn test_mcp_manager_starts_empty() {
-        let manager = McpManager::new();
-        let (registered, connected) = manager.try_get_status();
-        assert!(
-            registered.is_empty(),
-            "MCP manager should start with no registered servers"
-        );
-        assert!(
-            connected.is_empty(),
-            "MCP manager should start with no connected servers"
-        );
-    }
-
-    #[test]
-    fn test_sandbox_manager_has_native_runtime() {
-        let manager = SandboxManager::new(SecurityPolicy::default());
-        let runtimes = manager.available_runtimes();
-        assert!(!runtimes.is_empty(), "Sandbox manager should have runtimes");
-        assert!(
-            runtimes.contains(&"native"),
-            "Sandbox manager should have native runtime"
-        );
-    }
-
-    #[test]
-    fn test_security_policy_defaults() {
-        let policy = SecurityPolicy::default();
-        // Verify default policy has reasonable settings
-        assert!(
-            policy.max_memory_bytes >= 0,
-            "Memory limit should be non-negative"
-        );
-        assert!(policy.max_cpu_shares > 0, "CPU shares should be positive");
-    }
-}
-
-// Phase 7.7: Hot Cache tests (RED - expected to fail before implementation)
+// Hot Cache tests
 #[cfg(test)]
 mod hot_cache_tests {
     use crate::maesterclaw::hot_cache::{clamp_flash, MemorySuggestion};
@@ -258,7 +12,6 @@ mod hot_cache_tests {
     /// Test that suggestion stream emits when semantic detector crosses threshold
     #[test]
     fn test_suggestion_stream_emits_on_threshold_cross() {
-        // This test will fail until hot_cache module is implemented
         let suggestion = MemorySuggestion {
             memory_id: 123,
             preview: "User prefers Rust for CLI tools".to_string(),
@@ -395,5 +148,47 @@ mod hot_cache_tests {
             suggestions.is_empty(),
             "Empty suggestions should be handled gracefully"
         );
+    }
+}
+
+// Runtime validation tests
+#[cfg(test)]
+mod runtime_validation_tests {
+    use maestro_core::{McpManager, SandboxManager, SecurityPolicy};
+
+    #[test]
+    fn test_mcp_manager_starts_empty() {
+        let manager = McpManager::new();
+        let (registered, connected) = manager.try_get_status();
+        assert!(
+            registered.is_empty(),
+            "MCP manager should start with no registered servers"
+        );
+        assert!(
+            connected.is_empty(),
+            "MCP manager should start with no connected servers"
+        );
+    }
+
+    #[test]
+    fn test_sandbox_manager_has_native_runtime() {
+        let manager = SandboxManager::new(SecurityPolicy::default());
+        let runtimes = manager.available_runtimes();
+        assert!(!runtimes.is_empty(), "Sandbox manager should have runtimes");
+        assert!(
+            runtimes.contains(&"native"),
+            "Sandbox manager should have native runtime"
+        );
+    }
+
+    #[test]
+    fn test_security_policy_defaults() {
+        let policy = SecurityPolicy::default();
+        // Verify default policy has reasonable settings
+        assert!(
+            policy.max_memory_bytes >= 0,
+            "Memory limit should be non-negative"
+        );
+        assert!(policy.max_cpu_shares > 0, "CPU shares should be positive");
     }
 }

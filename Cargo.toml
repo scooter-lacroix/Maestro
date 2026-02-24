@@ -8,6 +8,7 @@ members = [
     "crates/ktop_collectors",
     "crates/core",
     "crates/gateway",
+    "crates/maestro-claw",
     # maestro-tab: Forked tab-rs terminal multiplexer
     "src/maestro-tab/tab",
     "src/maestro-tab/tab-command",
@@ -44,9 +45,6 @@ panic = "abort"
 [patch.crates-io]
 libsql = { path = "vendor/libsql" }
 
-# Use local maestro-tab fork instead of crates.io
-tab-api = { path = "src/maestro-tab/common/tab-api" }
-tab-websocket = { path = "src/maestro-tab/common/tab-websocket" }
-tab-command = { path = "src/maestro-tab/tab-command" }
-tab-daemon = { path = "src/maestro-tab/tab-daemon" }
-tab-pty = { path = "src/maestro-tab/tab-pty" }
+# Note: maestro-tab crates (tab-api, tab-command, etc.) are now referenced
+# directly via path dependencies in their respective Cargo.toml files,
+# so patches are no longer needed.
