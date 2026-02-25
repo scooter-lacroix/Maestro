@@ -74,11 +74,11 @@ impl Session {
         self.threads.iter_mut().find(|t| t.id() == id)
     }
 
-    /// Add a new thread and return a reference to it
-    pub fn add_thread(&mut self) -> &Thread {
+    /// Add a new thread and return a mutable reference to it
+    pub fn add_thread(&mut self) -> &mut Thread {
         let thread = Thread::new(self.id.clone());
         self.threads.push(thread);
-        self.threads.last().unwrap()
+        self.threads.last_mut().unwrap()
     }
 
     /// Get the metadata
@@ -146,6 +146,18 @@ mod tests {
 
         let missing = session.get_thread("non-existent");
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_session_add_thread_returns_mutable() {
+        use super::super::Turn;
+        use super::super::TurnRole;
+
+        let mut session = Session::new();
+        // add_thread() returns &mut Thread — can add turns directly
+        let thread = session.add_thread();
+        thread.add_turn(Turn::new(TurnRole::User, "hello".to_string()));
+        assert_eq!(session.threads.first().unwrap().turn_count(), 1);
     }
 
     #[test]

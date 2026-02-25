@@ -39,14 +39,24 @@ pub enum MemoryBridgeError {
 /// This adapter implements the maestro-claw MemoryBackend trait
 /// using maestro-core's Memory trait, allowing tools to use the
 /// core memory infrastructure.
+///
+/// # HIGH-1 Fix: get() and delete() local cache
+/// Because `maestro_core::Memory` only exposes `store()` and `search()`,
+/// `MemoryBridge` maintains a local `id → content` cache for `get()` and
+/// `delete()` operations. The cache is populated on every successful `store()`.
 pub struct MemoryBridge {
     inner: Arc<dyn Memory>,
+    /// Local cache: id → (content, metadata) — populated by store()
+    local_cache: Arc<tokio::sync::RwLock<std::collections::HashMap<String, (String, JsonValue)>>>,
 }
 
 impl MemoryBridge {
     /// Create a new memory bridge wrapping a maestro-core Memory
     pub fn new(memory: Arc<dyn Memory>) -> Self {
-        Self { inner: memory }
+        Self {
+            inner: memory,
+            local_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        }
     }
 
     /// Get the underlying maestro-core Memory reference
@@ -58,12 +68,20 @@ impl MemoryBridge {
 #[async_trait]
 impl MemoryBackend for MemoryBridge {
     async fn store(&self, content: &str, metadata: JsonValue) -> Result<String, MemoryError> {
-        self.inner
-            .store(content, metadata)
+        let id = self.inner
+            .store(content, metadata.clone())
             .await
             .map_err(|e| MemoryError {
                 message: e.to_string(),
-            })
+            })?;
+
+        // Populate local cache for get() and delete() support (HIGH-1)
+        self.local_cache
+            .write()
+            .await
+            .insert(id.clone(), (content.to_string(), metadata));
+
+        Ok(id)
     }
 
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryResult>, MemoryError> {
@@ -82,19 +100,29 @@ impl MemoryBackend for MemoryBridge {
             .collect())
     }
 
-    async fn get(&self, _id: &str) -> Result<Option<MemoryResult>, MemoryError> {
-        // maestro-core Memory trait doesn't have a get method
-        // This is a limitation - we can search by ID as a workaround
-        Err(MemoryError {
-            message: "Direct retrieval not supported by maestro-core Memory trait".to_string(),
-        })
+    /// Retrieve a memory by ID via the local cache (HIGH-1)
+    ///
+    /// Returns entries that were stored through this bridge instance.
+    /// Cross-process or cross-instance memories are not available since
+    /// `maestro_core::Memory` does not expose a `get()` API.
+    async fn get(&self, id: &str) -> Result<Option<MemoryResult>, MemoryError> {
+        let cache = self.local_cache.read().await;
+        Ok(cache.get(id).map(|(content, metadata)| MemoryResult {
+            id: id.to_string(),
+            content: content.clone(),
+            metadata: metadata.clone(),
+            score: 1.0,
+        }))
     }
 
-    async fn delete(&self, _id: &str) -> Result<bool, MemoryError> {
-        // maestro-core Memory trait doesn't have a delete method
-        Err(MemoryError {
-            message: "Delete not supported by maestro-core Memory trait".to_string(),
-        })
+    /// Delete a memory by ID from the local cache (HIGH-1)
+    ///
+    /// Note: the underlying `maestro_core::Memory` backend is not notified
+    /// since it has no `delete()` API. The entry is removed from the local
+    /// cache so future `get()` calls won't find it.
+    async fn delete(&self, id: &str) -> Result<bool, MemoryError> {
+        let removed = self.local_cache.write().await.remove(id).is_some();
+        Ok(removed)
     }
 }
 
@@ -145,8 +173,10 @@ impl Hook for PersistentMemoryHook {
     }
 
     fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
-        // Store user messages before processing
+        // Store user messages before processing (CRIT-2 fix)
         if self.store_roles.contains(&turn.role) {
+            let memory = Arc::clone(&self.memory);
+            let content = turn.content.clone();
             let mut metadata = self.default_metadata.clone();
             if let JsonValue::Object(ref mut map) = metadata {
                 map.insert("role".to_string(), serde_json::json!(format!("{:?}", turn.role)));
@@ -154,16 +184,27 @@ impl Hook for PersistentMemoryHook {
                 map.insert("timestamp".to_string(), serde_json::json!(turn.timestamp.to_rfc3339()));
             }
 
-            // Note: We can't await here since Hook::pre_execute is sync
-            // In a real implementation, we'd use a channel or spawn_blocking
-            // For now, we just pass through the turn
+            // Fire-and-forget async storage using the current Tokio runtime handle.
+            // Hook::pre_execute is sync, but we are always called from an async context
+            // (agent_loop is async), so Handle::current() is always valid here.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    if let Err(e) = memory.store(&content, metadata).await {
+                        tracing::warn!("PersistentMemoryHook: failed to store turn: {}", e);
+                    }
+                });
+            } else {
+                tracing::warn!("PersistentMemoryHook: no Tokio runtime available; turn not persisted");
+            }
         }
         Ok(turn.clone())
     }
 
     fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
-        // Store assistant responses after processing
+        // Store assistant responses after processing (CRIT-2 fix)
         if self.store_roles.contains(&turn.role) {
+            let memory = Arc::clone(&self.memory);
+            let content = turn.content.clone();
             let mut metadata = self.default_metadata.clone();
             if let JsonValue::Object(ref mut map) = metadata {
                 map.insert("role".to_string(), serde_json::json!(format!("{:?}", turn.role)));
@@ -171,7 +212,15 @@ impl Hook for PersistentMemoryHook {
                 map.insert("timestamp".to_string(), serde_json::json!(turn.timestamp.to_rfc3339()));
             }
 
-            // Same note as pre_execute - would need async handling
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    if let Err(e) = memory.store(&content, metadata).await {
+                        tracing::warn!("PersistentMemoryHook: failed to store turn: {}", e);
+                    }
+                });
+            } else {
+                tracing::warn!("PersistentMemoryHook: no Tokio runtime available; turn not persisted");
+            }
         }
         Ok(turn.clone())
     }
@@ -212,12 +261,17 @@ impl Memory for InMemoryStorage {
             content: content.to_string(),
             metadata,
         };
-        self.memories.write().unwrap().push(memory);
+        // Recover from poisoned lock rather than panicking
+        self.memories
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(memory);
         Ok(id)
     }
 
     async fn search(&self, query: &str, limit: usize) -> anyhow::Result<Vec<SearchResult>> {
-        let memories = self.memories.read().unwrap();
+        // Recover from poisoned lock rather than panicking
+        let memories = self.memories.read().unwrap_or_else(|e| e.into_inner());
         let results: Vec<SearchResult> = memories
             .iter()
             .filter(|m| m.content.to_lowercase().contains(&query.to_lowercase()))
@@ -355,6 +409,64 @@ mod tests {
         let hook = PersistentMemoryHook::new("test", storage);
 
         assert_eq!(hook.name(), "test");
+    }
+
+    #[tokio::test]
+    async fn test_memory_bridge_get_and_delete() {
+        let storage = Arc::new(InMemoryStorage::new());
+        let bridge = MemoryBridge::new(storage);
+
+        // Store something
+        let id = bridge
+            .store("Remember this", serde_json::json!({"key": "value"}))
+            .await
+            .unwrap();
+
+        // get() should work via local cache
+        let result = bridge.get(&id).await.unwrap();
+        assert!(result.is_some(), "get() should return the stored item");
+        assert_eq!(result.unwrap().content, "Remember this");
+
+        // delete() should remove from local cache
+        let deleted = bridge.delete(&id).await.unwrap();
+        assert!(deleted, "delete() should return true for existing entry");
+
+        // get() after delete should return None
+        let result = bridge.get(&id).await.unwrap();
+        assert!(result.is_none(), "get() after delete should return None");
+
+        // delete() on non-existent id should return false
+        let not_deleted = bridge.delete("non-existent-id").await.unwrap();
+        assert!(!not_deleted, "delete() of unknown id should return false");
+    }
+
+    #[tokio::test]
+    async fn test_persistent_memory_hook_actually_stores() {
+        // Test that PersistentMemoryHook uses fire-and-forget storage correctly
+        let storage = Arc::new(InMemoryStorage::new());
+        let storage_ref = Arc::clone(&storage);
+        let hook = PersistentMemoryHook::new("test", storage);
+
+        let context = HookContext::new(
+            0,
+            10,
+            "session".to_string(),
+            "thread".to_string(),
+            "provider".to_string(),
+        );
+
+        let turn = Turn::new(TurnRole::User, "Hello persistent!".to_string());
+        // pre_execute is now tested within a Tokio runtime
+        let result = hook.pre_execute(&context, &turn);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().content, "Hello persistent!");
+
+        // Give the spawned task a moment to complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // The storage should have the turn content
+        let results = storage_ref.search("Hello persistent!", 10).await.unwrap();
+        assert!(!results.is_empty(), "PersistentMemoryHook must actually store data");
     }
 
     #[test]

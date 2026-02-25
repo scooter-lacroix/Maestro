@@ -17,6 +17,26 @@ use crate::tools::ToolSpec;
 /// Ollama API base URL
 const OLLAMA_API_URL: &str = "http://localhost:11434";
 
+/// LOW-12: Map a reqwest network error to the correct `ProviderError` variant.
+fn map_network_error(e: reqwest::Error) -> ProviderError {
+    if e.is_timeout() {
+        ProviderError::Timeout(300) // Ollama has a longer timeout
+    } else {
+        ProviderError::NetworkError(e.to_string())
+    }
+}
+
+/// LOW-5: Ollama does not serve a `Retry-After` header, but we provide the
+/// same helper for consistency.
+fn extract_retry_after(response: &reqwest::Response) -> u64 {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60)
+}
+
 /// Ollama provider configuration
 #[derive(Debug, Clone)]
 pub struct OllamaConfig {
@@ -142,52 +162,89 @@ impl OllamaProvider {
 
     /// Convert turns to Ollama message format
     fn convert_messages(&self, turns: &[Turn]) -> Vec<OllamaMessage> {
-        turns
-            .iter()
-            .filter_map(|turn| {
-                let role = match turn.role {
-                    TurnRole::User => "user",
-                    TurnRole::Assistant => "assistant",
-                    TurnRole::System => "system",
-                    TurnRole::Tool => return None, // Ollama doesn't have tool role
-                };
+        let mut messages = Vec::new();
 
-                let mut images = Vec::new();
+        for turn in turns {
+            match turn.role {
+                TurnRole::Tool => {
+                    // MED-5: Tool results were previously silently dropped (`return None`).
+                    // Ollama does not have a dedicated "tool" role; surface tool results as
+                    // user messages so the model can see them.
+                    //
+                    // Prefer `turn.tool_results` (has is_error) over the bare content field.
+                    if !turn.tool_results.is_empty() {
+                        for tr in &turn.tool_results {
+                            let prefix = if tr.is_error { "Tool error" } else { "Tool result" };
+                            messages.push(OllamaMessage {
+                                role: "user".to_string(),
+                                content: format!("[{}]: {}", prefix, tr.content),
+                                images: None,
+                                tool_calls: None,
+                            });
+                        }
+                    } else if let Some(id) = &turn.tool_call_id {
+                        // Legacy fallback: just the content, no is_error info.
+                        messages.push(OllamaMessage {
+                            role: "user".to_string(),
+                            content: format!("[Tool result for {}]: {}", id, turn.content),
+                            images: None,
+                            tool_calls: None,
+                        });
+                    } else if !turn.content.is_empty() {
+                        messages.push(OllamaMessage {
+                            role: "user".to_string(),
+                            content: format!("[Tool result]: {}", turn.content),
+                            images: None,
+                            tool_calls: None,
+                        });
+                    }
+                    // If all three are empty, there is nothing useful to send.
+                }
+                _ => {
+                    let role = match turn.role {
+                        TurnRole::User => "user",
+                        TurnRole::Assistant => "assistant",
+                        TurnRole::System => "system",
+                        TurnRole::Tool => unreachable!("handled above"),
+                    };
 
-                // Handle tool calls for assistant messages
-                let content = if !turn.tool_calls.is_empty() && turn.content.is_empty() {
-                    // Format tool calls as text for models that don't support native tools
-                    turn.tool_calls
-                        .iter()
-                        .map(|tc| format!("[Tool: {}({})]", tc.name, tc.arguments))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    turn.content.clone()
-                };
-
-                Some(OllamaMessage {
-                    role: role.to_string(),
-                    content,
-                    images: if images.is_empty() { None } else { Some(images) },
-                    tool_calls: if turn.tool_calls.is_empty() {
-                        None
+                    // Handle tool calls for assistant messages
+                    let content = if !turn.tool_calls.is_empty() && turn.content.is_empty() {
+                        // Format tool calls as text for models that don't support native tools
+                        turn.tool_calls
+                            .iter()
+                            .map(|tc| format!("[Tool: {}({})]", tc.name, tc.arguments))
+                            .collect::<Vec<_>>()
+                            .join("\n")
                     } else {
-                        Some(
-                            turn.tool_calls
-                                .iter()
-                                .map(|tc| OllamaToolCall {
-                                    function: OllamaFunction {
-                                        name: tc.name.clone(),
-                                        arguments: tc.arguments.clone(),
-                                    },
-                                })
-                                .collect(),
-                        )
-                    },
-                })
-            })
-            .collect()
+                        turn.content.clone()
+                    };
+
+                    messages.push(OllamaMessage {
+                        role: role.to_string(),
+                        content,
+                        images: None,
+                        tool_calls: if turn.tool_calls.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                turn.tool_calls
+                                    .iter()
+                                    .map(|tc| OllamaToolCall {
+                                        function: OllamaFunction {
+                                            name: tc.name.clone(),
+                                            arguments: tc.arguments.clone(),
+                                        },
+                                    })
+                                    .collect(),
+                            )
+                        },
+                    });
+                }
+            }
+        }
+
+        messages
     }
 
     /// Parse tool calls from Ollama response
@@ -207,10 +264,12 @@ impl OllamaProvider {
             .unwrap_or_default()
     }
 
-    /// Handle API error response
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str) -> ProviderError {
+    /// Handle API error response.
+    /// `retry_after_secs` is extracted from the response header before the body is consumed (LOW-5).
+    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
         match status.as_u16() {
             404 => ProviderError::ModelNotFound("Model not found. Run 'ollama pull <model>'".to_string()),
+            429 => ProviderError::RateLimitExceeded(retry_after_secs),
             500 => ProviderError::ProviderError(format!("Ollama server error: {}", body)),
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
         }
@@ -342,12 +401,13 @@ impl Provider for OllamaProvider {
             .json(&request)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let ollama_response: OllamaResponse = response
@@ -405,12 +465,13 @@ impl Provider for OllamaProvider {
             .json(&request)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let stream = response.bytes_stream().map(|chunk_result| {
@@ -469,12 +530,13 @@ impl Provider for OllamaProvider {
             .json(&request)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let ollama_response: OllamaResponse = response
@@ -523,7 +585,13 @@ impl Provider for OllamaProvider {
             .get(format!("{}/api/tags", self.config.base_url))
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(format!("Cannot connect to Ollama: {}", e)))?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    ProviderError::Timeout(300)
+                } else {
+                    ProviderError::NetworkError(format!("Cannot connect to Ollama: {}", e))
+                }
+            })?;
 
         if !response.status().is_success() {
             return Err(ProviderError::Unavailable(
@@ -535,9 +603,16 @@ impl Provider for OllamaProvider {
     }
 
     fn format_messages(&self, turns: &[Turn]) -> Vec<serde_json::Value> {
+        // LOW-1: avoid panicking on serialization failure
         self.convert_messages(turns)
             .into_iter()
-            .map(|m| serde_json::to_value(m).unwrap())
+            .filter_map(|m| match serde_json::to_value(m) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to serialize Ollama message: {}", e);
+                    None
+                }
+            })
             .collect()
     }
 }
@@ -578,7 +653,8 @@ mod tests {
         let provider = OllamaProvider::new(config).unwrap();
         let caps = provider.capabilities();
         assert!(caps.streaming);
-        assert!(caps.native_tools);
+        // LOW-9: native_tools defaults to false for Ollama
+        assert!(!caps.native_tools);
         assert!(!caps.parallel_tool_calls);
     }
 
@@ -596,5 +672,47 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "system");
         assert_eq!(messages[1].role, "user");
+    }
+
+    #[test]
+    fn test_tool_turn_emitted_as_user_message() {
+        // MED-5: Tool results must reach the model as user messages, not be silently dropped.
+        let config = OllamaConfig::new("llama3".to_string());
+        let provider = OllamaProvider::new(config).unwrap();
+
+        let mut tool_turn = Turn::new(TurnRole::Tool, "42".to_string());
+        tool_turn.set_tool_call_id("call-abc".to_string());
+        tool_turn.add_tool_result("call-abc".to_string(), "42".to_string(), false);
+
+        let turns = vec![
+            Turn::new(TurnRole::User, "What is 6*7?".to_string()),
+            tool_turn,
+        ];
+
+        let messages = provider.convert_messages(&turns);
+        assert_eq!(messages.len(), 2, "Tool turn must produce a user message");
+        assert_eq!(messages[1].role, "user");
+        assert!(
+            messages[1].content.contains("42"),
+            "Tool result content must be in the user message"
+        );
+    }
+
+    #[test]
+    fn test_tool_turn_error_prefixed() {
+        // MED-5: Error tool results should be labelled so the model understands.
+        let config = OllamaConfig::new("llama3".to_string());
+        let provider = OllamaProvider::new(config).unwrap();
+
+        let mut tool_turn = Turn::new(TurnRole::Tool, "Not found".to_string());
+        tool_turn.set_tool_call_id("call-xyz".to_string());
+        tool_turn.add_tool_result("call-xyz".to_string(), "Not found".to_string(), true);
+
+        let messages = provider.convert_messages(&[tool_turn]);
+        assert_eq!(messages.len(), 1);
+        assert!(
+            messages[0].content.contains("error") || messages[0].content.contains("Error"),
+            "Error tool results must include an error label"
+        );
     }
 }

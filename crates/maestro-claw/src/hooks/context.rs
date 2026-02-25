@@ -46,8 +46,11 @@ impl HookContext {
     }
 
     /// Check if this is the last allowed turn
+    ///
+    /// Returns true when `max_turns` is zero (no turns allowed) or when
+    /// `turn_number` has reached the last allowed index.
     pub fn is_last_turn(&self) -> bool {
-        self.turn_number >= self.max_turns - 1
+        self.max_turns == 0 || self.turn_number >= self.max_turns.saturating_sub(1)
     }
 
     /// Get remaining turns
@@ -96,6 +99,32 @@ mod tests {
             "claude".to_string(),
         );
         assert_eq!(ctx.remaining_turns(), 4);
+    }
+
+    #[test]
+    fn test_hook_context_is_last_turn_zero_max() {
+        // max_turns = 0 must NOT panic (was usize underflow)
+        let ctx = HookContext::new(
+            0,
+            0,
+            "session-1".to_string(),
+            "thread-1".to_string(),
+            "claude".to_string(),
+        );
+        assert!(ctx.is_last_turn(), "zero max_turns should be treated as last turn");
+        assert_eq!(ctx.remaining_turns(), 0);
+    }
+
+    #[test]
+    fn test_hook_context_remaining_turns_zero() {
+        let ctx = HookContext::new(
+            0,
+            0,
+            "session-1".to_string(),
+            "thread-1".to_string(),
+            "claude".to_string(),
+        );
+        assert_eq!(ctx.remaining_turns(), 0);
     }
 
     #[test]

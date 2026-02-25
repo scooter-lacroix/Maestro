@@ -451,14 +451,21 @@ pub async fn handle_agent_execute(
     debug!("Agent execute request: {:?}", req.prompt);
 
     // Broadcast agent execution event
+    // Use char-aware truncation to avoid panicking on multi-byte UTF-8 boundaries
+    let prompt_preview = {
+        const PREVIEW_CHARS: usize = 97;
+        let chars_count = req.prompt.chars().count();
+        if chars_count > PREVIEW_CHARS {
+            let truncated: String = req.prompt.chars().take(PREVIEW_CHARS).collect();
+            format!("{}...", truncated)
+        } else {
+            req.prompt.clone()
+        }
+    };
     let event = crate::protocol::EventFrame::new(
         "agent.execute.started",
         Some(serde_json::json!({
-            "prompt_preview": if req.prompt.len() > 100 {
-                format!("{}...", &req.prompt[..97])
-            } else {
-                req.prompt.clone()
-            },
+            "prompt_preview": prompt_preview,
             "provider": req.provider,
             "stream": req.stream,
         })),

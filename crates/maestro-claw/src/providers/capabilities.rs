@@ -69,12 +69,16 @@ impl ProviderCapabilities {
     }
 
     /// Ollama capabilities (local models)
+    ///
+    /// LOW-9: `native_tools` defaults to `false` because the vast majority of
+    /// Ollama-served models do not support the Ollama tools API. Callers that
+    /// have confirmed their model supports native tools can override this field.
     pub fn ollama() -> Self {
         Self {
             streaming: true,
-            native_tools: true, // Some models support tools
+            native_tools: false,
             vision: false,
-            function_calling: true,
+            function_calling: false,
             system_messages: true,
             parallel_tool_calls: false,
         }
@@ -139,7 +143,8 @@ mod tests {
     fn test_capabilities_ollama() {
         let caps = ProviderCapabilities::ollama();
         assert!(caps.streaming);
-        assert!(caps.native_tools);
+        // LOW-9: Ollama native_tools must default to false (most models don't support it)
+        assert!(!caps.native_tools);
         assert!(!caps.parallel_tool_calls);
     }
 

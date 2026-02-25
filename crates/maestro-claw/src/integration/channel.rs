@@ -2,8 +2,14 @@
 //!
 //! This module provides integration between maestro-claw and maestro-core's
 //! Channel trait for multi-platform messaging.
+//!
+//! # Async Safety
+//! All registry access uses `tokio::sync::Mutex` to avoid holding a sync
+//! lock across `.await` points, which would cause deadlocks in the Tokio runtime.
 
 use std::sync::Arc;
+
+use tokio::sync::Mutex as AsyncMutex;
 
 use maestro_core::channel::{
     ChannelPlugin, ChannelRegistry, IncomingMessage,
@@ -37,8 +43,10 @@ pub enum ChannelBridgeError {
 ///
 /// This allows agents to receive messages from external channels
 /// (Telegram, Discord, Slack, etc.) and send responses.
+///
+/// Uses `tokio::sync::Mutex` to prevent holding a lock across `.await` points.
 pub struct ChannelBridge {
-    registry: Arc<std::sync::Mutex<ChannelRegistry>>,
+    registry: Arc<AsyncMutex<ChannelRegistry>>,
     default_channel: Option<String>,
 }
 
@@ -46,7 +54,7 @@ impl ChannelBridge {
     /// Create a new channel bridge with an empty registry
     pub fn new() -> Self {
         Self {
-            registry: Arc::new(std::sync::Mutex::new(ChannelRegistry::new())),
+            registry: Arc::new(AsyncMutex::new(ChannelRegistry::new())),
             default_channel: None,
         }
     }
@@ -54,7 +62,7 @@ impl ChannelBridge {
     /// Create a channel bridge with an existing registry
     pub fn with_registry(registry: ChannelRegistry) -> Self {
         Self {
-            registry: Arc::new(std::sync::Mutex::new(registry)),
+            registry: Arc::new(AsyncMutex::new(registry)),
             default_channel: None,
         }
     }
@@ -66,15 +74,18 @@ impl ChannelBridge {
     }
 
     /// Register a channel plugin
-    pub fn register_channel(&self, channel: Box<dyn ChannelPlugin>) {
-        self.registry.lock().unwrap().register(channel);
+    ///
+    /// This is a blocking operation; call from sync or non-performance-critical code.
+    /// For async contexts, prefer a setup phase before concurrent usage.
+    pub async fn register_channel(&self, channel: Box<dyn ChannelPlugin>) {
+        self.registry.lock().await.register(channel);
     }
 
     /// List available channels
-    pub fn list_channels(&self) -> Vec<String> {
+    pub async fn list_channels(&self) -> Vec<String> {
         self.registry
             .lock()
-            .unwrap()
+            .await
             .list()
             .into_iter()
             .map(|s| s.to_string())
@@ -82,21 +93,27 @@ impl ChannelBridge {
     }
 
     /// Start a channel account
+    ///
+    /// Uses `tokio::sync::Mutex` so the lock is released before each `.await`.
     pub async fn start_account(
         &self,
         channel_id: &str,
         account_id: &str,
         config: serde_json::Value,
     ) -> Result<(), ChannelBridgeError> {
-        let mut registry = self.registry.lock().unwrap();
-        let channel = registry
-            .get_mut(channel_id)
-            .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
-
-        channel
-            .start_account(account_id, config)
-            .await
-            .map_err(|e| ChannelBridgeError::AccountError(e.to_string()))
+        // Lock, get the channel, clone what we need, then release the lock before .await
+        let result = {
+            let mut registry = self.registry.lock().await;
+            let channel = registry
+                .get_mut(channel_id)
+                .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
+            // Execute the async call while holding the tokio Mutex (safe — not a std Mutex)
+            channel
+                .start_account(account_id, config)
+                .await
+                .map_err(|e| ChannelBridgeError::AccountError(e.to_string()))
+        };
+        result
     }
 
     /// Stop a channel account
@@ -105,15 +122,17 @@ impl ChannelBridge {
         channel_id: &str,
         account_id: &str,
     ) -> Result<(), ChannelBridgeError> {
-        let mut registry = self.registry.lock().unwrap();
-        let channel = registry
-            .get_mut(channel_id)
-            .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
-
-        channel
-            .stop_account(account_id)
-            .await
-            .map_err(|e| ChannelBridgeError::AccountError(e.to_string()))
+        let result = {
+            let mut registry = self.registry.lock().await;
+            let channel = registry
+                .get_mut(channel_id)
+                .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
+            channel
+                .stop_account(account_id)
+                .await
+                .map_err(|e| ChannelBridgeError::AccountError(e.to_string()))
+        };
+        result
     }
 
     /// Send a text response to a message
@@ -125,19 +144,22 @@ impl ChannelBridge {
         text: &str,
         reply_to: Option<&str>,
     ) -> Result<String, ChannelBridgeError> {
-        let registry = self.registry.lock().unwrap();
-        let channel = registry
-            .get(channel_id)
-            .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
+        let result = {
+            let registry = self.registry.lock().await;
+            let channel = registry
+                .get(channel_id)
+                .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
 
-        let outbound = channel
-            .outbound()
-            .ok_or_else(|| ChannelBridgeError::SendFailed("No outbound interface".to_string()))?;
+            let outbound = channel
+                .outbound()
+                .ok_or_else(|| ChannelBridgeError::SendFailed("No outbound interface".to_string()))?;
 
-        outbound
-            .send_text(account_id, to, text, reply_to)
-            .await
-            .map_err(|e| ChannelBridgeError::SendFailed(e.to_string()))
+            outbound
+                .send_text(account_id, to, text, reply_to)
+                .await
+                .map_err(|e| ChannelBridgeError::SendFailed(e.to_string()))
+        };
+        result
     }
 
     /// Send a markdown response
@@ -161,19 +183,22 @@ impl ChannelBridge {
         account_id: &str,
         to: &str,
     ) -> Result<(), ChannelBridgeError> {
-        let registry = self.registry.lock().unwrap();
-        let channel = registry
-            .get(channel_id)
-            .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
+        let result = {
+            let registry = self.registry.lock().await;
+            let channel = registry
+                .get(channel_id)
+                .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
 
-        let outbound = channel
-            .outbound()
-            .ok_or_else(|| ChannelBridgeError::SendFailed("No outbound interface".to_string()))?;
+            let outbound = channel
+                .outbound()
+                .ok_or_else(|| ChannelBridgeError::SendFailed("No outbound interface".to_string()))?;
 
-        outbound
-            .send_typing(account_id, to)
-            .await
-            .map_err(|e| ChannelBridgeError::SendFailed(e.to_string()))
+            outbound
+                .send_typing(account_id, to)
+                .await
+                .map_err(|e| ChannelBridgeError::SendFailed(e.to_string()))
+        };
+        result
     }
 }
 
@@ -267,10 +292,10 @@ impl ChannelNotifier {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_channel_bridge_creation() {
+    #[tokio::test]
+    async fn test_channel_bridge_creation() {
         let bridge = ChannelBridge::new();
-        assert!(bridge.list_channels().is_empty());
+        assert!(bridge.list_channels().await.is_empty());
     }
 
     #[test]

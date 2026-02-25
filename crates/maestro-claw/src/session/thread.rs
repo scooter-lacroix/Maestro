@@ -12,6 +12,11 @@ use super::{Turn, TurnRole};
 /// Default threshold for auto-summarization
 const DEFAULT_SUMMARY_THRESHOLD: usize = 20;
 
+/// Serde default function for summary_threshold
+fn default_summary_threshold() -> usize {
+    DEFAULT_SUMMARY_THRESHOLD
+}
+
 /// Message format for provider APIs
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderMessage {
@@ -64,7 +69,7 @@ pub struct Thread {
     #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
     /// Turn count threshold for requesting summarization
-    #[serde(skip)]
+    #[serde(default = "default_summary_threshold")]
     summary_threshold: usize,
 }
 
@@ -243,6 +248,28 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "system");
         assert_eq!(messages[1].role, "user");
+    }
+
+    #[test]
+    fn test_summary_threshold_persisted_through_serde() {
+        let mut thread = Thread::new("session-123".to_string());
+        thread.set_summary_threshold(5);
+
+        let json = serde_json::to_string(&thread).unwrap();
+        let restored: Thread = serde_json::from_str(&json).unwrap();
+
+        // Custom threshold must survive serde roundtrip
+        assert!(restored.needs_summary() == (restored.turn_count() >= 5),
+            "summary_threshold must be persisted through serde, not reset to default");
+        // Verify the threshold value is preserved:
+        // With threshold=5 → needs_summary() is true after exactly 5 turns.
+        // With the old default threshold=20 it would still be false → proves
+        // the custom value was correctly persisted through the serde roundtrip.
+        let mut restored = restored;
+        for _ in 0..5 {
+            restored.build_next_turn(TurnRole::User, "x".to_string());
+        }
+        assert!(restored.needs_summary(), "restored threshold should be 5, not default 20");
     }
 
     #[test]

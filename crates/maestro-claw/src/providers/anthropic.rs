@@ -17,6 +17,27 @@ use crate::tools::ToolSpec;
 /// Anthropic API base URL
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1";
 
+/// LOW-5: Extract the `Retry-After` header value (seconds) before the response
+/// body is consumed.  Falls back to 60 seconds when the header is absent.
+fn extract_retry_after(response: &reqwest::Response) -> u64 {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60)
+}
+
+/// LOW-12: Map a reqwest network error to the correct `ProviderError` variant.
+/// Distinguishes genuine timeouts from other network failures.
+fn map_network_error(e: reqwest::Error) -> ProviderError {
+    if e.is_timeout() {
+        ProviderError::Timeout(e.url().map(|_| 120u64).unwrap_or(120))
+    } else {
+        ProviderError::NetworkError(e.to_string())
+    }
+}
+
 /// Anthropic provider configuration
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
@@ -142,7 +163,13 @@ impl AnthropicProvider {
         }
 
         if let Some(tools) = tools {
-            body["tools"] = serde_json::to_value(tools).unwrap();
+            // LOW-1: avoid panicking on serialization failure
+            match serde_json::to_value(tools) {
+                Ok(v) => { body["tools"] = v; }
+                Err(e) => {
+                    tracing::warn!("Failed to serialize Anthropic tools: {}", e);
+                }
+            }
         }
 
         body
@@ -156,9 +183,15 @@ impl AnthropicProvider {
         for turn in turns {
             match turn.role {
                 TurnRole::System => {
-                    // Anthropic uses top-level system parameter
-                    if system.is_none() {
-                        system = Some(turn.content.clone());
+                    // LOW-11: Anthropic allows only one top-level system prompt.
+                    // Concatenate multiple System turns separated by a blank line
+                    // rather than silently dropping all but the first.
+                    match system {
+                        None => system = Some(turn.content.clone()),
+                        Some(ref mut existing) => {
+                            existing.push_str("\n\n");
+                            existing.push_str(&turn.content);
+                        }
                     }
                 }
                 TurnRole::User => {
@@ -192,20 +225,37 @@ impl AnthropicProvider {
                     });
                 }
                 TurnRole::Tool => {
-                    let tool_result = turn.tool_call_id.as_ref().map(|id| {
-                        AnthropicContent::ToolResult {
-                            tool_use_id: id.clone(),
-                            content: turn.content.clone(),
-                            is_error: false,
+                    // MED-4: Prefer `turn.tool_results` which carries accurate `is_error`.
+                    // The agent loop populates this Vec for every tool execution.
+                    if !turn.tool_results.is_empty() {
+                        for tr in &turn.tool_results {
+                            messages.push(AnthropicMessage {
+                                role: "user".to_string(),
+                                content: vec![AnthropicContent::ToolResult {
+                                    tool_use_id: tr.tool_call_id.clone(),
+                                    content: tr.content.clone(),
+                                    is_error: tr.is_error,
+                                }],
+                            });
                         }
-                    });
-
-                    if let Some(tr) = tool_result {
-                        // Anthropic expects tool results in user messages
+                    } else if let Some(id) = &turn.tool_call_id {
+                        // Fallback for turns created without tool_results (legacy path).
+                        // is_error cannot be determined here; default to false.
                         messages.push(AnthropicMessage {
                             role: "user".to_string(),
-                            content: vec![tr],
+                            content: vec![AnthropicContent::ToolResult {
+                                tool_use_id: id.clone(),
+                                content: turn.content.clone(),
+                                is_error: false,
+                            }],
                         });
+                    } else {
+                        // MED-4: Warn instead of silently dropping unidentified tool turns.
+                        tracing::warn!(
+                            turn_id = %turn.id,
+                            "TurnRole::Tool turn has no tool_call_id and no tool_results; \
+                             skipping — the tool result will not reach the LLM"
+                        );
                     }
                 }
             }
@@ -241,11 +291,15 @@ impl AnthropicProvider {
             .join("\n")
     }
 
-    /// Handle API error response
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str) -> ProviderError {
+    /// Handle API error response.
+    ///
+    /// `retry_after_secs` should be extracted from the `Retry-After` response
+    /// header **before** the body is consumed (LOW-5).
+    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
         match status.as_u16() {
             401 => ProviderError::AuthenticationFailed("Invalid API key".to_string()),
-            429 => ProviderError::RateLimitExceeded(60),
+            // LOW-5: use server-provided retry delay instead of hardcoded 60
+            429 => ProviderError::RateLimitExceeded(retry_after_secs),
             500 | 502 | 503 => ProviderError::Unavailable(format!("Anthropic service error: {}", status)),
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
         }
@@ -357,12 +411,14 @@ impl Provider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            // LOW-5: extract Retry-After before consuming the body
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let anthropic_response: AnthropicResponse = response
@@ -403,12 +459,14 @@ impl Provider for AnthropicProvider {
             .query(&[("stream", "true")])
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            // LOW-5: extract Retry-After before consuming the body
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let stream = response.bytes_stream().map(|chunk_result| {
@@ -472,12 +530,14 @@ impl Provider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            // LOW-5: extract Retry-After before consuming the body
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let anthropic_response: AnthropicResponse = response
@@ -535,7 +595,17 @@ impl Provider for AnthropicProvider {
 
     fn format_messages(&self, turns: &[Turn]) -> Vec<serde_json::Value> {
         let (messages, _system) = self.convert_messages(turns);
-        messages.into_iter().map(|m| serde_json::to_value(m).unwrap()).collect()
+        // LOW-1: avoid panicking on serialization failure
+        messages
+            .into_iter()
+            .filter_map(|m| match serde_json::to_value(m) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::warn!("Failed to serialize Anthropic message: {}", e);
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -611,5 +681,59 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(system, Some("You are helpful".to_string()));
         assert_eq!(messages[0].role, "user");
+    }
+
+    #[test]
+    fn test_multiple_system_turns_concatenated() {
+        // LOW-11: Multiple System turns must be concatenated rather than dropped.
+        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let turns = vec![
+            Turn::new(TurnRole::System, "Persona: assistant".to_string()),
+            Turn::new(TurnRole::System, "Rules: be concise".to_string()),
+            Turn::new(TurnRole::User, "Hi".to_string()),
+        ];
+
+        let (messages, system) = provider.convert_messages(&turns);
+        assert_eq!(messages.len(), 1, "Only the User turn should appear in messages");
+        let sys = system.unwrap();
+        assert!(sys.contains("Persona: assistant"), "First system content must be present");
+        assert!(sys.contains("Rules: be concise"), "Second system content must be concatenated");
+    }
+
+    #[test]
+    fn test_tool_turn_is_error_propagated() {
+        // MED-4: is_error from tool_results must be passed to the provider message.
+        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        let mut tool_turn = Turn::new(TurnRole::Tool, "Tool failed!".to_string());
+        tool_turn.set_tool_call_id("call-1".to_string());
+        // Simulate agent loop storing is_error=true
+        tool_turn.add_tool_result("call-1".to_string(), "Tool failed!".to_string(), true);
+
+        let (messages, _) = provider.convert_messages(&[tool_turn]);
+        assert_eq!(messages.len(), 1);
+        // Verify the ToolResult content was emitted (is_error is inside the enum variant)
+        assert_eq!(messages[0].role, "user");
+        assert!(matches!(
+            messages[0].content[0],
+            AnthropicContent::ToolResult { is_error: true, .. }
+        ));
+    }
+
+    #[test]
+    fn test_tool_turn_no_id_warns() {
+        // MED-4: Tool turn with no tool_call_id and no tool_results should be skipped (not panic).
+        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let provider = AnthropicProvider::new(config).unwrap();
+
+        // Turn with no tool_call_id and no tool_results
+        let tool_turn = Turn::new(TurnRole::Tool, "orphan result".to_string());
+
+        let (messages, _) = provider.convert_messages(&[tool_turn]);
+        // Should produce no messages (turn is skipped with a warning)
+        assert_eq!(messages.len(), 0, "Orphan tool turn must be silently skipped");
     }
 }

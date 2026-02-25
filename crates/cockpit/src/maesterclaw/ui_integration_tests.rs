@@ -61,11 +61,8 @@ mod cockpit_integration_tests {
     #[test]
     fn test_turn_history_display() {
         let mut session = Session::new();
+        // add_thread() now returns &mut Thread directly
         let thread = session.add_thread();
-
-        // Get mutable thread to add turns
-        let thread_id = thread.id().to_string();
-        let thread = session.get_thread_mut(&thread_id).unwrap();
         thread.add_turn(Turn::new(TurnRole::User, "Hello".to_string()));
         thread.add_turn(Turn::new(TurnRole::Assistant, "Hi there!".to_string()));
         thread.add_turn(Turn::new(TurnRole::User, "How are you?".to_string()));
@@ -103,10 +100,8 @@ mod cockpit_integration_tests {
     #[test]
     fn test_session_summary_stats() {
         let mut session = Session::new();
+        // add_thread() now returns &mut Thread directly
         let thread = session.add_thread();
-        let thread_id = thread.id().to_string();
-        let thread = session.get_thread_mut(&thread_id).unwrap();
-
         thread.add_turn(Turn::new(TurnRole::User, "Hello".to_string()));
         thread.add_turn(Turn::new(TurnRole::Assistant, "Hi!".to_string()));
         thread.add_turn(Turn::new(TurnRole::User, "Help me".to_string()));
