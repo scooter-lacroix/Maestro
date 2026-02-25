@@ -14,7 +14,7 @@ mod anthropic;
 mod ollama;
 mod openrouter;
 
-pub use r#trait::{ChatResponse, Provider, StreamChunk, TokenUsage, turn_to_message};
+pub use r#trait::{ChatResponse, Provider, StreamChunk, ToolCallDelta, TokenUsage, turn_to_message};
 pub use capabilities::ProviderCapabilities;
 pub use error::ProviderError;
 pub use openai::{OpenAIConfig, OpenAIProvider};

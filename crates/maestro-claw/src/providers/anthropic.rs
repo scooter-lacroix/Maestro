@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
+use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, ToolCallDelta, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -498,11 +498,64 @@ impl Provider for AnthropicProvider {
                                 let data = &line[6..];
                                 if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
                                     match event {
-                                        AnthropicStreamEvent::ContentBlockDelta { delta, .. } => {
-                                            if let Some(t) = delta.get("text").and_then(|t| t.as_str()) {
+                                        AnthropicStreamEvent::ContentBlockDelta { index, delta } => {
+                                            let delta_type = delta
+                                                .get("type")
+                                                .and_then(|t| t.as_str())
+                                                .unwrap_or("");
+                                            if delta_type == "text_delta" {
+                                                if let Some(t) = delta.get("text").and_then(|t| t.as_str()) {
+                                                    results.push(Ok(StreamChunk {
+                                                        delta: Some(t.to_string()),
+                                                        tool_call_delta: None,
+                                                        finish_reason: None,
+                                                    }));
+                                                }
+                                            } else if delta_type == "input_json_delta" {
+                                                // LOW-10: surface streaming tool call argument chunks
+                                                if let Some(partial) = delta
+                                                    .get("partial_json")
+                                                    .and_then(|p| p.as_str())
+                                                {
+                                                    results.push(Ok(StreamChunk {
+                                                        delta: None,
+                                                        tool_call_delta: Some(ToolCallDelta {
+                                                            index: index as usize,
+                                                            id: None,
+                                                            name: None,
+                                                            arguments_delta: Some(partial.to_string()),
+                                                        }),
+                                                        finish_reason: None,
+                                                    }));
+                                                }
+                                            }
+                                        }
+                                        // LOW-10: when a tool_use block starts, emit id+name
+                                        AnthropicStreamEvent::ContentBlockStart {
+                                            index,
+                                            content_block,
+                                        } => {
+                                            if content_block
+                                                .get("type")
+                                                .and_then(|t| t.as_str())
+                                                == Some("tool_use")
+                                            {
+                                                let id = content_block
+                                                    .get("id")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(String::from);
+                                                let name = content_block
+                                                    .get("name")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(String::from);
                                                 results.push(Ok(StreamChunk {
-                                                    delta: Some(t.to_string()),
-                                                    tool_call_delta: None,
+                                                    delta: None,
+                                                    tool_call_delta: Some(ToolCallDelta {
+                                                        index: index as usize,
+                                                        id,
+                                                        name,
+                                                        arguments_delta: None,
+                                                    }),
                                                     finish_reason: None,
                                                 }));
                                             }
@@ -639,8 +692,12 @@ enum AnthropicStreamEvent {
     },
     #[serde(rename = "message_stop")]
     MessageStop,
+    /// LOW-10: capture content_block so tool_use blocks expose id/name as ToolCallDelta
     #[serde(rename = "content_block_start")]
-    ContentBlockStart { index: u32 },
+    ContentBlockStart {
+        index: u32,
+        content_block: serde_json::Value,
+    },
     #[serde(rename = "content_block_stop")]
     ContentBlockStop { index: u32 },
     #[serde(rename = "message_start")]
@@ -754,5 +811,66 @@ mod tests {
         let (messages, _) = provider.convert_messages(&[tool_turn]);
         // Should produce no messages (turn is skipped with a warning)
         assert_eq!(messages.len(), 0, "Orphan tool turn must be silently skipped");
+    }
+
+    /// LOW-10: Anthropic ContentBlockStart for tool_use must deserialise id and name
+    #[test]
+    fn test_anthropic_content_block_start_tool_use_parsing() {
+        let json = r#"{
+            "type":"content_block_start",
+            "index":1,
+            "content_block":{
+                "type":"tool_use",
+                "id":"toolu_01A09",
+                "name":"get_weather",
+                "input":{}
+            }
+        }"#;
+
+        let event: AnthropicStreamEvent = serde_json::from_str(json).unwrap();
+        match event {
+            AnthropicStreamEvent::ContentBlockStart { index, content_block } => {
+                assert_eq!(index, 1);
+                assert_eq!(
+                    content_block.get("type").and_then(|t| t.as_str()),
+                    Some("tool_use")
+                );
+                assert_eq!(
+                    content_block.get("id").and_then(|v| v.as_str()),
+                    Some("toolu_01A09")
+                );
+                assert_eq!(
+                    content_block.get("name").and_then(|v| v.as_str()),
+                    Some("get_weather")
+                );
+            }
+            _ => panic!("Expected ContentBlockStart"),
+        }
+    }
+
+    /// LOW-10: Anthropic input_json_delta must carry partial_json
+    #[test]
+    fn test_anthropic_input_json_delta_parsing() {
+        let json = r#"{
+            "type":"content_block_delta",
+            "index":1,
+            "delta":{"type":"input_json_delta","partial_json":"{\"location\":"}
+        }"#;
+
+        let event: AnthropicStreamEvent = serde_json::from_str(json).unwrap();
+        match event {
+            AnthropicStreamEvent::ContentBlockDelta { index, delta } => {
+                assert_eq!(index, 1);
+                assert_eq!(
+                    delta.get("type").and_then(|t| t.as_str()),
+                    Some("input_json_delta")
+                );
+                assert_eq!(
+                    delta.get("partial_json").and_then(|v| v.as_str()),
+                    Some("{\"location\":")
+                );
+            }
+            _ => panic!("Expected ContentBlockDelta"),
+        }
     }
 }

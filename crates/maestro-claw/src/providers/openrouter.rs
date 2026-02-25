@@ -12,7 +12,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
+use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, ToolCallDelta, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -472,9 +472,27 @@ impl Provider for OpenRouterProvider {
                                     serde_json::from_str::<OpenRouterStreamResponse>(data)
                                 {
                                     if let Some(choice) = chunk.choices.first() {
+                                        // LOW-10: surface tool call deltas (OpenAI-compatible format)
+                                        let tool_call_delta = choice
+                                            .delta
+                                            .tool_calls
+                                            .as_ref()
+                                            .and_then(|tcs| tcs.first())
+                                            .map(|tc| ToolCallDelta {
+                                                index: tc.index,
+                                                id: tc.id.clone(),
+                                                name: tc
+                                                    .function
+                                                    .as_ref()
+                                                    .and_then(|f| f.name.clone()),
+                                                arguments_delta: tc
+                                                    .function
+                                                    .as_ref()
+                                                    .and_then(|f| f.arguments.clone()),
+                                            });
                                         results.push(Ok(StreamChunk {
                                             delta: choice.delta.content.clone(),
-                                            tool_call_delta: None,
+                                            tool_call_delta,
                                             finish_reason: choice.finish_reason.clone(),
                                         }));
                                     }
@@ -647,10 +665,28 @@ struct OpenRouterStreamChoice {
     finish_reason: Option<String>,
 }
 
+/// LOW-10: mirrors OpenAI tool-call delta format (OpenRouter is OpenAI-compatible)
+#[derive(Debug, Clone, Deserialize)]
+struct OpenRouterToolCallDelta {
+    index: usize,
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<OpenRouterFunctionCallDelta>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OpenRouterFunctionCallDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct OpenRouterDelta {
     #[serde(default)]
     content: Option<String>,
+    /// LOW-10: tool call argument deltas for streaming tool calls
+    #[serde(default)]
+    tool_calls: Option<Vec<OpenRouterToolCallDelta>>,
 }
 
 #[cfg(test)]
@@ -721,5 +757,36 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[1]["role"], "user");
+    }
+
+    /// LOW-10: OpenRouter streaming delta with tool_calls must deserialise correctly
+    #[test]
+    fn test_openrouter_stream_tool_call_delta_parsing() {
+        let sse_json = r#"{
+            "id":"or-1",
+            "choices":[{
+                "index":0,
+                "delta":{
+                    "content":null,
+                    "tool_calls":[{
+                        "index":0,
+                        "id":"call_xyz",
+                        "function":{"name":"search","arguments":""}
+                    }]
+                },
+                "finish_reason":null
+            }]
+        }"#;
+
+        let chunk: OpenRouterStreamResponse = serde_json::from_str(sse_json).unwrap();
+        let choice = chunk.choices.first().unwrap();
+        let tc = choice.delta.tool_calls.as_ref().unwrap().first().unwrap();
+
+        assert_eq!(tc.index, 0);
+        assert_eq!(tc.id.as_deref(), Some("call_xyz"));
+        assert_eq!(
+            tc.function.as_ref().and_then(|f| f.name.as_deref()),
+            Some("search")
+        );
     }
 }
