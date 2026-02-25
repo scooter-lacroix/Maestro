@@ -6,9 +6,10 @@
 //! - Vision support
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
@@ -469,43 +470,61 @@ impl Provider for AnthropicProvider {
             return Err(self.handle_error(status, &body, retry_after));
         }
 
-        let stream = response.bytes_stream().map(|chunk_result| {
+        // MED-3: Use flat_map + carryover buffer so that multiple SSE events
+        // arriving in a single TCP frame are all emitted, and events that are
+        // split across frame boundaries are reassembled correctly.
+        let carryover: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
+        let stream = response.bytes_stream().flat_map(move |chunk_result| {
+            let carryover = carryover.clone();
             match chunk_result {
                 Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    for line in text.lines() {
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
-                            if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
-                                match event {
-                                    AnthropicStreamEvent::ContentBlockDelta { delta, .. } => {
-                                        if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                                            return Ok(StreamChunk {
-                                                delta: Some(text.to_string()),
-                                                tool_call_delta: None,
-                                                finish_reason: None,
-                                            });
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    let mut carry = carryover.lock().unwrap_or_else(|e| e.into_inner());
+                    carry.push_str(&text);
+
+                    // Extract all complete lines (separated by \n)
+                    let mut results: Vec<Result<StreamChunk, ProviderError>> = Vec::new();
+                    loop {
+                        match carry.find('\n') {
+                            Some(pos) => {
+                                let line = carry[..pos].trim_end_matches('\r').to_string();
+                                let tail = carry[pos + 1..].to_string();
+                                *carry = tail;
+
+                                if !line.starts_with("data: ") {
+                                    continue;
+                                }
+                                let data = &line[6..];
+                                if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
+                                    match event {
+                                        AnthropicStreamEvent::ContentBlockDelta { delta, .. } => {
+                                            if let Some(t) = delta.get("text").and_then(|t| t.as_str()) {
+                                                results.push(Ok(StreamChunk {
+                                                    delta: Some(t.to_string()),
+                                                    tool_call_delta: None,
+                                                    finish_reason: None,
+                                                }));
+                                            }
                                         }
+                                        AnthropicStreamEvent::MessageStop => {
+                                            results.push(Ok(StreamChunk {
+                                                delta: None,
+                                                tool_call_delta: None,
+                                                finish_reason: Some("end_turn".to_string()),
+                                            }));
+                                        }
+                                        _ => {}
                                     }
-                                    AnthropicStreamEvent::MessageStop => {
-                                        return Ok(StreamChunk {
-                                            delta: None,
-                                            tool_call_delta: None,
-                                            finish_reason: Some("end_turn".to_string()),
-                                        });
-                                    }
-                                    _ => {}
                                 }
                             }
+                            None => break,
                         }
                     }
-                    Ok(StreamChunk {
-                        delta: None,
-                        tool_call_delta: None,
-                        finish_reason: None,
-                    })
+                    drop(carry);
+                    stream::iter(results)
                 }
-                Err(e) => Err(ProviderError::NetworkError(e.to_string())),
+                Err(e) => stream::iter(vec![Err(map_network_error(e))]),
             }
         });
 

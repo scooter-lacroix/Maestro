@@ -6,9 +6,10 @@
 //! - Local inference
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
@@ -474,33 +475,50 @@ impl Provider for OllamaProvider {
             return Err(self.handle_error(status, &body, retry_after));
         }
 
-        let stream = response.bytes_stream().map(|chunk_result| {
+        // MED-3: flat_map + carryover buffer.
+        // Ollama uses NDJSON (one complete JSON object per line) rather than SSE,
+        // but the same multi-object-per-frame and split-frame problems apply.
+        let carryover: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
+        let stream = response.bytes_stream().flat_map(move |chunk_result| {
+            let carryover = carryover.clone();
             match chunk_result {
                 Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    // Ollama streams JSON objects, one per line
-                    for line in text.lines() {
-                        if let Ok(resp) = serde_json::from_str::<OllamaResponse>(line) {
-                            let delta = resp.message.map(|m| m.content);
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    let mut carry = carryover.lock().unwrap_or_else(|e| e.into_inner());
+                    carry.push_str(&text);
 
-                            return Ok(StreamChunk {
-                                delta,
-                                tool_call_delta: None,
-                                finish_reason: if resp.done {
-                                    Some("stop".to_string())
-                                } else {
-                                    None
-                                },
-                            });
+                    let mut results: Vec<Result<StreamChunk, ProviderError>> = Vec::new();
+                    loop {
+                        match carry.find('\n') {
+                            Some(pos) => {
+                                let line = carry[..pos].trim_end_matches('\r').to_string();
+                                let tail = carry[pos + 1..].to_string();
+                                *carry = tail;
+
+                                if line.trim().is_empty() {
+                                    continue;
+                                }
+                                if let Ok(resp) = serde_json::from_str::<OllamaResponse>(&line) {
+                                    let delta = resp.message.map(|m| m.content);
+                                    results.push(Ok(StreamChunk {
+                                        delta,
+                                        tool_call_delta: None,
+                                        finish_reason: if resp.done {
+                                            Some("stop".to_string())
+                                        } else {
+                                            None
+                                        },
+                                    }));
+                                }
+                            }
+                            None => break,
                         }
                     }
-                    Ok(StreamChunk {
-                        delta: None,
-                        tool_call_delta: None,
-                        finish_reason: None,
-                    })
+                    drop(carry);
+                    stream::iter(results)
                 }
-                Err(e) => Err(ProviderError::NetworkError(e.to_string())),
+                Err(e) => stream::iter(vec![Err(map_network_error(e))]),
             }
         });
 
