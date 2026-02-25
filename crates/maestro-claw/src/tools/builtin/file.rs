@@ -54,6 +54,49 @@ pub struct FileTool {
     config: FileToolConfig,
 }
 
+/// Canonicalize a path using real filesystem resolution, handling non-existent paths.
+///
+/// If the full path exists, it is fully canonicalized (following all symlinks).
+/// If not, we walk up to the deepest existing ancestor, canonicalize that,
+/// and re-append the non-existent tail — so symlink-based sandbox escapes
+/// via the existing portion of the path are still detected. (MED-1)
+fn canonicalize_best_effort(path: &PathBuf) -> PathBuf {
+    // Happy path: path exists — full canonicalization.
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical;
+    }
+
+    // Walk up to the nearest existing ancestor and canonicalize it,
+    // then re-append the non-existent suffix.
+    let mut ancestor = path.clone();
+    let mut suffix = PathBuf::new();
+
+    loop {
+        if let Some(name) = ancestor.file_name() {
+            // Prepend this component to the suffix (building from deepest to shallowest)
+            let name_buf = PathBuf::from(name);
+            suffix = if suffix.as_os_str().is_empty() {
+                name_buf
+            } else {
+                name_buf.join(&suffix)
+            };
+
+            ancestor = match ancestor.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+                _ => return path.clone(),
+            };
+
+            if ancestor.exists() {
+                if let Ok(canonical) = std::fs::canonicalize(&ancestor) {
+                    return canonical.join(suffix);
+                }
+            }
+        } else {
+            return path.clone();
+        }
+    }
+}
+
 impl FileTool {
     /// Create a new FileTool with default configuration
     pub fn new() -> Self {
@@ -87,13 +130,20 @@ impl FileTool {
 
         let path = PathBuf::from(&expanded);
 
-        // Check for path traversal attempts
-        let path_str_lower = path_str.to_lowercase();
+        // First-pass: fast string-based check for obvious traversal (cheap guard).
+        // Catches `../` and similar before any filesystem work is done.
+        let path_str_lower = expanded.to_lowercase();
         let traversal_patterns = ["../", "..\\", "/..", "\\.."];
         for pattern in &traversal_patterns {
             if path_str_lower.contains(pattern) {
                 return Err("Path traversal detected".to_string());
             }
+        }
+
+        // Component-level check: reject any `..` path component.
+        // This catches a bare `".."` that the string patterns above miss.
+        if path.components().any(|c| c == std::path::Component::ParentDir) {
+            return Err("Path traversal detected".to_string());
         }
 
         // Resolve the path relative to base directory if set
@@ -106,6 +156,20 @@ impl FileTool {
         } else {
             path
         };
+
+        // Canonicalize-based sandbox enforcement (MED-1: defeats symlink escape attacks).
+        // When a sandbox base_directory is configured we verify that the fully-resolved
+        // path (after following all symlinks in the existing prefix) still lives under it.
+        if let Some(ref base) = self.config.base_directory {
+            let canonical_base = std::fs::canonicalize(base)
+                .unwrap_or_else(|_| base.clone());
+            let canonical_resolved = canonicalize_best_effort(&resolved);
+            if !canonical_resolved.starts_with(&canonical_base) {
+                return Err(
+                    "Path traversal detected (resolved outside sandbox)".to_string()
+                );
+            }
+        }
 
         // Check against blocked paths
         for blocked in &self.config.blocked_paths {
@@ -656,6 +720,40 @@ mod tests {
             .await;
         assert!(output.is_error);
         assert!(output.content.contains("Unknown operation"));
+    }
+
+    #[test]
+    fn test_validate_path_bare_dotdot_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let config = FileToolConfig {
+            base_directory: Some(tmp.path().to_path_buf()),
+            ..Default::default()
+        };
+        let tool = FileTool::with_config(config);
+
+        // Bare ".." bypasses the string-pattern check but is caught by the
+        // component-level check added in MED-1.
+        let result = tool.validate_path("..");
+        assert!(result.is_err(), "Bare '..' should be rejected");
+        assert!(result.unwrap_err().contains("traversal"));
+    }
+
+    #[test]
+    fn test_sandbox_absolute_escape_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let config = FileToolConfig {
+            base_directory: Some(tmp.path().to_path_buf()),
+            // Clear blocked_paths so only the canonicalize sandbox check is exercised.
+            blocked_paths: vec![],
+            ..Default::default()
+        };
+        let tool = FileTool::with_config(config);
+
+        // An absolute path outside the sandbox must be rejected when
+        // base_directory is set — the canonicalize check (MED-1) enforces this.
+        let result = tool.validate_path("/etc/passwd");
+        assert!(result.is_err(), "Absolute path outside sandbox should be rejected");
+        assert!(result.unwrap_err().contains("traversal"));
     }
 
     #[test]

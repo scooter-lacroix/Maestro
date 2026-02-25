@@ -17,6 +17,25 @@ use crate::tools::ToolSpec;
 /// OpenAI API base URL
 const OPENAI_API_URL: &str = "https://api.openai.com/v1";
 
+/// LOW-5: Extract the `Retry-After` header value (seconds) before consuming the body.
+fn extract_retry_after(response: &reqwest::Response) -> u64 {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60)
+}
+
+/// LOW-12: Map a reqwest network error to the correct `ProviderError` variant.
+fn map_network_error(e: reqwest::Error) -> ProviderError {
+    if e.is_timeout() {
+        ProviderError::Timeout(120)
+    } else {
+        ProviderError::NetworkError(e.to_string())
+    }
+}
+
 /// OpenAI provider configuration
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
@@ -140,7 +159,13 @@ impl OpenAIProvider {
         }
 
         if let Some(tools) = tools {
-            body["tools"] = serde_json::to_value(tools).unwrap();
+            // LOW-1: avoid panicking on serialization failure
+            match serde_json::to_value(tools) {
+                Ok(v) => { body["tools"] = v; }
+                Err(e) => {
+                    tracing::warn!("Failed to serialize OpenAI tools: {}", e);
+                }
+            }
         }
 
         body
@@ -164,13 +189,13 @@ impl OpenAIProvider {
     }
 
     /// Handle API error response
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str) -> ProviderError {
+    /// `retry_after_secs` should be extracted from the `Retry-After` header before
+    /// the response body is consumed (LOW-5).
+    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
         match status.as_u16() {
             401 => ProviderError::AuthenticationFailed("Invalid API key".to_string()),
-            429 => {
-                // Try to parse retry-after from error
-                ProviderError::RateLimitExceeded(60) // Default 60 seconds
-            }
+            // LOW-5: use server-provided retry delay
+            429 => ProviderError::RateLimitExceeded(retry_after_secs),
             500 | 502 | 503 => ProviderError::Unavailable(format!("OpenAI service error: {}", status)),
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
         }
@@ -277,12 +302,13 @@ impl Provider for OpenAIProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let openai_response: OpenAIResponse = response
@@ -332,12 +358,13 @@ impl Provider for OpenAIProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let stream = response
@@ -402,12 +429,13 @@ impl Provider for OpenAIProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
+            let retry_after = extract_retry_after(&response);
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error(status, &body));
+            return Err(self.handle_error(status, &body, retry_after));
         }
 
         let openai_response: OpenAIResponse = response
@@ -443,28 +471,9 @@ impl Provider for OpenAIProvider {
     }
 
     async fn warmup(&self) -> Result<(), ProviderError> {
-        // Make a minimal request to validate credentials
-        let messages = vec![serde_json::json!({
-            "role": "user",
-            "content": "Hi"
-        })];
-        let body = self.build_request_body(messages, None, false);
-
-        let response = self
-            .client
-            .post(format!("{}/chat/completions", self.api_url()))
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
-
-        if response.status() == 401 {
-            return Err(ProviderError::AuthenticationFailed("Invalid API key".to_string()));
-        }
-
-        Ok(())
+        // LOW-6: Previously made an expensive chat/completions call that wasted tokens.
+        // Delegate to health_check() which uses the /models list endpoint instead.
+        self.health_check().await
     }
 
     async fn health_check(&self) -> Result<(), ProviderError> {
@@ -475,7 +484,7 @@ impl Provider for OpenAIProvider {
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .send()
             .await
-            .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
+            .map_err(map_network_error)?;
 
         if response.status() == 401 {
             return Err(ProviderError::AuthenticationFailed("Invalid API key".to_string()));
@@ -506,18 +515,23 @@ impl Provider for OpenAIProvider {
 
                 // Add tool calls for assistant messages
                 if !turn.tool_calls.is_empty() {
-                    msg["tool_calls"] = serde_json::to_value(
-                        turn.tool_calls.iter().map(|tc| {
-                            serde_json::json!({
-                                "id": &tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": &tc.name,
-                                    "arguments": tc.arguments.to_string()
-                                }
-                            })
-                        }).collect::<Vec<_>>()
-                    ).unwrap();
+                    let tc_list = turn.tool_calls.iter().map(|tc| {
+                        serde_json::json!({
+                            "id": &tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": &tc.name,
+                                "arguments": tc.arguments.to_string()
+                            }
+                        })
+                    }).collect::<Vec<_>>();
+                    // LOW-1: avoid panicking on serialization failure
+                    match serde_json::to_value(tc_list) {
+                        Ok(v) => { msg["tool_calls"] = v; }
+                        Err(e) => {
+                            tracing::warn!("Failed to serialize OpenAI tool_calls: {}", e);
+                        }
+                    }
                 }
 
                 // Add tool call ID for tool messages

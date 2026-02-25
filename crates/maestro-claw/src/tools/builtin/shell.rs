@@ -87,6 +87,8 @@ impl ShellTool {
         let command_trimmed = command_lower.trim();
 
         // Blocked patterns - never allowed
+        // (MED-2) `sudo` and `eval` are always blocked because they trivially
+        // bypass every downstream classification check.
         let blocked_patterns = [
             "rm -rf /",
             "rm -rf /*",
@@ -105,6 +107,8 @@ impl ShellTool {
             "systemctl disable",
             "iptables -F",
             "ufw disable",
+            "sudo",           // MED-2: privilege escalation bypasses all guards
+            "eval",           // MED-2: dynamic evaluation bypasses classification
         ];
 
         for pattern in &blocked_patterns {
@@ -117,6 +121,10 @@ impl ShellTool {
         let cmd_name = command_trimmed.split_whitespace().next().unwrap_or("");
 
         // Dangerous commands
+        // (MED-2) Shell interpreters and scripting runtimes are classified as
+        // Dangerous because passing `-c "<payload>"` lets any blocked command
+        // bypass the pattern/name checks above (e.g. `bash -c "rm -rf /"`).
+        // They require `allow_dangerous: true` to execute.
         let dangerous_commands = [
             "rm", "rmdir", "del", "format", "fdisk", "parted", "wipefs",
             "chmod", "chown", "chgrp", "attr", "setfacl",
@@ -126,6 +134,15 @@ impl ShellTool {
             "git push", "git reset --hard", "git clean -fdx",
             "docker rm", "docker rmi", "docker system prune",
             "kubectl delete",
+            // Shell interpreters (MED-2)
+            "bash", "sh", "zsh", "dash", "fish", "ksh", "csh", "tcsh",
+            // Scripting language runtimes (MED-2)
+            "python", "python2", "python3",
+            "perl", "ruby", "php",
+            "node", "nodejs", "deno", "bun",
+            "lua", "tclsh", "wish",
+            // exec replaces current process — treat as dangerous
+            "exec",
         ];
 
         for dangerous in &dangerous_commands {
@@ -458,6 +475,53 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_dir_all("/tmp/maestro_test_dir_12345");
+    }
+
+    #[test]
+    fn test_interpreter_bypass_rejected_by_default() {
+        // MED-2: Shell interpreters are Dangerous and must be rejected without
+        // allow_dangerous: true, preventing `bash -c "rm -rf /"` style bypasses.
+        let tool = ShellTool::new(); // allow_dangerous defaults to false
+
+        let interpreters = [
+            "bash -c 'rm -rf /'",
+            "sh -c 'shutdown -h now'",
+            "python3 -c 'import os; os.system(\"rm -rf /\")'",
+            "perl -e 'system(\"rm -rf /\")'",
+            "node -e 'require(\"child_process\").exec(\"shutdown\")'",
+        ];
+
+        for cmd in &interpreters {
+            let output = tool.execute_sync(cmd);
+            assert!(
+                output.is_error,
+                "Interpreter bypass '{}' should be rejected with default config",
+                cmd
+            );
+        }
+    }
+
+    #[test]
+    fn test_sudo_blocked() {
+        // MED-2: sudo is always blocked regardless of allow_dangerous.
+        let config = ShellToolConfig {
+            allow_dangerous: true,
+            ..Default::default()
+        };
+        let tool = ShellTool::with_config(config);
+
+        let output = tool.execute_sync("sudo rm -rf /");
+        assert!(output.is_error, "sudo must always be blocked");
+        assert!(output.content.contains("blocked"));
+    }
+
+    #[test]
+    fn test_eval_blocked() {
+        // MED-2: eval is always blocked.
+        let tool = ShellTool::new();
+        let output = tool.execute_sync("eval 'shutdown now'");
+        assert!(output.is_error, "eval must always be blocked");
+        assert!(output.content.contains("blocked"));
     }
 
     #[test]

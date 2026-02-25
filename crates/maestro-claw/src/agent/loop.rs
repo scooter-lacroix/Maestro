@@ -10,7 +10,7 @@ use tokio::time::timeout;
 
 use crate::hooks::{HookContext, HookError, HookSystem};
 use crate::session::{Thread, ToolCall, Turn, TurnRole};
-use crate::tools::{ToolOutput, ToolRegistry};
+use crate::tools::ToolRegistry;
 
 /// Configuration for agent execution
 #[derive(Debug, Clone)]
@@ -266,12 +266,14 @@ pub async fn agent_loop(
                 Some(t) => t,
                 None => {
                     // Tool not found - create error result
-                    let error_result = ToolOutput::error(format!(
+                    let error_content = format!(
                         "Tool '{}' not found in registry",
                         tool_call.name
-                    ));
-                    let mut tool_turn = Turn::new(TurnRole::Tool, error_result.content.clone());
+                    );
+                    let mut tool_turn = Turn::new(TurnRole::Tool, error_content.clone());
                     tool_turn.set_tool_call_id(tool_call.id.clone());
+                    // MED-4: store is_error=true so providers can relay error status
+                    tool_turn.add_tool_result(tool_call.id.clone(), error_content, true);
                     thread.add_turn(tool_turn);
                     continue;
                 }
@@ -283,8 +285,14 @@ pub async fn agent_loop(
             tool_calls_executed += 1;
 
             // Add tool result turn
+            // MED-4: store is_error in tool_results so providers can relay accurate error status
             let mut tool_turn = Turn::new(TurnRole::Tool, tool_result.content.clone());
             tool_turn.set_tool_call_id(tool_call.id.clone());
+            tool_turn.add_tool_result(
+                tool_call.id.clone(),
+                tool_result.content.clone(),
+                tool_result.is_error,
+            );
             thread.add_turn(tool_turn);
         }
 

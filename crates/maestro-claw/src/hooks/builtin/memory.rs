@@ -27,12 +27,14 @@ impl MemoryHook {
 
     /// Get stored memories
     pub fn get_memories(&self) -> HashMap<String, String> {
-        self.memories.lock().unwrap().clone()
+        // Recover from poisoned lock rather than panicking
+        self.memories.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Clear all memories
     pub fn clear(&self) {
-        self.memories.lock().unwrap().clear();
+        // Recover from poisoned lock rather than panicking
+        self.memories.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
@@ -46,7 +48,7 @@ impl Hook for MemoryHook {
         if matches!(turn.role, crate::session::TurnRole::User) {
             self.memories
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(turn.id.clone(), turn.content.clone());
         }
         Ok(turn.clone())
@@ -57,7 +59,7 @@ impl Hook for MemoryHook {
         if matches!(turn.role, crate::session::TurnRole::Assistant) {
             self.memories
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(turn.id.clone(), turn.content.clone());
         }
         Ok(turn.clone())

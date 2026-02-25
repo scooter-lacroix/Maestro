@@ -34,10 +34,15 @@ impl ToolRegistry {
     /// Register a tool
     ///
     /// Returns true if the tool was newly registered,
-    /// false if a tool with the same name already exists.
+    /// false if a tool with the same name already exists (duplicate is silently kept).
     pub fn register(&mut self, tool: Arc<dyn Tool>) -> bool {
         let name = tool.name().to_string();
         if self.tools.contains_key(&name) {
+            tracing::warn!(
+                tool_name = %name,
+                "Tool '{}' is already registered; ignoring duplicate registration",
+                name
+            );
             return false;
         }
         self.tools.insert(name, tool);

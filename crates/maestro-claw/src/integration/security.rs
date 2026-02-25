@@ -257,15 +257,12 @@ impl<T: Tool + Send + Sync> Tool for SecuredTool<T> {
     }
 
     async fn execute(&self, arguments: JsonValue) -> ToolOutput {
-        // Pre-execute security check based on tool type
+        // Pre-execute security check: request_approval() already calls requires_approval()
+        // internally, so we call it directly to avoid the redundant double-check.
         let tool_name = self.name();
-
-        // Request approval if required
-        if self.bridge.requires_approval(tool_name) {
-            match self.bridge.request_approval(tool_name, &arguments).await {
-                Ok(()) => {}
-                Err(e) => return ToolOutput::error(e.to_string()),
-            }
+        match self.bridge.request_approval(tool_name, &arguments).await {
+            Ok(()) => {}
+            Err(e) => return ToolOutput::error(e.to_string()),
         }
 
         // Execute the inner tool
