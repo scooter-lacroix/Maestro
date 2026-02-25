@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
+use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, ToolCallDelta, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -402,9 +402,28 @@ impl Provider for OpenAIProvider {
                                     serde_json::from_str::<OpenAIStreamResponse>(data)
                                 {
                                     if let Some(choice) = chunk.choices.first() {
+                                        // LOW-10: surface tool call deltas so callers can
+                                        // reconstruct streaming tool calls by index
+                                        let tool_call_delta = choice
+                                            .delta
+                                            .tool_calls
+                                            .as_ref()
+                                            .and_then(|tcs| tcs.first())
+                                            .map(|tc| ToolCallDelta {
+                                                index: tc.index,
+                                                id: tc.id.clone(),
+                                                name: tc
+                                                    .function
+                                                    .as_ref()
+                                                    .and_then(|f| f.name.clone()),
+                                                arguments_delta: tc
+                                                    .function
+                                                    .as_ref()
+                                                    .and_then(|f| f.arguments.clone()),
+                                            });
                                         results.push(Ok(StreamChunk {
                                             delta: choice.delta.content.clone(),
-                                            tool_call_delta: None,
+                                            tool_call_delta,
                                             finish_reason: choice.finish_reason.clone(),
                                         }));
                                     }
@@ -679,5 +698,66 @@ mod tests {
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "call-1");
         assert_eq!(tool_calls[0].name, "test");
+    }
+
+    /// LOW-10: OpenAI streaming SSE with tool_calls delta must produce ToolCallDelta
+    #[test]
+    fn test_openai_stream_tool_call_delta_parsing() {
+        // Simulate parsing the SSE delta JSON the way the stream loop does it
+        let sse_json = r#"{
+            "id":"chatcmpl-1",
+            "choices":[{
+                "index":0,
+                "delta":{
+                    "tool_calls":[{
+                        "index":0,
+                        "id":"call_abc123",
+                        "type":"function",
+                        "function":{"name":"bash","arguments":""}
+                    }]
+                },
+                "finish_reason":null
+            }]
+        }"#;
+
+        let chunk: OpenAIStreamResponse = serde_json::from_str(sse_json).unwrap();
+        let choice = chunk.choices.first().unwrap();
+        let tc = choice.delta.tool_calls.as_ref().unwrap().first().unwrap();
+
+        assert_eq!(tc.index, 0);
+        assert_eq!(tc.id.as_deref(), Some("call_abc123"));
+        assert_eq!(
+            tc.function.as_ref().and_then(|f| f.name.as_deref()),
+            Some("bash")
+        );
+    }
+
+    /// LOW-10: subsequent argument chunks use index without id/name
+    #[test]
+    fn test_openai_stream_tool_call_arguments_delta() {
+        let sse_json = r#"{
+            "id":"chatcmpl-2",
+            "choices":[{
+                "index":0,
+                "delta":{
+                    "tool_calls":[{
+                        "index":0,
+                        "function":{"arguments":"{\"cmd\":\"ls\"}"}
+                    }]
+                },
+                "finish_reason":null
+            }]
+        }"#;
+
+        let chunk: OpenAIStreamResponse = serde_json::from_str(sse_json).unwrap();
+        let choice = chunk.choices.first().unwrap();
+        let tc = choice.delta.tool_calls.as_ref().unwrap().first().unwrap();
+
+        assert_eq!(tc.index, 0);
+        assert!(tc.id.is_none(), "subsequent chunks have no id");
+        assert_eq!(
+            tc.function.as_ref().and_then(|f| f.arguments.as_deref()),
+            Some("{\"cmd\":\"ls\"}")
+        );
     }
 }

@@ -42,7 +42,7 @@ pub use hooks::builtin::{LoggingHook, MemoryHook};
 #[cfg(feature = "providers")]
 pub use providers::{
     ChatResponse, Provider as LlmProvider, ProviderCapabilities, ProviderError,
-    StreamChunk, TokenUsage,
+    StreamChunk, ToolCallDelta, TokenUsage,
     OpenAIConfig, OpenAIProvider,
     AnthropicConfig, AnthropicProvider,
     OllamaConfig, OllamaProvider,
