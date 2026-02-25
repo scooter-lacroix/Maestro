@@ -18,6 +18,6 @@ pub use r#trait::{ChatResponse, Provider, StreamChunk, TokenUsage, turn_to_messa
 pub use capabilities::ProviderCapabilities;
 pub use error::ProviderError;
 pub use openai::{OpenAIConfig, OpenAIProvider};
-pub use anthropic::AnthropicProvider;
-pub use ollama::OllamaProvider;
-pub use openrouter::OpenRouterProvider;
+pub use anthropic::{AnthropicConfig, AnthropicProvider};
+pub use ollama::{OllamaConfig, OllamaProvider};
+pub use openrouter::{OpenRouterConfig, OpenRouterProvider};

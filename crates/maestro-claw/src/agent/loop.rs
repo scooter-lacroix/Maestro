@@ -221,11 +221,58 @@ pub async fn agent_loop(
 
         // Execute pre-hooks on the current user/input turn (last turn in thread)
         // This allows hooks to log, inject memory context, or modify the input before provider call
+        // Rec-2: hooks are now async — await the call
         if let Some(last_turn) = thread.turns.last() {
-            let _ = hooks.execute_pre(&hook_context, last_turn)?;
+            let _ = hooks.execute_pre(&hook_context, last_turn).await?;
         }
 
-        // Get messages from thread
+        // Rec-6: Context window management — summarize when the thread grows too long.
+        //
+        // If the thread exceeds `summary_threshold` turns and no summary exists yet,
+        // ask the provider to produce a brief summary of the conversation so far.
+        // Then trim the oldest turns to prevent the context from growing unboundedly.
+        // `to_messages()` will prepend the summary as a system message so the provider
+        // always has full context even after old turns are discarded.
+        if thread.needs_summary() && thread.summary.is_none() {
+            let summary_msgs: Vec<crate::session::ProviderMessage> = {
+                let mut msgs = thread.to_messages();
+                msgs.push(crate::session::ProviderMessage {
+                    role: "user".to_string(),
+                    content: "Please provide a brief 2–3 sentence summary of our conversation so far, \
+                              covering the key points discussed.".to_string(),
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+                msgs
+            };
+
+            match timeout(
+                Duration::from_secs(config.turn_timeout_secs),
+                provider.execute(summary_msgs, vec![]),
+            )
+            .await
+            {
+                Ok(Ok(resp)) if !resp.content.is_empty() => {
+                    tracing::debug!(
+                        thread_id = %thread.id(),
+                        summary_len = resp.content.len(),
+                        "Agent loop: generated conversation summary"
+                    );
+                    thread.set_summary(resp.content);
+                    // Keep only the most recent half of the threshold to bound context size
+                    let keep = (thread.summary_threshold() / 2).max(4);
+                    thread.trim_old_turns(keep);
+                }
+                Ok(Ok(_)) | Ok(Err(_)) | Err(_) => {
+                    tracing::warn!(
+                        thread_id = %thread.id(),
+                        "Agent loop: summarization failed; continuing without summary"
+                    );
+                }
+            }
+        }
+
+        // Get messages from thread (Rec-6: includes summary system message when set)
         let messages = thread.to_messages();
         let tool_specs = tools.to_tool_specs();
 
@@ -243,8 +290,8 @@ pub async fn agent_loop(
             assistant_turn.add_tool_call(tc.id, tc.name, tc.arguments);
         }
 
-        // Execute post-hooks on assistant turn
-        assistant_turn = hooks.execute_post(&hook_context, &assistant_turn)?;
+        // Execute post-hooks on assistant turn (Rec-2: async)
+        assistant_turn = hooks.execute_post(&hook_context, &assistant_turn).await?;
 
         // Add assistant turn to thread
         thread.add_turn(assistant_turn.clone());

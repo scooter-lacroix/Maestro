@@ -55,6 +55,13 @@ pub struct OllamaConfig {
     pub num_ctx: Option<u32>,
     /// Whether to use GPU
     pub use_gpu: Option<bool>,
+    /// Whether this model supports native tool calling (Rec-5).
+    ///
+    /// Defaults to `false` because most Ollama models do not support the
+    /// tools API.  Set to `true` only for models known to support it, e.g.
+    /// llama3.1, mistral-nemo, qwen2.5.  Overrides the static
+    /// `ProviderCapabilities::ollama()` preset.
+    pub native_tools: bool,
 }
 
 impl OllamaConfig {
@@ -68,6 +75,7 @@ impl OllamaConfig {
             num_predict: None,
             num_ctx: None,
             use_gpu: None,
+            native_tools: false, // safe default (Rec-5 / LOW-9)
         }
     }
 
@@ -92,6 +100,16 @@ impl OllamaConfig {
     /// Set context window size
     pub fn with_num_ctx(mut self, num_ctx: u32) -> Self {
         self.num_ctx = Some(num_ctx);
+        self
+    }
+
+    /// Enable or disable native tool-calling support (Rec-5).
+    ///
+    /// Set to `true` only for models known to support the Ollama tools API
+    /// (e.g. `llama3.1`, `mistral-nemo`, `qwen2.5`).  At runtime this
+    /// controls whether `chat_with_tools` is called instead of `chat`.
+    pub fn with_tool_support(mut self, native_tools: bool) -> Self {
+        self.native_tools = native_tools;
         self
     }
 }
@@ -382,7 +400,14 @@ impl Provider for OllamaProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities::ollama()
+        // Rec-5: Use the config-level native_tools flag so callers can opt-in
+        // for models known to support tool calling (e.g. llama3.1, qwen2.5).
+        let mut caps = ProviderCapabilities::ollama(); // starts with native_tools=false
+        if self.config.native_tools {
+            caps.native_tools = true;
+            caps.function_calling = true;
+        }
+        caps
     }
 
     async fn chat(&self, turns: &[Turn]) -> Result<ChatResponse, ProviderError> {

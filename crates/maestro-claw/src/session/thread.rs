@@ -128,6 +128,11 @@ impl Thread {
         self.summary = Some(summary);
     }
 
+    /// Get the current summary threshold
+    pub fn summary_threshold(&self) -> usize {
+        self.summary_threshold
+    }
+
     /// Set the summary threshold
     pub fn set_summary_threshold(&mut self, threshold: usize) {
         self.summary_threshold = threshold;
@@ -150,12 +155,38 @@ impl Thread {
         self.turns.last().unwrap()
     }
 
-    /// Convert thread history to provider message format
+    /// Trim old turns to keep only the most recent `keep` turns (Rec-6).
+    ///
+    /// This is called after the summary is generated to prevent unbounded
+    /// context growth.  At least 1 turn is always retained.
+    pub fn trim_old_turns(&mut self, keep: usize) {
+        let keep = keep.max(1);
+        if self.turns.len() > keep {
+            let drain_to = self.turns.len() - keep;
+            self.turns.drain(..drain_to);
+        }
+    }
+
+    /// Convert thread history to provider message format (Rec-6)
     ///
     /// This creates messages suitable for sending to LLM providers,
     /// including proper formatting of tool calls and results.
+    ///
+    /// When a summary is set (i.e. after the thread was trimmed), the summary
+    /// is prepended as a `system` message so the provider has full context
+    /// even after old turns were discarded.
     pub fn to_messages(&self) -> Vec<ProviderMessage> {
-        let mut messages = Vec::with_capacity(self.turns.len());
+        // Rec-6: prepend summary as a system context message when present
+        let mut messages: Vec<ProviderMessage> = if let Some(ref summary) = self.summary {
+            vec![ProviderMessage {
+                role: "system".to_string(),
+                content: format!("Conversation context summary: {}", summary),
+                tool_calls: None,
+                tool_call_id: None,
+            }]
+        } else {
+            Vec::with_capacity(self.turns.len())
+        };
 
         for turn in &self.turns {
             let msg = match turn.role {

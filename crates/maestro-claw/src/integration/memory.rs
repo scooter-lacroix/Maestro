@@ -167,59 +167,50 @@ impl PersistentMemoryHook {
     }
 }
 
+/// Rec-2: PersistentMemoryHook now implements the async Hook trait directly.
+///
+/// The previous fire-and-forget `tokio::task::spawn` workaround (CRIT-2 partial fix)
+/// is replaced with a proper `async fn` implementation — no more "hope the spawned
+/// task finishes before the caller needs the data" semantics.
+#[async_trait]
 impl Hook for PersistentMemoryHook {
     fn name(&self) -> &str {
         &self.name
     }
 
-    fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
-        // Store user messages before processing (CRIT-2 fix)
+    async fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         if self.store_roles.contains(&turn.role) {
-            let memory = Arc::clone(&self.memory);
-            let content = turn.content.clone();
             let mut metadata = self.default_metadata.clone();
             if let JsonValue::Object(ref mut map) = metadata {
                 map.insert("role".to_string(), serde_json::json!(format!("{:?}", turn.role)));
                 map.insert("turn_id".to_string(), serde_json::json!(turn.id));
                 map.insert("timestamp".to_string(), serde_json::json!(turn.timestamp.to_rfc3339()));
             }
-
-            // Fire-and-forget async storage using the current Tokio runtime handle.
-            // Hook::pre_execute is sync, but we are always called from an async context
-            // (agent_loop is async), so Handle::current() is always valid here.
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    if let Err(e) = memory.store(&content, metadata).await {
-                        tracing::warn!("PersistentMemoryHook: failed to store turn: {}", e);
-                    }
-                });
-            } else {
-                tracing::warn!("PersistentMemoryHook: no Tokio runtime available; turn not persisted");
+            if let Err(e) = self.memory.store(&turn.content, metadata).await {
+                tracing::warn!(
+                    hook_name = %self.name,
+                    "PersistentMemoryHook: failed to store pre-turn: {}",
+                    e
+                );
             }
         }
         Ok(turn.clone())
     }
 
-    fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
-        // Store assistant responses after processing (CRIT-2 fix)
+    async fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         if self.store_roles.contains(&turn.role) {
-            let memory = Arc::clone(&self.memory);
-            let content = turn.content.clone();
             let mut metadata = self.default_metadata.clone();
             if let JsonValue::Object(ref mut map) = metadata {
                 map.insert("role".to_string(), serde_json::json!(format!("{:?}", turn.role)));
                 map.insert("turn_id".to_string(), serde_json::json!(turn.id));
                 map.insert("timestamp".to_string(), serde_json::json!(turn.timestamp.to_rfc3339()));
             }
-
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move {
-                    if let Err(e) = memory.store(&content, metadata).await {
-                        tracing::warn!("PersistentMemoryHook: failed to store turn: {}", e);
-                    }
-                });
-            } else {
-                tracing::warn!("PersistentMemoryHook: no Tokio runtime available; turn not persisted");
+            if let Err(e) = self.memory.store(&turn.content, metadata).await {
+                tracing::warn!(
+                    hook_name = %self.name,
+                    "PersistentMemoryHook: failed to store post-turn: {}",
+                    e
+                );
             }
         }
         Ok(turn.clone())
@@ -442,7 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_persistent_memory_hook_actually_stores() {
-        // Test that PersistentMemoryHook uses fire-and-forget storage correctly
+        // Rec-2: PersistentMemoryHook is now properly async — no spawn needed.
         let storage = Arc::new(InMemoryStorage::new());
         let storage_ref = Arc::clone(&storage);
         let hook = PersistentMemoryHook::new("test", storage);
@@ -456,21 +447,18 @@ mod tests {
         );
 
         let turn = Turn::new(TurnRole::User, "Hello persistent!".to_string());
-        // pre_execute is now tested within a Tokio runtime
-        let result = hook.pre_execute(&context, &turn);
+        // pre_execute is now a direct async call — no sleep needed
+        let result = hook.pre_execute(&context, &turn).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().content, "Hello persistent!");
 
-        // Give the spawned task a moment to complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        // The storage should have the turn content
+        // The storage should already have the turn content (no fire-and-forget delay)
         let results = storage_ref.search("Hello persistent!", 10).await.unwrap();
         assert!(!results.is_empty(), "PersistentMemoryHook must actually store data");
     }
 
-    #[test]
-    fn test_persistent_memory_hook_pre_execute() {
+    #[tokio::test]
+    async fn test_persistent_memory_hook_pre_execute() {
         let storage = Arc::new(InMemoryStorage::new());
         let hook = PersistentMemoryHook::new("test", storage);
 
@@ -483,7 +471,7 @@ mod tests {
         );
 
         let turn = Turn::new(TurnRole::User, "Hello".to_string());
-        let result = hook.pre_execute(&context, &turn);
+        let result = hook.pre_execute(&context, &turn).await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap().content, "Hello");

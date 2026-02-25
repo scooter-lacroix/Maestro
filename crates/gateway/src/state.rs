@@ -16,6 +16,26 @@ use crate::protocol::EventFrame;
 use crate::rate_limit::{RateLimitConfig, SlidingWindowRateLimiter};
 use crate::ws::MethodRegistry;
 
+// ---------------------------------------------------------------------------
+// Agent Session Store types (Rec-4)
+// ---------------------------------------------------------------------------
+
+/// An in-memory record of a stored agent session.
+///
+/// Holds the accumulated conversation turns so subsequent execute calls can
+/// continue the same thread, and the metadata required by the session list/get
+/// endpoints.
+pub struct StoredAgentSession {
+    /// Metadata returned by `/api/agent/sessions` endpoints
+    pub info: crate::agent::SessionInfo,
+    /// Accumulated conversation turns (flattened single thread)
+    pub turns: Vec<maestro_claw::Turn>,
+    /// Provider name originally used to create this session
+    pub provider: String,
+    /// Model originally used to create this session
+    pub model: String,
+}
+
 /// Configuration for the gateway
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
@@ -41,6 +61,25 @@ pub struct GatewayConfig {
     pub cors_allowed_methods: Vec<String>,
     /// CORS allowed headers
     pub cors_allowed_headers: Vec<String>,
+
+    // ---- Agent execution configuration (MED-7, MED-8) ----
+
+    /// Bearer token required by `/api/agent/*` endpoints (MED-8).
+    ///
+    /// `None` disables authentication — suitable for local development only.
+    pub agent_api_key: Option<String>,
+
+    /// Default LLM provider name: "openai" | "anthropic" | "ollama" | "openrouter"
+    pub default_llm_provider: String,
+
+    /// OpenAI API key used when provider = "openai"
+    pub openai_api_key: Option<String>,
+
+    /// Anthropic API key used when provider = "anthropic"
+    pub anthropic_api_key: Option<String>,
+
+    /// Default model name; provider-specific default applies when `None`
+    pub default_model: Option<String>,
 }
 
 impl Default for GatewayConfig {
@@ -75,6 +114,13 @@ impl Default for GatewayConfig {
                 "OPTIONS".to_string(),
             ],
             cors_allowed_headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
+
+            // Agent config — unauthenticated by default; callers must set keys to enable providers
+            agent_api_key: None,
+            default_llm_provider: "openai".to_string(),
+            openai_api_key: None,
+            anthropic_api_key: None,
+            default_model: None,
         }
     }
 }
@@ -105,6 +151,14 @@ pub struct GatewayState {
     pub broadcast_rate_limiter: Arc<SlidingWindowRateLimiter>,
     /// Broadcast tracking: last broadcast time per sender
     pub broadcast_tracking: Mutex<std::collections::HashMap<String, Instant>>,
+    /// In-memory agent session store (Rec-4)
+    ///
+    /// Keyed by session ID.  DashMap provides lock-free concurrent reads and
+    /// shard-locked concurrent writes so no extra `Mutex` is needed here.
+    /// The `StoredAgentSession` value is only mutated briefly (to append
+    /// turns after an `execute` completes) and never across an `.await`, so
+    /// DashMap's shard locks are safe to use.
+    pub session_store: dashmap::DashMap<String, StoredAgentSession>,
 }
 
 impl GatewayState {
@@ -138,6 +192,7 @@ impl GatewayState {
             ws_rate_limiter: Arc::new(SlidingWindowRateLimiter::new(ws_rate_limit)),
             broadcast_rate_limiter: Arc::new(SlidingWindowRateLimiter::new(broadcast_rate_limit)),
             broadcast_tracking: Mutex::new(std::collections::HashMap::new()),
+            session_store: dashmap::DashMap::new(),
         }
     }
 

@@ -3005,6 +3005,7 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "hyper 1.8.1",
+ "maestro-claw",
  "maestro-core",
  "parking_lot 0.12.5",
  "rand 0.8.5",

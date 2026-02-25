@@ -2,6 +2,8 @@
 
 use std::fmt::Debug;
 
+use async_trait::async_trait;
+
 use crate::hooks::{Hook, HookContext, HookError};
 use crate::session::Turn;
 
@@ -21,12 +23,13 @@ impl LoggingHook {
     }
 }
 
+#[async_trait]
 impl Hook for LoggingHook {
     fn name(&self) -> &str {
         &self.name
     }
 
-    fn pre_execute(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    async fn pre_execute(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         tracing::info!(
             session_id = %context.session_id,
             thread_id = %context.thread_id,
@@ -39,7 +42,7 @@ impl Hook for LoggingHook {
         Ok(turn.clone())
     }
 
-    fn post_execute(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    async fn post_execute(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         tracing::info!(
             session_id = %context.session_id,
             thread_id = %context.thread_id,
@@ -74,23 +77,23 @@ mod tests {
         assert_eq!(hook.name(), "test");
     }
 
-    #[test]
-    fn test_logging_hook_pre_execute() {
+    #[tokio::test]
+    async fn test_logging_hook_pre_execute() {
         let hook = LoggingHook::new("test");
         let context = create_test_context();
         let turn = Turn::new(TurnRole::User, "Hello".to_string());
 
-        let result = hook.pre_execute(&context, &turn).unwrap();
+        let result = hook.pre_execute(&context, &turn).await.unwrap();
         assert_eq!(result.content, "Hello");
     }
 
-    #[test]
-    fn test_logging_hook_post_execute() {
+    #[tokio::test]
+    async fn test_logging_hook_post_execute() {
         let hook = LoggingHook::new("test");
         let context = create_test_context();
         let turn = Turn::new(TurnRole::Assistant, "Hi there".to_string());
 
-        let result = hook.post_execute(&context, &turn).unwrap();
+        let result = hook.post_execute(&context, &turn).await.unwrap();
         assert_eq!(result.content, "Hi there");
     }
 }

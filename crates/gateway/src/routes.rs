@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Json},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Json, Response},
     routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::state::GatewayState;
 
@@ -393,95 +393,416 @@ pub async fn handle_dashboard_approvals(
 }
 
 // ============================================================================
+// Agent API — Authentication helper (MED-8)
+// ============================================================================
+
+/// Verify the Bearer token on agent API requests.
+///
+/// If `GatewayConfig::agent_api_key` is `None`, all requests are allowed
+/// (useful for local development).  When a key is configured, the
+/// `Authorization: Bearer <key>` header must match exactly.
+fn verify_agent_auth(state: &GatewayState, headers: &HeaderMap) -> Result<(), Response> {
+    let Some(ref required) = state.config.agent_api_key else {
+        return Ok(()); // No key configured → open access
+    };
+
+    let bearer = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
+    match bearer {
+        Some(token) if token == required.as_str() => Ok(()),
+        Some(_) => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Invalid API key"})),
+        )
+            .into_response()),
+        None => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Authorization: Bearer <key> header required"})),
+        )
+            .into_response()),
+    }
+}
+
+// ============================================================================
+// Agent API — Provider factory (MED-7)
+// ============================================================================
+
+/// Build a `maestro_claw::agent::Provider` from gateway config + request params.
+///
+/// The provider name is taken from `req.provider`, falling back to
+/// `config.default_llm_provider`.  The model is taken from `req.model`,
+/// falling back to `config.default_model`, then to a provider-specific
+/// built-in default.
+fn build_agent_provider(
+    config: &crate::state::GatewayConfig,
+    req: &crate::agent::AgentExecuteRequest,
+) -> Result<Arc<dyn maestro_claw::agent::Provider>, Response> {
+    use maestro_claw::{
+        AnthropicConfig, AnthropicProvider, OpenAIConfig, OpenAIProvider, ProviderAdapter,
+    };
+
+    let provider_name = req
+        .provider
+        .as_deref()
+        .unwrap_or(config.default_llm_provider.as_str());
+
+    let err = |msg: &str| -> Response {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response()
+    };
+
+    match provider_name {
+        "openai" => {
+            let api_key = config
+                .openai_api_key
+                .as_deref()
+                .ok_or_else(|| err("OpenAI API key not configured (set openai_api_key)"))?;
+            let model = req
+                .model
+                .as_deref()
+                .or(config.default_model.as_deref())
+                .unwrap_or("gpt-4o");
+            let inner = OpenAIProvider::new(OpenAIConfig::new(
+                api_key.to_string(),
+                model.to_string(),
+            ))
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response()
+            })?;
+            Ok(Arc::new(ProviderAdapter::new(Arc::new(inner))))
+        }
+        "anthropic" => {
+            let api_key = config
+                .anthropic_api_key
+                .as_deref()
+                .ok_or_else(|| err("Anthropic API key not configured (set anthropic_api_key)"))?;
+            let model = req
+                .model
+                .as_deref()
+                .or(config.default_model.as_deref())
+                .unwrap_or("claude-3-5-sonnet-20241022");
+            let inner = AnthropicProvider::new(AnthropicConfig::new(
+                api_key.to_string(),
+                model.to_string(),
+            ))
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response()
+            })?;
+            Ok(Arc::new(ProviderAdapter::new(Arc::new(inner))))
+        }
+        unknown => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("Unknown provider '{}'. Supported: openai, anthropic", unknown)
+            })),
+        )
+            .into_response()),
+    }
+}
+
+// ============================================================================
 // Agent API Handlers
 // ============================================================================
 
-/// List agent sessions
+/// List agent sessions (Rec-4)
 pub async fn handle_agent_session_list(
-    State(_state): State<Arc<GatewayState>>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    // TODO: Implement session listing from maestro-claw session store
-    Json(crate::agent::SessionListResponse::empty())
+    if let Err(r) = verify_agent_auth(&state, &headers) {
+        return r;
+    }
+
+    let sessions: Vec<crate::agent::SessionInfo> = state
+        .session_store
+        .iter()
+        .map(|entry| entry.value().info.clone())
+        .collect();
+
+    Json(crate::agent::SessionListResponse::from_sessions(sessions)).into_response()
 }
 
-/// Create a new agent session
+/// Create a new agent session (Rec-4)
 pub async fn handle_agent_session_create(
-    State(_state): State<Arc<GatewayState>>,
-    Json(_req): Json<crate::agent::SessionCreateRequest>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Json(req): Json<crate::agent::SessionCreateRequest>,
 ) -> impl IntoResponse {
-    // TODO: Implement session creation with maestro-claw
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": "Agent session creation not yet implemented",
-            "hint": "Use agent/execute endpoint to auto-create sessions"
-        })),
-    )
+    if let Err(r) = verify_agent_auth(&state, &headers) {
+        return r;
+    }
+
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    let info = crate::agent::SessionInfo {
+        id: session_id.clone(),
+        thread_count: 0,
+        turn_count: 0,
+        created_at: created_at.clone(),
+        status: "idle".to_string(),
+    };
+
+    state.session_store.insert(
+        session_id.clone(),
+        crate::state::StoredAgentSession {
+            info: info.clone(),
+            turns: Vec::new(),
+            provider: req.provider.clone(),
+            model: req.model.clone().unwrap_or_default(),
+        },
+    );
+
+    debug!("Created agent session: {}", session_id);
+
+    Json(crate::agent::SessionCreateResponse {
+        session_id,
+        created_at,
+    })
+    .into_response()
 }
 
-/// Get a specific agent session
+/// Get a specific agent session (Rec-4)
 pub async fn handle_agent_session_get(
-    State(_state): State<Arc<GatewayState>>,
-    axum::extract::Path(_id): axum::extract::Path<String>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    // TODO: Implement session retrieval from maestro-claw
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"error": "Session not found"})),
-    )
+    if let Err(r) = verify_agent_auth(&state, &headers) {
+        return r;
+    }
+
+    match state.session_store.get(&id) {
+        Some(entry) => Json(entry.value().info.clone()).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Session not found"})),
+        )
+            .into_response(),
+    }
 }
 
-/// Delete an agent session
+/// Delete an agent session (Rec-4)
 pub async fn handle_agent_session_delete(
-    State(_state): State<Arc<GatewayState>>,
-    axum::extract::Path(_id): axum::extract::Path<String>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    // TODO: Implement session deletion
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({"error": "Session deletion not yet implemented"})),
-    )
+    if let Err(r) = verify_agent_auth(&state, &headers) {
+        return r;
+    }
+
+    let removed = state.session_store.remove(&id).is_some();
+
+    if removed {
+        debug!("Deleted agent session: {}", id);
+        Json(crate::agent::SessionDeleteResponse { deleted: true }).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Session not found"})),
+        )
+            .into_response()
+    }
 }
 
-/// Execute an agent prompt
+/// Execute an agent prompt (MED-7)
+///
+/// Flow:
+/// 1. Authenticate (MED-8)
+/// 2. Load existing session turns or start fresh (Rec-4)
+/// 3. Build provider from config + request params
+/// 4. Run `agent_loop` with a fresh `Thread` seeded with conversation history
+/// 5. Persist updated turns back to the session store
+/// 6. Return `AgentExecuteResponse`
 pub async fn handle_agent_execute(
     State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
     Json(req): Json<crate::agent::AgentExecuteRequest>,
 ) -> impl IntoResponse {
-    debug!("Agent execute request: {:?}", req.prompt);
+    // MED-8: Authenticate
+    if let Err(r) = verify_agent_auth(&state, &headers) {
+        return r;
+    }
 
-    // Broadcast agent execution event
-    // Use char-aware truncation to avoid panicking on multi-byte UTF-8 boundaries
+    debug!("Agent execute: prompt_len={}", req.prompt.len());
+
+    // ------------------------------------------------------------------
+    // Build provider (MED-7)
+    // ------------------------------------------------------------------
+    let provider = match build_agent_provider(&state.config, &req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+
+    // ------------------------------------------------------------------
+    // Resolve session and extract prior turns (Rec-4)
+    //
+    // We extract turns without holding any DashMap lock so the lock is
+    // dropped before we enter the (potentially long) agent_loop await.
+    // ------------------------------------------------------------------
+    let (session_id, prior_turns) = if let Some(ref sid) = req.session_id {
+        // Look up existing session
+        let turns = match state.session_store.get(sid) {
+            Some(entry) => entry.value().turns.clone(),
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": "Session not found"})),
+                )
+                    .into_response();
+            }
+        };
+        (sid.clone(), turns)
+        // DashMap Ref dropped here before .await
+    } else {
+        // Auto-create a new session
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let info = crate::agent::SessionInfo {
+            id: new_id.clone(),
+            thread_count: 1,
+            turn_count: 0,
+            created_at,
+            status: "active".to_string(),
+        };
+        state.session_store.insert(
+            new_id.clone(),
+            crate::state::StoredAgentSession {
+                info,
+                turns: Vec::new(),
+                provider: req
+                    .provider
+                    .clone()
+                    .unwrap_or_else(|| state.config.default_llm_provider.clone()),
+                model: req.model.clone().unwrap_or_default(),
+            },
+        );
+        (new_id, Vec::new())
+    };
+
+    // ------------------------------------------------------------------
+    // Build a Thread hydrated with prior conversation history
+    // ------------------------------------------------------------------
+    let mut thread = maestro_claw::Thread::new(session_id.clone());
+    for turn in prior_turns {
+        thread.add_turn(turn);
+    }
+    thread.add_turn(maestro_claw::Turn::new(
+        maestro_claw::TurnRole::User,
+        req.prompt.clone(),
+    ));
+
+    let thread_id = thread.id().to_string();
+
+    // ------------------------------------------------------------------
+    // Broadcast "started" event
+    // ------------------------------------------------------------------
     let prompt_preview = {
         const PREVIEW_CHARS: usize = 97;
-        let chars_count = req.prompt.chars().count();
-        if chars_count > PREVIEW_CHARS {
+        if req.prompt.chars().count() > PREVIEW_CHARS {
             let truncated: String = req.prompt.chars().take(PREVIEW_CHARS).collect();
             format!("{}...", truncated)
         } else {
             req.prompt.clone()
         }
     };
-    let event = crate::protocol::EventFrame::new(
+    let _ = state.event_bus.send(crate::protocol::EventFrame::new(
         "agent.execute.started",
         Some(serde_json::json!({
+            "session_id": session_id,
+            "thread_id": thread_id,
             "prompt_preview": prompt_preview,
-            "provider": req.provider,
-            "stream": req.stream,
         })),
         Some(state.next_seq()),
-    );
-    let _ = state.event_bus.send(event);
+    ));
 
-    // TODO: Implement actual agent execution with maestro-claw
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": "Agent execution not yet wired to maestro-claw",
-            "request_received": true,
-            "prompt_length": req.prompt.len()
-        })),
-    )
+    // ------------------------------------------------------------------
+    // Run the agent loop (may take many seconds for multi-turn sessions)
+    // ------------------------------------------------------------------
+    let max_turns = req.max_turns.unwrap_or(20);
+    let config = maestro_claw::AgentConfig::default().with_max_turns(max_turns);
+    let tools = Arc::new(maestro_claw::ToolRegistry::new());
+    let hooks = Arc::new(maestro_claw::HookSystem::new());
+
+    let agent_result = maestro_claw::agent_loop(&mut thread, provider, tools, hooks, config).await;
+
+    // ------------------------------------------------------------------
+    // Persist updated turns back to the session store (Rec-4)
+    //
+    // This is done without holding any lock during the await above; now
+    // we briefly acquire the DashMap shard lock just to write.
+    // ------------------------------------------------------------------
+    {
+        let updated_turns = thread.turns.clone();
+        if let Some(mut entry) = state.session_store.get_mut(&session_id) {
+            entry.value_mut().turns = updated_turns;
+            entry.value_mut().info.turn_count = thread.turns.len();
+            entry.value_mut().info.thread_count = 1;
+            entry.value_mut().info.status = "idle".to_string();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Build and return response
+    // ------------------------------------------------------------------
+    match agent_result {
+        Ok(result) => {
+            // Broadcast "completed" event
+            let _ = state.event_bus.send(crate::protocol::EventFrame::new(
+                "agent.execute.completed",
+                Some(serde_json::json!({
+                    "session_id": session_id,
+                    "thread_id": thread_id,
+                    "turns_used": result.total_turns,
+                    "tool_calls": result.tool_calls_executed,
+                    "completed_normally": result.completed_normally,
+                })),
+                Some(state.next_seq()),
+            ));
+
+            let response = crate::agent::AgentExecuteResponse {
+                session_id,
+                thread_id,
+                content: result.content().to_string(),
+                turns_used: result.total_turns,
+                tool_calls: result.tool_calls_executed,
+                completed_normally: result.completed_normally,
+                termination_reason: if !result.completed_normally {
+                    Some(result.termination_reason.clone())
+                } else {
+                    None
+                },
+            };
+            Json(response).into_response()
+        }
+        Err(e) => {
+            warn!("Agent loop error for session {}: {}", session_id, e);
+            // Update session status to error
+            if let Some(mut entry) = state.session_store.get_mut(&session_id) {
+                entry.value_mut().info.status = "error".to_string();
+            }
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
 }
 
 #[cfg(test)]

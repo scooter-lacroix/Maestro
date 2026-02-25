@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
+
 use crate::hooks::{Hook, HookContext, HookError};
 use crate::session::Turn;
 
@@ -38,12 +40,13 @@ impl MemoryHook {
     }
 }
 
+#[async_trait]
 impl Hook for MemoryHook {
     fn name(&self) -> &str {
         &self.name
     }
 
-    fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    async fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         // Store user messages in memory
         if matches!(turn.role, crate::session::TurnRole::User) {
             self.memories
@@ -54,7 +57,7 @@ impl Hook for MemoryHook {
         Ok(turn.clone())
     }
 
-    fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    async fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         // Store assistant responses in memory
         if matches!(turn.role, crate::session::TurnRole::Assistant) {
             self.memories
@@ -87,39 +90,39 @@ mod tests {
         assert_eq!(hook.name(), "test");
     }
 
-    #[test]
-    fn test_memory_hook_stores_user_messages() {
+    #[tokio::test]
+    async fn test_memory_hook_stores_user_messages() {
         let hook = MemoryHook::new("test");
         let context = create_test_context();
         let turn = Turn::new(TurnRole::User, "Hello".to_string());
         let turn_id = turn.id.clone();
 
-        hook.pre_execute(&context, &turn).unwrap();
+        hook.pre_execute(&context, &turn).await.unwrap();
 
         let memories = hook.get_memories();
         assert_eq!(memories.get(&turn_id), Some(&"Hello".to_string()));
     }
 
-    #[test]
-    fn test_memory_hook_stores_assistant_responses() {
+    #[tokio::test]
+    async fn test_memory_hook_stores_assistant_responses() {
         let hook = MemoryHook::new("test");
         let context = create_test_context();
         let turn = Turn::new(TurnRole::Assistant, "Hi there".to_string());
         let turn_id = turn.id.clone();
 
-        hook.post_execute(&context, &turn).unwrap();
+        hook.post_execute(&context, &turn).await.unwrap();
 
         let memories = hook.get_memories();
         assert_eq!(memories.get(&turn_id), Some(&"Hi there".to_string()));
     }
 
-    #[test]
-    fn test_memory_hook_clear() {
+    #[tokio::test]
+    async fn test_memory_hook_clear() {
         let hook = MemoryHook::new("test");
         let context = create_test_context();
         let turn = Turn::new(TurnRole::User, "Hello".to_string());
 
-        hook.pre_execute(&context, &turn).unwrap();
+        hook.pre_execute(&context, &turn).await.unwrap();
         assert!(!hook.get_memories().is_empty());
 
         hook.clear();

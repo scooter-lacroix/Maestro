@@ -199,6 +199,28 @@ impl SessionListResponse {
 // Event Streaming Types
 // ============================================================================
 
+/// Compact summary of a single tool call, carried by `AgentTurnEvent` (LOW-13).
+///
+/// Using a typed struct (rather than bare `Vec<String>`) lets clients correlate
+/// turn events with `ToolExecutionEvent` entries via the `id` field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallSummary {
+    /// Tool call ID (matches `ToolExecutionEvent::tool_call_id`)
+    pub id: String,
+    /// Tool name (matches `ToolExecutionEvent::tool_name`)
+    pub name: String,
+}
+
+impl ToolCallSummary {
+    /// Convenience constructor
+    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+        }
+    }
+}
+
 /// Event for agent turn completion
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTurnEvent {
@@ -214,13 +236,14 @@ pub struct AgentTurnEvent {
     pub role: String,
     /// Content preview (truncated)
     pub content_preview: String,
-    /// Tool calls made in this turn
+    /// Tool calls made in this turn — structured so clients can correlate with
+    /// `ToolExecutionEvent` by matching on `id` (LOW-13)
     #[serde(default)]
-    pub tool_calls: Vec<String>,
+    pub tool_calls: Vec<ToolCallSummary>,
 }
 
 impl AgentTurnEvent {
-    /// Create a new turn event
+    /// Create a new turn event (tool_calls defaults to empty)
     pub fn new(
         session_id: impl Into<String>,
         thread_id: impl Into<String>,
@@ -237,6 +260,12 @@ impl AgentTurnEvent {
             content_preview: content_preview.into(),
             tool_calls: Vec::new(),
         }
+    }
+
+    /// Attach structured tool call summaries to this turn event
+    pub fn with_tool_calls(mut self, calls: Vec<ToolCallSummary>) -> Self {
+        self.tool_calls = calls;
+        self
     }
 }
 
