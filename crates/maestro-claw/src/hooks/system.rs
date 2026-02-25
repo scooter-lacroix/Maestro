@@ -24,16 +24,16 @@ impl HookSystem {
         self.hooks.push(hook);
     }
 
-    /// Execute all pre-hooks in order
+    /// Execute all pre-hooks in order (Rec-2: async)
     ///
     /// If any hook returns an Abort error, the chain stops immediately.
     /// If a hook returns a regular error, the error is logged but the chain continues.
     /// Returns the potentially modified turn.
-    pub fn execute_pre(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    pub async fn execute_pre(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         let mut current_turn = turn.clone();
 
         for hook in &self.hooks {
-            match hook.pre_execute(context, &current_turn) {
+            match hook.pre_execute(context, &current_turn).await {
                 Ok(modified_turn) => {
                     current_turn = modified_turn;
                 }
@@ -50,16 +50,16 @@ impl HookSystem {
         Ok(current_turn)
     }
 
-    /// Execute all post-hooks in order
+    /// Execute all post-hooks in order (Rec-2: async)
     ///
     /// If any hook returns an Abort error, the chain stops immediately.
     /// If a hook returns a regular error, the error is logged but the chain continues.
     /// Returns the potentially modified turn.
-    pub fn execute_post(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    pub async fn execute_post(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
         let mut current_turn = turn.clone();
 
         for hook in &self.hooks {
-            match hook.post_execute(context, &current_turn) {
+            match hook.post_execute(context, &current_turn).await {
                 Ok(modified_turn) => {
                     current_turn = modified_turn;
                 }
@@ -90,6 +90,7 @@ impl HookSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     #[derive(Debug)]
     struct TestHook {
@@ -104,19 +105,20 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl Hook for TestHook {
         fn name(&self) -> &str {
             &self.name
         }
 
-        fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+        async fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
             // Add a marker to the content
             let mut modified = turn.clone();
             modified.content = format!("[pre:{}] {}", self.name, modified.content);
             Ok(modified)
         }
 
-        fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+        async fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
             // Add a marker to the content
             let mut modified = turn.clone();
             modified.content = format!("[post:{}] {}", self.name, modified.content);
@@ -137,8 +139,8 @@ mod tests {
         assert_eq!(system.len(), 1);
     }
 
-    #[test]
-    fn test_hook_system_execute_pre() {
+    #[tokio::test]
+    async fn test_hook_system_execute_pre() {
         let mut system = HookSystem::new();
         system.register(Arc::new(TestHook::new("hook1")));
         system.register(Arc::new(TestHook::new("hook2")));
@@ -152,13 +154,13 @@ mod tests {
         );
         let turn = Turn::new(crate::session::TurnRole::User, "test".to_string());
 
-        let result = system.execute_pre(&context, &turn).unwrap();
+        let result = system.execute_pre(&context, &turn).await.unwrap();
         assert!(result.content.contains("[pre:hook1]"));
         assert!(result.content.contains("[pre:hook2]"));
     }
 
-    #[test]
-    fn test_hook_system_execute_post() {
+    #[tokio::test]
+    async fn test_hook_system_execute_post() {
         let mut system = HookSystem::new();
         system.register(Arc::new(TestHook::new("hook1")));
         system.register(Arc::new(TestHook::new("hook2")));
@@ -172,7 +174,7 @@ mod tests {
         );
         let turn = Turn::new(crate::session::TurnRole::Assistant, "test".to_string());
 
-        let result = system.execute_post(&context, &turn).unwrap();
+        let result = system.execute_post(&context, &turn).await.unwrap();
         assert!(result.content.contains("[post:hook1]"));
         assert!(result.content.contains("[post:hook2]"));
     }

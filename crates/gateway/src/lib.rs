@@ -56,5 +56,5 @@ pub use state::{GatewayConfig, GatewayState};
 pub use agent::{
     AgentExecuteRequest, AgentExecuteResponse, AgentStatusEvent, AgentTurnEvent,
     SessionCreateRequest, SessionDeleteRequest, SessionInfo, SessionListResponse,
-    StreamingChunk, ToolExecutionEvent,
+    StreamingChunk, ToolCallSummary, ToolExecutionEvent,
 };

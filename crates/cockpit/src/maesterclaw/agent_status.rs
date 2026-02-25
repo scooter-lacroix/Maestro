@@ -87,7 +87,27 @@ impl Default for AgentStatus {
     }
 }
 
+/// LOW-14: Typed `From<AgentStatus> for String` conversion so code that needs a
+/// plain display string can use `String::from(status)` rather than hard-coding
+/// status strings that can drift from the enum definition.
+impl From<AgentStatus> for String {
+    fn from(s: AgentStatus) -> String {
+        s.label().to_string()
+    }
+}
+
+/// Allow `&AgentStatus` → `String` too (convenient for `format!` etc.)
+impl From<&AgentStatus> for String {
+    fn from(s: &AgentStatus) -> String {
+        s.label().to_string()
+    }
+}
+
 /// Session display information for TUI list
+///
+/// LOW-14: `status` is now typed as `AgentStatus` instead of `String`, which
+/// ensures the TUI always shows a valid, consistent status label and makes it
+/// impossible to put the field in an inconsistent state relative to the enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDisplay {
     /// Session ID
@@ -98,8 +118,8 @@ pub struct SessionDisplay {
     pub thread_count: usize,
     /// Total turns across all threads
     pub turn_count: usize,
-    /// Session status
-    pub status: String,
+    /// Session status (typed — use `AgentStatus` variants)
+    pub status: AgentStatus,
     /// When created
     pub created_at: String,
     /// Whether this session is selected
@@ -107,13 +127,13 @@ pub struct SessionDisplay {
 }
 
 impl SessionDisplay {
-    /// Create a new session display
+    /// Create a new session display with a typed `AgentStatus` (LOW-14)
     pub fn new(
         id: String,
         title: String,
         thread_count: usize,
         turn_count: usize,
-        status: String,
+        status: AgentStatus,
         created_at: String,
     ) -> Self {
         // Truncate title if needed
@@ -137,10 +157,11 @@ impl SessionDisplay {
     /// Format for list display
     pub fn format_list_item(&self) -> String {
         format!(
-            "{} {} ({}) - {} turns",
+            "{} {} [{}{}] - {} turns",
             if self.is_selected { ">" } else { " " },
             self.title,
-            self.status,
+            self.status.icon(),
+            self.status.label(),
             self.turn_count
         )
     }
@@ -317,12 +338,43 @@ mod tests {
             long_title.into(),
             1,
             5,
-            "active".into(),
+            AgentStatus::idle(), // LOW-14: typed status
             "2026-02-23".into(),
         );
 
         assert!(display.title.len() <= 63);
         assert!(display.title.ends_with("..."));
+    }
+
+    #[test]
+    fn test_session_display_status_typed() {
+        // LOW-14: status is AgentStatus, not String
+        let display = SessionDisplay::new(
+            "sess-1".into(),
+            "Test Session".into(),
+            2,
+            10,
+            AgentStatus::running("sess-1".into(), 10),
+            "2026-02-25".into(),
+        );
+
+        assert!(display.status.is_running());
+        assert_eq!(display.status.label(), "Running");
+
+        // format_list_item uses the icon + label from the enum
+        let item = display.format_list_item();
+        assert!(item.contains("Running"), "list item should contain status label");
+        assert!(item.contains("◐"), "list item should contain running icon");
+    }
+
+    #[test]
+    fn test_agent_status_from_string_conversion() {
+        // LOW-14: From<AgentStatus> for String
+        let s: String = AgentStatus::ready().into();
+        assert_eq!(s, "Ready");
+
+        let s: String = AgentStatus::error("oops".into()).into();
+        assert_eq!(s, "Error");
     }
 
     #[test]

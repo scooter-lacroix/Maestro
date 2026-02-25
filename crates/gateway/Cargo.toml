@@ -16,6 +16,8 @@ path = "src/main.rs"
 [dependencies]
 # Core library
 maestro-core = { path = "../core" }
+# AI agent framework (MED-7/MED-8/Rec-4: session storage + agent execution + auth)
+maestro-claw = { path = "../maestro-claw", features = ["providers"] }
 
 # Async runtime
 tokio = { workspace = true }
