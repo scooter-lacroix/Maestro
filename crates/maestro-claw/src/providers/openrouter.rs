@@ -7,9 +7,10 @@
 //! - Fallback support
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
@@ -438,40 +439,54 @@ impl Provider for OpenRouterProvider {
             return Err(self.handle_error(status, &body, retry_after));
         }
 
-        let stream = response.bytes_stream().map(|chunk_result| {
+        // MED-3: flat_map + carryover buffer — mirrors the Anthropic/OpenAI fix.
+        let carryover: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
+        let stream = response.bytes_stream().flat_map(move |chunk_result| {
+            let carryover = carryover.clone();
             match chunk_result {
                 Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    for line in text.lines() {
-                        if line.starts_with("data: ") {
-                            let data = &line[6..];
-                            if data == "[DONE]" {
-                                return Ok(StreamChunk {
-                                    delta: None,
-                                    tool_call_delta: None,
-                                    finish_reason: Some("stop".to_string()),
-                                });
-                            }
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    let mut carry = carryover.lock().unwrap_or_else(|e| e.into_inner());
+                    carry.push_str(&text);
 
-                            if let Ok(chunk) = serde_json::from_str::<OpenRouterStreamResponse>(data) {
-                                if let Some(choice) = chunk.choices.first() {
-                                    let delta = choice.delta.content.clone();
-                                    return Ok(StreamChunk {
-                                        delta,
+                    let mut results: Vec<Result<StreamChunk, ProviderError>> = Vec::new();
+                    loop {
+                        match carry.find('\n') {
+                            Some(pos) => {
+                                let line = carry[..pos].trim_end_matches('\r').to_string();
+                                let tail = carry[pos + 1..].to_string();
+                                *carry = tail;
+
+                                if !line.starts_with("data: ") {
+                                    continue;
+                                }
+                                let data = &line[6..];
+                                if data == "[DONE]" {
+                                    results.push(Ok(StreamChunk {
+                                        delta: None,
                                         tool_call_delta: None,
-                                        finish_reason: choice.finish_reason.clone(),
-                                    });
+                                        finish_reason: Some("stop".to_string()),
+                                    }));
+                                } else if let Ok(chunk) =
+                                    serde_json::from_str::<OpenRouterStreamResponse>(data)
+                                {
+                                    if let Some(choice) = chunk.choices.first() {
+                                        results.push(Ok(StreamChunk {
+                                            delta: choice.delta.content.clone(),
+                                            tool_call_delta: None,
+                                            finish_reason: choice.finish_reason.clone(),
+                                        }));
+                                    }
                                 }
                             }
+                            None => break,
                         }
                     }
-                    Ok(StreamChunk {
-                        delta: None,
-                        tool_call_delta: None,
-                        finish_reason: None,
-                    })
+                    drop(carry);
+                    stream::iter(results)
                 }
-                Err(e) => Err(ProviderError::NetworkError(e.to_string())),
+                Err(e) => stream::iter(vec![Err(map_network_error(e))]),
             }
         });
 

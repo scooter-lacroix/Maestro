@@ -10,7 +10,7 @@ use tokio::time::timeout;
 
 use crate::hooks::{HookContext, HookError, HookSystem};
 use crate::session::{Thread, ToolCall, Turn, TurnRole};
-use crate::tools::ToolRegistry;
+use crate::tools::{ToolOutput, ToolRegistry};
 
 /// Configuration for agent execution
 #[derive(Debug, Clone)]
@@ -279,8 +279,26 @@ pub async fn agent_loop(
                 }
             };
 
-            // Execute tool - ToolOutput already contains is_error flag
-            let tool_result = tool.execute(tool_call.arguments.clone()).await;
+            // Rec-7: Validate required arguments before executing the tool.
+            // This surfaces missing-argument errors to the LLM rather than
+            // letting each individual tool impl produce ad-hoc error messages.
+            let tool_result = match ToolRegistry::validate_arguments(
+                tool.as_ref(),
+                &tool_call.arguments,
+            ) {
+                Err(validation_err) => {
+                    tracing::warn!(
+                        tool_name = %tool_call.name,
+                        error = %validation_err,
+                        "Tool argument validation failed before execution"
+                    );
+                    ToolOutput::error(validation_err)
+                }
+                Ok(()) => {
+                    // Execute tool - ToolOutput already contains is_error flag
+                    tool.execute(tool_call.arguments.clone()).await
+                }
+            };
 
             tool_calls_executed += 1;
 

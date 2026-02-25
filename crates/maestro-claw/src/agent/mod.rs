@@ -5,9 +5,12 @@
 //! - `AgentConfig` - Configuration for agent execution
 //! - `AgentError` - Errors from agent execution
 //! - `AgentResult` - Result from agent execution
-//! - `Provider` - Trait for AI providers
+//! - `Provider` - Trait for AI providers (simplified)
+//! - `ProviderAdapter` - Bridges `providers::Provider` → `agent::Provider` (MED-6)
 //! - `ProviderResponse` - Response from providers
 
 mod r#loop;
+mod adapter;
 
 pub use r#loop::{agent_loop, AgentConfig, AgentError, AgentResult, ErrorStrategy, Provider, ProviderResponse};
+pub use adapter::ProviderAdapter;

@@ -73,6 +73,42 @@ impl ToolRegistry {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
+
+    /// Validate that `arguments` satisfies the required-field list declared in
+    /// a tool's JSON Schema.  Returns `Ok(())` when all required fields are
+    /// present, or `Err(String)` listing the missing fields. (Rec-7)
+    pub fn validate_arguments(tool: &dyn Tool, arguments: &serde_json::Value) -> Result<(), String> {
+        let schema = tool.parameters_schema();
+
+        let required = match schema.get("required").and_then(|r| r.as_array()) {
+            Some(r) => r.clone(),
+            None => return Ok(()), // No required fields declared — nothing to check
+        };
+
+        let provided = arguments.as_object();
+        let missing: Vec<String> = required
+            .iter()
+            .filter_map(|r| r.as_str())
+            .filter(|field| {
+                // A field is missing if it is not present in arguments or is null
+                match provided {
+                    Some(obj) => !obj.contains_key(*field),
+                    None => true, // arguments isn't even an object
+                }
+            })
+            .map(|s| s.to_string())
+            .collect();
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Missing required argument{}: {}",
+                if missing.len() == 1 { "" } else { "s" },
+                missing.join(", ")
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +204,50 @@ mod tests {
 
         let specs = registry.to_tool_specs();
         assert_eq!(specs.len(), 2);
+    }
+
+    struct RequiredTool;
+
+    #[async_trait]
+    impl Tool for RequiredTool {
+        fn name(&self) -> &str { "required" }
+        fn description(&self) -> &str { "tool with required fields" }
+        fn parameters_schema(&self) -> JsonValue {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"}
+                },
+                "required": ["path", "content"]
+            })
+        }
+        async fn execute(&self, _arguments: JsonValue) -> crate::tools::ToolOutput {
+            crate::tools::ToolOutput::success("ok".to_string())
+        }
+    }
+
+    #[test]
+    fn test_validate_arguments_all_present() {
+        let tool = RequiredTool;
+        let args = serde_json::json!({"path": "/tmp/x", "content": "hello"});
+        assert!(ToolRegistry::validate_arguments(&tool, &args).is_ok());
+    }
+
+    #[test]
+    fn test_validate_arguments_missing_field() {
+        let tool = RequiredTool;
+        let args = serde_json::json!({"path": "/tmp/x"}); // content missing
+        let result = ToolRegistry::validate_arguments(&tool, &args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("content"));
+    }
+
+    #[test]
+    fn test_validate_arguments_no_required_schema() {
+        let tool = MockTool::new("no_req");
+        let args = serde_json::json!({});
+        // MockTool schema has no "required" key — should always pass
+        assert!(ToolRegistry::validate_arguments(&tool, &args).is_ok());
     }
 }

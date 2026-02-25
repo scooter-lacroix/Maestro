@@ -6,9 +6,10 @@
 //! - Vision support
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
@@ -367,47 +368,57 @@ impl Provider for OpenAIProvider {
             return Err(self.handle_error(status, &body, retry_after));
         }
 
-        let stream = response
-            .bytes_stream()
-            .map(|chunk_result| {
-                match chunk_result {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        // Parse SSE data
-                        for line in text.lines() {
-                            if line.starts_with("data: ") {
+        // MED-3: flat_map + carryover buffer so multiple SSE events per TCP
+        // frame are all emitted and split-frame events are reassembled.
+        let carryover: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
+        let stream = response.bytes_stream().flat_map(move |chunk_result| {
+            let carryover = carryover.clone();
+            match chunk_result {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    let mut carry = carryover.lock().unwrap_or_else(|e| e.into_inner());
+                    carry.push_str(&text);
+
+                    let mut results: Vec<Result<StreamChunk, ProviderError>> = Vec::new();
+                    loop {
+                        match carry.find('\n') {
+                            Some(pos) => {
+                                let line = carry[..pos].trim_end_matches('\r').to_string();
+                                let tail = carry[pos + 1..].to_string();
+                                *carry = tail;
+
+                                if !line.starts_with("data: ") {
+                                    continue;
+                                }
                                 let data = &line[6..];
                                 if data == "[DONE]" {
-                                    return Ok(StreamChunk {
+                                    results.push(Ok(StreamChunk {
                                         delta: None,
                                         tool_call_delta: None,
                                         finish_reason: Some("stop".to_string()),
-                                    });
-                                }
-
-                                if let Ok(chunk) = serde_json::from_str::<OpenAIStreamResponse>(data) {
+                                    }));
+                                } else if let Ok(chunk) =
+                                    serde_json::from_str::<OpenAIStreamResponse>(data)
+                                {
                                     if let Some(choice) = chunk.choices.first() {
-                                        let delta = choice.delta.content.clone();
-                                        let finish_reason = choice.finish_reason.clone();
-
-                                        return Ok(StreamChunk {
-                                            delta,
+                                        results.push(Ok(StreamChunk {
+                                            delta: choice.delta.content.clone(),
                                             tool_call_delta: None,
-                                            finish_reason,
-                                        });
+                                            finish_reason: choice.finish_reason.clone(),
+                                        }));
                                     }
                                 }
                             }
+                            None => break,
                         }
-                        Ok(StreamChunk {
-                            delta: None,
-                            tool_call_delta: None,
-                            finish_reason: None,
-                        })
                     }
-                    Err(e) => Err(ProviderError::NetworkError(e.to_string())),
+                    drop(carry);
+                    stream::iter(results)
                 }
-            });
+                Err(e) => stream::iter(vec![Err(map_network_error(e))]),
+            }
+        });
 
         Ok(Box::new(stream))
     }

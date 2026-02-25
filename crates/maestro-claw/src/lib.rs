@@ -32,7 +32,7 @@ pub use tools::{Tool, ToolOutput, ToolRegistry, ToolSpec};
 pub use tools::builtin::{FileTool, MemoryTool, ShellTool, CommandRiskLevel};
 
 // Re-export agent types
-pub use agent::{agent_loop, AgentConfig, AgentError, AgentResult, ErrorStrategy, Provider, ProviderResponse};
+pub use agent::{agent_loop, AgentConfig, AgentError, AgentResult, ErrorStrategy, Provider, ProviderAdapter, ProviderResponse};
 
 // Re-export hooks types
 pub use hooks::{Hook, HookContext, HookError, HookSystem};
