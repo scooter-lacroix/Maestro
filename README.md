@@ -18,7 +18,7 @@ Maestro v2 is a major architectural evolution that unifies three powerful system
 
 - **Maestro Core** - Spec-driven development with automatic agent selection and TDD enforcement
 - **Unified Memory System** - Built-in project context with semantic search and coordination patterns
-- **109 Rebranded Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
+- **109 Repurposed Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
 - **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
 - **16 Integrated Hooks** - Session start, tool use, coordination, and session end hooks
 - **TLDR Code Analysis** - 5-layer code analysis with semantic indexing
