@@ -3196,7 +3196,8 @@ async fn run_app<B: Backend>(
                                         }
                                     };
                                 } else {
-                                    app.tab_index = (app.tab_index + 1) % 10; // 10 tabs
+                                    let tab_count = tabs::all_titles().len();
+                                    app.tab_index = (app.tab_index + 1) % tab_count;
                                     app.preview_focused = false;
                                 }
                             }
@@ -3206,7 +3207,7 @@ async fn run_app<B: Backend>(
                                 if app.tab_index == tabs::DASHBOARD {
                                     match app.dash_focus {
                                         DashFocus::Sessions => {
-                                            app.tab_index = tabs::SETTINGS;
+                                            app.tab_index = tabs::TRACKLENS;
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
@@ -4266,7 +4267,8 @@ async fn run_app<B: Backend>(
                                 app.preview_focused = false;
                             }
                             (KeyModifiers::ALT, KeyCode::Char('i')) => {
-                                app.tab_index = (app.tab_index + 1) % 10; // 10 tabs
+                                let tab_count = tabs::all_titles().len();
+                                app.tab_index = (app.tab_index + 1) % tab_count;
                                 app.preview_focused = false;
                             }
                             (_, KeyCode::Down) => {
