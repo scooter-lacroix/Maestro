@@ -37,7 +37,7 @@ export * from './utils/identity';
 export * from './utils/obsidian';
 export * from './utils/bear';
 export * from './utils/agentSwitch';
-export * from './utils/planSave';
+export * from './utils/docSave';
 export * from './utils/uiPreferences';
 export * from './utils/autonomyMode';
 export * from './utils/defaultNotesApp';
