@@ -14,6 +14,7 @@ import {
   readdirSync,
 } from "fs";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { generateSlug, savePlan, saveAnnotations, saveFinalSnapshot } from "./storage";
@@ -108,6 +109,9 @@ export async function startTrackLensServer(
   options: ServerOptions
 ): Promise<ServerResult> {
   const { plan, origin, htmlContent, autonomyMode } = options;
+
+  // Generate authentication token for decision endpoint
+  const authToken = randomUUID();
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -408,6 +412,12 @@ export async function startTrackLensServer(
 
       // API: Submit decision (approve/deny)
       if (url.pathname === "/api/decision" && req.method === "POST") {
+        // Validate authentication token
+        const authHeader = req.headers.get("authorization");
+        if (authHeader !== `Bearer ${authToken}`) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         try {
           const body = await req.json();
           const {
@@ -464,7 +474,10 @@ export async function startTrackLensServer(
       }
 
       // Serve HTML
-      return new Response(htmlContent, {
+      // Inject authentication token into HTML for client-side access
+      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
+      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
+      return new Response(htmlWithToken, {
         headers: { "Content-Type": "text/html" },
       });
     },
