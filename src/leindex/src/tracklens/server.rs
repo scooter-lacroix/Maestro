@@ -109,14 +109,12 @@ impl TrackLensServer {
 
     /// Generate a cryptographically secure authentication token
     fn generate_auth_token() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use rand::Rng;
 
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-
-        format!("{:x}", timestamp)
+        let mut rng = rand::thread_rng();
+        let bytes: [u8; 32] = rng.gen();
+        // Encode as hex using format loop (hex crate not in dependencies)
+        bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
     }
 
     /// Get the current auth token (for testing/debugging)
