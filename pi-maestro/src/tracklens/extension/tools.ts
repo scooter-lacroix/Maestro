@@ -15,6 +15,7 @@
 import type { ExtensionAPI } from "../../types";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
+import { runRemediationLoop } from "../walkthrough/remediation-loop";
 
 /**
  * Register TrackLens tools with pi-maestro extension
@@ -236,7 +237,7 @@ After review, provide your feedback or approval.`,
    * TrackLens Walkthrough Tool
    *
    * Generates a walkthrough document for a completed track and presents
-   * it in the TrackLens UI for user review.
+   * it in the TrackLens UI for user review with remediation loop support.
    */
   pi.registerTool({
     name: "tracklens_walkthrough",
@@ -248,6 +249,7 @@ After review, provide your feedback or approval.`,
       - Generate a comprehensive walkthrough of what was done
       - Present the changes in a visual, annotated format
       - Allow the user to review and approve the completed work
+      - Handle denial with annotations and remediation loop
 
       The walkthrough will include:
       - Summary of the track's goals
@@ -255,6 +257,11 @@ After review, provide your feedback or approval.`,
       - Files changed with diffs
       - Key decisions made
       - Testing performed
+
+      If the user denies with annotations, the tool will:
+      - Create remediation tasks from annotations
+      - Add tasks to plan.md
+      - Regenerate walkthrough for re-review
     `.trim(),
     parameters: {
       type: "object",
@@ -267,14 +274,19 @@ After review, provide your feedback or approval.`,
           type: "string",
           description: "Brief summary of what was accomplished",
         },
+        autoReview: {
+          type: "boolean",
+          description: "Whether to automatically start interactive review (default: true)",
+        },
       },
       required: ["trackId"],
     },
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { trackId, summary } = params as {
+      const { trackId, summary, autoReview = true } = params as {
         trackId: string;
         summary?: string;
+        autoReview?: boolean;
       };
 
       // Find maestro project root
@@ -292,10 +304,10 @@ After review, provide your feedback or approval.`,
         };
       }
 
+      const trackDir = resolve(root, "maestro/tracks", trackId);
+
       // Import walkthrough generator
       const { generateWalkthrough, saveWalkthrough } = await import("../walkthrough");
-
-      const trackDir = resolve(root, "maestro/tracks", trackId);
 
       // Generate walkthrough
       const walkthrough = generateWalkthrough({
@@ -311,22 +323,169 @@ After review, provide your feedback or approval.`,
       // Save walkthrough to storage
       const savedPath = await saveWalkthrough(trackId, walkthrough);
 
-      // Return walkthrough markdown for review
-      return {
-        content: [
-          {
-            type: "text",
-            text: walkthrough.markdown,
+      // If autoReview is disabled, just return the walkthrough
+      if (!autoReview) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: walkthrough.markdown,
+            },
+          ],
+          details: {
+            trackId,
+            approved: false, // Requires user approval
+            savedPath,
+            completedTasks: walkthrough.completedTasks.length,
+            changedFiles: walkthrough.changedFiles.length,
           },
-        ],
-        details: {
-          trackId,
-          approved: false, // Requires user approval
-          savedPath,
-          completedTasks: walkthrough.completedTasks.length,
-          changedFiles: walkthrough.changedFiles.length,
-        },
-      };
+        };
+      }
+
+      // Try to run interactive review with TrackLens server
+      let startTrackLensServer: any;
+      let htmlContent: string | null = null;
+
+      try {
+        // @ts-ignore - Dynamic import for TrackLens server
+        const tracklensServer = await import("@maestro/tracklens-server");
+        startTrackLensServer = tracklensServer.startTrackLensServer;
+
+        // Try to load HTML content from dist
+        const { existsSync: exists, readFileSync: read } = await import("fs");
+        const htmlPath = resolve(root, "dist/tracklens-editor.html");
+        if (exists(htmlPath)) {
+          htmlContent = read(htmlPath, "utf-8");
+        }
+      } catch {
+        // Server not available, return walkthrough for manual review
+        return {
+          content: [
+            {
+              type: "text",
+              text: walkthrough.markdown,
+            },
+          ],
+          details: {
+            trackId,
+            approved: false,
+            savedPath,
+            manualReview: true,
+          },
+        };
+      }
+
+      // Start TrackLens server with walkthrough
+      try {
+        const server = await startTrackLensServer({
+          plan: walkthrough.markdown,
+          origin: "pi-maestro",
+          htmlContent,
+          mode: "walkthrough",
+        });
+
+        // Wait for user decision
+        const result = await server.waitForDecision();
+
+        // Stop the server
+        server.stop();
+
+        // Handle approval/denial
+        if (!result.approved && result.annotations && result.annotations.length > 0) {
+          // User denied with annotations - run remediation loop
+          const remediationResult = await runRemediationLoop({
+            trackId,
+            root,
+            trackDir,
+            maxIterations: 3,
+            onReview: async (walkthroughMarkdown: string, iteration: number) => {
+              // Re-present updated walkthrough for review
+              const reviewServer = await startTrackLensServer({
+                plan: walkthroughMarkdown,
+                origin: "pi-maestro",
+                htmlContent,
+                mode: "walkthrough",
+              });
+
+              const reviewResult = await reviewServer.waitForDecision();
+              reviewServer.stop();
+
+              return {
+                approved: reviewResult.approved,
+                feedback: reviewResult.feedback,
+                annotations: reviewResult.annotations,
+                savedPath: reviewResult.savedPath,
+              };
+            },
+          });
+
+          if (!remediationResult.approved) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Walkthrough review failed after ${remediationResult.totalIterations} iterations.\n\nRemediation tasks:\n${remediationResult.remediationTasks?.map(t => `- ${t.description}`).join("\n") || "None"}`,
+                },
+              ],
+              details: {
+                trackId,
+                approved: false,
+                iterations: remediationResult.totalIterations,
+                savedPath,
+              },
+            };
+          }
+
+          // Approved after remediation
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Walkthrough approved after ${remediationResult.totalIterations} iteration(s).\n\n${remediationResult.finalWalkthrough || ""}`,
+              },
+            ],
+            details: {
+              trackId,
+              approved: true,
+              iterations: remediationResult.totalIterations,
+              savedPath,
+            },
+          };
+        }
+
+        // User approved or denied without annotations
+        return {
+          content: [
+            {
+              type: "text",
+              text: result.feedback || (result.approved ? "Walkthrough approved" : "Walkthrough denied"),
+            },
+          ],
+          details: {
+            trackId,
+            approved: result.approved,
+            savedPath: result.savedPath,
+            agentSwitch: result.agentSwitch,
+            autonomyMode: result.autonomyMode,
+          },
+        };
+      } catch (error) {
+        // Server error - return walkthrough for manual review
+        return {
+          content: [
+            {
+              type: "text",
+              text: `TrackLens server error: ${error}\n\nPlease review manually:\n\n${walkthrough.markdown}`,
+            },
+          ],
+          details: {
+            trackId,
+            approved: false,
+            savedPath,
+            manualReview: true,
+          },
+        };
+      }
     },
   });
 }

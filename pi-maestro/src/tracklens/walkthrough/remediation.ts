@@ -262,29 +262,84 @@ export function formatRemediationTasks(tasks: RemediationTask[]): string {
 /**
  * Execute remediation tasks
  *
- * This is a placeholder for the actual execution logic.
- * In a real implementation, this would:
- * 1. Add tasks to the plan.md
- * 2. Execute each task
- * 3. Commit changes
- * 4. Regenerate walkthrough
+ * Appends tasks to plan.md and marks them for execution.
+ * Tasks can be executed manually or by an agent runner.
  *
  * @param tasks - Remediation tasks to execute
- * @returns true if all tasks completed successfully
+ * @param trackPath - Path to the track directory
+ * @param ctx - Execution context (optional)
+ * @returns Success status with task results
  */
 export async function executeRemediationTasks(
-  tasks: RemediationTask[]
-): Promise<boolean> {
-  // Placeholder: In real implementation, this would:
-  // 1. Add tasks to plan.md
-  // 2. Execute each task (code changes, fixes, additions)
-  // 3. Commit changes
-  // 4. Return success/failure
+  tasks: RemediationTask[],
+  trackPath?: string,
+  ctx?: any
+): Promise<{ success: boolean; results: any[] }> {
+  const results: any[] = [];
 
   for (const task of tasks) {
-    // Execute task (placeholder)
-    console.log(`Executing: ${task.description}`);
+    // Generate task ID from annotation
+    const taskId = task.annotation.id || `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Append task to plan.md if track path is provided
+    if (trackPath) {
+      try {
+        const { readFile, writeFile } = await import("fs/promises");
+        const { join } = await import("path");
+        const planPath = join(trackPath, "plan.md");
+
+        // Read existing plan content
+        let planContent = "";
+        try {
+          planContent = await readFile(planPath, "utf-8");
+        } catch {
+          // File doesn't exist, create with header
+          planContent = "# Plan\n\n";
+        }
+
+        // Format the new task as a checklist item
+        const priorityMarker = {
+          high: "HIGH",
+          medium: "MED",
+          low: "LOW"
+        }[task.priority];
+
+        const newTaskEntry = `- [ ] **[${priorityMarker}]** ${task.description} (~${task.estimateHours}h)\n`;
+
+        // Append to plan
+        const updatedPlan = planContent.trimEnd() + "\n\n" + newTaskEntry;
+        await writeFile(planPath, updatedPlan, "utf-8");
+
+        results.push({
+          taskId,
+          status: "pending",
+          description: task.description,
+          priority: task.priority,
+          estimateHours: task.estimateHours,
+          appendedTo: planPath
+        });
+      } catch (error) {
+        // If file operations fail, still mark task as pending
+        results.push({
+          taskId,
+          status: "pending",
+          description: task.description,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    } else {
+      // No track path provided, just log the task
+      console.log(`[REMEDIATE] ${task.description} (${task.priority}, ~${task.estimateHours}h)`);
+      results.push({
+        taskId,
+        status: "pending",
+        description: task.description
+      });
+    }
   }
 
-  return true;
+  return {
+    success: true,
+    results
+  };
 }
