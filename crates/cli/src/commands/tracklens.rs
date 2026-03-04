@@ -249,13 +249,12 @@ async fn run_walkthrough(track_id: String, full_diffs: bool, browser: bool) -> R
             // Save walkthrough-final.md (within validated track_path)
             let output_path = track_path.join("walkthrough-final.md");
 
-            // Double-check the output path is still within tracks_dir
-            let canonical_output = output_path.canonicalize()
-                .unwrap_or_else(|_| output_path.clone());
-            let canonical_tracks = tracks_dir.canonicalize()
-                .unwrap_or_else(|_| tracks_dir.clone());
-
-            if !canonical_output.starts_with(&canonical_tracks) {
+            // Security check: canonicalize parent directory (must exist)
+            let parent = output_path.parent().unwrap();
+            std::fs::create_dir_all(parent)?;
+            let canonical_parent = parent.canonicalize()?;
+            let canonical_tracks = tracks_dir.canonicalize()?;
+            if !canonical_parent.starts_with(&canonical_tracks) {
                 return anyhow::bail!("Security error: Output path escapes tracks directory");
             }
 
