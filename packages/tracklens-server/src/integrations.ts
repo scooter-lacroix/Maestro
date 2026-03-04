@@ -6,7 +6,7 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
+import { join, resolve, normalize } from "path";
 import { sanitizeTag } from "./project";
 
 export interface ObsidianConfig {
@@ -218,6 +218,16 @@ export async function saveToObsidian(
       return {
         success: false,
         error: `Vault not found: ${normalizedVault}`,
+      };
+    }
+
+    // Path traversal sanitization: verify resolved path stays within vault root
+    const resolvedVault = resolve(normalizedVault);
+    const resolved = resolve(resolvedVault, normalize(folder));
+    if (!resolved.startsWith(resolve(resolvedVault))) {
+      return {
+        success: false,
+        error: "Invalid folder path",
       };
     }
 
