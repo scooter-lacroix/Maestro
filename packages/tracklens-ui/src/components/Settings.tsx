@@ -34,7 +34,7 @@ import {
   getPlanSaveSettings,
   savePlanSaveSettings,
   type PlanSaveSettings,
-} from '../utils/planSave';
+} from '../utils/docSave';
 import {
   getUIPreferences,
   saveUIPreferences,
