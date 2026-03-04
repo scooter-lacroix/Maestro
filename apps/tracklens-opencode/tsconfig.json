@@ -19,8 +19,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"],
-  "references": [
-    { "path": "../../packages/tracklens-server" }
-  ]
+  "exclude": ["node_modules", "dist"]
 }
