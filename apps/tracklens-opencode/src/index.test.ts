@@ -36,8 +36,10 @@ describe("TrackLens OpenCode Plugin - Rebranding", () => {
   test("should use TrackLens server imports", async () => {
     const source = await Bun.file("./src/index.ts").text();
 
-    // Should import from tracklens-server
+    // Should import from tracklens-server subpaths
     expect(source).toContain("@maestro/tracklens-server");
+    expect(source).toContain("startReviewServer");
+    expect(source).toContain("startAnnotateServer");
     expect(source).toContain("startTrackLensServer");
   });
 
