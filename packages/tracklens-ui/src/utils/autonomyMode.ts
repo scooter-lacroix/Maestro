@@ -1,44 +1,25 @@
 /**
- * TrackLens Autonomy Mode Settings
+ * TrackLens - Autonomy Mode Settings Utility (Claude Code only)
  *
- * Manages the preferred autonomy mode to restore after document approval.
- * This is the merged version of Plannotator's permissionMode with Maestro Conductor's
- * autonomy levels, providing a unified interface across both systems.
+ * Manages the preferred autonomy mode to restore after review approval.
+ * Claude Code 2.1.7+ supports updatedPermissions in hook responses.
  *
  * Available modes:
- * - full-auto: Auto-approve all decisions (bypassPermissions in Claude Code)
- * - semi-auto: Auto-approve file edits only (acceptEdits in Claude Code)
- * - checkpoint: Manually approve each decision (default in Claude Code)
+ * - bypassPermissions: Auto-approve all tool calls (full-auto)
+ * - acceptEdits: Auto-approve file edits only (semi-auto)
+ * - default: Manually approve each tool call (checkpoint)
  *
- * REBRANDED: Merged from permissionMode.ts + Maestro Conductor autonomy levels
- * Storage key changed from 'plannotator-permission-mode' to 'tracklens-autonomy-mode'
+ * REBRANDED: Plannotator → TrackLens, Permission Mode → Autonomy Mode
+ *
+ * @packageDocumentation
  */
 
 import { storage } from './storage';
 
 const STORAGE_KEY_MODE = 'tracklens-autonomy-mode';
 const STORAGE_KEY_CONFIGURED = 'tracklens-autonomy-mode-configured';
-const LEGACY_STORAGE_KEY = 'plannotator-permission-mode'; // For migration
 
-export type AutonomyMode = 'full-auto' | 'semi-auto' | 'checkpoint';
-
-/**
- * Mapping from legacy Plannotator permission modes to TrackLens autonomy modes
- */
-const LEGACY_MAP: Record<string, AutonomyMode> = {
-  bypassPermissions: 'full-auto',
-  acceptEdits: 'semi-auto',
-  default: 'checkpoint',
-};
-
-/**
- * Reverse mapping to Claude Code's PermissionRequest format
- */
-const TO_CLAUDE_CODE_MAP: Record<AutonomyMode, string> = {
-  'full-auto': 'bypassPermissions',
-  'semi-auto': 'acceptEdits',
-  'checkpoint': 'default',
-};
+export type AutonomyMode = 'bypassPermissions' | 'acceptEdits' | 'default';
 
 export interface AutonomyModeSettings {
   mode: AutonomyMode;
@@ -47,43 +28,30 @@ export interface AutonomyModeSettings {
 
 export const AUTONOMY_MODE_OPTIONS: { value: AutonomyMode; label: string; description: string }[] = [
   {
-    value: 'semi-auto',
+    value: 'acceptEdits',
     label: 'Semi-Auto',
     description: 'Auto-approve file edits, ask for other tools',
   },
   {
-    value: 'full-auto',
-    label: 'Full Auto',
+    value: 'bypassPermissions',
+    label: 'Full-Auto',
     description: 'Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)',
   },
   {
-    value: 'checkpoint',
+    value: 'default',
     label: 'Checkpoint',
     description: 'Manually approve each tool call',
   },
 ];
 
-const DEFAULT_MODE: AutonomyMode = 'checkpoint';
+const DEFAULT_MODE: AutonomyMode = 'acceptEdits';
 
 /**
  * Get current autonomy mode settings from storage
- * Handles migration from legacy Plannotator permission mode
  */
 export function getAutonomyModeSettings(): AutonomyModeSettings {
-  let mode = storage.getItem(STORAGE_KEY_MODE) as AutonomyMode | null;
-  let configured = storage.getItem(STORAGE_KEY_CONFIGURED) === 'true';
-
-  // Check legacy key for migration
-  if (!mode && !configured) {
-    const legacy = storage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy && LEGACY_MAP[legacy]) {
-      const mapped = LEGACY_MAP[legacy];
-      setAutonomyModeSettings(mapped);
-      // Clean up legacy key
-      storage.removeItem(LEGACY_STORAGE_KEY);
-      return { mode: mapped, configured: false }; // Still needs proper configuration
-    }
-  }
+  const mode = storage.getItem(STORAGE_KEY_MODE) as AutonomyMode | null;
+  const configured = storage.getItem(STORAGE_KEY_CONFIGURED) === 'true';
 
   return {
     mode: mode || DEFAULT_MODE,
@@ -94,7 +62,7 @@ export function getAutonomyModeSettings(): AutonomyModeSettings {
 /**
  * Save autonomy mode settings to storage
  */
-export function setAutonomyModeSettings(mode: AutonomyMode): void {
+export function saveAutonomyModeSettings(mode: AutonomyMode): void {
   storage.setItem(STORAGE_KEY_MODE, mode);
   storage.setItem(STORAGE_KEY_CONFIGURED, 'true');
 }
@@ -106,25 +74,10 @@ export function needsAutonomyModeSetup(): boolean {
   return storage.getItem(STORAGE_KEY_CONFIGURED) !== 'true';
 }
 
-/**
- * Convert autonomy mode to Claude Code's PermissionRequest format
- */
-export function modeToClaudeCodePermission(mode: AutonomyMode): string {
-  return TO_CLAUDE_CODE_MAP[mode];
-}
-
-/**
- * Convert Claude Code permission to autonomy mode
- */
-export function permissionFromClaudeCode(permission: string): AutonomyMode {
-  if (permission === 'bypassPermissions') return 'full-auto';
-  if (permission === 'acceptEdits') return 'semi-auto';
-  return 'checkpoint';
-}
-
-/**
- * Validate if a string is a valid autonomy mode
- */
-export function isValidAutonomyMode(mode: string): mode is AutonomyMode {
-  return ['full-auto', 'semi-auto', 'checkpoint'].includes(mode);
-}
+// Legacy aliases for backward compatibility
+export type PermissionMode = AutonomyMode;
+export type PermissionModeSettings = AutonomyModeSettings;
+export const PERMISSION_MODE_OPTIONS = AUTONOMY_MODE_OPTIONS;
+export const getPermissionModeSettings = getAutonomyModeSettings;
+export const savePermissionModeSettings = saveAutonomyModeSettings;
+export const needsPermissionModeSetup = needsAutonomyModeSetup;

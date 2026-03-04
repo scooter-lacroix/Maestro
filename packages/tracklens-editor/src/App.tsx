@@ -33,7 +33,11 @@ import { getBearSettings } from '@maestro/tracklens-ui';
 import { getAgentSwitchSettings } from '@maestro/tracklens-ui';
 import { needsUIFeaturesSetup } from '@maestro/tracklens-ui';
 import { getEditorMode, saveEditorMode } from '@maestro/tracklens-ui';
-import { getPermissionModeSettings, needsPermissionModeSetup } from '@maestro/tracklens-ui';
+import {
+  AutonomyModeSetup as PermissionModeSetup,
+  getAutonomyModeSettings as getPermissionModeSettings,
+  needsAutonomyModeSetup as needsPermissionModeSetup,
+} from '@maestro/tracklens-ui';
 import type { Annotation, Block, EditorMode, ImageAttachment } from '@maestro/tracklens-ui';
 
 // Initialize mermaid
