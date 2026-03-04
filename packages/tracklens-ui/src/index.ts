@@ -18,7 +18,6 @@ export * from './components/MermaidBlock';
 export * from './components/AnnotationPanel';
 export * from './components/AnnotationSidebar';
 export * from './components/ExportModal';
-export * from './components/ImportModal';
 export * from './components/Viewer';
 export * from './components/AttachmentsButton';
 export * from './components/ImageThumbnail';
@@ -30,7 +29,6 @@ export * from './hooks/useAgents';
 export * from './hooks/useSidebar';
 export * from './hooks/useVaultBrowser';
 export * from './hooks/useActiveSection';
-export * from './hooks/useSharing';
 export * from './hooks/usePlanDiff';
 export * from './hooks/useLinkedDoc';
 

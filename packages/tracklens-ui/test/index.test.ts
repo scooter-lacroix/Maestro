@@ -48,11 +48,6 @@ describe("TrackLens UI runtime exports", () => {
     expect(ExportModal).toBeDefined();
   });
 
-  it("should export ImportModal", () => {
-    const { ImportModal } = require("../dist/index.js");
-    expect(ImportModal).toBeDefined();
-  });
-
   it("should export useResizablePanel", () => {
     const { useResizablePanel } = require("../dist/index.js");
     expect(useResizablePanel).toBeDefined();
