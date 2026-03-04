@@ -84,7 +84,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setSaveErrors(prev => { const next = { ...prev }; delete next[target]; return next; });
 
     try {
-      let result;
+      let result: { success?: boolean; error?: string } | undefined;
       if (target === 'obsidian') {
         const res = await fetch('/api/obsidian', {
           method: 'POST',
