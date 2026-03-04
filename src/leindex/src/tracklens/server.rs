@@ -131,6 +131,7 @@ impl TrackLensServer {
             .route("/", get(index))
             .route("/api/decision", post(submit_decision))
             .route("/api/content", get(get_content))
+            .route("/api/plan", get(get_plan))
             .layer(
                 // Restrictive CORS: only allow local requests for security
                 CorsLayer::new()
@@ -286,6 +287,25 @@ async fn get_content(
         Ok(Json(c.clone()))
     } else {
         Err(StatusCode::NOT_FOUND)
+    }
+}
+
+/// Get plan content - returns { "plan": string } format for JS editor compatibility
+async fn get_plan(
+    State(state): State<Arc<ServerState>>,
+) -> Json<serde_json::Value> {
+    let content = state.content.read()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+
+    match content {
+        Ok(content) => {
+            if let Some(c) = content.as_ref() {
+                Json(serde_json::json!({ "plan": c.content }))
+            } else {
+                Json(serde_json::json!({ "plan": "" }))
+            }
+        }
+        Err(_) => Json(serde_json::json!({ "plan": "" })),
     }
 }
 
