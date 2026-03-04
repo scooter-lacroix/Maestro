@@ -7,6 +7,7 @@
 
 import { mkdirSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { getRepoInfo } from "./repo";
@@ -55,6 +56,9 @@ export async function startReviewServer(
   options: ReviewServerOptions
 ): Promise<ReviewServerResult> {
   const { htmlContent, origin, gitContext, rawPatch, gitRef, error } = options;
+
+  // Generate authentication token for decision endpoint
+  const authToken = randomUUID();
 
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;
@@ -234,6 +238,12 @@ export async function startReviewServer(
 
       // API: Submit decision
       if (url.pathname === "/api/decision" && req.method === "POST") {
+        // Validate authentication token
+        const authHeader = req.headers.get("authorization");
+        if (authHeader !== `Bearer ${authToken}`) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         try {
           const body = await req.json();
           const {
@@ -264,7 +274,10 @@ export async function startReviewServer(
       }
 
       // Serve HTML
-      return new Response(htmlContent, {
+      // Inject authentication token into HTML for client-side access
+      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
+      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
+      return new Response(htmlWithToken, {
         headers: { "Content-Type": "text/html" },
       });
     },
