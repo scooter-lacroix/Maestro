@@ -183,40 +183,26 @@ impl MaestroTabMultiplexer {
         let mut tmux_session: TmuxSession = session.clone().into();
         self.inner.start_session(&mut tmux_session, command)?;
 
-        // Apply transparency settings after session creation
-        // This ensures the terminal background remains transparent
-        if let Err(e) = self.apply_transparency_to_session(&session.name) {
-            debug!(
-                "Failed to apply transparency to session {}: {}",
-                session.name, e
-            );
-            // Non-fatal: continue even if transparency fails
-        }
+        // NOTE: Transparency is now handled by shell hooks (fish/bash/zsh)
+        // The apply_transparency_to_session function has been removed to prevent
+        // the printf command from being printed to the terminal.
 
         // Update the original session with any changes made during start
         *session = tmux_session.into();
         Ok(())
     }
 
-    /// Apply transparency settings to a session
-    fn apply_transparency_to_session(&self, session_name: &str) -> Result<()> {
-        // Send transparency reset sequence via printf command
-        // This bypasses tmux's buffering and writes directly to the terminal
-        let transparency_cmd = r#"printf '\033[0m\033]111\007\033[49m\033[2J\033[H'"#;
-
-        // Send the printf command to the shell
-        self.inner.send_keys(session_name, transparency_cmd)?;
-
-        // Small delay to ensure command is received
-        std::thread::sleep(std::time::Duration::from_millis(30));
-
-        // Press Enter to execute the command
-        self.inner.send_enter(session_name)?;
-
-        // Wait for the command to execute and take effect
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        debug!("Applied transparency settings to session: {}", session_name);
+    /// Apply transparency settings to a session (DISABLED)
+    ///
+    /// This function is now a no-op. Transparency is handled by shell hooks
+    /// in the user's shell configuration (~/.maestro/*_transparency.* files).
+    /// The previous implementation printed commands to the terminal which was
+    /// disruptive to users.
+    #[allow(dead_code)]
+    fn apply_transparency_to_session(&self, _session_name: &str) -> Result<()> {
+        // Transparency is now handled by shell hooks, not by sending commands
+        // to the terminal. This function is kept for API compatibility but
+        // does nothing.
         Ok(())
     }
 

@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::Mutex;
 
 use crate::hooks::{Hook, HookContext, HookError};
 use crate::session::Turn;
@@ -28,15 +29,13 @@ impl MemoryHook {
     }
 
     /// Get stored memories
-    pub fn get_memories(&self) -> HashMap<String, String> {
-        // Recover from poisoned lock rather than panicking
-        self.memories.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    pub async fn get_memories(&self) -> HashMap<String, String> {
+        self.memories.lock().await.clone()
     }
 
     /// Clear all memories
-    pub fn clear(&self) {
-        // Recover from poisoned lock rather than panicking
-        self.memories.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    pub async fn clear(&self) {
+        self.memories.lock().await.clear();
     }
 }
 
@@ -51,7 +50,7 @@ impl Hook for MemoryHook {
         if matches!(turn.role, crate::session::TurnRole::User) {
             self.memories
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .await
                 .insert(turn.id.clone(), turn.content.clone());
         }
         Ok(turn.clone())
@@ -62,7 +61,7 @@ impl Hook for MemoryHook {
         if matches!(turn.role, crate::session::TurnRole::Assistant) {
             self.memories
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .await
                 .insert(turn.id.clone(), turn.content.clone());
         }
         Ok(turn.clone())
@@ -99,7 +98,7 @@ mod tests {
 
         hook.pre_execute(&context, &turn).await.unwrap();
 
-        let memories = hook.get_memories();
+        let memories = hook.get_memories().await;
         assert_eq!(memories.get(&turn_id), Some(&"Hello".to_string()));
     }
 
@@ -112,7 +111,7 @@ mod tests {
 
         hook.post_execute(&context, &turn).await.unwrap();
 
-        let memories = hook.get_memories();
+        let memories = hook.get_memories().await;
         assert_eq!(memories.get(&turn_id), Some(&"Hi there".to_string()));
     }
 
@@ -123,9 +122,9 @@ mod tests {
         let turn = Turn::new(TurnRole::User, "Hello".to_string());
 
         hook.pre_execute(&context, &turn).await.unwrap();
-        assert!(!hook.get_memories().is_empty());
+        assert!(!hook.get_memories().await.is_empty());
 
-        hook.clear();
-        assert!(hook.get_memories().is_empty());
+        hook.clear().await;
+        assert!(hook.get_memories().await.is_empty());
     }
 }

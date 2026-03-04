@@ -1,0 +1,29 @@
+{
+  "project_id": "maestro-claw",
+  "generation": "eda44910dbe3c6e51a7fb489be9a55869bbff00cb7c7b365cbb50160dcaa52df",
+  "phase": 3,
+  "options_hash": "eb38c720",
+  "payload": {
+    "entry_points": [
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs:send_markdown",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs:send_text",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/security.rs:execute_command",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/agent/loop.rs:agent_loop",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/hooks/context.rs:new",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs:send_typing",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs:start_account",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/anthropic.rs:build_request_body",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/anthropic.rs:handle_error",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/ollama.rs:handle_error"
+    ],
+    "impacted_nodes": 79,
+    "focus_files": [
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/anthropic.rs",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/ollama.rs",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/agent/loop.rs",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/security.rs",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs",
+      "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/hooks/context.rs"
+    ]
+  }
+}

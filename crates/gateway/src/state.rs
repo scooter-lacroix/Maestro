@@ -229,6 +229,35 @@ impl GatewayState {
         (allowed, retry_after)
     }
 
+    /// Garbage-collect stale sessions (TTL: 1 hour, max: 100)
+    pub fn gc_sessions(&self) {
+        let now = chrono::Utc::now();
+        let ttl = chrono::TimeDelta::hours(1);
+
+        // Remove sessions older than TTL
+        self.session_store.retain(|_, session| {
+            if let Ok(created) = chrono::DateTime::parse_from_rfc3339(&session.info.created_at) {
+                now.signed_duration_since(created) < ttl
+            } else {
+                true // Keep sessions with unparseable timestamps
+            }
+        });
+
+        // LRU eviction: if still too many, remove oldest
+        if self.session_store.len() > 100 {
+            let mut entries: Vec<(String, String)> = self
+                .session_store
+                .iter()
+                .map(|e| (e.key().clone(), e.value().info.created_at.clone()))
+                .collect();
+            entries.sort_by(|a, b| a.1.cmp(&b.1));
+            let to_remove = entries.len() - 100;
+            for (id, _) in entries.into_iter().take(to_remove) {
+                self.session_store.remove(&id);
+            }
+        }
+    }
+
     /// Record a broadcast event for rate limiting
     pub fn record_broadcast(&self, sender_id: &str) {
         let mut tracking = self.broadcast_tracking.lock();

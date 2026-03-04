@@ -1,6 +1,5 @@
 //! Session management for Maestro-tab integration
 
-use anyhow::Result;
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::Arc;

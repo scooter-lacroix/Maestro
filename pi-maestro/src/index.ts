@@ -19,6 +19,8 @@ import { registerRevert } from "./commands/revert";
 import { registerConfigure } from "./commands/configure";
 import { registerTui } from "./commands/tui";
 import { registerLeindex } from "./commands/leindex";
+import { registerTrackLensTools } from "./tracklens/extension/tools";
+import { registerTrackLensCommand } from "./tracklens/extension/command";
 
 // Re-export for external use
 export { registerSetup } from "./commands/setup";
@@ -58,6 +60,10 @@ function isInMaestroProject(): boolean {
  * Extension entry point - registers all maestro commands
  */
 export default function (pi: ExtensionAPI) {
+  // Register TrackLens tools and command
+  registerTrackLensTools(pi);
+  registerTrackLensCommand(pi);
+
   // Core workflow commands (implement maestro workflows)
   registerSetup(pi, "maestro:setup");
   registerNewTrack(pi, "maestro:newTrack");  // CRITICAL COMMAND

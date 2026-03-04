@@ -1,4 +1,4 @@
-use crate::message::pty::{PtyOptions, PtyRequest, PtyResponse, PtyShutdown};
+use crate::message::pty::{PtyOptions, PtyRequest, PtyResponse, PtyShutdown, PtyOutputBarrier};
 use crate::prelude::*;
 
 use postage::barrier;
@@ -39,15 +39,17 @@ impl Service for PtyService {
     fn spawn(bus: &Self::Bus) -> Self::Lifeline {
         bus.capacity::<PtyRequest>(STDIN_CHANNEL_SIZE)?;
         bus.capacity::<PtyResponse>(OUTPUT_CHANNEL_SIZE)?;
+        bus.capacity::<PtyOutputBarrier>(1)?;
 
         let options = bus.resource::<PtyOptions>()?;
         let rx_request = bus.rx::<PtyRequest>()?;
         let rx_shutdown = bus.rx::<PtyShutdown>()?;
         let tx_response = bus.tx::<PtyResponse>()?;
+        let tx_barrier_msg = bus.tx::<PtyOutputBarrier>()?;
 
         let _run = Self::try_task(
             "run",
-            Self::run(options, rx_request, rx_shutdown, tx_response),
+            Self::run(options, rx_request, rx_shutdown, tx_response, tx_barrier_msg),
         );
 
         Ok(Self { _run })
@@ -60,6 +62,7 @@ impl PtyService {
         rx_request: impl Stream<Item = PtyRequest> + Unpin + Send + 'static,
         mut rx_shutdown: impl Stream<Item = PtyShutdown> + Unpin,
         tx_response: impl Sink<Item = PtyResponse> + Clone + Unpin + Send + 'static,
+        tx_barrier_msg: impl Sink<Item = PtyOutputBarrier> + Clone + Unpin + Send + 'static,
     ) -> anyhow::Result<()> {
         let system = Self::create_pty(options).await?;
         let (tx_barrier, mut rx_barrier) = barrier::channel();
@@ -77,11 +80,16 @@ impl PtyService {
 
         let child = system.child;
         let mut tx_exit = tx_response.clone();
+        let mut tx_barrier_msg = tx_barrier_msg;
         let _exit_code = Self::try_task("exit_code", async move {
             let exit_code = child.wait().await?;
             rx_barrier.recv().await;
 
             info!("Shell successfully terminated with exit code {}", exit_code);
+
+            // Signal that output is complete using the PtyOutputBarrier message
+            tx_barrier_msg.send(PtyOutputBarrier {}).await.ok();
+
             tx_exit.send(PtyResponse::Terminated).await?;
 
             Ok(())

@@ -3,6 +3,7 @@ use std::time::Duration;
 use crate::{
     config::Action,
     message::terminal::{TerminalInput, TerminalOutput, TerminalShutdown},
+    state::terminal::TerminalSizeState,
 };
 use crate::{message::terminal::TerminalSend, prelude::*};
 use anyhow::Context;
@@ -16,6 +17,7 @@ use super::echo_input::{key_bindings, InputFilter, KeyBindings};
 pub struct TerminalEchoService {
     _input: Lifeline,
     _output: Lifeline,
+    _size: Lifeline,
 }
 
 impl Service for TerminalEchoService {
@@ -31,7 +33,19 @@ impl Service for TerminalEchoService {
         let tx_shutdown = bus.tx::<TerminalShutdown>()?;
         let _input = Self::try_task("stdin", forward_stdin(tx, tx_terminal, tx_shutdown));
 
-        Ok(TerminalEchoService { _input, _output })
+        // Monitor terminal size changes to demonstrate TerminalSizeState usage
+        let mut rx_size = bus.rx::<TerminalSizeState>()?;
+        let _size = Self::task("size", async move {
+            while let Some(size_state) = rx_size.recv().await {
+                trace!(
+                    "Terminal size: {} cols x {} rows",
+                    size_state.cols(),
+                    size_state.rows()
+                );
+            }
+        });
+
+        Ok(TerminalEchoService { _input, _output, _size })
     }
 }
 

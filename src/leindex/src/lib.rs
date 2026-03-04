@@ -33,6 +33,7 @@ pub mod orchestrate;
 pub mod setup;
 pub mod slicing;
 pub mod token_format;
+pub mod tracklens;
 pub mod vector;
 
 // Re-export commonly used submodules for convenient access

@@ -458,43 +458,12 @@ impl TmuxMultiplexer {
             warn!("Failed to enable pipe-pane for {}: {}", session.name, e);
         }
 
-        // CRITICAL: Apply transparency reset by EXECUTING printf in the shell
-        //
-        // The problem with send-keys -l: it sends to shell INPUT (like typing),
-        // but escape sequences need to go through shell OUTPUT to reach the terminal.
-        //
-        // Solution: Execute the printf command IN the shell, so it writes to stdout,
-        // which goes through tmux and reaches the actual terminal.
-        //
-        // The working sequence: printf '\033[0m\033]111\007\033[49m\033[2J\033[H'
-        // - \033[0m      = Reset all attributes (SGR 0)
-        // - \033]111\007 = OSC 111 (reset background to default/transparent)
-        // - \033[49m     = Reset background to default
-        // - \033[2J      = Clear entire screen
-        // - \033[H       = Move cursor to home
+        // NOTE: Transparency is now handled by shell hooks (fish/bash/zsh) that are
+        // created in configure_session_options(). The previous implementation sent
+        // printf commands directly to the terminal which was disruptive.
+        // Shell hooks run silently in the background.
 
-        let transparency_cmd = r#"printf '\033[0m\033]111\007\033[49m\033[2J\033[H'"#;
-
-        // Send the printf command to the shell
-        let _ = Command::new("tmux")
-            .args(["send-keys", "-t", &session.name, "-l", transparency_cmd])
-            .output();
-
-        // Small delay to ensure command is received
-        std::thread::sleep(std::time::Duration::from_millis(30));
-
-        // Press Enter to execute the command
-        let _ = Command::new("tmux")
-            .args(["send-keys", "-t", &session.name, "Enter"])
-            .output();
-
-        // Wait for the command to execute and take effect
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        // Force tmux to redraw
-        let _ = Command::new("tmux").args(["refresh-client"]).output();
-
-        info!("Created tmux session with transparency: {}", session.name);
+        info!("Created tmux session: {}", session.name);
         Ok(())
     }
 

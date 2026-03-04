@@ -1,0 +1,29 @@
+{
+  "name": "@maestro/tracklens-shared",
+  "version": "0.1.0",
+  "description": "TrackLens shared utilities - compression, storage, types, helpers",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "bun test",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "maestro",
+    "tracklens",
+    "shared",
+    "utilities",
+    "compression"
+  ],
+  "author": "Maestro",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "pako": "^2.1.0"
+  }
+}

@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::{
     message::{
         main::{MainRecv, MainShutdown},
-        tabs::{CreateTabRequest, ScanWorkspace, TabRecv, TabShutdown, TabsRecv},
+        tabs::{CreateTabRequest, RequestTabClose, ScanWorkspace, TabRecv, TabShutdown, TabsRecv},
         terminal::TerminalRecv,
     },
     prelude::*,
@@ -66,6 +66,10 @@ impl Message<TabBus> for CreateTabRequest {
 }
 
 impl Message<TabBus> for ScanWorkspace {
+    type Channel = mpsc::Sender<Self>;
+}
+
+impl Message<TabBus> for RequestTabClose {
     type Channel = mpsc::Sender<Self>;
 }
 

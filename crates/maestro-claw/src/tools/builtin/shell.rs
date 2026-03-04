@@ -86,6 +86,17 @@ impl ShellTool {
         let command_lower = command.to_lowercase();
         let command_trimmed = command_lower.trim();
 
+        // EDGE-3: Normalize to defeat bypass tricks (backslash escapes, quotes,
+        // dollar-sign quoting, extra whitespace).
+        let normalized: String = command_trimmed
+            .chars()
+            .filter(|c| *c != '\\' && *c != '"' && *c != '\'' && *c != '$')
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join(" ");
+        let command_trimmed = normalized.as_str();
+
         // Blocked patterns - never allowed
         // (MED-2) `sudo` and `eval` are always blocked because they trivially
         // bypass every downstream classification check.

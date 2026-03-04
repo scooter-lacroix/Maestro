@@ -15,6 +15,7 @@ pub mod state;
 pub mod tabs;
 pub mod theme;
 pub mod toast;
+pub mod tracklens;
 pub mod welcome;
 pub mod yazi_launcher;
 

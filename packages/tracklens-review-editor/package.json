@@ -1,0 +1,37 @@
+{
+  "name": "@maestro/tracklens-review-editor",
+  "version": "0.1.0",
+  "description": "TrackLens code review React app - git diff visualization with annotation",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "maestro",
+    "tracklens",
+    "code-review",
+    "git-diff",
+    "react"
+  ],
+  "author": "Maestro",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  },
+  "dependencies": {
+    "@maestro/tracklens-shared": "workspace:*",
+    "@maestro/tracklens-ui": "workspace:*",
+    "react": "^18.2.0",
+    "react-diff-viewer": "^3.1.1",
+    "react-diff-viewer-continued": "^4.1.2",
+    "react-dom": "^18.2.0"
+  }
+}

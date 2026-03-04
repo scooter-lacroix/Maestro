@@ -45,15 +45,16 @@ use crate::state::{
 };
 use crate::tabs::{
     render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
-    render_sessions, render_settings, session_log_tail,
+    render_sessions, render_settings, render_tracklens, session_log_tail,
 };
+use crate::tracklens::TrackLensPane;
 
 // Re-export for use in tabs
 pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
 /// Tab identifiers with explicit indices for maintainability
-/// Order: Welcome(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9)
+/// Order: Welcome(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9) → TrackLens(10)
 pub mod tabs {
     pub const DASHBOARD: usize = 0;
     pub const MAESTERCLAW: usize = 1;
@@ -65,6 +66,7 @@ pub mod tabs {
     pub const KRUSTOP: usize = 7;
     pub const LSPS: usize = 8;
     pub const SETTINGS: usize = 9;
+    pub const TRACKLENS: usize = 10;
 
     /// Get all tab titles in order
     pub fn all_titles() -> Vec<&'static str> {
@@ -79,6 +81,7 @@ pub mod tabs {
             "Krustop",
             "LSPs",
             "Settings",
+            "TrackLens",
         ]
     }
 }
@@ -264,6 +267,8 @@ pub struct App {
     pub omp_manager: Option<OmpAgentManager>,
     // Phase 7.7: Hot cache for memory suggestions
     pub hot_cache: crate::maesterclaw::HotCache,
+    // TrackLens review state
+    pub tracklens_pane: TrackLensPane,
 }
 
 // Note: Type definitions (InputMode, HubFocus, McpOption, SettingsOption, SettingsMenuKind,
@@ -382,6 +387,7 @@ impl App {
                 None
             },
             hot_cache: crate::maesterclaw::HotCache::new(),
+            tracklens_pane: TrackLensPane::new(),
         };
 
         // Start MCP status refresh background task
@@ -2246,19 +2252,25 @@ async fn run_app<B: Backend>(
                                     InputMode::SettingsEditor => {
                                         app.config.editor = app.rename_buffer.clone();
                                         std::env::set_var("EDITOR", &app.config.editor);
-                                        let _ = app.config.save();
+                                        if let Err(e) = app.config.save() {
+                                            app.status_message = format!("Failed to save config: {}", e);
+                                        } else {
+                                            app.status_message =
+                                                format!("Editor set to '{}'", app.config.editor);
+                                        }
                                         app.input_mode = InputMode::Normal;
-                                        app.status_message =
-                                            format!("Editor set to '{}'", app.config.editor);
                                     }
                                     InputMode::SettingsInstallPath => {
                                         app.config.install_path = app.rename_buffer.clone();
-                                        let _ = app.config.save();
+                                        if let Err(e) = app.config.save() {
+                                            app.status_message = format!("Failed to save config: {}", e);
+                                        } else {
+                                            app.status_message = format!(
+                                                "Install path set to '{}'",
+                                                app.config.install_path
+                                            );
+                                        }
                                         app.input_mode = InputMode::Normal;
-                                        app.status_message = format!(
-                                            "Install path set to '{}'",
-                                            app.config.install_path
-                                        );
                                     }
                                     InputMode::SettingsMenu => {
                                         let Some(kind) = app.settings_menu_kind else {
@@ -2282,17 +2294,23 @@ async fn run_app<B: Backend>(
                                                 }
                                                 app.config.editor = id.clone();
                                                 std::env::set_var("EDITOR", &app.config.editor);
-                                                let _ = app.config.save();
-                                                app.status_message = format!(
-                                                    "Editor set to '{}'",
-                                                    app.config.editor
-                                                );
+                                                if let Err(e) = app.config.save() {
+                                                    app.status_message = format!("Failed to save config: {}", e);
+                                                } else {
+                                                    app.status_message = format!(
+                                                        "Editor set to '{}'",
+                                                        app.config.editor
+                                                    );
+                                                }
                                             }
                                             SettingsMenuKind::Theme => {
                                                 app.config.theme = id.clone();
-                                                let _ = app.config.save();
-                                                app.status_message =
-                                                    format!("Theme set to '{}'", app.config.theme);
+                                                if let Err(e) = app.config.save() {
+                                                    app.status_message = format!("Failed to save config: {}", e);
+                                                } else {
+                                                    app.status_message =
+                                                        format!("Theme set to '{}'", app.config.theme);
+                                                }
                                             }
                                         }
 
@@ -4730,8 +4748,14 @@ async fn run_app<B: Backend>(
                                             }
                                         }
                                         SettingsOption::Save => {
-                                            let _ = app.config.save();
-                                            app.status_message = "Configuration saved to ~/.config/maestro/config.toml".to_string();
+                                            match app.config.save() {
+                                                Ok(()) => {
+                                                    app.toast_queue.success("Configuration saved to ~/.config/maestro/config.toml");
+                                                }
+                                                Err(e) => {
+                                                    app.toast_queue.error(format!("Failed to save config: {}", e));
+                                                }
+                                            }
                                         }
                                     }
                                 } else if app.tab_index == tabs::PROJECTS {
@@ -5101,6 +5125,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         tabs::KRUSTOP => crate::tabs::ktop::render_ktop(frame, chunks[1], app),
         tabs::LSPS => render_lsps(frame, chunks[1], app),
         tabs::SETTINGS => render_settings(frame, app),
+        tabs::TRACKLENS => render_tracklens(frame, chunks[1], app),
         _ => {}
     }
     // Footer

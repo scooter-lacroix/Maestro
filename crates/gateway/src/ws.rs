@@ -325,7 +325,7 @@ pub fn builtin_handlers() -> Vec<(
                 }
             })
         }),
-        ("agent/session/list", |req, state| {
+        ("agent/session/list", |req, _state| {
             Box::pin(async move {
                 // TODO: Wire to maestro-claw session store
                 ResponseFrame::success(
@@ -334,7 +334,7 @@ pub fn builtin_handlers() -> Vec<(
                 )
             })
         }),
-        ("agent/session/create", |req, state| {
+        ("agent/session/create", |req, _state| {
             Box::pin(async move {
                 // Parse the request
                 let create_req: Result<crate::agent::SessionCreateRequest, _> =

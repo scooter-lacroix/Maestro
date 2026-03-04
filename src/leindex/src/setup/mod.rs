@@ -12,6 +12,7 @@ pub mod password;
 pub use distro::{detect_distro, Distro};
 pub use package_manager::{
     get_build_tools_install_command, get_package_manager, get_package_name, get_package_names,
+    get_yazi_addon_packages, get_yazi_addon_purposes, get_yazi_addons_install_command,
     PackageManager, PackagePurpose,
 };
 pub use password::PasswordCache;
@@ -201,6 +202,14 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     name: "Bass Note - Yazi".to_string(),
                     description: format!("[{}] Ensuring Yazi is present...", pm_name),
                     action: StepAction::Shell(yazi_cmd),
+                });
+
+                // Install Yazi addons for enhanced functionality
+                let addons_cmd = package_manager::get_yazi_addons_install_command(distro, pm.as_ref());
+                steps.push(Step {
+                    name: "Bass Note - Yazi Addons".to_string(),
+                    description: format!("[{}] Installing Yazi enhancement packages...", pm_name),
+                    action: StepAction::Shell(addons_cmd),
                 });
             }
             "Claude Code (by Anthropic)" => {

@@ -43,15 +43,15 @@ impl Config {
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
-        if let Some(config_dir) = dirs::config_dir() {
-            let maestro_conf = config_dir.join("maestro");
-            if !maestro_conf.exists() {
-                fs::create_dir_all(&maestro_conf)?;
-            }
-            let config_path = maestro_conf.join("config.toml");
-            let toml_string = toml::to_string(self)?;
-            fs::write(config_path, toml_string)?;
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+        let maestro_conf = config_dir.join("maestro");
+        if !maestro_conf.exists() {
+            fs::create_dir_all(&maestro_conf)?;
         }
+        let config_path = maestro_conf.join("config.toml");
+        let toml_string = toml::to_string(self)?;
+        fs::write(config_path, toml_string)?;
         Ok(())
     }
 }

@@ -1,0 +1,17 @@
+{
+  "project_id": "maestro-claw",
+  "generation": "eda44910dbe3c6e51a7fb489be9a55869bbff00cb7c7b365cbb50160dcaa52df",
+  "phase": 1,
+  "options_hash": null,
+  "payload": {
+    "total_files": 39,
+    "parsed_files": 0,
+    "parse_failures": 0,
+    "signatures": 0,
+    "language_distribution": {
+      "external": 316,
+      "Rust": 957
+    },
+    "parser_completeness": []
+  }
+}

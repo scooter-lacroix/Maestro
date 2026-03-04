@@ -1,0 +1,12 @@
+{
+  "name": "tracklens",
+  "displayName": "TrackLens",
+  "description": "Visual review and annotation system for plans, code diffs, and markdown documents",
+  "version": "0.1.0",
+  "author": "Maestro",
+  "publisher": "Maestro",
+  "license": "MIT",
+  "capabilities": {
+    "hooks": true
+  }
+}

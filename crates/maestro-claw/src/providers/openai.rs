@@ -232,6 +232,7 @@ struct FunctionDefinition {
 }
 
 /// OpenAI chat response format
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAIResponse {
     id: String,
@@ -242,6 +243,7 @@ struct OpenAIResponse {
     usage: Option<OpenAIUsage>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAIChoice {
     index: u32,
@@ -249,6 +251,7 @@ struct OpenAIChoice {
     finish_reason: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAIMessage {
     role: String,
@@ -256,6 +259,7 @@ struct OpenAIMessage {
     tool_calls: Option<Vec<OpenAIToolCall>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAIToolCall {
     id: String,
@@ -270,6 +274,7 @@ struct OpenAIFunctionCall {
     arguments: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAIUsage {
     prompt_tokens: u64,
@@ -385,8 +390,7 @@ impl Provider for OpenAIProvider {
                         match carry.find('\n') {
                             Some(pos) => {
                                 let line = carry[..pos].trim_end_matches('\r').to_string();
-                                let tail = carry[pos + 1..].to_string();
-                                *carry = tail;
+                                carry.drain(..=pos);
 
                                 if !line.starts_with("data: ") {
                                     continue;

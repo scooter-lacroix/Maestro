@@ -258,9 +258,41 @@ ${trackId ? `
    - After completing each task, update plan.md
    - Change \`- [ ] Task: ...\` to \`- [x] Task: ...\`
 
-## 4.0 FINALIZE TRACK
+## 4.0 TRACKLENS WALKTHROUGH REVIEW
 
-When all tasks in plan.md are complete:
+When all tasks in plan.md are complete, request TrackLens walkthrough review:
+
+1. **CALL TRACKLENS_WALKTHROUGH TOOL:**
+   \`\`\`
+   tracklens_walkthrough with:
+   - trackId: "<track_id>"
+   - summary: "Brief summary of what was accomplished"
+   \`\`\`
+
+2. **WAIT FOR USER DECISION:**
+   - **If approved:** Track walkthrough accepted by user
+   - **If denied with feedback:** Address the feedback and call tracklens_walkthrough again
+   - **If TrackLens unavailable:** Fall back to manual completion (skip to step 5.0)
+
+3. **REVIEW/DENIAL LOOP:**
+   - Present walkthrough in TrackLens UI with:
+     - Summary of track goals
+     - List of completed tasks
+     - Files changed with diffs
+     - Key decisions made
+     - Testing performed
+   - User can annotate with feedback
+   - Loop until user approves
+
+4. **MINIMAL TEXT FALLBACK:**
+   If TrackLens UI is unavailable and manual review is needed:
+   - Generate text-based walkthrough summary
+   - Present as markdown in chat
+   - Ask for approval: "Does this walkthrough look complete? (1) Approve, (2) Request changes"
+
+## 5.0 FINALIZE TRACK
+
+After walkthrough approval:
 
 1. Update track status to complete:
    - Change \`## [~] Track: ...\` to \`## [x] Track: ...\`
@@ -274,13 +306,30 @@ When all tasks in plan.md are complete:
 
 3. Announce completion
 
-## 5.0 IMPORTANT NOTES
+## 6.0 IMPORTANT NOTES
 
 - **Workflow.md is single source of truth** for task lifecycle
 - **Validate ALL tool calls** - halt on failure
 - **Use LeIndex CLI** for codebase analysis before implementation
 - **Update checkboxes** in plan.md as work progresses
 - **Follow Critical Think templates** for quality assurance
+
+## 7.0 TRACKLENS INTEGRATION
+
+**TrackLens Walkthrough is DEFAULT-ON for implement workflow:**
+- All completed tracks require walkthrough review
+- User can approve, deny with feedback, or request changes
+- Review/denial loop continues until user approves
+
+**Toggle TrackLens Behavior:**
+- To disable walkthrough reviews: Use \`/tracklens toggle off\` command
+- To re-enable walkthrough reviews: Use \`/tracklens toggle on\` command
+- Default setting is ON (walkthrough required)
+
+**Minimal Text Fallback:**
+- If TrackLens UI is unavailable, system falls back to text-based walkthrough
+- This ensures workflow continues even without UI
+- User can still approve or request changes via chat
 
 ## 6.0 TOOL MAPPING
 
