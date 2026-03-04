@@ -16,14 +16,20 @@
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin";
+import { startTrackLensServer } from "@maestro/tracklens-server";
 import { startReviewServer } from "@maestro/tracklens-server/review";
+import { startAnnotateServer } from "@maestro/tracklens-server/annotate";
 import { getGitContext, runGitDiff } from "@maestro/tracklens-server/git";
 
 // @ts-ignore - Bun import attribute for text
 import reviewHtml from "./tracklens-review.html" with { type: "text" };
-const reviewHtmlContent = reviewHtml as unknown as string;
+// @ts-ignore - Bun import attribute for text
+import planHtml from "../tracklens.html" with { type: "text" };
 
-export const TrackLensPlugin: Plugin = async (ctx) => {
+const reviewHtmlContent = reviewHtml as unknown as string;
+const planHtmlContent = planHtml as unknown as string;
+
+export const TrackLensPlugin: Plugin = async (ctx: any) => {
   // Config handler: Register submit_plan as primary-only tool (hidden from sub-agents)
   const config = async (opencodeConfig: any) => {
     const existingPrimaryTools = opencodeConfig.experimental?.primary_tools ?? [];
@@ -210,6 +216,207 @@ Do NOT proceed with implementation until your plan is approved.
             type: "string",
             description: "Optional autonomy mode to set after approval",
           },
+        },
+        execute: async (params: { plan?: string; agentSwitch?: string; autonomyMode?: string }) => {
+          const { plan, agentSwitch, autonomyMode } = params;
+
+          if (!plan) {
+            return { content: "Error: Plan content is required" };
+          }
+
+          // Start TrackLens server with plan content
+          const server = await startTrackLensServer({
+            plan,
+            origin: "opencode",
+            htmlContent: planHtmlContent,
+            autonomyMode,
+          });
+
+          // Wait for user decision
+          const result = await server.waitForDecision();
+
+          // Give browser time to receive response and update UI
+          await Bun.sleep(1500);
+
+          // Handle agent switch if requested
+          if (result.agentSwitch) {
+            const targetAgent = result.agentSwitch;
+            console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
+
+            try {
+              const agentsResponse = await ctx.client.app.agents({
+                query: { directory: ctx.directory }
+              });
+              const agents = agentsResponse.data;
+              const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
+
+              if (targetAgentObj) {
+                // @ts-ignore - Agent has id field
+                await ctx.client.agents.switch({
+                  agent_id: targetAgentObj.id,
+                });
+              }
+            } catch (error) {
+              console.error(`[TrackLens] Failed to switch agent: ${error}`);
+            }
+          }
+
+          // Return feedback based on decision
+          if (result.approved) {
+            return {
+              content: result.feedback
+                ? `## Plan Approved\n\n${result.feedback}`
+                : "Plan approved. You may proceed with implementation.",
+            };
+          } else {
+            return {
+              content: result.feedback
+                ? `## Plan Rejected\n\n${result.feedback}`
+                : "Plan rejected. Please revise based on user feedback.",
+            };
+          }
+        },
+      }),
+
+      tracklens_review: tool({
+        description: `
+          Launch a code review in the TrackLens UI.
+
+          Opens the TrackLens review interface showing git diffs, allowing the user
+          to review changes visually and provide feedback.
+
+          Supported diff types:
+          - uncommitted: All uncommitted changes (default)
+          - staged: Staged changes only
+          - unstaged: Unstaged changes only
+          - last-commit: The most recent commit
+          - branch: Current branch vs default branch
+        `,
+        parameters: {
+          diffType: {
+            type: "string",
+            description: "Git diff type: uncommitted, staged, unstaged, last-commit, branch",
+            default: "uncommitted",
+          },
+        },
+        execute: async (params: { diffType?: string }) => {
+          const gitContext = await getGitContext();
+          const diffType = (params.diffType || "uncommitted") as
+            | "uncommitted"
+            | "staged"
+            | "unstaged"
+            | "last-commit"
+            | "branch";
+
+          const { patch, label, error } = await runGitDiff(diffType, gitContext.defaultBranch);
+
+          const server = await startReviewServer({
+            rawPatch: patch,
+            gitRef: label,
+            error,
+            origin: "opencode",
+            diffType,
+            gitContext,
+            htmlContent: reviewHtmlContent,
+          });
+
+          const result = await server.waitForDecision();
+
+          // Give browser time to receive response and update UI
+          await Bun.sleep(1500);
+
+          // Handle agent switch if requested
+          if (result.agentSwitch) {
+            const targetAgent = result.agentSwitch;
+            console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
+
+            try {
+              const agentsResponse = await ctx.client.app.agents({
+                query: { directory: ctx.directory }
+              });
+              const agents = agentsResponse.data;
+              const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
+
+              if (targetAgentObj) {
+                // @ts-ignore - Agent has id field
+                await ctx.client.agents.switch({
+                  agent_id: targetAgentObj.id,
+                });
+              }
+            } catch (error) {
+              console.error(`[TrackLens] Failed to switch agent: ${error}`);
+            }
+          }
+
+          // Return feedback to agent
+          if (result.feedback) {
+            return {
+              content: `## Code Review Feedback\n\n${result.feedback}`,
+            };
+          }
+
+          return {
+            content: "Review complete. No feedback provided.",
+          };
+        },
+      }),
+
+      tracklens_annotate: tool({
+        description: `
+          Launch annotation mode for a specific file in the TrackLens UI.
+
+          Opens the TrackLens annotation interface showing a markdown file,
+          allowing the user to annotate specific sections with comments or suggestions.
+
+          Use this tool when you want the user to review or annotate a specific file,
+          such as a spec document, plan, or any markdown content.
+        `,
+        parameters: {
+          filePath: {
+            type: "string",
+            description: "Path to the file to annotate (relative to project root)",
+          },
+        },
+        execute: async (params: { filePath?: string }) => {
+          const { filePath } = params;
+
+          if (!filePath) {
+            return { content: "Error: filePath is required" };
+          }
+
+          // Read the file content
+          let fileContent: string;
+          try {
+            fileContent = await Bun.file(filePath).text();
+          } catch (error) {
+            return {
+              content: `Error: Failed to read file "${filePath}": ${error}`,
+            };
+          }
+
+          // Start annotate server
+          const server = await startAnnotateServer({
+            markdown: fileContent,
+            filePath,
+            origin: "opencode",
+            htmlContent: reviewHtmlContent, // Reuse review HTML for annotation mode
+          });
+
+          const result = await server.waitForDecision();
+
+          // Give browser time to receive response and update UI
+          await Bun.sleep(1500);
+
+          // Return feedback to agent
+          if (result.feedback) {
+            return {
+              content: `## Annotation Feedback\n\n${result.feedback}`,
+            };
+          }
+
+          return {
+            content: "Annotation complete. No feedback provided.",
+          };
         },
       }),
     },
