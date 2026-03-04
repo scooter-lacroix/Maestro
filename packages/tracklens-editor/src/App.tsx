@@ -21,7 +21,6 @@ import {
   CompletionOverlay,
   ThemeProvider,
   ModeToggle,
-  PermissionModeSetup,
   UIFeaturesSetup,
   useResizablePanel,
 } from '@maestro/tracklens-ui';
