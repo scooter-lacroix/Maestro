@@ -128,9 +128,13 @@ export default function App() {
     };
 
     try {
+      const token = (window as any).TRACKLENS_AUTH_TOKEN;
       const res = await fetch('/api/decision', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(body),
       });
 
@@ -146,9 +150,13 @@ export default function App() {
     const annotationsOutput = exportAnnotations(blocks, annotations);
 
     try {
+      const token = (window as any).TRACKLENS_AUTH_TOKEN;
       const res = await fetch('/api/decision', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           approved: false,
           feedback: annotationsOutput,
@@ -167,9 +175,13 @@ export default function App() {
     const annotationsOutput = exportAnnotations(blocks, annotations);
 
     try {
+      const token = (window as any).TRACKLENS_AUTH_TOKEN;
       const res = await fetch('/api/decision', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           approved: false,
           feedback: annotationsOutput,
