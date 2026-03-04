@@ -41,11 +41,11 @@ import {
   type UIPreferences,
 } from '../utils/uiPreferences';
 import {
-  getPermissionModeSettings,
-  savePermissionModeSettings,
-  PERMISSION_MODE_OPTIONS,
-  type PermissionMode,
-} from '../utils/permissionMode';
+  getAutonomyModeSettings as getPermissionModeSettings,
+  saveAutonomyModeSettings as savePermissionModeSettings,
+  AUTONOMY_MODE_OPTIONS as PERMISSION_MODE_OPTIONS,
+  type AutonomyMode as PermissionMode,
+} from '../utils/autonomyMode';
 import { getAutoCloseDelay, setAutoCloseDelay, AUTO_CLOSE_OPTIONS, type AutoCloseDelay } from '../utils/storage';
 import {
   getDefaultNotesApp,
@@ -269,14 +269,14 @@ export const Settings: React.FC<SettingsProps> = ({ onIdentityChange, origin, mo
                             onChange={(e) => handlePermissionModeChange(e.target.value as PermissionMode)}
                             className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
                           >
-                            {PERMISSION_MODE_OPTIONS.map((option) => (
+                            {PERMISSION_MODE_OPTIONS.map((option: { value: string; label: string; description: string }) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
                               </option>
                             ))}
                           </select>
                           <div className="text-[10px] text-muted-foreground/70">
-                            {PERMISSION_MODE_OPTIONS.find(o => o.value === permissionMode)?.description}
+                            {PERMISSION_MODE_OPTIONS.find((o: { value: string; label: string; description: string }) => o.value === permissionMode)?.description}
                           </div>
                         </div>
                       </>
