@@ -13,7 +13,7 @@ import {
   writeFileSync,
   readdirSync,
 } from "fs";
-import { join } from "path";
+import { join, resolve, normalize } from "path";
 import { randomUUID } from "crypto";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
@@ -346,6 +346,16 @@ export async function startTrackLensServer(
             const home =
               process.env.HOME || process.env.USERPROFILE || "";
             normalizedVault = join(home, normalizedVault.slice(1));
+          }
+
+          // Path traversal sanitization: verify resolved path stays within vault root
+          const resolvedVault = resolve(normalizedVault);
+          const resolved = resolve(resolvedVault, normalize(folder));
+          if (!resolved.startsWith(resolve(resolvedVault))) {
+            return Response.json({
+              success: false,
+              error: "Invalid folder path",
+            }, { status: 400 });
           }
 
           const folderPath = join(normalizedVault, folder);
