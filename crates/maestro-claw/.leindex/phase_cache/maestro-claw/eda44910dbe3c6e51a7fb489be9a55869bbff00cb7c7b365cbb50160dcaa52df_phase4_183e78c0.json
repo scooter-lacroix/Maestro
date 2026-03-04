@@ -1,0 +1,70 @@
+{
+  "project_id": "maestro-claw",
+  "generation": "eda44910dbe3c6e51a7fb489be9a55869bbff00cb7c7b365cbb50160dcaa52df",
+  "phase": 4,
+  "options_hash": "183e78c0",
+  "payload": {
+    "hotspots": [
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/security.rs:execute_command",
+        "score": 0.5754687,
+        "complexity": 7,
+        "impact_size": 15
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/anthropic.rs:handle_error",
+        "score": 0.56205356,
+        "complexity": 5,
+        "impact_size": 20
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/ollama.rs:handle_error",
+        "score": 0.55502236,
+        "complexity": 5,
+        "impact_size": 19
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/openrouter.rs:handle_error",
+        "score": 0.55502236,
+        "complexity": 5,
+        "impact_size": 19
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/openai.rs:handle_error",
+        "score": 0.54095984,
+        "complexity": 5,
+        "impact_size": 17
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/lib.rs:__module__",
+        "score": 0.53428566,
+        "complexity": 1,
+        "impact_size": 64
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/agent/loop.rs:agent_loop",
+        "score": 0.5182143,
+        "complexity": 6,
+        "impact_size": 16
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs:send_markdown",
+        "score": 0.49109375,
+        "complexity": 7,
+        "impact_size": 3
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/channel.rs:send_text",
+        "score": 0.49109375,
+        "complexity": 7,
+        "impact_size": 3
+      },
+      {
+        "node_id": "/run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/anthropic.rs:build_request_body",
+        "score": 0.48205358,
+        "complexity": 5,
+        "impact_size": 20
+      }
+    ]
+  }
+}

@@ -353,6 +353,7 @@ impl From<&ToolSpec> for AnthropicTool {
 }
 
 /// Anthropic response format
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct AnthropicResponse {
     id: String,
@@ -489,8 +490,7 @@ impl Provider for AnthropicProvider {
                         match carry.find('\n') {
                             Some(pos) => {
                                 let line = carry[..pos].trim_end_matches('\r').to_string();
-                                let tail = carry[pos + 1..].to_string();
-                                *carry = tail;
+                                carry.drain(..=pos);
 
                                 if !line.starts_with("data: ") {
                                     continue;
@@ -634,13 +634,16 @@ impl Provider for AnthropicProvider {
     }
 
     async fn warmup(&self) -> Result<(), ProviderError> {
+        // Minimize token waste: send minimal request with max_tokens: 1
         let messages = vec![AnthropicMessage {
             role: "user".to_string(),
             content: vec![AnthropicContent::Text {
                 text: "Hi".to_string(),
             }],
         }];
-        let body = self.build_request_body(messages, None, None);
+        let mut body = self.build_request_body(messages, None, None);
+        // Override max_tokens to minimize token waste during warmup
+        body["max_tokens"] = serde_json::json!(1);
 
         let response = self
             .client
@@ -661,7 +664,7 @@ impl Provider for AnthropicProvider {
     }
 
     async fn health_check(&self) -> Result<(), ProviderError> {
-        // Anthropic doesn't have a health endpoint, so we just check auth
+        // Anthropic doesn't have a /models endpoint, reuse warmup logic
         self.warmup().await
     }
 
@@ -682,6 +685,7 @@ impl Provider for AnthropicProvider {
 }
 
 /// Anthropic streaming event types
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 enum AnthropicStreamEvent {

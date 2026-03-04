@@ -21,20 +21,33 @@ impl Service for TerminalEventService {
 
         #[allow(unreachable_code)]
         let _update = Self::try_task("run", async move {
-            let mut set_size = (0, 0);
+            let mut last_state: Option<TerminalSizeState> = None;
             loop {
                 let size = terminal_size().expect("get terminal size");
-                if size != set_size {
-                    set_size = size;
+                let state = TerminalSizeState(size);
 
-                    tx.send(TerminalSizeState(set_size))
+                // Use the dimension methods to check for changes
+                let dims_changed = last_state.as_ref().map_or(true, |last| {
+                    last.dimensions() != state.dimensions()
+                });
+
+                if dims_changed {
+                    debug!(
+                        "Terminal size changed: {} cols x {} rows",
+                        state.cols(),
+                        state.rows()
+                    );
+
+                    last_state = Some(state.clone());
+
+                    tx.send(state.clone())
                         .await
                         .context("send TerminalStateSize")?;
 
                     tx_send
-                        .send(TerminalInput::Resize(set_size))
+                        .send(TerminalInput::Resize(state.dimensions()))
                         .await
-                        .context("send TerminalStateSize")?;
+                        .context("send TerminalInput::Resize")?;
                 }
 
                 tokio::time::sleep(Duration::from_millis(200)).await;

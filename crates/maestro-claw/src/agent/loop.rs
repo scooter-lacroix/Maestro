@@ -21,6 +21,8 @@ pub struct AgentConfig {
     pub turn_timeout_secs: u64,
     /// Error handling strategy
     pub error_strategy: ErrorStrategy,
+    /// Custom prompt for conversation summarization
+    pub summary_prompt: String,
 }
 
 impl Default for AgentConfig {
@@ -29,6 +31,8 @@ impl Default for AgentConfig {
             max_turns: 20,
             turn_timeout_secs: 60,
             error_strategy: ErrorStrategy::Retry(3),
+            summary_prompt: "Please provide a brief 2–3 sentence summary of our conversation so far, \
+                            covering the key points discussed.".to_string(),
         }
     }
 }
@@ -238,8 +242,7 @@ pub async fn agent_loop(
                 let mut msgs = thread.to_messages();
                 msgs.push(crate::session::ProviderMessage {
                     role: "user".to_string(),
-                    content: "Please provide a brief 2–3 sentence summary of our conversation so far, \
-                              covering the key points discussed.".to_string(),
+                    content: config.summary_prompt.clone(),
                     tool_calls: None,
                     tool_call_id: None,
                 });

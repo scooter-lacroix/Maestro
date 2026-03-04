@@ -357,6 +357,7 @@ struct OllamaToolDefinition {
 }
 
 /// Ollama response format
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OllamaResponse {
     model: String,
@@ -370,6 +371,7 @@ struct OllamaResponse {
     prompt_eval_count: Option<u64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OllamaResponseMessage {
     role: String,
@@ -518,8 +520,7 @@ impl Provider for OllamaProvider {
                         match carry.find('\n') {
                             Some(pos) => {
                                 let line = carry[..pos].trim_end_matches('\r').to_string();
-                                let tail = carry[pos + 1..].to_string();
-                                *carry = tail;
+                                carry.drain(..=pos);
 
                                 if line.trim().is_empty() {
                                     continue;

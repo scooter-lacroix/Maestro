@@ -7,6 +7,7 @@ use crate::{
     message::fuzzy::FuzzySelection,
     message::fuzzy::FuzzyShutdown,
     prelude::*,
+    state::fuzzy::FuzzyEntryState,
     state::fuzzy::FuzzyMatch,
     state::fuzzy::FuzzyMatchState,
     state::fuzzy::FuzzyOutputEvent,
@@ -43,6 +44,7 @@ pub struct FuzzyFinderService {
     _input: Lifeline,
     _query_state: Lifeline,
     _filter_state: Lifeline,
+    _entry_state: Lifeline,
     _select_state: Lifeline,
     _select: Lifeline,
     _output_state: Lifeline,
@@ -72,12 +74,19 @@ impl Service for FuzzyFinderService {
             let rx = bus.rx::<Option<FuzzyTabsState>>()?;
             let rx_query = bus.rx::<FuzzyQueryState>()?;
             let tx = bus.tx::<FuzzyMatchState>()?;
+            let tx_entries = bus.tx::<FuzzyEntryState>()?;
             let fuzzy_config = load_fuzzy_config();
 
             Self::try_task(
                 "filter_state",
-                Self::filter_state(rx, rx_query, tx, fuzzy_config),
+                Self::filter_state(rx, rx_query, tx, tx_entries, fuzzy_config),
             )
+        };
+
+        // Receive and log entry state changes for debugging
+        let _entry_state = {
+            let rx = bus.rx::<FuzzyEntryState>()?;
+            Self::try_task("entry_state", Self::entry_state(rx))
         };
 
         let _select_state = {
@@ -122,6 +131,7 @@ impl Service for FuzzyFinderService {
             _input,
             _query_state,
             _filter_state,
+            _entry_state,
             _select_state,
             _select,
             _output_state,
@@ -307,6 +317,7 @@ impl FuzzyFinderService {
         rx: impl Stream<Item = Option<FuzzyTabsState>> + Unpin,
         rx_query: impl Stream<Item = FuzzyQueryState> + Unpin,
         mut tx: impl Sink<Item = FuzzyMatchState> + Unpin,
+        mut tx_entries: impl Sink<Item = FuzzyEntryState> + Unpin,
         fuzzy_config: FuzzyConfig,
     ) -> anyhow::Result<()> {
         let matcher = SkimMatcherV2::default().ignore_case();
@@ -333,7 +344,13 @@ impl FuzzyFinderService {
                                 .cmp(&b.last_selected)
                                 .reverse()
                                 .then_with(|| a.name.cmp(&b.name))
-                        })
+                        });
+
+                        // Update FuzzyEntryState with the new entries
+                        let entry_state = FuzzyEntryState {
+                            entries: entries.clone(),
+                        };
+                        tx_entries.send(entry_state).await.ok();
                     }
                 }
                 FilterEvent::Query(state) => {
@@ -814,4 +831,25 @@ enum OutputRecv {
     Matches(FuzzyMatchState),
     Select(Option<FuzzySelectState>),
     Event(FuzzyEvent),
+}
+
+impl FuzzyFinderService {
+    /// Receive and log entry state changes for debugging
+    async fn entry_state(
+        mut rx: impl Stream<Item = FuzzyEntryState> + Unpin,
+    ) -> anyhow::Result<()> {
+        while let Some(state) = rx.recv().await {
+            // Use the accessor methods to avoid dead code warnings
+            if state.is_empty() {
+                trace!("Fuzzy entry state cleared");
+            } else {
+                trace!(
+                    "Fuzzy entry state updated: {} entries, first: {:?}",
+                    state.len(),
+                    state.entries().first().map(|e| e.name.as_str())
+                );
+            }
+        }
+        Ok(())
+    }
 }

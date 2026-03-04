@@ -649,6 +649,9 @@ pub async fn handle_agent_execute(
         Err(r) => return r,
     };
 
+    // EDGE-4: Garbage-collect stale/excess sessions before creating new ones
+    state.gc_sessions();
+
     // ------------------------------------------------------------------
     // Resolve session and extract prior turns (Rec-4)
     //

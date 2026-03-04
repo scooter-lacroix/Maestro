@@ -1,5 +1,5 @@
 use crate::{
-    message::main::{MainRecv, MainShutdown},
+    message::main::{MainRecv, MainShutdown, SendStdin, SendStdout},
     message::tabs::TabRecv,
     message::terminal::TerminalRecv,
     state::tabs::ActiveTabsState,
@@ -56,6 +56,15 @@ impl Message<MainBus> for Request {
 
 impl Message<MainBus> for Response {
     type Channel = broadcast::Sender<Self>;
+}
+
+// Direct stdin/stdout messages
+impl Message<MainBus> for SendStdout {
+    type Channel = mpsc::Sender<Self>;
+}
+
+impl Message<MainBus> for SendStdin {
+    type Channel = mpsc::Sender<Self>;
 }
 
 impl Resource<MainBus> for WebsocketResource {}

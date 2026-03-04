@@ -153,19 +153,21 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: Maestro v2.5 - Cockpit v2 + LeIndex Rust Core + Orchestrate Pane
+## [x] Track: Maestro v2.5 - Cockpit v2 + LeIndex Rust Core + Orchestrate Pane
 *Link: [./maestro/tracks/v2-5_20260121/](./maestro/tracks/v2-5_20260121/)*
 
 **Description**: Reorganize Maestro so the Rust Cockpit v2 is the canonical TUI (Go TUI fully retired), LeIndex in pure Rust fully absorbs TLDR (no `maestro.tldr` usage), and add an Orchestrate pane by porting/rebranding `subsy/ralph-tui` with LeIndex-powered token-efficient loop execution.
 
 **Type**: Master Orchestration Track
 
-**Status**: IN PROGRESS - Phase 5 (Enhanced Features & Polish) 🚧
+**Status**: ✅ COMPLETE - All 3 sub-tracks finished
 
 **Sub-Tracks**:
 - [x] 01-cockpit-tui-reorg (COMPLETE - All 5 phases finished)
 - [x] 02-leindex-core-rust (COMPLETE - Phases 1-4, 5 deferred to 03, 6 verified)
 - [x] 03-orchestrate-pane-ralph (COMPLETE - All 6 phases finished)
+
+**Completion Date**: 2026-01-22
 
 **Execution**: `/maestro:implement v2-5_20260121`
 
@@ -245,25 +247,35 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-## [~] Track: Pi-Mono Integration for Maestro
+## [x] Track: Pi-Mono Integration for Maestro
 *Link: [./maestro/tracks/pi-mono_20260123/](./maestro/tracks/pi-mono_20260123/)*
 
 **Description**: Integrate pi-mono as a first-class CLI agent in Maestro's ecosystem - Full 7-phase implementation including Detection, Model Configuration, Agent Mapping, Execution Engine, Config Workflow, Command Integration, and Testing
 
 **Type**: Feature
 
-**Status**: IN PROGRESS
+**Status**: ✅ COMPLETE - All 7 phases finished
 
 **Phases**:
-- Phase 1: Detection & Discovery System (3 tasks)
-- Phase 2: Adaptive Model Configuration (4 tasks)
-- Phase 3: Agent Role Mapping System (3 tasks)
-- Phase 4: Subagent Execution Engine (4 tasks)
-- Phase 5: Interactive Configuration Workflow (2 tasks)
-- Phase 6: Maestro Command Integration (4 tasks)
-- Phase 7: Testing & Validation (3 tasks)
+- [x] Phase 1: Detection & Discovery System (3 tasks) - COMPLETE ✅
+- [x] Phase 2: Adaptive Model Configuration (4 tasks) - COMPLETE ✅
+- [x] Phase 3: Agent Role Mapping System (3 tasks) - COMPLETE ✅
+- [x] Phase 4: Subagent Execution Engine (4 tasks) - COMPLETE ✅
+- [x] Phase 5: Interactive Configuration Workflow (2 tasks) - COMPLETE ✅
+- [x] Phase 6: Maestro Command Integration (4 tasks) - COMPLETE ✅
+- [x] Phase 7: Testing & Validation (3 tasks) - COMPLETE ✅
 
-**Total Tasks**: 23
+**Total Tasks**: 23 (23 complete, 0 remaining)
+
+**Test Status**: All 633 tests passing
+- 520 unit tests (pi-mono crate)
+- 103 doc tests
+- 10 e2e integration tests
+
+**Acceptance Criteria**: 8/8 PASS ✅
+**Tzar Review**: PASS (9.5/10) - Excellence Achieved ✅
+**Completion Date**: 2026-02-24
+**Commit**: 459e275 - Signal termination bug fix
 
 **Execution**: `/maestro:implement pi-mono_20260123`
 
@@ -446,3 +458,35 @@ Cleanup (parallel, no dependencies)
 - [x] No regressions in existing functionality (934 total tests pass)
 
 **Execution**: `/maestro:orchestrate maesterclaw-rebuild_20260223`
+
+---
+
+## [ ] Track: TrackLens Integration — Port Plannotator as visual review, annotation, and walkthrough system
+*Link: [./maestro/tracks/tracklens-port_20260304/](./maestro/tracks/tracklens-port_20260304/)*
+
+**Description**: Port Plannotator into Maestro as TrackLens — browser-based visual review, annotation, and walkthrough system integrated into track creation (newTrack) and completion (implement) workflows across Claude Code, OpenCode, and Pi-mono platforms. Includes Rust core (Axum server, walkthrough generator), Cockpit TUI pane, CLI subcommand, and complete rebranding.
+
+**Type**: Feature
+
+**Status**: NEW
+
+**Phases**:
+- Phase 1: Foundation — directory structures, core types, utilities, rebranding (7 tasks)
+- Phase 2: Server Layer — Node.js + Rust servers, integrations (8 tasks)
+- Phase 3: UI Components — React apps, hooks, Vite builds (10 tasks)
+- Phase 4: Claude Code Integration — hook plugin, slash commands (6 tasks)
+- Phase 5: OpenCode Integration — plugin with tool registration (2 tasks)
+- Phase 6: Pi-mono + newTrack Integration — tools, workflow modifications (5 tasks)
+- Phase 7: Walkthrough System — generator, remediation loop, compression (5 tasks)
+- Phase 8: Cockpit TUI + CLI — pane, subcommand, E2E testing (8 tasks)
+
+**Total Tasks**: 51
+
+**Reference Plan**: [tracks/plannotator-port-plan.md](../../tracks/plannotator-port-plan.md) (2,149-line detailed plan with full code snippets)
+
+**Execution**: `/maestro:implement tracklens-port_20260304`
+
+---
+
+## [~] Track: TrackLens Integration — Full Plannotator Port
+*Link: [./maestro/tracks/tracklens-fullport_20260304/](./maestro/tracks/tracklens-fullport_20260304/)*

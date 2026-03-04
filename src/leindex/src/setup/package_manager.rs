@@ -183,6 +183,27 @@ pub enum PackagePurpose {
     Ctags,
     /// Yazi file manager
     Yazi,
+    // Yazi addon packages for enhanced functionality
+    /// FFmpeg - video/audio preview
+    Ffmpeg,
+    /// 7-Zip - archive support
+    P7zip,
+    /// jq - JSON preview
+    Jq,
+    /// poppler - PDF preview
+    Poppler,
+    /// fd - file finder (alternative to find)
+    Fd,
+    /// ripgrep - fast grep
+    Ripgrep,
+    /// fzf - fuzzy finder
+    Fzf,
+    /// zoxide - smart cd
+    Zoxide,
+    /// resvg - SVG preview
+    Resvg,
+    /// ImageMagick - image preview/conversion
+    ImageMagick,
 }
 
 /// Returns the package name for a given purpose and distribution
@@ -243,6 +264,58 @@ pub fn get_package_name(purpose: PackagePurpose, distro: Distro) -> Option<&'sta
         (PackagePurpose::Yazi, Distro::Arch) => Some("yazi"),
         (PackagePurpose::Yazi, Distro::Fedora) => Some("yazi"),
 
+        // === Yazi Addon Packages ===
+
+        // FFmpeg - video/audio preview
+        (PackagePurpose::Ffmpeg, Distro::Debian) => Some("ffmpeg"),
+        (PackagePurpose::Ffmpeg, Distro::Arch) => Some("ffmpeg"),
+        (PackagePurpose::Ffmpeg, Distro::Fedora) => Some("ffmpeg"),
+
+        // 7-Zip - archive support
+        (PackagePurpose::P7zip, Distro::Debian) => Some("p7zip-full"),
+        (PackagePurpose::P7zip, Distro::Arch) => Some("p7zip"),
+        (PackagePurpose::P7zip, Distro::Fedora) => Some("p7zip"),
+
+        // jq - JSON preview
+        (PackagePurpose::Jq, Distro::Debian) => Some("jq"),
+        (PackagePurpose::Jq, Distro::Arch) => Some("jq"),
+        (PackagePurpose::Jq, Distro::Fedora) => Some("jq"),
+
+        // poppler - PDF preview
+        (PackagePurpose::Poppler, Distro::Debian) => Some("poppler-utils"),
+        (PackagePurpose::Poppler, Distro::Arch) => Some("poppler"),
+        (PackagePurpose::Poppler, Distro::Fedora) => Some("poppler-utils"),
+
+        // fd - file finder
+        (PackagePurpose::Fd, Distro::Debian) => Some("fd-find"),
+        (PackagePurpose::Fd, Distro::Arch) => Some("fd"),
+        (PackagePurpose::Fd, Distro::Fedora) => Some("fd-find"),
+
+        // ripgrep - fast grep
+        (PackagePurpose::Ripgrep, Distro::Debian) => Some("ripgrep"),
+        (PackagePurpose::Ripgrep, Distro::Arch) => Some("ripgrep"),
+        (PackagePurpose::Ripgrep, Distro::Fedora) => Some("ripgrep"),
+
+        // fzf - fuzzy finder
+        (PackagePurpose::Fzf, Distro::Debian) => Some("fzf"),
+        (PackagePurpose::Fzf, Distro::Arch) => Some("fzf"),
+        (PackagePurpose::Fzf, Distro::Fedora) => Some("fzf"),
+
+        // zoxide - smart cd
+        (PackagePurpose::Zoxide, Distro::Debian) => Some("zoxide"),
+        (PackagePurpose::Zoxide, Distro::Arch) => Some("zoxide"),
+        (PackagePurpose::Zoxide, Distro::Fedora) => Some("zoxide"),
+
+        // resvg - SVG preview (may not be in all repos)
+        (PackagePurpose::Resvg, Distro::Debian) => None, // Not in standard repos
+        (PackagePurpose::Resvg, Distro::Arch) => Some("resvg"),
+        (PackagePurpose::Resvg, Distro::Fedora) => None, // Not in standard repos
+
+        // ImageMagick - image preview/conversion
+        (PackagePurpose::ImageMagick, Distro::Debian) => Some("imagemagick"),
+        (PackagePurpose::ImageMagick, Distro::Arch) => Some("imagemagick"),
+        (PackagePurpose::ImageMagick, Distro::Fedora) => Some("ImageMagick"),
+
         // Unknown distro - return None
         (_, Distro::Unknown) => None,
         (_, Distro::Macos) => None, // Handle macOS separately if needed
@@ -267,6 +340,39 @@ pub fn get_build_tools_install_command(distro: Distro) -> String {
         Distro::Arch => "sudo pacman -S --noconfirm --needed base-devel".to_string(),
         _ => "# Please install build tools manually".to_string(),
     }
+}
+
+/// Returns all yazi addon package purposes
+pub fn get_yazi_addon_purposes() -> Vec<PackagePurpose> {
+    vec![
+        PackagePurpose::Ffmpeg,
+        PackagePurpose::P7zip,
+        PackagePurpose::Jq,
+        PackagePurpose::Poppler,
+        PackagePurpose::Fd,
+        PackagePurpose::Ripgrep,
+        PackagePurpose::Fzf,
+        PackagePurpose::Zoxide,
+        PackagePurpose::Resvg,
+        PackagePurpose::ImageMagick,
+    ]
+}
+
+/// Returns yazi addon package names for a distribution
+pub fn get_yazi_addon_packages(distro: Distro) -> Vec<String> {
+    get_package_names(&get_yazi_addon_purposes(), distro)
+}
+
+/// Returns the yazi addon installation command for the distribution
+pub fn get_yazi_addons_install_command(distro: Distro, pm: &dyn PackageManager) -> String {
+    let packages = get_yazi_addon_packages(distro);
+
+    if packages.is_empty() {
+        // Fallback for distros without some packages
+        return "# Yazi addons: Please install ffmpeg 7zip jq poppler fd ripgrep fzf zoxide resvg imagemagick".to_string();
+    }
+
+    pm.install_command(&packages.iter().map(|s| s.as_str()).collect::<Vec<_>>())
 }
 
 #[cfg(test)]

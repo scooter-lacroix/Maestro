@@ -1,5 +1,5 @@
 use crate::{
-    message::pty::{MainShutdown, PtyOptions, PtyRequest, PtyResponse, PtyShutdown},
+    message::pty::{MainShutdown, PtyOptions, PtyRequest, PtyResponse, PtyShutdown, PtyOutputBarrier},
     prelude::*,
 };
 use postage::{broadcast, mpsc};
@@ -27,6 +27,10 @@ impl Message<PtyBus> for PtyResponse {
 
 impl Message<PtyBus> for PtyShutdown {
     type Channel = broadcast::Sender<Self>;
+}
+
+impl Message<PtyBus> for PtyOutputBarrier {
+    type Channel = mpsc::Sender<Self>;
 }
 
 pub struct MainPtyCarrier {

@@ -13,6 +13,7 @@ pub mod memory;
 pub mod projects;
 pub mod sessions;
 pub mod settings;
+pub mod tracklens;
 
 // Re-export commonly used functions for convenience
 pub use analysis::render_analysis;
@@ -24,3 +25,4 @@ pub use memory::render_memory;
 pub use projects::render_projects;
 pub use sessions::{render_sessions, session_log_tail};
 pub use settings::render_settings;
+pub use tracklens::render_tracklens;

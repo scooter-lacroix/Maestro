@@ -7,6 +7,7 @@ use crate::{
     message::terminal::TerminalSend,
     message::terminal::TerminalShutdown,
     prelude::*,
+    state::fuzzy::FuzzyEntryState,
     state::fuzzy::FuzzyMatchState,
     state::fuzzy::FuzzyOutputEvent,
     state::fuzzy::FuzzyQueryState,
@@ -47,6 +48,10 @@ impl Message<FuzzyBus> for FuzzyOutputEvent {
 
 impl Message<FuzzyBus> for FuzzyShutdown {
     type Channel = mpsc::Sender<Self>;
+}
+
+impl Message<FuzzyBus> for FuzzyEntryState {
+    type Channel = watch::Sender<Self>;
 }
 
 impl Resource<FuzzyBus> for FuzzyEscapeState {}

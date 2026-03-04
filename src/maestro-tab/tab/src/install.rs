@@ -312,7 +312,7 @@ impl PackageBuilder {
         path: PathBuf,
         permissions: Permissions,
         description: Desc,
-    ) -> ScriptBuilder
+    ) -> ScriptBuilder<'_>
     where
         Desc: ToString,
     {

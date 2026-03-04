@@ -1,0 +1,16 @@
+{
+  "project_id": "maestro-claw",
+  "generation": "eda44910dbe3c6e51a7fb489be9a55869bbff00cb7c7b365cbb50160dcaa52df",
+  "phase": 2,
+  "options_hash": null,
+  "payload": {
+    "internal_import_edges": 103,
+    "external_import_edges": 316,
+    "unresolved_modules": 205,
+    "confidence_bands": [
+      103,
+      0,
+      316
+    ]
+  }
+}

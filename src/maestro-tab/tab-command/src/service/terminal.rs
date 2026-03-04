@@ -68,10 +68,31 @@ pub struct TerminalService {
     _terminal_event: TerminalEventService,
 }
 
+/// Holds service lifelines to keep them alive during mode switches.
+/// The fields are accessed in the Drop implementation to ensure proper cleanup.
 enum ServiceLifeline {
     Echo(TerminalEchoService),
     FuzzyFinder(FuzzyFinderService, TerminalFuzzyCarrier),
     None,
+}
+
+impl Drop for ServiceLifeline {
+    fn drop(&mut self) {
+        // Match on each variant to acknowledge the fields exist and trigger their drops
+        match self {
+            ServiceLifeline::Echo(service) => {
+                debug!("Dropping TerminalEchoService");
+                // service will be dropped here
+                let _ = service;
+            }
+            ServiceLifeline::FuzzyFinder(service, carrier) => {
+                debug!("Dropping FuzzyFinderService and carrier");
+                // both will be dropped here
+                let _ = (service, carrier);
+            }
+            ServiceLifeline::None => {}
+        }
+    }
 }
 
 impl Service for TerminalService {
@@ -106,6 +127,7 @@ impl Service for TerminalService {
                 let reset_terminal = mode != current_mode;
 
                 if reset_terminal && restart {
+                    // Drop the old service explicitly, which triggers cleanup via the Drop impl
                     drop(service);
                     reset_terminal_state();
                     Self::set_raw_mode(&mode);
@@ -133,10 +155,12 @@ impl Service for TerminalService {
 impl TerminalService {
     fn set_raw_mode(mode: &TerminalMode) {
         match mode {
-            TerminalMode::Echo(_) => {
+            TerminalMode::Echo(tab_id) => {
+                debug!("Setting raw mode for tab {:?}", tab_id);
                 enable_raw_mode(true);
             }
-            TerminalMode::FuzzyFinder(_) => {
+            TerminalMode::FuzzyFinder(back_tab) => {
+                debug!("Setting fuzzy finder mode, back tab: {:?}", back_tab);
                 enable_raw_mode(false);
             }
             TerminalMode::None => {

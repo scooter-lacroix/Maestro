@@ -997,6 +997,7 @@ dependencies = [
  "tab-websocket",
  "thiserror",
  "tokio",
+ "tokio-test",
  "tracing",
  "tungstenite",
 ]

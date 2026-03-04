@@ -1,0 +1,29 @@
+{
+  "project_id": "maestro-claw",
+  "generation": "eda44910dbe3c6e51a7fb489be9a55869bbff00cb7c7b365cbb50160dcaa52df",
+  "phase": 5,
+  "options_hash": "703fdb10",
+  "payload": {
+    "recommendations": [
+      {
+        "message": "Resolve 316 external import edges to improve dependency certainty",
+        "priority": 0.95,
+        "confidence": "External",
+        "rationale": "Unresolved imports lower phase-2 confidence and reduce graph precision"
+      },
+      {
+        "message": "Prioritize test/refactor work in top focus file: /run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/providers/anthropic.rs",
+        "priority": 0.8,
+        "confidence": "Heuristic",
+        "rationale": "Phase-3 forward impact indicates high fan-out from selected entry points"
+      },
+      {
+        "message": "Review hotspot /run/media/scooter/W.D-SSD/Prod/maestro/crates/maestro-claw/src/integration/security.rs:execute_command (complexity=7, impact=15)",
+        "priority": 0.5754687,
+        "confidence": "Heuristic",
+        "rationale": "HybridScorer combined complexity + graph impact + textual risk markers"
+      }
+    ],
+    "public_symbol_hints": 0
+  }
+}

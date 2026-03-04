@@ -35,6 +35,12 @@ pub enum IntegrationTool {
     Amp,
     /// Factory Droid CLI
     Droid,
+    /// Pi-Mono (Pi AI integration)
+    Pi,
+    /// OMP (Oh My Pi)
+    Omp,
+    /// iFlow (Intelligent Flow Agent)
+    Iflow,
 }
 
 impl IntegrationTool {
@@ -48,6 +54,9 @@ impl IntegrationTool {
             IntegrationTool::Qwen,
             IntegrationTool::Amp,
             IntegrationTool::Droid,
+            IntegrationTool::Pi,
+            IntegrationTool::Omp,
+            IntegrationTool::Iflow,
         ]
     }
 
@@ -71,6 +80,9 @@ impl IntegrationTool {
             IntegrationTool::Qwen => Some(Utf8PathBuf::from(format!("{}/.qwen", home_str))),
             IntegrationTool::Amp => Some(Utf8PathBuf::from(format!("{}/.config/amp", home_str))),
             IntegrationTool::Droid => Some(Utf8PathBuf::from(format!("{}/.factory", home_str))),
+            IntegrationTool::Pi => Some(Utf8PathBuf::from(format!("{}/.pi", home_str))),
+            IntegrationTool::Omp => Some(Utf8PathBuf::from(format!("{}/.omp", home_str))),
+            IntegrationTool::Iflow => Some(Utf8PathBuf::from(format!("{}/.iflow", home_str))),
         }
     }
 
@@ -83,6 +95,9 @@ impl IntegrationTool {
             IntegrationTool::Codex => Some(config.join("prompts")),
             IntegrationTool::Gemini => Some(config.join("commands/maestro")),
             IntegrationTool::Qwen => Some(config.join("commands/maestro")),
+            IntegrationTool::Pi => Some(config.join("commands/maestro")),
+            IntegrationTool::Omp => Some(config.join("commands/maestro")),
+            IntegrationTool::Iflow => Some(config.join("commands/maestro")),
             IntegrationTool::Amp | IntegrationTool::Droid => None, // MCP-only
         }
     }
@@ -98,6 +113,9 @@ impl IntegrationTool {
             IntegrationTool::Qwen => Some(config.join("settings.json")),
             IntegrationTool::Amp => Some(config.join("settings.json")),
             IntegrationTool::Droid => Some(config.join("mcp.json")),
+            IntegrationTool::Pi => Some(config.join("settings.json")),
+            IntegrationTool::Omp => Some(config.join("settings.json")),
+            IntegrationTool::Iflow => Some(config.join("settings.json")),
         }
     }
 
@@ -120,7 +138,7 @@ impl IntegrationTool {
         };
 
         match self {
-            IntegrationTool::Claude | IntegrationTool::Gemini | IntegrationTool::Qwen => json!({
+            IntegrationTool::Claude | IntegrationTool::Gemini | IntegrationTool::Qwen | IntegrationTool::Pi | IntegrationTool::Omp | IntegrationTool::Iflow => json!({
                 "command": command,
                 "args": ["mcp", "proxy", "leindex"]
             }),
@@ -153,7 +171,7 @@ impl IntegrationTool {
         match self {
             IntegrationTool::Claude => Some("mcpServers"),
             IntegrationTool::OpenCode => Some("mcp"),
-            IntegrationTool::Gemini | IntegrationTool::Qwen => Some("mcpServers"),
+            IntegrationTool::Gemini | IntegrationTool::Qwen | IntegrationTool::Pi | IntegrationTool::Omp | IntegrationTool::Iflow => Some("mcpServers"),
             IntegrationTool::Amp => Some("amp.mcpServers"),
             IntegrationTool::Droid => Some("mcpServers"),
             IntegrationTool::Codex => None, // Uses TOML
@@ -1243,6 +1261,9 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             IntegrationTool::Codex => "codex",
             IntegrationTool::Amp => "amp",
             IntegrationTool::Droid => "droid",
+            IntegrationTool::Pi => "pi-mono",
+            IntegrationTool::Omp => "omp",
+            IntegrationTool::Iflow => "iflow",
         };
 
         match std::process::Command::new(binary_name)

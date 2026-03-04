@@ -44,7 +44,7 @@ tokio = { version = "1", features = ["full"] }
 
 # Web framework for API
 axum = "0.7"
-tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "fs", "trace", "limit"] }
 
 # Database
 rusqlite = { version = "0.32", optional = true }  # TEMP: Keep for migration support (feature: rusqlite) - no bundled to avoid conflicts with libsql
@@ -100,6 +100,8 @@ tempfile = "3.8"  # Secure temporary file creation for atomic writes
 base64 = "0.22"  # For libsql vector extension encoding
 hostname = "0.4"  # For session lock hostnames
 ignore = "0.4"  # Gitignore-style file filtering for edit detection
+portpicker = "0.1"  # Available port selection for TrackLens server
+open = "4.0"  # Browser opening for TrackLens review UI
 
 # Full-text search (preserves existing Tantivy capability)
 tantivy = "0.22"

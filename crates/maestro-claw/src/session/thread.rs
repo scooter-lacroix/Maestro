@@ -162,8 +162,19 @@ impl Thread {
     pub fn trim_old_turns(&mut self, keep: usize) {
         let keep = keep.max(1);
         if self.turns.len() > keep {
-            let drain_to = self.turns.len() - keep;
-            self.turns.drain(..drain_to);
+            // Preserve the first turn if it's a System message (system prompt)
+            let skip = if !self.turns.is_empty()
+                && matches!(self.turns[0].role, TurnRole::System)
+            {
+                1
+            } else {
+                0
+            };
+            let total_to_keep = keep + skip;
+            if self.turns.len() > total_to_keep {
+                let drain_to = self.turns.len() - keep;
+                self.turns.drain(skip..drain_to);
+            }
         }
     }
 

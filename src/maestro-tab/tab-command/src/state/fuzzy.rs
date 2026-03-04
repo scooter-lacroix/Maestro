@@ -80,9 +80,26 @@ pub struct FuzzyOutputMatch {
     pub doc: Option<Vec<Token>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FuzzyEntryState {
     pub entries: Vec<Arc<TabEntry>>,
+}
+
+impl FuzzyEntryState {
+    /// Get the number of entries
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if there are no entries
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get the entries
+    pub fn entries(&self) -> &[Arc<TabEntry>] {
+        &self.entries
+    }
 }
 
 #[derive(Debug, Clone)]

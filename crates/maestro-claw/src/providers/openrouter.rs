@@ -287,6 +287,7 @@ struct OpenRouterFunctionDef {
 }
 
 /// OpenRouter response format (OpenAI-compatible)
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenRouterResponse {
     id: String,
@@ -296,6 +297,7 @@ struct OpenRouterResponse {
     usage: Option<OpenRouterUsage>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenRouterChoice {
     index: u32,
@@ -303,6 +305,7 @@ struct OpenRouterChoice {
     finish_reason: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenRouterMessage {
     role: String,
@@ -310,6 +313,7 @@ struct OpenRouterMessage {
     tool_calls: Option<Vec<OpenRouterToolCall>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenRouterToolCall {
     id: String,
@@ -324,6 +328,7 @@ struct OpenRouterFunction {
     arguments: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct OpenRouterUsage {
     prompt_tokens: u64,
@@ -455,8 +460,7 @@ impl Provider for OpenRouterProvider {
                         match carry.find('\n') {
                             Some(pos) => {
                                 let line = carry[..pos].trim_end_matches('\r').to_string();
-                                let tail = carry[pos + 1..].to_string();
-                                *carry = tail;
+                                carry.drain(..=pos);
 
                                 if !line.starts_with("data: ") {
                                     continue;
@@ -564,27 +568,9 @@ impl Provider for OpenRouterProvider {
     }
 
     async fn warmup(&self) -> Result<(), ProviderError> {
-        let messages = vec![serde_json::json!({
-            "role": "user",
-            "content": "Hi"
-        })];
-        let body = self.build_request_body(messages, None, false);
-
-        let response = self
-            .client
-            .post(format!("{}/chat/completions", self.api_url()))
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(map_network_error)?;
-
-        if response.status() == 401 {
-            return Err(ProviderError::AuthenticationFailed("Invalid API key".to_string()));
-        }
-
-        Ok(())
+        // Delegate to health_check() which uses the /models endpoint
+        // instead of wasting tokens with a chat completion
+        self.health_check().await
     }
 
     async fn health_check(&self) -> Result<(), ProviderError> {

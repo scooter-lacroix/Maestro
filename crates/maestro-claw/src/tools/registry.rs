@@ -55,8 +55,8 @@ impl ToolRegistry {
     }
 
     /// List all registered tool names
-    pub fn list(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
+    pub fn list(&self) -> Vec<&str> {
+        self.tools.keys().map(|s| s.as_str()).collect()
     }
 
     /// Export all tools as provider specs

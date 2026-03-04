@@ -54,6 +54,18 @@ impl Session {
         }
     }
 
+    /// Create a new session with a display name
+    pub fn named(title: impl Into<String>) -> Self {
+        let mut session = Self::new();
+        session.metadata.insert("title".to_string(), title.into());
+        session
+    }
+
+    /// Get the session title (if set)
+    pub fn title(&self) -> Option<&str> {
+        self.metadata.get("title").map(|s| s.as_str())
+    }
+
     /// Get the session ID
     pub fn id(&self) -> &str {
         &self.id

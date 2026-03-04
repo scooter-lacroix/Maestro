@@ -79,6 +79,16 @@ impl MaestroTabClient {
         self.request_tx.send(request).await?;
         Ok(())
     }
+
+    /// Receive a response from the daemon
+    pub async fn recv_response(&mut self) -> Option<Request> {
+        self.response_rx.recv().await
+    }
+
+    /// Try to receive a response without blocking
+    pub fn try_recv_response(&mut self) -> Result<Request, mpsc::error::TryRecvError> {
+        self.response_rx.try_recv()
+    }
 }
 
 /// Errors specific to the Maestro-tab integration

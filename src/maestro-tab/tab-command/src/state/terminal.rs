@@ -6,6 +6,23 @@ use crate::env::terminal_size;
 #[derive(Clone, Debug)]
 pub struct TerminalSizeState(pub (u16, u16));
 
+impl TerminalSizeState {
+    /// Get the terminal dimensions as (cols, rows)
+    pub fn dimensions(&self) -> (u16, u16) {
+        self.0
+    }
+
+    /// Get the number of columns
+    pub fn cols(&self) -> u16 {
+        self.0 .0
+    }
+
+    /// Get the number of rows
+    pub fn rows(&self) -> u16 {
+        self.0 .1
+    }
+}
+
 impl Default for TerminalSizeState {
     fn default() -> Self {
         let dimensions = terminal_size().expect("failed to get terminal size");

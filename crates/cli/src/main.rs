@@ -16,7 +16,7 @@ use leindex_core::cli::orchestrate;
 
 // Local CLI commands
 mod commands;
-use commands::{configure, pi_agents, pi_status, pi_test};
+use commands::{configure, pi_agents, pi_status, pi_test, tracklens};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -167,6 +167,12 @@ enum Commands {
         /// Output in JSON format
         #[arg(long)]
         json: bool,
+    },
+
+    /// TrackLens review and walkthrough
+    TrackLens {
+        #[command(subcommand)]
+        command: tracklens::TrackLensCommands,
     },
 }
 
@@ -499,5 +505,6 @@ async fn main() -> Result<()> {
             verbose,
             json,
         } => pi_agents::run(config, verbose, json).await,
+        Commands::TrackLens { command } => tracklens::run(command).await,
     }
 }

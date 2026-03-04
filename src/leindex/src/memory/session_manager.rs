@@ -224,28 +224,53 @@ impl SessionManager {
 
         match tool.to_lowercase().as_str() {
             "claude" => Ok(format!(
-                "export EDITOR={}; cd {} && claude --strict-mcp-config --mcp-config {}",
+                "export EDITOR={}; builtin cd {} && claude --strict-mcp-config --mcp-config {}",
                 editor, escaped_project, mcp_config
             )),
             "gemini" => Ok(format!(
-                "export EDITOR={}; cd {} && gemini",
-                editor, escaped_project
+                "export EDITOR={}; builtin cd {} && gemini --mcp-config {}",
+                editor, escaped_project, mcp_config
             )),
             "amp" => Ok(format!(
-                "export EDITOR={}; cd {} && amp",
+                "export EDITOR={}; builtin cd {} && amp",
                 editor, escaped_project
             )),
             "opencode" => Ok(format!(
-                "export EDITOR={}; cd {} && opencode",
+                "export EDITOR={}; builtin cd {} && opencode",
                 editor, escaped_project
             )),
             "codex" => Ok(format!(
-                "export EDITOR={}; cd {} && codex -c 'mcp_servers={{}}' -c 'mcp_servers.maestro_tool_search.command=\"maestro\"' -c 'mcp_servers.maestro_tool_search.args=[\"mcp\",\"tool-search\"]'",
+                "export EDITOR={}; builtin cd {} && codex -c 'mcp_servers={{}}' -c 'mcp_servers.maestro_tool_search.command=\"maestro\"' -c 'mcp_servers.maestro_tool_search.args=[\"mcp\",\"tool-search\"]'",
                 editor, escaped_project
             )),
+            "qwen" => Ok(format!(
+                "export EDITOR={}; builtin cd {} && qwen --mcp-config {}",
+                editor, escaped_project, mcp_config
+            )),
+            "pi" | "pi-mono" => Ok(format!(
+                "export EDITOR={}; builtin cd {} && pi-mono --mcp-config {}",
+                editor, escaped_project, mcp_config
+            )),
+            "omp" => Ok(format!(
+                "export EDITOR={}; builtin cd {} && omp --mcp-config {}",
+                editor, escaped_project, mcp_config
+            )),
+            "iflow" => {
+                // iFlow uses project-scoped MCP servers, not a --mcp-config flag.
+                // We add the maestro-tool-search server at PROJECT scope before launching.
+                // This keeps user's global settings.json untouched while providing
+                // maestro tool search within maestro-launched sessions.
+                let add_mcp_cmd = format!(
+                    "iflow mcp add maestro-tool-search maestro mcp tool-search --scope project --trust 2>/dev/null || true"
+                );
+                Ok(format!(
+                    "export EDITOR={}; builtin cd {} && {} && iflow",
+                    editor, escaped_project, add_mcp_cmd
+                ))
+            }
             "shell" | _ => {
                 // Default to interactive shell
-                Ok(format!("export EDITOR={}; cd {}", editor, escaped_project))
+                Ok(format!("export EDITOR={}; builtin cd {}", editor, escaped_project))
             }
         }
     }
