@@ -33,26 +33,37 @@ import {
 } from "@maestro/tracklens-server/annotate";
 import { getGitContext, runGitDiff } from "@maestro/tracklens-server/git";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { dirname, resolve } from "path";
 
 // Load HTML at runtime (since compile-time imports don't work from dist/)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const projectRoot = process.env.CLAUDE_PROJECT_DIR || resolve(__dirname, "..", "..", "..");
 
-// When running from dist/index.js, we need to go up to the packages directory
-async function loadHtmlContent(filename: string): Promise<string> {
-  const path = `${__dirname}/../../../packages/${filename}`;
-  const file = Bun.file(path);
-  if (await file.exists()) {
-    return await file.text();
+async function loadHtmlContent(paths: string[]): Promise<string> {
+  for (const candidate of paths) {
+    const file = Bun.file(candidate);
+    if (await file.exists()) {
+      return await file.text();
+    }
   }
-  // Provide more context in error message
-  throw new Error(`Could not load ${filename} from ${path}\nCurrent directory: ${__dirname}\nEnsure packages are built: bun run build`);
+
+  throw new Error(
+    `Could not load TrackLens HTML asset.\nChecked:\n${paths.join("\n")}\nCurrent directory: ${__dirname}\nProject root: ${projectRoot}\nEnsure packages are built: bun run build`
+  );
 }
 
 // Load HTML content at startup (top-level await)
-const planHtmlContent = await loadHtmlContent("tracklens-editor/dist/index.html");
-const reviewHtmlContent = await loadHtmlContent("tracklens-review-editor/dist/index.html");
+const planHtmlContent = await loadHtmlContent([
+  resolve(__dirname, "index.html"),
+  resolve(__dirname, "..", "dist", "index.html"),
+  resolve(projectRoot, "packages", "tracklens-editor", "dist", "index.html"),
+]);
+const reviewHtmlContent = await loadHtmlContent([
+  resolve(__dirname, "review.html"),
+  resolve(__dirname, "..", "dist", "review.html"),
+  resolve(projectRoot, "packages", "tracklens-review-editor", "dist", "index.html"),
+]);
 const annotateHtmlContent = reviewHtmlContent;
 
 // Check for subcommand
@@ -83,24 +94,24 @@ if (args[0] === "review") {
     htmlContent: reviewHtmlContent,
   });
 
-  // Wait for user feedback
-  const result = await server.waitForDecision();
+  try {
+    const result = await server.waitForDecision();
 
-  // Give browser time to receive response and update UI
-  await Bun.sleep(1500);
+    await Bun.sleep(1500);
 
-  // Output feedback to stdout (captured by slash command)
-  if (result.feedback) {
-    console.log(result.feedback);
+    if (result.feedback) {
+      console.log(result.feedback);
+    }
+
+    if (result.agentSwitch) {
+      console.log(`\n[TrackLens] Switching to agent: ${result.agentSwitch}`);
+      // Claude Code will handle the agent switch based on stdout
+    }
+
+    process.exit(result.feedback ? 0 : 1);
+  } finally {
+    server.stop();
   }
-
-  // Handle agent switch
-  if (result.agentSwitch) {
-    console.log(`\n[TrackLens] Switching to agent: ${result.agentSwitch}`);
-    // Claude Code will handle the agent switch based on stdout
-  }
-
-  process.exit(result.feedback ? 0 : 1);
 } else if (args[0] === "annotate") {
   // ============================================
   // ANNOTATE MODE
@@ -130,18 +141,19 @@ if (args[0] === "review") {
     htmlContent: annotateHtmlContent,
   });
 
-  // Wait for user feedback
-  const result = await server.waitForDecision();
+  try {
+    const result = await server.waitForDecision();
 
-  // Give browser time to receive response and update UI
-  await Bun.sleep(1500);
+    await Bun.sleep(1500);
 
-  // Output feedback to stdout
-  if (result.feedback) {
-    console.log(result.feedback);
+    if (result.feedback) {
+      console.log(result.feedback);
+    }
+
+    process.exit(result.feedback ? 0 : 1);
+  } finally {
+    server.stop();
   }
-
-  process.exit(result.feedback ? 0 : 1);
 } else {
   // ============================================
   // PLAN REVIEW MODE (default, hook-invoked)

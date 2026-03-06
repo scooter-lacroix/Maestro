@@ -88,7 +88,7 @@ Automatically detect pi-mono installation, validate subagent extension, and disc
 #### 1.1 CLI Tool Detection (maestro/utils/cli_detection.py)
 
 Key features:
-- Search paths: /home/stan/pi-mono/pi, ~/.local/bin/pi, /usr/local/bin/pi
+- Search paths: `<path-to-pi-mono-binary>`, `~/.local/bin/pi`, `/usr/local/bin/pi`
 - Validation: Check for subagent extension and CLI
 - Version detection
 - Capability detection (subagent, streaming, parallel, chain)
@@ -149,7 +149,7 @@ class ModelTier(Enum):
 # ~/.maestro/config/pi-mono.yaml
 version: "1.0"
 enabled: true
-path: "/home/stan/pi-mono/pi"
+path: "<path-to-pi-mono-binary>"
 version_info: "0.49.3"
 
 providers:
@@ -273,7 +273,7 @@ DEFAULT_ROLE_MAPPINGS = {
 **Sample Session:**
 ```
 🔍 Detecting pi-mono installation...
-✅ Found pi-mono at: /home/stan/pi-mono/pi
+✅ Found pi-mono at: <path-to-pi-mono-binary>
    Version: 0.49.3
    Subagent extension: configured
 
@@ -428,7 +428,7 @@ DEFAULT_WORKFLOWS = {
 
 ```python
 runner = PiSubagentRunner(
-    pi_path="/home/stan/pi-mono/pi",
+    pi_path="<path-to-pi-mono-binary>",
     config=config,
 )
 
@@ -616,7 +616,7 @@ maestro/cli.py                    # Add pi-mono CLI commands
 # ~/.maestro/config/pi-mono.yaml
 version: "1.0"
 enabled: true
-path: "/home/stan/pi-mono/pi"
+path: "<path-to-pi-mono-binary>"
 version_info: "0.49.3"
 
 providers:
@@ -714,7 +714,7 @@ config.save()
 
 ```python
 runner = PiSubagentRunner(
-    pi_path="/home/stan/pi-mono/pi",
+    pi_path="<path-to-pi-mono-binary>",
     config=config,
 )
 
@@ -743,4 +743,4 @@ result = await runner.execute_chain([
 
 **Document Version:** 1.0  
 **Last Updated:** January 22, 2026  
-**Location:** /home/stan/Prod/maestro/PI_MONO_INTEGRATION_PLAN.md
+**Location:** `<repo-root>/PI_MONO_INTEGRATION_PLAN.md`
