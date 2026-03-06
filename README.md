@@ -167,7 +167,6 @@ MaestroClaw is the unified agent execution layer for Maestro, providing comprehe
 - Enhanced tool registry and built-in tools
 - File, memory, and shell tools with proper security
 
-**Documentation**: [MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md](docs/MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md) | [MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md](docs/MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md)
 
 ### Tracklens - Walkthrough System
 
