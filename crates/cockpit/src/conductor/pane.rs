@@ -8,17 +8,79 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use std::path::{Path, PathBuf};
-
-use leindex_analyzers::orchestrate::{
-    model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode, IterationLog, IterationStatus},
-    parser::{parse_tracks_md, parse_plan_md},
-    setup::{SetupStatus, detect_setup_status, AgentTool},
+use maestro_pi_mono::agents::mapping::AgentRole;
+use leindex_core::{
+    multiplexer::TmuxMultiplexer,
+    orchestrate::{
+        model::{
+            IterationLog, IterationStatus, LoopMode, SessionState, SessionStatus, Task, Track,
+            TrackPlan, TrackStatus,
+        },
+        parser::{parse_plan_md, parse_tracks_md},
+        setup::{detect_setup_status, AgentTool, SetupStatus},
+    },
 };
-use leindex_analyzers::multiplexer::TmuxMultiplexer;
+use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use tokio_util::sync::CancellationToken;
 
 use super::model::ConductorState;
+use super::{
+    input_modal::InputModal, memory_browser::MemoryBrowser, selector_modal::SelectorModal,
+};
 use crate::maestro_paths::MaestroProject;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandArgs {
+    program: String,
+    args: Vec<String>,
+}
+
+impl CommandArgs {
+    pub fn new(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+            args: Vec::new(),
+        }
+    }
+
+    pub fn push_arg(&mut self, arg: impl Into<String>) {
+        self.args.push(arg.into());
+    }
+
+    pub fn push_flag(&mut self, flag: &str) {
+        self.args.push(flag.to_string());
+    }
+
+    pub fn spawn_detached(&self) -> std::io::Result<std::process::Child> {
+        use std::process::{Command, Stdio};
+
+        Command::new(&self.program)
+            .args(&self.args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
+
+    fn render_arg(arg: &str) -> String {
+        if arg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':')) {
+            arg.to_string()
+        } else {
+            format!("'{}'", arg.replace('\'', "'\\''"))
+        }
+    }
+}
+
+impl std::fmt::Display for CommandArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", Self::render_arg(&self.program))?;
+        for arg in &self.args {
+            write!(f, " {}", Self::render_arg(arg))?;
+        }
+        Ok(())
+    }
+}
 
 /// Setup state for the conductor pane
 #[derive(Debug, Clone)]
@@ -90,12 +152,26 @@ pub struct ConductorPane {
     pub show_dashboard: bool,
     /// Current Maestro project info
     pub current_project: Option<MaestroProject>,
+    /// Steering input modal
+    pub steering_modal: InputModal,
+    /// Iteration-limit input modal
+    pub iter_modal: InputModal,
+    /// Generic selector modal
+    pub selector_modal: SelectorModal,
+    /// Memory browser overlay
+    pub memory_browser: MemoryBrowser,
+    /// Active cancellation token for background execution
+    pub cancellation_token: Option<Arc<CancellationToken>>,
 }
 
 impl Default for ConductorPane {
     fn default() -> Self {
         Self {
-            state: ConductorState::default(),
+            state: {
+                let mut state = ConductorState::default();
+                state.omp_available = crate::omp::is_omp_available();
+                state
+            },
             selected_index: 0,
             details_mode: crate::conductor::model::DetailsViewMode::Details,
             tracks: Vec::new(),
@@ -117,6 +193,16 @@ impl Default for ConductorPane {
             setup: Default::default(),
             show_dashboard: false,
             current_project: None,
+            steering_modal: InputModal::new("Steering Message", "Enter guidance for the next iteration:"),
+            iter_modal: InputModal::new("Max Iterations", "Enter max iterations (0 = unlimited):"),
+            selector_modal: SelectorModal {
+                title: String::new(),
+                items: Vec::new(),
+                selected: 0,
+                visible: false,
+            },
+            memory_browser: MemoryBrowser::default(),
+            cancellation_token: None,
         }
     }
 }
@@ -204,28 +290,28 @@ impl ConductorPane {
                             if session_path.exists() {
                                 if let Ok(content) = std::fs::read_to_string(&session_path) {
                                     if let Ok(session) =
-                                        serde_json::from_str::<leindex_analyzers::orchestrate::model::SessionState>(&content)
+                                        serde_json::from_str::<SessionState>(&content)
                                     {
                                         // Skip completed/failed sessions to avoid stale phantom entries.
                                         if matches!(
                                             session.status,
-                                            leindex_analyzers::orchestrate::model::SessionStatus::Completed
-                                                | leindex_analyzers::orchestrate::model::SessionStatus::Failed
-                                                | leindex_analyzers::orchestrate::model::SessionStatus::Interrupted
-                                                | leindex_analyzers::orchestrate::model::SessionStatus::Idle
+                                            SessionStatus::Completed
+                                                | SessionStatus::Failed
+                                                | SessionStatus::Interrupted
+                                                | SessionStatus::Idle
                                         ) {
                                             continue;
                                         }
 
                                         let track_status = match session.status {
-                                            leindex_analyzers::orchestrate::model::SessionStatus::Running
-                                            | leindex_analyzers::orchestrate::model::SessionStatus::Paused => {
-                                                leindex_analyzers::orchestrate::model::TrackStatus::InProgress
+                                            SessionStatus::Running
+                                            | SessionStatus::Paused => {
+                                                TrackStatus::InProgress
                                             }
-                                            leindex_analyzers::orchestrate::model::SessionStatus::Completed => {
-                                                leindex_analyzers::orchestrate::model::TrackStatus::Completed
+                                            SessionStatus::Completed => {
+                                                TrackStatus::Completed
                                             }
-                                            _ => leindex_analyzers::orchestrate::model::TrackStatus::Pending,
+                                            _ => TrackStatus::Pending,
                                         };
 
                                         // Create a placeholder Track for this external session
@@ -287,9 +373,9 @@ impl ConductorPane {
                     id: log.task_id.clone(),
                     title: log.task_id.clone(), // Use ID as title for virtual tasks
                     status: match log.status {
-                        IterationStatus::Completed => leindex_analyzers::orchestrate::model::TrackStatus::Completed,
-                        IterationStatus::Running => leindex_analyzers::orchestrate::model::TrackStatus::InProgress,
-                        _ => leindex_analyzers::orchestrate::model::TrackStatus::Pending,
+                        IterationStatus::Completed => TrackStatus::Completed,
+                        IterationStatus::Running => TrackStatus::InProgress,
+                        _ => TrackStatus::Pending,
                     },
                     dependencies: Vec::new(),
                     description: "Synthesized from iteration history".to_string(),
@@ -300,8 +386,8 @@ impl ConductorPane {
             } else if let Some(t) = tasks.iter_mut().find(|t| t.id == log.task_id) {
                 // Update status to latest
                 t.status = match log.status {
-                    IterationStatus::Completed => leindex_analyzers::orchestrate::model::TrackStatus::Completed,
-                    IterationStatus::Running => leindex_analyzers::orchestrate::model::TrackStatus::InProgress,
+                    IterationStatus::Completed => TrackStatus::Completed,
+                    IterationStatus::Running => TrackStatus::InProgress,
                     _ => t.status,
                 };
             }
@@ -595,7 +681,19 @@ impl ConductorPane {
     ) {
         let is_expanded = self.expanded_tasks.contains(&task.id);
         let has_children = !task.subtasks.is_empty();
-        
+        let completed_tasks = self.collect_completed_tasks();
+        let dependency_statuses = task
+            .dependencies
+            .iter()
+            .map(|dep| match completed_tasks.get(&dep.task_id).copied().unwrap_or(false) {
+                true => crate::conductor::model::DependencyStatus::Completed,
+                false if dep.dependency_type == leindex_core::orchestrate::model::TaskDependencyType::Hard => {
+                    crate::conductor::model::DependencyStatus::Blocked
+                }
+                false => crate::conductor::model::DependencyStatus::Pending,
+            })
+            .collect();
+
         items.push(crate::conductor::model::SelectableItem::Task {
             id: task.id.clone(),
             title: task.title.clone(),
@@ -603,6 +701,12 @@ impl ConductorPane {
             status: task.status,
             has_children,
             is_expanded,
+            description: task.description.clone(),
+            notes: task.notes.clone().unwrap_or_default(),
+            is_blocked: task.is_blocked(&completed_tasks),
+            is_actionable: task.is_actionable(&completed_tasks),
+            dependencies: task.dependencies.clone(),
+            dependency_statuses,
         });
         
         if is_expanded {
@@ -610,6 +714,23 @@ impl ConductorPane {
                 self.add_tasks_to_selectable_items(subtask, depth + 1, items);
             }
         }
+    }
+
+    fn collect_completed_tasks(&self) -> std::collections::HashMap<String, bool> {
+        fn visit(task: &Task, map: &mut std::collections::HashMap<String, bool>) {
+            map.insert(task.id.clone(), task.status == TrackStatus::Completed);
+            for subtask in &task.subtasks {
+                visit(subtask, map);
+            }
+        }
+
+        let mut completed = std::collections::HashMap::new();
+        if let Some(plan) = self.cached_plan.as_ref() {
+            for task in &plan.tasks {
+                visit(task, &mut completed);
+            }
+        }
+        completed
     }
 
     /// Internal helper to load plan without borrowing self.tracks
@@ -827,10 +948,10 @@ impl ConductorPane {
     }
 
     /// Get the recommended start command for the current track
-    pub fn get_start_command(&mut self, tool: Option<&str>, dangerous: bool, sandbox: bool) -> String {
+    pub fn get_start_command(&mut self, tool: Option<&str>, dangerous: bool, sandbox: bool) -> Option<CommandArgs> {
         let track_idx = match self.get_selected_track_index() {
             Some(idx) => idx,
-            None => return "// No track selected".to_string(),
+            None => return None,
         };
 
         let track_id = &self.tracks[track_idx].id;
@@ -840,77 +961,105 @@ impl ConductorPane {
             LoopMode::Building => "building",
         };
 
-        let mut cmd = format!(
-            "maestro orchestrate start {} --mode {} --tool {}",
-            track_id, mode_str, tool
-        );
+        let mut cmd = CommandArgs::new("maestro");
+        cmd.push_arg("orchestrate");
+        cmd.push_arg("start");
+        cmd.push_arg(track_id);
+        cmd.push_arg("--mode");
+        cmd.push_arg(mode_str);
+        cmd.push_arg("--tool");
+        cmd.push_arg(tool);
 
         if dangerous {
-            cmd.push_str(" --dangerous");
+            cmd.push_flag("--dangerous");
         }
 
         if sandbox {
-            cmd.push_str(" --sandbox");
+            cmd.push_flag("--sandbox");
         }
 
-        cmd.push_str(&format!(" --tracks-dir {}", self.tracks_dir.display()));
+        cmd.push_arg("--tracks-dir");
+        cmd.push_arg(self.tracks_dir.display().to_string());
 
-        cmd
+        Some(cmd)
     }
 
     /// Get the recommended pause command for the current track
-    pub fn get_pause_command(&mut self) -> String {
+    pub fn get_pause_command(&mut self) -> Option<CommandArgs> {
         let track_idx = match self.get_selected_track_index() {
             Some(idx) => idx,
-            None => return "// No track selected".to_string(),
+            None => return None,
         };
 
         let track_id = &self.tracks[track_idx].id;
-        format!(
-            "maestro orchestrate pause {} --tracks-dir {}",
-            track_id,
-            self.tracks_dir.display()
-        )
+        let mut cmd = CommandArgs::new("maestro");
+        cmd.push_arg("orchestrate");
+        cmd.push_arg("pause");
+        cmd.push_arg(track_id);
+        cmd.push_arg("--tracks-dir");
+        cmd.push_arg(self.tracks_dir.display().to_string());
+        Some(cmd)
     }
 
     /// Get the recommended resume command for the current track
-    pub fn get_resume_command(&mut self) -> String {
+    pub fn get_resume_command(&mut self) -> Option<CommandArgs> {
         let track_idx = match self.get_selected_track_index() {
             Some(idx) => idx,
-            None => return "// No track selected".to_string(),
+            None => return None,
         };
 
         let track_id = &self.tracks[track_idx].id;
-        format!(
-            "maestro orchestrate resume {} --tracks-dir {}",
-            track_id,
-            self.tracks_dir.display()
-        )
+        let mut cmd = CommandArgs::new("maestro");
+        cmd.push_arg("orchestrate");
+        cmd.push_arg("resume");
+        cmd.push_arg(track_id);
+        cmd.push_arg("--tracks-dir");
+        cmd.push_arg(self.tracks_dir.display().to_string());
+        Some(cmd)
     }
 
     /// Get the recommended status command for the current track
-    pub fn get_status_command(&mut self) -> String {
-        let track_idx = match self.get_selected_track_index() {
-            Some(idx) => idx,
-            None => {
-                return format!(
-                    "maestro orchestrate status --tracks-dir {}",
-                    self.tracks_dir.display()
-                )
-            }
-        };
-
-        let track_id = &self.tracks[track_idx].id;
-        format!(
-            "maestro orchestrate status {} --tracks-dir {}",
-            track_id,
-            self.tracks_dir.display()
-        )
+    pub fn get_status_command(&mut self) -> CommandArgs {
+        let mut cmd = CommandArgs::new("maestro");
+        cmd.push_arg("orchestrate");
+        cmd.push_arg("status");
+        if let Some(track_idx) = self.get_selected_track_index() {
+            cmd.push_arg(&self.tracks[track_idx].id);
+        }
+        cmd.push_arg("--tracks-dir");
+        cmd.push_arg(self.tracks_dir.display().to_string());
+        cmd
     }
 
     /// Get the command to create a new track
     pub fn get_new_track_command(&self) -> String {
         "maestro newTrack".to_string()
+    }
+
+    pub fn poll_observed_sessions_sync(&mut self) {
+        let _ = self.load_tracks();
+    }
+
+    pub fn sync_orchestrate_sessions_blocking(&mut self) {
+        let _ = self.load_tracks();
+        self.state.current_track = self
+            .get_selected_track_index()
+            .and_then(|idx| self.tracks.get(idx))
+            .map(|track| track.id.clone());
+    }
+
+    pub fn cycle_agent_role(&mut self) -> AgentRole {
+        let current = match self.state.selected_agent_role.as_deref() {
+            Some("Scout") => Some(AgentRole::Scout),
+            Some("Architect") => Some(AgentRole::Architect),
+            Some("Critic") => Some(AgentRole::Critic),
+            Some("Kraken") => Some(AgentRole::Kraken),
+            _ => None,
+        };
+        let next = super::agent_executor::role_utils::cycle_role(&current);
+        self.state.selected_agent_role =
+            Some(super::agent_executor::role_utils::role_display_name(&next).to_string());
+        next
     }
 }
 

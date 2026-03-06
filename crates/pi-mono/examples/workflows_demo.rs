@@ -1,7 +1,6 @@
 // Test program to verify workflow API
 use maestro_pi_mono::{
-    default_presets, get_preset, preset_names, AgentRole, PiAgentType, WorkflowMode,
-    WorkflowPreset, WorkflowStep,
+    default_presets, get_preset, preset_names, AgentRole, PiAgentType, WorkflowStep,
 };
 
 fn main() {

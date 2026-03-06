@@ -141,7 +141,10 @@ mod tests {
             id: "test-1".to_string(),
             selection: TextSelection {
                 start: Position { line: 1, column: 0 },
-                end: Position { line: 2, column: 10 },
+                end: Position {
+                    line: 2,
+                    column: 10,
+                },
                 text: "selected text".to_string(),
             },
             content: AnnotationContent {

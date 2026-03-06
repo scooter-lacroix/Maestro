@@ -39,6 +39,7 @@ pub mod vector;
 // Re-export commonly used submodules for convenient access
 pub use lsp::*;
 // Re-export vector module contents but also keep vector module accessible for submodules like vector::report
+#[allow(ambiguous_glob_reexports)]
 pub use vector::*;
 
 pub use ast_analyzer::*;
@@ -53,6 +54,7 @@ pub use multi_lang_dfg::{
     FunctionDataFlow as MultiLangFunctionDataFlow, MultiLangDFGAnalyzer, MultiLangDFGResult,
 };
 pub use multi_lang_slicing::*;
+#[allow(ambiguous_glob_reexports)]
 pub use orchestrate::*;
 pub use slicing::*;
 
@@ -70,8 +72,8 @@ pub use multi_lang_ast::MultiLangASTAnalyzer;
 pub use multi_lang_callgraph::MultiLangCallGraphAnalyzer;
 pub use multi_lang_cfg::MultiLangCFGAnalyzer;
 // MultiLangDFGAnalyzer is already imported via wildcard above
-pub use multi_lang_slicing::MultiLangSlicingAnalyzer;
 pub use language::ProgrammingLanguage;
+pub use multi_lang_slicing::MultiLangSlicingAnalyzer;
 
 // Explicit re-exports for commonly used types
 pub use multiplexer::TmuxMultiplexer;
@@ -87,24 +89,24 @@ pub use memory::search::*;
 pub use memory::turso_backend::*;
 
 // Explicit re-exports for commonly used memory types
-pub use memory::models::Session as MemorySession;
-pub use memory::models::SessionGroup;
-pub use memory::models::SessionStatus as MemorySessionStatus;
+pub use memory::lsp_manager::LspType;
+#[cfg(feature = "rusqlite")]
+pub use memory::mcp_pool::McpPool;
 pub use memory::models::McpServer;
 pub use memory::models::McpStatus;
 pub use memory::models::Memory;
 pub use memory::models::MemoryCategory;
 pub use memory::models::MemoryImportance;
-pub use memory::lsp_manager::LspType;
-pub use memory::turso_backend::LspStatus;
-pub use memory::turso_backend::TursoStorageBackend;
+pub use memory::models::Session as MemorySession;
+pub use memory::models::SessionGroup;
+pub use memory::models::SessionStatus as MemorySessionStatus;
+#[cfg(feature = "rusqlite")]
+pub use memory::service::MemoryService;
 #[cfg(feature = "rusqlite")]
 pub use memory::session_manager::SessionManager;
 #[cfg(feature = "rusqlite")]
 pub use memory::session_manager::SessionRestoreMode;
-#[cfg(feature = "rusqlite")]
-pub use memory::service::MemoryService;
-#[cfg(feature = "rusqlite")]
-pub use memory::mcp_pool::McpPool;
+pub use memory::turso_backend::LspStatus;
+pub use memory::turso_backend::TursoStorageBackend;
 
 pub const MAX_FILE_SIZE: usize = 1048576; // 1MB

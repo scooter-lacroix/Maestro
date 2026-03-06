@@ -14,7 +14,7 @@ pub use leindex_core::*;
 use leindex_core::cli::implement::ImplementSessionTarget;
 use leindex_core::cli::integrate::{IntegrateAction, IntegrationTool};
 use leindex_core::cli::mcp;
-use leindex_core::cli::{analyze, implement, integrate, memory_impl as memory};
+use leindex_core::cli::{analyze, implement, integrate, memory_impl as mem_cmd};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]

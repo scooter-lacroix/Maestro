@@ -13,9 +13,9 @@ pub mod walkthrough;
 
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
-pub use server::{TrackLensServer, ServerConfig, ReviewContent, ReviewMetadata};
+pub use server::{ReviewContent, ReviewMetadata, ServerConfig, TrackLensServer};
 pub use types::*;
-pub use walkthrough::{WalkthroughGenerator, WalkthroughConfig};
+pub use walkthrough::{WalkthroughConfig, WalkthroughGenerator};
 
 // ─── Module Documentation ─────────────────────────────────────────────────────
 

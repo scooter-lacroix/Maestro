@@ -1,18 +1,69 @@
-# Maestro v2.5 - The Unified Development Framework
+# Maestro
 
 <div align="center">
 
-**Transform AI interactions into production-ready software**
+**The orchestration layer for AI-assisted software development**
 
 [![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/scooter-lacroix/Maestro?style=social)](https://github.com/scooter-lacroix/Maestro)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-supported-purple.svg)](docs/CLAUDE-CODE.md)
 [![OpenCode](https://img.shields.io/badge/OpenCode-supported-orange.svg)](docs/OPENCODE.md)
 [![Tests](https://img.shields.io/badge/tests-250%2B_passing-brightgreen.svg)](maestro/tracks/maestro-v2_20260110/)
 
 </div>
 
-## Overview
+If Maestro is useful to you, please [star the repository](https://github.com/scooter-lacroix/Maestro). The project already sees heavy clone activity, and stars help new users trust that the repo is alive and worth adopting.
+
+## What Maestro Is
+
+Maestro is not just a CLI, a skill pack, or a TUI.
+
+Maestro is the **control plane** that turns AI coding sessions into structured engineering workflows:
+
+- spec -> plan -> implement
+- tracked execution instead of chat drift
+- specialized agents instead of one undifferentiated model loop
+- review, memory, indexing, and orchestration in one system
+
+The easiest way to understand the repo is as two layers:
+
+### Layer 1: tools you can use directly
+
+- **LeIndex**: standalone codebase exploration and analysis
+- **TrackLens**: walkthrough and review UI
+- **Cockpit**: TUI control surface for sessions, orchestration, and runtime state
+
+### Layer 2: orchestration
+
+- **Maestro**: the workflow engine that coordinates specs, tracks, agents, hooks, memory, and execution
+
+If you only want code analysis, start with `leindex`.
+If you want deterministic AI-assisted implementation workflows, start with `maestro`.
+
+## Start Here
+
+### Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash
+```
+
+### Choose your entry point
+
+- `maestro` for spec-driven orchestration and workflow automation
+- `leindex` for standalone codebase search and analysis
+- `maestro tui` for the Rust cockpit interface
+- `TrackLens` when you need guided walkthrough and review surfaces
+
+### Read next
+
+- [Installation guide](docs/INSTALLATION.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [MaestroClaw parity matrix](docs/MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md)
+
+## Why This Repo Exists
 
 Maestro v2.5 is a major architectural evolution that unifies powerful systems into a cohesive, spec-driven development orchestration framework:
 
@@ -28,6 +79,10 @@ Maestro v2.5 is a major architectural evolution that unifies powerful systems in
 - **Conductor Engine** - Token-efficient track-based automation (inspired by Ralph TUI)
 - **Pi-Mono Integration** - Unified agent discovery, detection, and execution across mono-repos
 - **Cockpit TUI** - Rust-based Terminal UI for session, MCP, and orchestration management
+
+It exists to solve a specific problem: most AI development workflows are high-output but low-control.
+
+Maestro adds structure, memory, orchestration, and review so AI sessions can produce work that is inspectable, reproducible, and maintainable.
 
 Transform AI chat interactions into professional software engineering workflows with:
 
@@ -378,10 +433,10 @@ For the complete Maestro experience including the TUI and web dashboard for **Cl
 
 ```bash
 # One-line installer
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash
 
 # Or manually clone and install
-git clone https://github.com/scooter-lacroix/Maestro.git
+git clone --branch main https://github.com/scooter-lacroix/Maestro.git
 cd Maestro
 ./install.sh
 ```
@@ -402,7 +457,7 @@ Then in Claude Code or your selected tool:
 Maestro's unified installer automatically detects and configures all supported agents. Simply run:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash
 ```
 
 Then in OpenCode:
@@ -800,6 +855,21 @@ Maestro v2.5 includes comprehensive testing infrastructure:
 - **CI/CD ready** with pytest, coverage, and automated regression detection
 
 See [Maestro v2 Track](maestro/tracks/maestro-v2_20260110/) for implementation details.
+
+Validate the finalized build on `main` with:
+
+```bash
+git clone --branch main https://github.com/scooter-lacroix/Maestro.git
+cd Maestro
+bun install
+bun run build:tracklens
+cargo test --workspace
+```
+
+Quick validation:
+- Remote install entrypoint: `curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash`
+- Local install branch safety: `git branch --show-current` before and after `./install.sh`
+- Finalized `main` build: `bun run build:tracklens && cargo test --workspace`
 
 ## Contributing
 

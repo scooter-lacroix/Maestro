@@ -8,11 +8,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui::text::Line;
 
 use crate::state::McpOption;
-<<<<<<< HEAD
 use crate::theme::theme_from_name;
-=======
-use crate::theme::{theme_from_name, Theme};
->>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the MCP menu modal.
@@ -42,12 +38,12 @@ pub fn render_mcp_menu(frame: &mut Frame, app: &App) {
         .style(Style::default().bg(theme.panel_bg));
 
     let options = vec![
-        (McpOption::StartStop, "▶/■ Start/Stop Server"),
+        (McpOption::Start, "▶ Start Server"),
+        (McpOption::Stop, "■ Stop Server"),
         (McpOption::Pause, "⏸ Pause Connection"),
         (McpOption::Logs, "📋 View Server Logs"),
         (McpOption::Add, "➕ Add New Server"),
         (McpOption::Remove, "❌ Remove from Pool"),
-        (McpOption::Install, "🛠️ Install Component"),
     ];
 
     let mut list_items = Vec::new();

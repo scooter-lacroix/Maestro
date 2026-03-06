@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
     info!("LSP: {:?}, Project: {}", lsp_type, args.project);
 
     // Create the bridge
-    let bridge = McpBridge::new_with_session(lsp_type, &args.project, args.session.clone());
+    let bridge = McpBridge::new(lsp_type, &args.project);
 
     // Run the MCP server (stdio-based)
     if let Err(e) = run_mcp_server(bridge, &args.project, args.session).await {

@@ -17,12 +17,35 @@ pub use package_manager::{
 };
 pub use password::PasswordCache;
 
+#[derive(Debug, Clone)]
+pub struct StepDescriptor {
+    pub name: String,
+    pub description: String,
+}
+
 pub enum SetupEvent {
-    ActionStarted(String),
-    StepCompleted(usize, usize), // current, total
+    PlanReady(Vec<StepDescriptor>),
+    StepStarted {
+        current: usize,
+        total: usize,
+        step: StepDescriptor,
+    },
+    StepCompleted {
+        current: usize,
+        total: usize,
+        step_name: String,
+    },
+    PasswordPrompt {
+        service: String,
+        prompt: String,
+    },
     Log(String),
     Finished,
-    Error(String),
+    Error {
+        step: Option<String>,
+        message: String,
+        hint: Option<String>,
+    },
 }
 
 pub struct Step {
@@ -205,7 +228,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 });
 
                 // Install Yazi addons for enhanced functionality
-                let addons_cmd = package_manager::get_yazi_addons_install_command(distro, pm.as_ref());
+                let addons_cmd =
+                    package_manager::get_yazi_addons_install_command(distro, pm.as_ref());
                 steps.push(Step {
                     name: "Bass Note - Yazi Addons".to_string(),
                     description: format!("[{}] Installing Yazi enhancement packages...", pm_name),
@@ -821,8 +845,25 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     });
 
     let total = steps.len();
+    let step_plan = steps
+        .iter()
+        .map(|step| StepDescriptor {
+            name: step.name.clone(),
+            description: step.description.clone(),
+        })
+        .collect();
+    let _ = tx.send(SetupEvent::PlanReady(step_plan));
+
     for (i, step) in steps.into_iter().enumerate() {
-        let _ = tx.send(SetupEvent::ActionStarted(step.description));
+        let descriptor = StepDescriptor {
+            name: step.name.clone(),
+            description: step.description.clone(),
+        };
+        let _ = tx.send(SetupEvent::StepStarted {
+            current: i + 1,
+            total,
+            step: descriptor,
+        });
         let _ = tx.send(SetupEvent::Log(format!(
             "CONDUCTOR: Commencing {}",
             step.name
@@ -847,6 +888,11 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 let output = if needs_sudo {
                     // Check if we have a cached password
                     if !config.password_cache.is_valid() {
+                        let _ = tx.send(SetupEvent::PasswordPrompt {
+                            service: "sudo".to_string(),
+                            prompt: "Administrator privileges are required to continue."
+                                .to_string(),
+                        });
                         let _ = tx.send(SetupEvent::Log("[sudo] password required".to_string()));
                         // Wait for password to be provided via TUI
                         while !config.password_cache.is_valid() {
@@ -896,29 +942,50 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                         if out.status.success() {
                             let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
-                            let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                            let _ = tx.send(SetupEvent::StepCompleted {
+                                current: i + 1,
+                                total,
+                                step_name: step.name,
+                            });
                         } else {
                             // Check if it's a password error
                             let stderr = String::from_utf8_lossy(&out.stderr);
                             if stderr.contains("Sorry") || stderr.contains("incorrect") {
-                                let _ = tx.send(SetupEvent::Error(
-                                    "Password authentication failed. Please check your password and try again.".to_string()
-                                ));
+                                let _ = tx.send(SetupEvent::Error {
+                                    step: Some(step.name),
+                                    message: "Password authentication failed.".to_string(),
+                                    hint: Some(
+                                        "Re-run the installer and enter your system password again."
+                                            .to_string(),
+                                    ),
+                                });
                             } else {
-                                let _ = tx.send(SetupEvent::Error(format!(
-                                    "Step '{}' failed with exit code: {:?}",
-                                    step.name,
-                                    out.status.code()
-                                )));
+                                let _ = tx.send(SetupEvent::Error {
+                                    step: Some(step.name.clone()),
+                                    message: format!(
+                                        "Step '{}' failed with exit code: {:?}",
+                                        step.name,
+                                        out.status.code()
+                                    ),
+                                    hint: Some(
+                                        "Review the live output panel for the failing command and rerun after fixing the environment."
+                                            .to_string(),
+                                    ),
+                                });
                             }
                             return;
                         }
                     }
                     Err(e) => {
-                        let _ = tx.send(SetupEvent::Error(format!(
-                            "Failed to execute step '{}': {}",
-                            step.name, e
-                        )));
+                        let step_name = step.name.clone();
+                        let _ = tx.send(SetupEvent::Error {
+                            step: Some(step_name.clone()),
+                            message: format!("Failed to execute step '{}': {}", step_name, e),
+                            hint: Some(
+                                "Check that the required tooling is available and that the terminal can execute shell commands."
+                                    .to_string(),
+                            ),
+                        });
                         return;
                     }
                 }
@@ -928,20 +995,27 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     for line in lines {
                         let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", line)));
                     }
-                    let _ = tx.send(SetupEvent::StepCompleted(i + 1, total));
+                    let _ = tx.send(SetupEvent::StepCompleted {
+                        current: i + 1,
+                        total,
+                        step_name: step.name,
+                    });
                 }
                 Err(e) => {
-                    let _ = tx.send(SetupEvent::Error(format!(
-                        "Step '{}' failed: {}",
-                        step.name, e
-                    )));
+                    let step_name = step.name.clone();
+                    let _ = tx.send(SetupEvent::Error {
+                        step: Some(step_name.clone()),
+                        message: format!("Step '{}' failed: {}", step_name, e),
+                        hint: Some(
+                            "Open the live output panel for the most recent details, then rerun once the failing dependency or file path is fixed."
+                                .to_string(),
+                        ),
+                    });
                     return;
                 }
             },
         }
     }
-
-    let _ = tx.send(SetupEvent::Finished);
 
     // Persist configuration using the config module
     // Convert setup Config to main Config and save
@@ -953,8 +1027,18 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         transparent: false,
     };
     if let Err(e) = persistent_config.save() {
-        let _ = tx.send(SetupEvent::Error(format!("Failed to save config: {}", e)));
+        let _ = tx.send(SetupEvent::Error {
+            step: None,
+            message: format!("Failed to save config: {}", e),
+            hint: Some(
+                "The install steps finished, but the configuration file could not be written."
+                    .to_string(),
+            ),
+        });
+        return;
     }
+
+    let _ = tx.send(SetupEvent::Finished);
 }
 
 fn home_dir() -> Result<PathBuf> {
@@ -1398,41 +1482,4 @@ fn ensure_toml_table(value: &mut toml::Value) -> &mut toml::value::Table {
     value
         .as_table_mut()
         .expect("value is table after normalization")
-}
-
-/// Save setup configuration to the config file
-/// This writes the selected tools and paths to the config module's config file
-fn save_setup_config(config: &Config) -> Result<()> {
-    use std::fs;
-    use std::io::Write;
-
-    let config_dir = dirs::config_dir()
-        .context("Failed to get config directory")?
-        .join("maestro");
-
-    fs::create_dir_all(&config_dir)
-        .context("Failed to create config directory")?;
-
-    let config_path = config_dir.join("config.toml");
-
-    // Build TOML config
-    let mut toml_content = String::new();
-    toml_content.push_str("# Maestro Configuration\n");
-    toml_content.push_str(&format!("editor = \"{}\"\n", config.editor));
-    toml_content.push_str(&format!("install_path = \"{}\"\n", config.install_path));
-
-    if !config.selected_tools.is_empty() {
-        toml_content.push_str("selected_tools = [\n");
-        for tool in &config.selected_tools {
-            toml_content.push_str(&format!("    \"{}\",\n", tool));
-        }
-        toml_content.push_str("]\n");
-    }
-
-    let mut file = fs::File::create(&config_path)
-        .context("Failed to create config file")?;
-    file.write_all(toml_content.as_bytes())
-        .context("Failed to write config file")?;
-
-    Ok(())
 }

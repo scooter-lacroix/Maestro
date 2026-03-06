@@ -1,6 +1,6 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
-use leindex_analyzers::orchestrate::model::TrackStatus;
+use leindex_core::orchestrate::model::TrackStatus;
 use super::model::{SelectableItem, ConductorStatus};
 use super::pane::ConductorPane;
 use super::theme::ConductorTheme;

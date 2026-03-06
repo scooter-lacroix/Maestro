@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::app::App;
-use leindex_analyzers::memory::LspStatus;
+use leindex_core::memory::turso_backend::LspStatus;
 
 /// Get installation commands for a given LSP name
 pub fn get_lsp_install_command(lsp_name: &str) -> Vec<&'static str> {
@@ -229,4 +229,12 @@ pub fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
             .wrap(Wrap { trim: false });
         frame.render_widget(missing_para, chunks[2]);
     }
+}
+
+pub fn generate_agent_prompt<T: std::fmt::Debug>(diagnostics: &[T], project_path: &str) -> String {
+    format!(
+        "Review and fix the current LSP diagnostics for project `{project_path}`.\n\nDiagnostics ({count}):\n{details:#?}\n",
+        count = diagnostics.len(),
+        details = diagnostics
+    )
 }

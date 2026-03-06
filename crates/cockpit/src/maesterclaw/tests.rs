@@ -185,10 +185,7 @@ mod runtime_validation_tests {
     fn test_security_policy_defaults() {
         let policy = SecurityPolicy::default();
         // Verify default policy has reasonable settings
-        assert!(
-            policy.max_memory_bytes >= 0,
-            "Memory limit should be non-negative"
-        );
+        let _ = policy.max_memory_bytes;
         assert!(policy.max_cpu_shares > 0, "CPU shares should be positive");
     }
 }

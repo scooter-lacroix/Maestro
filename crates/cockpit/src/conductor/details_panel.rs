@@ -1,9 +1,9 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use leindex_core::orchestrate::model::{IterationStatus, SessionStatus};
 use super::pane::ConductorPane;
 use super::model::DetailsViewMode;
 use super::theme::ConductorTheme;
-use leindex_analyzers::orchestrate::model::{SessionStatus, IterationStatus};
 
 pub fn render_details_panel(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, theme: &crate::theme::Theme) {
     let conductor_theme = ConductorTheme::default();
@@ -11,6 +11,7 @@ pub fn render_details_panel(frame: &mut Frame, area: Rect, pane: &mut ConductorP
         DetailsViewMode::Details => render_details_view(frame, area, pane, &conductor_theme, theme),
         DetailsViewMode::Output => render_output_view(frame, area, pane, &conductor_theme, theme),
         DetailsViewMode::Prompt => render_prompt_view(frame, area, pane, &conductor_theme, theme),
+        DetailsViewMode::Parallel => render_output_view(frame, area, pane, &conductor_theme, theme),
     }
 }
 
@@ -36,9 +37,18 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
         match item {
             super::model::SelectableItem::Track { id, .. } => {
                 let tool_name = pane.state.active_agent.as_ref().map(|a| a.tool.clone()).unwrap_or_else(|| "claude".to_string());
-                let start_cmd = pane.get_start_command(Some(&tool_name), false, false);
-                let pause_cmd = pane.get_pause_command();
-                let resume_cmd = pane.get_resume_command();
+                let start_cmd = pane
+                    .get_start_command(Some(&tool_name), false, false)
+                    .map(|cmd| cmd.to_string())
+                    .unwrap_or_else(|| "// No track selected".to_string());
+                let pause_cmd = pane
+                    .get_pause_command()
+                    .map(|cmd| cmd.to_string())
+                    .unwrap_or_else(|| "// No track selected".to_string());
+                let resume_cmd = pane
+                    .get_resume_command()
+                    .map(|cmd| cmd.to_string())
+                    .unwrap_or_else(|| "// No track selected".to_string());
                 
                 let mut details = vec![
                     Line::from(vec![
@@ -164,8 +174,19 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
 
                 details
             }
-            super::model::SelectableItem::Task { title, id, status, .. } => {
-                vec![
+            super::model::SelectableItem::Task {
+                title,
+                id,
+                status,
+                description,
+                notes,
+                is_blocked,
+                is_actionable,
+                dependencies,
+                dependency_statuses,
+                ..
+            } => {
+                let mut details = vec![
                     Line::from(vec![
                         Span::styled("Task:  ", Style::default().fg(conductor_theme.accent_secondary)),
                         Span::styled(title, Style::default().bold().fg(conductor_theme.fg_primary)),
@@ -178,20 +199,54 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
                         Span::styled("Status:", Style::default().fg(conductor_theme.accent_secondary)),
                         Span::styled(format!(" {:?}", status), Style::default().fg(conductor_theme.fg_secondary)),
                     ]),
-                ]
-            }
+                    Line::from(vec![
+                        Span::styled("Ready: ", Style::default().fg(conductor_theme.accent_secondary)),
+                        Span::styled(
+                            if *is_actionable { "actionable" } else if *is_blocked { "blocked" } else { "waiting" },
+                            Style::default().fg(if *is_actionable {
+                                conductor_theme.status_success
+                            } else if *is_blocked {
+                                conductor_theme.status_error
+                            } else {
+                                conductor_theme.fg_secondary
+                            }),
+                        ),
+                    ]),
+                ];
 
+                if !description.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Description:",
+                        Style::default().fg(conductor_theme.accent_primary).underlined(),
+                    )));
+                    details.push(Line::from(Span::styled(
+                        description,
+                        Style::default().fg(conductor_theme.fg_secondary),
+                    )));
+                }
 
-                // Dependencies section
-                if !item.dependencies.is_empty() {
+                if !notes.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Notes:",
+                        Style::default().fg(conductor_theme.accent_primary).underlined(),
+                    )));
+                    details.push(Line::from(Span::styled(
+                        notes,
+                        Style::default().fg(conductor_theme.fg_secondary).italic(),
+                    )));
+                }
+
+                if !dependencies.is_empty() {
                     details.push(Line::from(""));
                     details.push(Line::from(Span::styled(
                         "Dependencies:",
                         Style::default().fg(conductor_theme.accent_primary).underlined(),
                     )));
 
-                    for (idx, dep) in item.dependencies.iter().enumerate() {
-                        let icon = match item.dependency_statuses.get(idx) {
+                    for (idx, dep) in dependencies.iter().enumerate() {
+                        let icon = match dependency_statuses.get(idx) {
                             Some(crate::conductor::model::DependencyStatus::Completed) => "✓",
                             Some(crate::conductor::model::DependencyStatus::Blocked) => "⊘",
                             Some(crate::conductor::model::DependencyStatus::Pending) => "○",
@@ -210,6 +265,8 @@ fn render_details_view(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, 
                     }
                 }
 
+                details
+            }
         }
     } else {
         vec![Line::from(Span::styled("No item selected.", Style::default().fg(conductor_theme.fg_muted)))]

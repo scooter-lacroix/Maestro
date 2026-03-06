@@ -7,13 +7,17 @@ Maestro has a **single installer entrypoint**: `install.sh`.
 ## Quick Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/master/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash
 ```
 
 Local (from a clone):
 ```bash
+git clone --branch main https://github.com/scooter-lacroix/Maestro.git
+cd Maestro
 ./install.sh
 ```
+
+Local installs stay on your current checkout unless you explicitly set `MAESTRO_BRANCH`.
 
 ---
 
@@ -209,7 +213,7 @@ If the one-line installer doesn't work for your environment:
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/scooter-lacroix/Maestro.git
+git clone --branch main https://github.com/scooter-lacroix/Maestro.git
 cd Maestro
 ```
 
@@ -220,7 +224,20 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### 3. (Optional) Copy Claude Code assets manually
+### 3. Validate the finalized build on `main`
+
+```bash
+bun install
+bun run build:tracklens
+cargo test --workspace
+```
+
+Concise validation steps:
+- Confirm the remote installer pulls from `main` by default with `curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash`
+- Confirm local installs stay on your current branch unless you set `MAESTRO_BRANCH`, using `git branch --show-current` before and after `./install.sh`
+- Confirm the finalized `main` build succeeds with `bun run build:tracklens && cargo test --workspace`
+
+### 4. (Optional) Copy Claude Code assets manually
 
 ```bash
 # Copy commands to Claude directory

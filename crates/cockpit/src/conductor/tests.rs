@@ -2,9 +2,39 @@
 mod tests {
     use super::super::pane::ConductorPane;
     use super::super::model::SelectableItem;
+    use std::ffi::OsString;
     use std::path::PathBuf;
+    use std::sync::{LazyLock, Mutex, MutexGuard};
     use tempfile::TempDir;
     use std::fs;
+
+    static HOME_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    struct HomeEnvGuard {
+        previous_home: Option<OsString>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl HomeEnvGuard {
+        fn set(path: &std::path::Path) -> Self {
+            let lock = HOME_ENV_LOCK.lock().unwrap();
+            let previous_home = std::env::var_os("HOME");
+            std::env::set_var("HOME", path);
+            Self {
+                previous_home,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for HomeEnvGuard {
+        fn drop(&mut self) {
+            match &self.previous_home {
+                Some(previous) => std::env::set_var("HOME", previous),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
 
     #[test]
     fn test_master_track_detection() {
@@ -26,7 +56,7 @@ mod tests {
 
     #[test]
     fn test_master_track_detection_via_metadata() {
-        use leindex_analyzers::orchestrate::model::{Track, TrackMetadata, TrackType, TrackStatus};
+        use leindex_core::orchestrate::model::{Track, TrackMetadata, TrackStatus, TrackType};
         let mut pane = ConductorPane::new(PathBuf::from("/non-existent"));
         pane.tracks.push(Track {
             id: "feature-1".to_string(),
@@ -65,7 +95,7 @@ mod tests {
         fs::write(session_dir.join("session.json"), r#"{"session_id":"test","track_id":"ext-track","status":"running","mode":"building","agent_config":{"tool":"claude","dangerous_mode":false,"sandbox":false},"current_iteration":1,"current_task_id":null,"started_at":"","updated_at":""}"#).unwrap();
         
         // Mock HOME
-        std::env::set_var("HOME", temp_home.path());
+        let _home_guard = HomeEnvGuard::set(temp_home.path());
         
         let mut pane = ConductorPane::new(PathBuf::from("/non-existent"));
         pane.load_tracks().unwrap();
@@ -81,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_process_iteration_log_suppression() {
-        use leindex_analyzers::orchestrate::model::{IterationLog, IterationStatus};
+        use leindex_core::orchestrate::model::{IterationLog, IterationStatus};
         
         let mut pane = ConductorPane::new(PathBuf::from("."));
         let log = IterationLog {
@@ -92,6 +122,7 @@ mod tests {
             status: IterationStatus::Running,
             output: "some output".to_string(),
             error: None,
+            duration_ms: 0,
         };
         
         // Initial catch-up (suppress_output = true)
@@ -108,10 +139,10 @@ mod tests {
     fn test_command_generation() {
         let temp = TempDir::new().unwrap();
         let mut pane = ConductorPane::new(temp.path().to_path_buf());
-        pane.tracks.push(leindex_analyzers::orchestrate::model::Track {
+        pane.tracks.push(leindex_core::orchestrate::model::Track {
             id: "test-track".to_string(),
             description: "test".to_string(),
-            status: leindex_analyzers::orchestrate::model::TrackStatus::Pending,
+            status: leindex_core::orchestrate::model::TrackStatus::Pending,
             link_path: PathBuf::from("."),
             metadata: None,
             plan: None,
@@ -119,7 +150,7 @@ mod tests {
         
         let items = pane.get_selectable_items();
         pane.selected_index = items.len() - 1;
-        let cmd = pane.get_start_command(None, false, false);
+        let cmd = pane.get_start_command(None, false, false).unwrap().to_string();
         assert!(cmd.contains("maestro orchestrate start test-track"), "Command should contain start and track ID");
         assert!(cmd.contains("--mode building"), "Default mode should be building");
     }
@@ -132,7 +163,7 @@ mod tests {
         // Mock HOME to empty dir
         let empty_home = temp.path().join("empty_home");
         fs::create_dir_all(&empty_home).unwrap();
-        std::env::set_var("HOME", empty_home);
+        let _home_guard = HomeEnvGuard::set(&empty_home);
         
         pane.load_tracks().unwrap();
         assert!(pane.tracks.is_empty(), "Tracks should be empty");

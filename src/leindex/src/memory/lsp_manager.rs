@@ -22,7 +22,8 @@
 //! ## Usage
 //!
 //! ```no_run
-//! use leindex_analyzers::memory::{LspManager, LspType, TursoStorageBackend};
+//! use leindex_core::memory::lsp_manager::{LspManager, LspType};
+//! use leindex_core::TursoStorageBackend;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {

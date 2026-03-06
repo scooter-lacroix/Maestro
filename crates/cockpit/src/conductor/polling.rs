@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use chrono::TimeZone;
-use leindex_analyzers::orchestrate::model::{SessionState, IterationLog, SessionStatus, IterationStatus};
+use leindex_core::orchestrate::model::{IterationLog, IterationStatus, SessionState, SessionStatus};
 use super::pane::ConductorPane;
 use super::model::{ConductorStatus, ConductorEvent, OutputStream, ActiveAgentState, AgentReason};
 
@@ -347,7 +347,9 @@ fn map_session_status(status: SessionStatus) -> ConductorStatus {
     match status {
         SessionStatus::Idle => ConductorStatus::Idle,
         SessionStatus::Running => ConductorStatus::Running,
+        SessionStatus::Pausing => ConductorStatus::Pausing,
         SessionStatus::Paused => ConductorStatus::Paused,
+        SessionStatus::Stopping => ConductorStatus::Stopping,
         SessionStatus::Completed => ConductorStatus::Completed,
         SessionStatus::Failed => ConductorStatus::Failed,
         SessionStatus::Interrupted => ConductorStatus::Stopping,

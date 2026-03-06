@@ -3,11 +3,7 @@
 //! This module contains all the enums and structs used for Cockpit TUI state.
 //! These are pure data types with no business logic.
 
-<<<<<<< HEAD
-use leindex_analyzers::memory::models::{Session, SessionGroup};
-=======
 use leindex_core::memory::models::{Session, SessionGroup};
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
 /// Input mode for the TUI - determines what input is being captured
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -16,6 +12,8 @@ pub enum InputMode {
     NewSessionTitle,
     NewSessionPath,
     NewSessionTool,
+    NewMemoryContent,
+    NewMemoryCategory,
     SessionSwitcher,
     RenameGroup,
     ForkSession,
@@ -23,12 +21,16 @@ pub enum InputMode {
     DeleteConfirm,
     AnalysisPrompt,
     MemorySearch,
+    MemoryDetail,
+    MemoryDetailFocus,
     // Phase 11 additions
     SessionHub,
     NewGroupTitle,
     MoveToGroup,
     McpMenu,
     McpLogs,
+    LspInstaller,
+    DiagnosticView,
     // Phase 15 additions
     NewProjectName,
     NewProjectPath,
@@ -70,10 +72,7 @@ pub enum SettingsOption {
     Editor,
     InstallPath,
     Theme,
-<<<<<<< HEAD
     Transparent,
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     Save,
 }
 
@@ -85,11 +84,7 @@ pub enum SettingsMenuKind {
 }
 
 /// Dashboard focus areas
-<<<<<<< HEAD
 #[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
-=======
-#[derive(PartialEq, Eq, Clone, Copy, Default)]
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 pub enum DashFocus {
     #[default]
     Sessions,
@@ -122,9 +117,23 @@ pub struct ProjectInfo {
 /// Memory information
 #[derive(Clone)]
 pub struct MemoryInfo {
-    pub _id: i64,
+    pub id: i64,
     pub content: String,
     pub category: String,
+    pub summary: Option<String>,
+    pub importance: String,
+    pub source: Option<String>,
+    pub session_id: Option<String>,
+    pub project_id: Option<String>,
+    pub track_id: Option<String>,
+    pub created_at: String,
+    pub expires_at: Option<String>,
+    pub last_accessed: Option<String>,
+    pub access_count: usize,
+    pub accessed_by: Vec<String>,
+    pub tags: Vec<String>,
+    pub is_expanded: bool,
+    pub similarity_score: Option<f32>,
 }
 
 /// Dashboard statistics
@@ -134,7 +143,6 @@ pub struct Stats {
     pub memory_count: usize,
     pub track_count: usize,
 }
-<<<<<<< HEAD
 
 /// Analysis mode for LeIndex 5-phase analysis
 #[derive(PartialEq, Eq, Clone, Copy, Default, Debug)]
@@ -154,5 +162,64 @@ pub struct AnalysisHistoryEntry {
     pub result_summary: String,
     pub mode: AnalysisMode,
 }
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
+
+/// Per-session diagnostic severity counts.
+#[derive(Clone, Debug, Default)]
+pub struct LspDiagnosticCounts {
+    pub errors: usize,
+    pub warnings: usize,
+    pub infos: usize,
+    pub hints: usize,
+}
+
+/// Aggregated diagnostics for a single session/LSP grouping.
+#[derive(Clone, Debug, Default)]
+pub struct LspDiagnosticSummary {
+    pub session_id: Option<String>,
+    pub session_title: Option<String>,
+    pub lsp_name: Option<String>,
+    pub counts: LspDiagnosticCounts,
+}
+
+/// Top-level LSP status rollup for the cockpit header and tab summaries.
+#[derive(Clone, Debug, Default)]
+pub struct LspStatusSummary {
+    pub total_lsps: usize,
+    pub running: usize,
+    pub stopped: usize,
+    pub errors: usize,
+    pub starting: usize,
+    pub total_errors: usize,
+    pub total_warnings: usize,
+}
+
+/// Modal state for the LSP installer chooser.
+#[derive(Clone, Debug, Default)]
+pub struct LspInstallerState {
+    pub is_open: bool,
+    pub selected_index: usize,
+    pub is_installing: bool,
+    pub install_output: Option<String>,
+}
+
+/// Selection state for the diagnostic detail modal.
+#[derive(Clone, Debug, Default)]
+pub struct DiagnosticViewState {
+    pub is_open: bool,
+    pub selected_index: usize,
+}
+
+/// A single LSP diagnostic entry, suitable for rendering and agent handoff.
+#[derive(Clone, Debug, Default)]
+pub struct LspDiagnosticDetail {
+    pub session_id: Option<String>,
+    pub session_title: Option<String>,
+    pub lsp_name: Option<String>,
+    pub file_path: String,
+    pub severity: String,
+    pub message: String,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+    pub source: Option<String>,
+    pub code: Option<String>,
+}

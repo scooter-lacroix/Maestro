@@ -10,7 +10,7 @@ use maestro_pi_mono::{
     },
     detection::PiDetection,
     discovery::ModelDiscovery,
-    execution::{ExecutionResult, Executor, ExecutorConfig, StreamEvent, StreamEventType},
+    execution::{ExecutionResult, ExecutorConfig, StreamEvent, StreamEventType},
     ModelConfig, SubagentResult, SubagentRunner, UsageMetrics,
 };
 use std::time::Duration;

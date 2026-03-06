@@ -18,11 +18,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::compression::CompressionLayer;
 
-use super::types::{TrackLensDecision, ReviewMode};
+use super::types::{ReviewMode, TrackLensDecision};
 
 // ─── Server Configuration ─────────────────────────────────────────────────────
 
@@ -122,7 +122,10 @@ impl TrackLensServer {
         let mut rng = rand::thread_rng();
         let bytes: [u8; 32] = rng.gen();
         // Encode as hex using format loop (hex crate not in dependencies)
-        bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+        bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
     }
 
     /// Get the current auth token (for testing/debugging)
@@ -167,7 +170,7 @@ impl TrackLensServer {
                     .allow_origin(origin_localhost)
                     .allow_origin(origin_127)
                     .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-                    .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+                    .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
             )
             .layer(CompressionLayer::new()) // Compress HTML responses
             .layer(RequestBodyLimitLayer::new(1024 * 100)) // Limit request body to 100KB
@@ -193,7 +196,10 @@ impl TrackLensServer {
 
     /// Set the review content
     pub fn set_content(&self, content: ReviewContent) -> anyhow::Result<()> {
-        let mut state = self.state.content.write()
+        let mut state = self
+            .state
+            .content
+            .write()
             .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
         *state = Some(content);
         Ok(())
@@ -244,7 +250,8 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
 
     // Fallback placeholder if no HTML bundle found
     let token = &state.auth_token;
-    Html(format!(r#"<!DOCTYPE html>
+    Html(format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
     <title>TrackLens Review</title>
@@ -269,7 +276,9 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
         <li><code>POST /api/decision</code> - Submit decision (requires auth token)</li>
     </ul>
 </body>
-</html>"#, token))
+</html>"#,
+        token
+    ))
 }
 
 async fn submit_decision(
@@ -294,7 +303,9 @@ async fn submit_decision(
     }
 
     // Send decision via watch channel
-    state.decision_tx.send(Some(decision))
+    state
+        .decision_tx
+        .send(Some(decision))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
@@ -303,7 +314,9 @@ async fn submit_decision(
 async fn get_content(
     State(state): State<Arc<ServerState>>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let content = state.content.read()
+    let content = state
+        .content
+        .read()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(c) = content.as_ref() {
         Ok(Json(c.clone()))
@@ -313,10 +326,10 @@ async fn get_content(
 }
 
 /// Get plan content - returns { "plan": string } format for JS editor compatibility
-async fn get_plan(
-    State(state): State<Arc<ServerState>>,
-) -> Json<serde_json::Value> {
-    let content = state.content.read()
+async fn get_plan(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
+    let content = state
+        .content
+        .read()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
 
     match content {
@@ -342,6 +355,7 @@ mod tests {
     async fn test_server_creation() {
         let config = ServerConfig {
             port: 0,
+            open_browser: false,
             ..Default::default()
         };
         let server = TrackLensServer::new(config);
@@ -380,13 +394,16 @@ mod tests {
         let token = token.unwrap();
 
         // Verify token is not a short timestamp-based value
-        assert!(token.len() >= 32, "Token should be at least 32 chars (cryptographically secure)");
+        assert!(
+            token.len() >= 32,
+            "Token should be at least 32 chars (cryptographically secure)"
+        );
 
         // Test 1: Submit decision with valid token (simulating JS editor behavior)
         let decision_payload = serde_json::json!({
-            "approved": true,
-            "feedback": "Test approval",
-            "annotations": "[]"
+            "behavior": "allow",
+            "annotations": null,
+            "autonomy_mode": null
         });
 
         let response = client

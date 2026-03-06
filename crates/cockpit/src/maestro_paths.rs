@@ -158,7 +158,7 @@ pub fn discover_projects_from_dirs(working_dirs: &[PathBuf]) -> Vec<MaestroProje
 
 /// Discover all Maestro projects by scanning the current directory and all active tmux panes.
 pub fn discover_all_projects() -> Vec<MaestroProject> {
-    use leindex_analyzers::multiplexer::TmuxMultiplexer;
+    use leindex_core::multiplexer::TmuxMultiplexer;
     
     let mut working_dirs = Vec::new();
     

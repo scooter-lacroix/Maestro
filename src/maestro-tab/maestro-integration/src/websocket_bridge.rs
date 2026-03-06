@@ -416,7 +416,6 @@ mod tests {
     #[test]
     fn test_encode_decode_response() {
         use tab_api::chunk::OutputChunk;
-        use tab_api::tab::TabId;
 
         let response = PtyWebsocketResponse::Output(OutputChunk {
             index: 0,

@@ -78,22 +78,22 @@ pub async fn run(command: TrackLensCommands) -> Result<()> {
 fn validate_track_id(track_id: &str) -> Result<()> {
     // Reject empty track IDs
     if track_id.is_empty() {
-        return anyhow::bail!("Track ID cannot be empty");
+        anyhow::bail!("Track ID cannot be empty");
     }
 
     // Reject track IDs containing path separators
     if track_id.contains('/') || track_id.contains('\\') {
-        return anyhow::bail!("Track ID cannot contain path separators");
+        anyhow::bail!("Track ID cannot contain path separators");
     }
 
     // Reject path traversal attempts
     if track_id.contains("..") {
-        return anyhow::bail!("Track ID cannot contain '..' (path traversal not allowed)");
+        anyhow::bail!("Track ID cannot contain '..' (path traversal not allowed)");
     }
 
     // Reject absolute paths
     if track_id.starts_with('/') || track_id.starts_with('\\') {
-        return anyhow::bail!("Track ID cannot be an absolute path");
+        anyhow::bail!("Track ID cannot be an absolute path");
     }
 
     // Only allow safe characters: alphanumeric, dash, underscore
@@ -102,7 +102,7 @@ fn validate_track_id(track_id: &str) -> Result<()> {
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
 
     if !safe_chars {
-        return anyhow::bail!(
+        anyhow::bail!(
             "Track ID contains invalid characters. Only alphanumeric, '-', and '_' are allowed"
         );
     }
@@ -255,7 +255,7 @@ async fn run_walkthrough(track_id: String, full_diffs: bool, browser: bool) -> R
             let canonical_parent = parent.canonicalize()?;
             let canonical_tracks = tracks_dir.canonicalize()?;
             if !canonical_parent.starts_with(&canonical_tracks) {
-                return anyhow::bail!("Security error: Output path escapes tracks directory");
+                anyhow::bail!("Security error: Output path escapes tracks directory");
             }
 
             let content = server.state.content.read()

@@ -288,8 +288,6 @@ fn render_status_bar(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_render_function_exists() {
         // Verify the render functions compile

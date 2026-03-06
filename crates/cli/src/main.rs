@@ -50,7 +50,6 @@ enum Commands {
         analysis: String,
     },
 
-<<<<<<< HEAD
     /// Configure Maestro integrations
     Configure {
         /// Enable pi-mono configuration wizard
@@ -72,6 +71,12 @@ enum Commands {
 
     /// Launch Maestro Terminal UI (Cockpit)
     Tui,
+
+    /// TrackLens review and walkthrough tools
+    TrackLens {
+        #[command(subcommand)]
+        command: commands::tracklens::TrackLensCommands,
+    },
 
     /// Initiate a track implementation in tmux
     Implement {
@@ -222,6 +227,18 @@ enum OrchestrateCommands {
         /// Error strategy: retry, skip, abort
         #[arg(long, default_value = "retry")]
         error_strategy: String,
+
+        /// Pi-Mono agent to use for execution (e.g. scout, architect, kraken)
+        #[arg(long)]
+        pi_agent: Option<String>,
+
+        /// Pi-Mono chain of agents to execute in sequence (comma-separated)
+        #[arg(long)]
+        pi_chain: Option<String>,
+
+        /// Pi-Mono parallel agent execution (comma-separated agents)
+        #[arg(long)]
+        pi_parallel: Option<String>,
     },
 
     /// Pause orchestrate loop for a track
@@ -350,7 +367,9 @@ async fn main() -> Result<()> {
             analysis,
         } => analyze::run(path, format, language, analysis).await,
         Commands::Configure { pi_mono } => configure::run(pi_mono).await,
-        Commands::LeIndex { command } => leindex_cmd::run(command).await,
+        Commands::LeIndex { command } => {
+            leindex_cmd::run(leindex_cmd::LeIndexCommand { command }).await
+        }
         Commands::Memory { command } => match command {
             MemoryCommands::Serve {
                 port,
@@ -368,6 +387,7 @@ async fn main() -> Result<()> {
             } => memory::store(content, category, importance, db).await,
         },
         Commands::Tui => maestro_cockpit::run().await,
+        Commands::TrackLens { command } => commands::tracklens::run(command).await,
         Commands::Implement {
             command,
             description,
@@ -395,6 +415,9 @@ async fn main() -> Result<()> {
                 tracks_dir,
                 max_retries,
                 error_strategy,
+                pi_agent,
+                pi_chain,
+                pi_parallel,
             } => {
                 orchestrate::run(orchestrate::OrchestrateCommand {
                     command: orchestrate::OrchestrateSubcommand::Start {
@@ -407,6 +430,9 @@ async fn main() -> Result<()> {
                         tracks_dir,
                         max_retries,
                         error_strategy,
+                        pi_agent,
+                        pi_chain,
+                        pi_parallel,
                     }
                 }).await
             }

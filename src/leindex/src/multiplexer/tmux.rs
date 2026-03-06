@@ -1072,9 +1072,9 @@ __maestro_reset_background
         let output = Command::new("tmux")
             .args([
                 "list-panes",
-                "-a",  // all sessions
-                "-F",  // format
-                "#{pane_current_command}\t#{pane_current_path}",  // command and path
+                "-a",                                            // all sessions
+                "-F",                                            // format
+                "#{pane_current_command}\t#{pane_current_path}", // command and path
             ])
             .output()
             .context("Failed to list tmux panes")?;
@@ -1125,30 +1125,11 @@ __maestro_reset_background
         let output = Command::new("tmux")
             .args([
                 "display-message",
-                "-p",  // print to stdout
-                "#{pane_current_path}",  // current pane's working directory
+                "-p",                   // print to stdout
+                "#{pane_current_path}", // current pane's working directory
             ])
             .output()
             .context("Failed to get active pane path")?;
-
-        if !output.status.success() {
-            return Ok(None);
-        }
-
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(path))
-        }
-    }
-
-    /// Get the active pane's current path (if available)
-    pub fn get_active_pane_path(&self) -> Result<Option<String>> {
-        let output = Command::new("tmux")
-            .args(["display-message", "-p", "#{pane_current_path}"])
-            .output()
-            .context("Failed to query tmux active pane path")?;
 
         if !output.status.success() {
             return Ok(None);

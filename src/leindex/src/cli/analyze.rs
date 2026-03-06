@@ -8,12 +8,8 @@ use std::path::PathBuf;
 
 // Use analyzer types from the library crate
 use crate::{
-    MultiLangASTAnalyzer,
-    MultiLangCallGraphAnalyzer,
-    MultiLangCFGAnalyzer,
-    MultiLangDFGAnalyzer,
-    MultiLangSlicingAnalyzer,
-    ProgrammingLanguage,
+    MultiLangASTAnalyzer, MultiLangCFGAnalyzer, MultiLangCallGraphAnalyzer, MultiLangDFGAnalyzer,
+    MultiLangSlicingAnalyzer, ProgrammingLanguage,
 };
 
 pub async fn run(

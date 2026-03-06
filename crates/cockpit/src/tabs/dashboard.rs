@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::state::{DashFocus, DashSessionEntry};
-use leindex_analyzers::memory::LspStatus;
+use leindex_core::memory::{models::{McpStatus, SessionStatus}, turso_backend::LspStatus};
 
 pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
@@ -277,13 +277,13 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
                 }
                 DashSessionEntry::Session(sess) => {
                     let status_icon = match sess.status {
-                        leindex_analyzers::memory::models::SessionStatus::Running => {
+                        SessionStatus::Running => {
                             Span::styled(" ● ", Style::default().fg(Color::Green))
                         }
-                        leindex_analyzers::memory::models::SessionStatus::Terminated => {
+                        SessionStatus::Terminated => {
                             Span::styled(" x ", Style::default().fg(Color::Red))
                         }
-                        leindex_analyzers::memory::models::SessionStatus::Waiting => {
+                        SessionStatus::Waiting => {
                             Span::styled(" ◒ ", Style::default().fg(Color::Yellow))
                         }
                         _ => Span::styled(" o ", Style::default().fg(Color::Gray)),
@@ -360,8 +360,7 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .mcp_servers
         .iter()
         .map(|s| {
-            let status_color = if s.status == leindex_analyzers::memory::models::McpStatus::Running
-            {
+            let status_color = if s.status == McpStatus::Running {
                 Color::Green
             } else {
                 Color::Red
