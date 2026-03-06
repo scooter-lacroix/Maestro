@@ -32,7 +32,10 @@
     "maestro:revert",
     "maestro:configure",
     "maestro:memory",
-    "maestro:tui"
+    "maestro:tui",
+    "maestro:leindex",
+    "maestro:orchestrate",
+    "maestro:tldr"
   ],
   "skills": {
     "path": "maestro/skills",

@@ -167,5 +167,14 @@ maestro/leindex/rust/target/
 target/
 .leindex_data/
 
+# LeIndex databases and caches (never commit these)
+.leindex/
+**/.leindex/
+*.leindex.db
+
+# Runtime state and configs
+.omx/
+.gemini/
+
 # Vibe CLI session logs
 .vibe/logs/

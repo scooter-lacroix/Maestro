@@ -9,8 +9,8 @@ use std::sync::Arc;
 use serde_json::Value as JsonValue;
 
 use maestro_core::capabilities::sandbox::{
-    AutonomyLevel, ExecutionRequest, NativeRuntime, ResourceLimits, RuntimeAdapter,
-    SandboxManager, SandboxResult, SecurityPolicy, validate_command_safe, validate_path_safe,
+    validate_command_safe, validate_path_safe, AutonomyLevel, ExecutionRequest, NativeRuntime,
+    ResourceLimits, RuntimeAdapter, SandboxManager, SandboxResult, SecurityPolicy,
 };
 
 use crate::tools::{Tool, ToolOutput};
@@ -130,7 +130,11 @@ impl SecurityPolicyBridge {
     }
 
     /// Validate a command for execution
-    pub fn validate_command(&self, command: &str, args: &[String]) -> Result<(), SecurityPolicyError> {
+    pub fn validate_command(
+        &self,
+        command: &str,
+        args: &[String],
+    ) -> Result<(), SecurityPolicyError> {
         validate_command_safe(command, args).map_err(|e| SecurityPolicyError::CommandNotAllowed {
             command: command.to_string(),
             reason: e.to_string(),
@@ -163,6 +167,24 @@ impl SecurityPolicyBridge {
                 operation: operation.to_string(),
                 level: self.policy.autonomy_level,
             })
+        }
+    }
+
+    fn approval_operation(tool_name: &str, arguments: &JsonValue) -> String {
+        match tool_name {
+            "shell" => "shell_exec".to_string(),
+            "file" => match arguments
+                .get("operation")
+                .and_then(|value| value.as_str())
+                .unwrap_or("read")
+            {
+                "write" => "file_write".to_string(),
+                "delete" => "file_delete".to_string(),
+                _ => "file_read".to_string(),
+            },
+            "cron_add" | "cron_remove" => "file_write".to_string(),
+            name if name.starts_with("mcp__") => "network_request".to_string(),
+            other => other.to_string(),
         }
     }
 
@@ -222,6 +244,14 @@ impl SecurityPolicyBridge {
             bridge: self,
         }
     }
+
+    /// Wrap a shared trait-object tool with security policy enforcement.
+    pub fn wrap_shared_tool(self, tool: Arc<dyn Tool>) -> Arc<dyn Tool> {
+        Arc::new(SharedSecuredTool {
+            inner: tool,
+            bridge: self,
+        })
+    }
 }
 
 /// A tool wrapped with security policy enforcement
@@ -257,16 +287,65 @@ impl<T: Tool + Send + Sync> Tool for SecuredTool<T> {
     }
 
     async fn execute(&self, arguments: JsonValue) -> ToolOutput {
-        // Pre-execute security check: request_approval() already calls requires_approval()
-        // internally, so we call it directly to avoid the redundant double-check.
-        let tool_name = self.name();
-        match self.bridge.request_approval(tool_name, &arguments).await {
+        let operation = SecurityPolicyBridge::approval_operation(self.name(), &arguments);
+        let approval_details = serde_json::json!({
+            "tool_name": self.name(),
+            "arguments": arguments,
+        });
+        match self
+            .bridge
+            .request_approval(&operation, &approval_details)
+            .await
+        {
             Ok(()) => {}
             Err(e) => return ToolOutput::error(e.to_string()),
         }
 
         // Execute the inner tool
-        self.inner.execute(arguments).await
+        self.inner
+            .execute(approval_details["arguments"].clone())
+            .await
+    }
+}
+
+/// Trait-object variant of `SecuredTool` for shared registries.
+pub struct SharedSecuredTool {
+    inner: Arc<dyn Tool>,
+    bridge: SecurityPolicyBridge,
+}
+
+#[async_trait::async_trait]
+impl Tool for SharedSecuredTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    fn parameters_schema(&self) -> JsonValue {
+        self.inner.parameters_schema()
+    }
+
+    async fn execute(&self, arguments: JsonValue) -> ToolOutput {
+        let operation = SecurityPolicyBridge::approval_operation(self.name(), &arguments);
+        let approval_details = serde_json::json!({
+            "tool_name": self.name(),
+            "arguments": arguments,
+        });
+        match self
+            .bridge
+            .request_approval(&operation, &approval_details)
+            .await
+        {
+            Ok(()) => {
+                self.inner
+                    .execute(approval_details["arguments"].clone())
+                    .await
+            }
+            Err(e) => ToolOutput::error(e.to_string()),
+        }
     }
 }
 
@@ -310,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_autonomous_level() {
-        let mut policy = SecurityPolicy::permissive();
+        let policy = SecurityPolicy::permissive();
         let bridge = SecurityPolicyBridge::new(policy);
         assert!(!bridge.requires_approval("shell_exec")); // No approval needed
     }
@@ -321,17 +400,18 @@ mod tests {
         let bridge = SecurityPolicyBridge::new(policy);
 
         // Safe command
-        assert!(bridge.validate_command("echo", &["hello".to_string()]).is_ok());
+        assert!(bridge
+            .validate_command("echo", &["hello".to_string()])
+            .is_ok());
 
         // Unsafe command (injection attempt)
-        assert!(bridge.validate_command("echo", &["| rm -rf /".to_string()]).is_err());
+        assert!(bridge
+            .validate_command("echo", &["| rm -rf /".to_string()])
+            .is_err());
     }
 
     #[test]
     fn test_validate_path_safe() {
-        let policy = create_test_policy();
-        let bridge = SecurityPolicyBridge::new(policy);
-
         // Path within allowed roots - need to test with existing paths
         let temp_dir = std::env::temp_dir();
         let allowed_path = temp_dir.join("maestro_test_safe");
@@ -399,5 +479,24 @@ mod tests {
             .request_approval("shell_exec", &serde_json::json!({}))
             .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_approval_operation_mapping() {
+        assert_eq!(
+            SecurityPolicyBridge::approval_operation("shell", &serde_json::json!({})),
+            "shell_exec"
+        );
+        assert_eq!(
+            SecurityPolicyBridge::approval_operation(
+                "file",
+                &serde_json::json!({"operation": "write"})
+            ),
+            "file_write"
+        );
+        assert_eq!(
+            SecurityPolicyBridge::approval_operation("mcp__github__issues", &serde_json::json!({})),
+            "network_request"
+        );
     }
 }

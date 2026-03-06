@@ -77,7 +77,10 @@ impl ToolRegistry {
     /// Validate that `arguments` satisfies the required-field list declared in
     /// a tool's JSON Schema.  Returns `Ok(())` when all required fields are
     /// present, or `Err(String)` listing the missing fields. (Rec-7)
-    pub fn validate_arguments(tool: &dyn Tool, arguments: &serde_json::Value) -> Result<(), String> {
+    pub fn validate_arguments(
+        tool: &dyn Tool,
+        arguments: &serde_json::Value,
+    ) -> Result<(), String> {
         let schema = tool.parameters_schema();
 
         let required = match schema.get("required").and_then(|r| r.as_array()) {
@@ -210,8 +213,12 @@ mod tests {
 
     #[async_trait]
     impl Tool for RequiredTool {
-        fn name(&self) -> &str { "required" }
-        fn description(&self) -> &str { "tool with required fields" }
+        fn name(&self) -> &str {
+            "required"
+        }
+        fn description(&self) -> &str {
+            "tool with required fields"
+        }
         fn parameters_schema(&self) -> JsonValue {
             serde_json::json!({
                 "type": "object",

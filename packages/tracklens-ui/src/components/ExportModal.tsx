@@ -84,7 +84,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setSaveErrors(prev => { const next = { ...prev }; delete next[target]; return next; });
 
     try {
-      let result: { success?: boolean; error?: string } | undefined;
+      type ApiResponse = { success: boolean; error?: string };
+      let result: ApiResponse | undefined;
+
       if (target === 'obsidian') {
         const res = await fetch('/api/obsidian', {
           method: 'POST',
@@ -95,14 +97,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             filenameFormat: obsidianSettings.filenameFormat,
           }),
         });
-        result = await res.json();
+        result = await res.json() as ApiResponse;
       } else if (target === 'bear') {
         const res = await fetch('/api/bear', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        result = await res.json();
+        result = await res.json() as ApiResponse;
       }
 
       if (result?.success) {
@@ -111,8 +113,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         setSaveStatus(prev => ({ ...prev, [target]: 'error' }));
         setSaveErrors(prev => ({ ...prev, [target]: result?.error || 'Save failed' }));
       }
-    } catch {
+    } catch (error: unknown) {
       setSaveStatus(prev => ({ ...prev, [target]: 'error' }));
+      // Log error for debugging
+      console.error('Save failed:', error);
     }
   };
 

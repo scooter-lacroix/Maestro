@@ -1,15 +1,5 @@
-/**
- * TrackLens Review Editor - Inline Annotation Component
- *
- * Renders a single annotation comment inside the diff view.
- *
- * REBRANDED: Plannotator → TrackLens
- *
- * @packageDocumentation
- */
-
 import React from 'react';
-import type { DiffAnnotationMetadata } from '@maestro/tracklens-ui';
+import { DiffAnnotationMetadata } from '@maestro/tracklens-ui/types';
 import { SuggestionBlock } from './SuggestionBlock';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 

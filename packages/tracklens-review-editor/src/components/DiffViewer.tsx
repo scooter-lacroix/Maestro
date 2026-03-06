@@ -1,125 +1,201 @@
-/**
- * TrackLens Diff Viewer Component
- * Displays git diff with annotation support
- */
-
-import React from "react";
-import ReactDiffViewer from "react-diff-viewer-continued";
-import type { DiffFile } from "../App";
-import type { CodeAnnotation, CodeAnnotationType } from "@maestro/tracklens-ui";
+import React, { useMemo, useRef, useEffect, useCallback } from 'react';
+import { PatchDiff } from '@pierre/diffs/react';
+import { CodeAnnotation, SelectedLineRange, DiffAnnotationMetadata } from '@maestro/tracklens-ui/types';
+import { useTheme } from '@maestro/tracklens-ui/components/ThemeProvider';
+import { detectLanguage } from '../utils/detectLanguage';
+import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
+import { FileHeader } from './FileHeader';
+import { InlineAnnotation } from './InlineAnnotation';
+import { AnnotationToolbar } from './AnnotationToolbar';
+import { SuggestionModal } from './SuggestionModal';
 
 interface DiffViewerProps {
-  diffData: any;
-  selectedFile: DiffFile | null;
+  patch: string;
+  filePath: string;
+  diffStyle: 'split' | 'unified';
   annotations: CodeAnnotation[];
-  onAddAnnotation: (
-    filePath: string,
-    startLine: number,
-    endLine: number,
-    type: CodeAnnotationType,
-    content: string
-  ) => void;
+  selectedAnnotationId: string | null;
+  pendingSelection: SelectedLineRange | null;
+  onLineSelection: (range: SelectedLineRange | null) => void;
+  onAddAnnotation: (type: 'comment' | 'suggestion' | 'concern', text?: string, suggestedCode?: string, originalCode?: string) => void;
+  onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string) => void;
+  onSelectAnnotation: (id: string | null) => void;
+  onDeleteAnnotation: (id: string) => void;
+  isViewed?: boolean;
+  onToggleViewed?: () => void;
 }
 
-export function DiffViewer({
-  diffData,
-  selectedFile,
+export const DiffViewer: React.FC<DiffViewerProps> = ({
+  patch,
+  filePath,
+  diffStyle,
   annotations,
+  selectedAnnotationId,
+  pendingSelection,
+  onLineSelection,
   onAddAnnotation,
-}: DiffViewerProps) {
-  if (!selectedFile) {
+  onEditAnnotation,
+  onSelectAnnotation,
+  onDeleteAnnotation,
+  isViewed = false,
+  onToggleViewed,
+}) => {
+  const { theme } = useTheme();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const toolbar = useAnnotationToolbar({ patch, filePath, onLineSelection, onAddAnnotation, onEditAnnotation });
+
+  // Clear pending selection when file changes
+  const prevFilePathRef = useRef(filePath);
+  useEffect(() => {
+    if (prevFilePathRef.current !== filePath) {
+      prevFilePathRef.current = filePath;
+      onLineSelection(null);
+    }
+  }, [filePath, onLineSelection]);
+
+  // Scroll to selected annotation when it changes
+  useEffect(() => {
+    if (!selectedAnnotationId || !containerRef.current) return;
+
+    const timeoutId = setTimeout(() => {
+      const annotationEl = containerRef.current?.querySelector(
+        `[data-annotation-id="${selectedAnnotationId}"]`
+      );
+      if (annotationEl) {
+        annotationEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedAnnotationId]);
+
+  // Map annotations to @pierre/diffs format
+  const lineAnnotations = useMemo(() => {
+    return annotations.map(ann => ({
+      side: ann.side === 'new' ? 'additions' as const : 'deletions' as const,
+      lineNumber: ann.lineEnd,
+      metadata: {
+        annotationId: ann.id,
+        type: ann.type,
+        text: ann.text,
+        suggestedCode: ann.suggestedCode,
+        originalCode: ann.originalCode,
+        author: ann.author,
+      } as DiffAnnotationMetadata,
+    }));
+  }, [annotations]);
+
+  // Handle edit: find annotation and start editing in toolbar
+  const handleEdit = useCallback((id: string) => {
+    const ann = annotations.find(a => a.id === id);
+    if (ann) toolbar.startEdit(ann);
+  }, [annotations, toolbar.startEdit]);
+
+  // Render annotation in diff
+  const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
+    if (!annotation.metadata) return null;
+
     return (
-      <div
-        style={{
-          padding: "20px",
-          textAlign: "center",
-          color: "var(--text-secondary)",
+      <InlineAnnotation
+        metadata={annotation.metadata}
+        language={detectLanguage(filePath)}
+        onSelect={onSelectAnnotation}
+        onEdit={handleEdit}
+        onDelete={onDeleteAnnotation}
+      />
+    );
+  }, [filePath, onSelectAnnotation, handleEdit, onDeleteAnnotation]);
+
+  // Render hover utility (+ button)
+  const renderHoverUtility = useCallback((getHoveredLine: () => { lineNumber: number; side: 'deletions' | 'additions' } | undefined) => {
+    const line = getHoveredLine();
+    if (!line) return null;
+
+    return (
+      <button
+        className="hover-add-comment"
+        onClick={(e) => {
+          e.stopPropagation();
+          toolbar.handleLineSelectionEnd({
+            start: line.lineNumber,
+            end: line.lineNumber,
+            side: line.side,
+          });
         }}
       >
-        Select a file to view diff
-      </div>
+        +
+      </button>
     );
-  }
+  }, [toolbar.handleLineSelectionEnd]);
 
-  const handleAddComment = (startLine: number, endLine: number) => {
-    const content = prompt("Enter your comment:");
-    if (content) {
-      onAddAnnotation(selectedFile.path, startLine, endLine, "comment", content);
-    }
-  };
-
-  const fileAnnotations = annotations.filter((a) => a.filePath === selectedFile.path);
-
-  // Parse the patch to get old and new content
-  const oldLines: string[] = [];
-  const newLines: string[] = [];
-  
-  selectedFile.patch.split('\n').forEach(line => {
-    if (line.startsWith('-') && !line.startsWith('---')) {
-      oldLines.push(line.slice(1));
-    } else if (line.startsWith('+') && !line.startsWith('+++')) {
-      newLines.push(line.slice(1));
-    } else if (!line.startsWith('@@') && !line.startsWith('+++') && !line.startsWith('---') && !line.startsWith('diff')) {
-      oldLines.push(line.slice(1));
-      newLines.push(line.slice(1));
-    }
-  });
+  // Determine theme for @pierre/diffs
+  const pierreTheme = useMemo(() => {
+    const effectiveTheme = theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : theme;
+    return effectiveTheme === 'light' ? 'pierre-light' : 'pierre-dark';
+  }, [theme]);
 
   return (
-    <div
-      style={{
-        flex: 1,
-        overflow: "auto",
-        padding: "16px",
-      }}
-    >
-      <div
-        style={{
-          marginBottom: "16px",
-          paddingBottom: "8px",
-          borderBottom: "1px solid var(--border-color)",
-        }}
-      >
-        <h3 style={{ margin: 0 }}>{selectedFile.path}</h3>
-        <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-          {selectedFile.oldPath && selectedFile.oldPath !== selectedFile.path && (
-            <span>
-              renamed from {selectedFile.oldPath} •{" "}
-            </span>
-          )}
-          <span>
-            {selectedFile.additions} additions, {selectedFile.deletions} deletions
-          </span>
-        </div>
-      </div>
-
-      <ReactDiffViewer
-        oldValue={oldLines.join('\n')}
-        newValue={newLines.join('\n')}
-        splitView={true}
+    <div ref={containerRef} className="h-full overflow-auto relative" onMouseMove={toolbar.handleMouseMove}>
+      <FileHeader
+        filePath={filePath}
+        patch={patch}
+        isViewed={isViewed}
+        onToggleViewed={onToggleViewed}
       />
 
-      {/* Annotations */}
-      {fileAnnotations.map((annotation) => (
-        <div
-          key={annotation.id}
-          style={{
-            marginTop: "16px",
-            padding: "12px",
-            backgroundColor: "var(--bg-secondary)",
-            borderRadius: "4px",
-            borderLeft: `3px solid ${
-              annotation.type === "comment" ? "#3b82f6" : "#ef4444"
-            }`,
+      <div className="p-4">
+        <PatchDiff
+          key={filePath}
+          patch={patch}
+          options={{
+            theme: pierreTheme,
+            themeType: 'dark',
+            diffStyle,
+            diffIndicators: 'bars',
+            enableLineSelection: true,
+            enableHoverUtility: true,
+            onLineSelectionEnd: (range) => toolbar.handleLineSelectionEnd(range as SelectedLineRange | null),
           }}
-        >
-          <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-            Line {annotation.lineStart}
-            {annotation.author && ` • ${annotation.author}`}
-          </div>
-          <div style={{ marginTop: "4px" }}>{annotation.text}</div>
-        </div>
-      ))}
+          lineAnnotations={lineAnnotations}
+          selectedLines={pendingSelection || undefined}
+          renderAnnotation={renderAnnotation}
+          renderHoverUtility={renderHoverUtility}
+        />
+      </div>
+
+      {toolbar.toolbarState && (
+        <AnnotationToolbar
+          toolbarState={toolbar.toolbarState}
+          toolbarRef={toolbar.toolbarRef}
+          commentText={toolbar.commentText}
+          setCommentText={toolbar.setCommentText}
+          suggestedCode={toolbar.suggestedCode}
+          setSuggestedCode={toolbar.setSuggestedCode}
+          showSuggestedCode={toolbar.showSuggestedCode}
+          setShowSuggestedCode={toolbar.setShowSuggestedCode}
+          setShowCodeModal={toolbar.setShowCodeModal}
+          isEditing={!!toolbar.editingAnnotationId}
+          onSubmit={toolbar.handleSubmitAnnotation}
+          onDismiss={toolbar.handleDismiss}
+          onCancel={toolbar.handleCancel}
+        />
+      )}
+
+      {toolbar.showCodeModal && (
+        <SuggestionModal
+          filePath={filePath}
+          toolbarState={toolbar.toolbarState}
+          selectedOriginalCode={toolbar.selectedOriginalCode}
+          suggestedCode={toolbar.suggestedCode}
+          setSuggestedCode={toolbar.setSuggestedCode}
+          modalLayout={toolbar.modalLayout}
+          setModalLayout={toolbar.setModalLayout}
+          onClose={() => toolbar.setShowCodeModal(false)}
+        />
+      )}
     </div>
   );
-}
+};

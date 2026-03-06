@@ -1,18 +1,33 @@
 {
   "name": "@maestro/tracklens-web-highlighter",
   "version": "0.1.0",
-  "description": "TrackLens text selection library for annotation",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "description": "Text selection and annotation highlighting library for TrackLens",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit"
   },
   "keywords": [
     "maestro",
     "tracklens",
     "text-selection",
-    "annotation"
+    "annotation",
+    "highlight",
+    "web-highlighter"
   ],
   "author": "Maestro",
   "license": "MIT",

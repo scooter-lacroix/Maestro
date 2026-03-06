@@ -4,10 +4,11 @@
  * @packageDocumentation
  */
 
-import { describe, test, expect, beforeAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { execSync } from "child_process";
 
 import {
   generateWalkthrough,
@@ -22,6 +23,30 @@ describe("walkthrough generator", () => {
 
   beforeAll(() => {
     tempDir = mkdtempSync(join(tmpdir(), "walkthrough-test-"));
+
+    // Initialize git repository for tests that need git operations
+    try {
+      execSync("git init", { cwd: tempDir, stdio: "ignore" });
+      execSync('git config user.email "test@test.com"', { cwd: tempDir, stdio: "ignore" });
+      execSync('git config user.name "test"', { cwd: tempDir, stdio: "ignore" });
+
+      // Create an initial commit to establish git history
+      writeFileSync(join(tempDir, ".gitkeep"), "", "utf-8");
+      execSync("git add .", { cwd: tempDir, stdio: "ignore" });
+      execSync('git commit -m "init"', { cwd: tempDir, stdio: "ignore" });
+    } catch (e) {
+      // Git initialization failed - tests that require git will fail
+      console.warn("Failed to initialize test git repository:", e);
+    }
+  });
+
+  afterAll(() => {
+    // Clean up temp directory
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch (e) {
+      // Cleanup failed - temp directory may remain
+    }
   });
 
   describe("extractCompletedTasks", () => {

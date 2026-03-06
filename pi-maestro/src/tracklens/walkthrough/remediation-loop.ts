@@ -93,7 +93,7 @@ export async function runRemediationLoop(
     if (onRemediation) {
       await onRemediation(remediationTasks, iteration);
     } else {
-      await executeRemediationTasks(remediationTasks);
+      await executeRemediationTasks(remediationTasks, trackDir);
     }
 
     // Regenerate walkthrough

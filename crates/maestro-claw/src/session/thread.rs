@@ -163,9 +163,7 @@ impl Thread {
         let keep = keep.max(1);
         if self.turns.len() > keep {
             // Preserve the first turn if it's a System message (system prompt)
-            let skip = if !self.turns.is_empty()
-                && matches!(self.turns[0].role, TurnRole::System)
-            {
+            let skip = if !self.turns.is_empty() && matches!(self.turns[0].role, TurnRole::System) {
                 1
             } else {
                 0
@@ -301,8 +299,10 @@ mod tests {
         let restored: Thread = serde_json::from_str(&json).unwrap();
 
         // Custom threshold must survive serde roundtrip
-        assert!(restored.needs_summary() == (restored.turn_count() >= 5),
-            "summary_threshold must be persisted through serde, not reset to default");
+        assert!(
+            restored.needs_summary() == (restored.turn_count() >= 5),
+            "summary_threshold must be persisted through serde, not reset to default"
+        );
         // Verify the threshold value is preserved:
         // With threshold=5 → needs_summary() is true after exactly 5 turns.
         // With the old default threshold=20 it would still be false → proves
@@ -311,7 +311,10 @@ mod tests {
         for _ in 0..5 {
             restored.build_next_turn(TurnRole::User, "x".to_string());
         }
-        assert!(restored.needs_summary(), "restored threshold should be 5, not default 20");
+        assert!(
+            restored.needs_summary(),
+            "restored threshold should be 5, not default 20"
+        );
     }
 
     #[test]

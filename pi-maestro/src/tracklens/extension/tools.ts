@@ -15,7 +15,7 @@
 import type { ExtensionAPI } from "../../types";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
-import { runRemediationLoop } from "../walkthrough/remediation-loop";
+import { runRemediationLoop } from "../walkthrough/remediation";
 
 /**
  * Register TrackLens tools with pi-maestro extension
@@ -57,55 +57,84 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
     parameters: {
       type: "object",
       properties: {
+        markdown: {
+          type: "string",
+          description: "Markdown content to review (pass directly or read from file)",
+        },
+        documentType: {
+          type: "string",
+          enum: ["spec.md", "plan.md", "walkthrough", "document"],
+          description: "Type of document being reviewed",
+        },
+        trackId: {
+          type: "string",
+          description: "Track ID for context (optional)",
+        },
+        mode: {
+          type: "string",
+          enum: ["review", "walkthrough"],
+          description: "Review mode",
+          default: "review",
+        },
         filePath: {
           type: "string",
-          description: "Path to the markdown file to review (relative to project root)",
-        },
-        reviewType: {
-          type: "string",
-          enum: ["spec", "plan", "walkthrough"],
-          description: "Type of review being requested",
-        },
-        summary: {
-          type: "string",
-          description: "Brief summary of what's being reviewed (for user context)",
+          description: "Alternative: Path to the markdown file to review (relative to project root)",
         },
       },
-      required: ["filePath", "reviewType"],
+      required: ["documentType"],
     },
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { filePath, reviewType, summary } = params as {
-        filePath: string;
-        reviewType: "spec" | "plan" | "walkthrough";
-        summary?: string;
+      const { markdown: directMarkdown, documentType, trackId, mode = "review", filePath } = params as {
+        markdown?: string;
+        documentType: "spec.md" | "plan.md" | "walkthrough" | "document";
+        trackId?: string;
+        mode?: "review" | "walkthrough";
+        filePath?: string;
       };
 
-      // Resolve file path
-      const absolutePath = resolve(ctx.cwd, filePath);
+      let markdown: string;
 
-      // Check if file exists
-      if (!existsSync(absolutePath)) {
+      // Get markdown content - either directly or from file
+      if (directMarkdown) {
+        markdown = directMarkdown;
+      } else if (filePath) {
+        // Resolve file path
+        const absolutePath = resolve(ctx.cwd, filePath);
+
+        // Check if file exists
+        if (!existsSync(absolutePath)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: File not found: ${absolutePath}`,
+              },
+            ],
+            details: { approved: false },
+          };
+        }
+
+        // Read markdown content
+        markdown = readFileSync(absolutePath, "utf-8");
+      } else {
         return {
           content: [
             {
               type: "text",
-              text: `Error: File not found: ${absolutePath}`,
+              text: `Error: Either 'markdown' content or 'filePath' must be provided`,
             },
           ],
           details: { approved: false },
         };
       }
 
-      // Read markdown content
-      const markdown = readFileSync(absolutePath, "utf-8");
-
       if (markdown.trim().length === 0) {
         return {
           content: [
             {
               type: "text",
-              text: `Error: File is empty: ${absolutePath}`,
+              text: `Error: Markdown content is empty`,
             },
           ],
           details: { approved: false },
@@ -121,11 +150,17 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
         const tracklensServer = await import("@maestro/tracklens-server");
         startTrackLensServer = tracklensServer.startTrackLensServer;
 
-        // Try to load HTML content from dist
+        // Try to load HTML content from apps/tracklens-opencode
         const { existsSync: exists, readFileSync: read } = await import("fs");
-        const htmlPath = resolve(ctx.cwd, "dist/tracklens-editor.html");
-        if (exists(htmlPath)) {
-          htmlContent = read(htmlPath, "utf-8");
+        const htmlPaths = [
+          resolve(ctx.cwd, "apps/tracklens-opencode/tracklens.html"),
+          resolve(ctx.cwd, "dist/tracklens-editor.html"),
+        ];
+        for (const htmlPath of htmlPaths) {
+          if (exists(htmlPath)) {
+            htmlContent = read(htmlPath, "utf-8");
+            break;
+          }
         }
       } catch (error) {
         // TrackLens server not available - return instructions for manual review
@@ -135,9 +170,9 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
               type: "text",
               text: `# TrackLens Review Request
 
-**Review Type:** ${reviewType}
-**File:** ${filePath}
-**Summary:** ${summary || "No summary provided"}
+**Document Type:** ${documentType}
+**Track ID:** ${trackId || "N/A"}
+**Mode:** ${mode}
 
 TrackLens UI is not available. Please review the file manually:
 
@@ -160,9 +195,9 @@ After review, provide your feedback or approval.`,
               type: "text",
               text: `# TrackLens Review Request
 
-**Review Type:** ${reviewType}
-**File:** ${filePath}
-**Summary:** ${summary || "No summary provided"}
+**Document Type:** ${documentType}
+**Track ID:** ${trackId || "N/A"}
+**Mode:** ${mode}
 
 TrackLens UI HTML not built yet. Please review the file manually:
 
@@ -214,9 +249,9 @@ After review, provide your feedback or approval.`,
               type: "text",
               text: `# TrackLens Review Request
 
-**Review Type:** ${reviewType}
-**File:** ${filePath}
-**Summary:** ${summary || "No summary provided"}
+**Document Type:** ${documentType}
+**Track ID:** ${trackId || "N/A"}
+**Mode:** ${mode}
 
 TrackLens server error: ${error}. Please review manually:
 
@@ -351,11 +386,17 @@ After review, provide your feedback or approval.`,
         const tracklensServer = await import("@maestro/tracklens-server");
         startTrackLensServer = tracklensServer.startTrackLensServer;
 
-        // Try to load HTML content from dist
+        // Try to load HTML content from apps/tracklens-opencode
         const { existsSync: exists, readFileSync: read } = await import("fs");
-        const htmlPath = resolve(root, "dist/tracklens-editor.html");
-        if (exists(htmlPath)) {
-          htmlContent = read(htmlPath, "utf-8");
+        const htmlPaths = [
+          resolve(root, "apps/tracklens-opencode/tracklens.html"),
+          resolve(root, "dist/tracklens-editor.html"),
+        ];
+        for (const htmlPath of htmlPaths) {
+          if (exists(htmlPath)) {
+            htmlContent = read(htmlPath, "utf-8");
+            break;
+          }
         }
       } catch {
         // Server not available, return walkthrough for manual review

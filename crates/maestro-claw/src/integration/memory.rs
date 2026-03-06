@@ -68,7 +68,8 @@ impl MemoryBridge {
 #[async_trait]
 impl MemoryBackend for MemoryBridge {
     async fn store(&self, content: &str, metadata: JsonValue) -> Result<String, MemoryError> {
-        let id = self.inner
+        let id = self
+            .inner
             .store(content, metadata.clone())
             .await
             .map_err(|e| MemoryError {
@@ -85,9 +86,13 @@ impl MemoryBackend for MemoryBridge {
     }
 
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryResult>, MemoryError> {
-        let results = self.inner.search(query, limit).await.map_err(|e| MemoryError {
-            message: e.to_string(),
-        })?;
+        let results = self
+            .inner
+            .search(query, limit)
+            .await
+            .map_err(|e| MemoryError {
+                message: e.to_string(),
+            })?;
 
         Ok(results
             .into_iter()
@@ -130,7 +135,6 @@ impl MemoryBackend for MemoryBridge {
 ///
 /// This hook can be attached to the agent loop to automatically
 /// persist conversation turns to memory.
-#[derive(Debug)]
 pub struct PersistentMemoryHook {
     name: String,
     memory: Arc<dyn Memory>,
@@ -138,6 +142,16 @@ pub struct PersistentMemoryHook {
     store_roles: Vec<crate::session::TurnRole>,
     /// Metadata to attach to stored memories
     default_metadata: JsonValue,
+}
+
+impl std::fmt::Debug for PersistentMemoryHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersistentMemoryHook")
+            .field("name", &self.name)
+            .field("store_roles", &self.store_roles)
+            .field("default_metadata", &self.default_metadata)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PersistentMemoryHook {
@@ -182,9 +196,15 @@ impl Hook for PersistentMemoryHook {
         if self.store_roles.contains(&turn.role) {
             let mut metadata = self.default_metadata.clone();
             if let JsonValue::Object(ref mut map) = metadata {
-                map.insert("role".to_string(), serde_json::json!(format!("{:?}", turn.role)));
+                map.insert(
+                    "role".to_string(),
+                    serde_json::json!(format!("{:?}", turn.role)),
+                );
                 map.insert("turn_id".to_string(), serde_json::json!(turn.id));
-                map.insert("timestamp".to_string(), serde_json::json!(turn.timestamp.to_rfc3339()));
+                map.insert(
+                    "timestamp".to_string(),
+                    serde_json::json!(turn.timestamp.to_rfc3339()),
+                );
             }
             if let Err(e) = self.memory.store(&turn.content, metadata).await {
                 tracing::warn!(
@@ -201,9 +221,15 @@ impl Hook for PersistentMemoryHook {
         if self.store_roles.contains(&turn.role) {
             let mut metadata = self.default_metadata.clone();
             if let JsonValue::Object(ref mut map) = metadata {
-                map.insert("role".to_string(), serde_json::json!(format!("{:?}", turn.role)));
+                map.insert(
+                    "role".to_string(),
+                    serde_json::json!(format!("{:?}", turn.role)),
+                );
                 map.insert("turn_id".to_string(), serde_json::json!(turn.id));
-                map.insert("timestamp".to_string(), serde_json::json!(turn.timestamp.to_rfc3339()));
+                map.insert(
+                    "timestamp".to_string(),
+                    serde_json::json!(turn.timestamp.to_rfc3339()),
+                );
             }
             if let Err(e) = self.memory.store(&turn.content, metadata).await {
                 tracing::warn!(
@@ -292,7 +318,10 @@ impl SessionPersistence {
     }
 
     /// Save a session to memory
-    pub async fn save_session(&self, session: &crate::session::Session) -> Result<String, MemoryBridgeError> {
+    pub async fn save_session(
+        &self,
+        session: &crate::session::Session,
+    ) -> Result<String, MemoryBridgeError> {
         let content = serde_json::to_string_pretty(&session)
             .map_err(|e| MemoryBridgeError::StorageFailed(e.to_string()))?;
 
@@ -309,7 +338,10 @@ impl SessionPersistence {
     }
 
     /// Save a thread to memory
-    pub async fn save_thread(&self, thread: &crate::session::Thread) -> Result<String, MemoryBridgeError> {
+    pub async fn save_thread(
+        &self,
+        thread: &crate::session::Thread,
+    ) -> Result<String, MemoryBridgeError> {
         let content = serde_json::to_string_pretty(&thread)
             .map_err(|e| MemoryBridgeError::StorageFailed(e.to_string()))?;
 
@@ -326,7 +358,10 @@ impl SessionPersistence {
     }
 
     /// Search for sessions
-    pub async fn search_sessions(&self, query: &str) -> Result<Vec<SearchResult>, MemoryBridgeError> {
+    pub async fn search_sessions(
+        &self,
+        query: &str,
+    ) -> Result<Vec<SearchResult>, MemoryBridgeError> {
         self.memory
             .search(query, 10)
             .await
@@ -454,7 +489,10 @@ mod tests {
 
         // The storage should already have the turn content (no fire-and-forget delay)
         let results = storage_ref.search("Hello persistent!", 10).await.unwrap();
-        assert!(!results.is_empty(), "PersistentMemoryHook must actually store data");
+        assert!(
+            !results.is_empty(),
+            "PersistentMemoryHook must actually store data"
+        );
     }
 
     #[tokio::test]
@@ -482,7 +520,7 @@ mod tests {
         let storage = Arc::new(InMemoryStorage::new());
         let persistence = SessionPersistence::new(storage);
 
-        let session = crate::session::Session::new("Test session".to_string());
+        let session = crate::session::Session::new();
         let result = persistence.save_session(&session).await;
 
         assert!(result.is_ok());

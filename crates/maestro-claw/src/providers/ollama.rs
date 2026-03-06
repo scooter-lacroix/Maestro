@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, TokenUsage};
+use super::{ChatResponse, Provider, ProviderCapabilities, ProviderError, StreamChunk, TokenUsage};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -145,8 +145,7 @@ impl OllamaProvider {
             .or_else(|| std::env::var("OLLAMA_MODEL").ok())
             .unwrap_or_else(|| "llama3".to_string());
 
-        let base_url = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| OLLAMA_API_URL.to_string());
+        let base_url = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| OLLAMA_API_URL.to_string());
 
         let config = OllamaConfig::new(model).with_base_url(base_url);
         Self::new(config)
@@ -193,7 +192,11 @@ impl OllamaProvider {
                     // Prefer `turn.tool_results` (has is_error) over the bare content field.
                     if !turn.tool_results.is_empty() {
                         for tr in &turn.tool_results {
-                            let prefix = if tr.is_error { "Tool error" } else { "Tool result" };
+                            let prefix = if tr.is_error {
+                                "Tool error"
+                            } else {
+                                "Tool result"
+                            };
                             messages.push(OllamaMessage {
                                 role: "user".to_string(),
                                 content: format!("[{}]: {}", prefix, tr.content),
@@ -285,9 +288,16 @@ impl OllamaProvider {
 
     /// Handle API error response.
     /// `retry_after_secs` is extracted from the response header before the body is consumed (LOW-5).
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
+    fn handle_error(
+        &self,
+        status: reqwest::StatusCode,
+        body: &str,
+        retry_after_secs: u64,
+    ) -> ProviderError {
         match status.as_u16() {
-            404 => ProviderError::ModelNotFound("Model not found. Run 'ollama pull <model>'".to_string()),
+            404 => ProviderError::ModelNotFound(
+                "Model not found. Run 'ollama pull <model>'".to_string(),
+            ),
             429 => ProviderError::RateLimitExceeded(retry_after_secs),
             500 => ProviderError::ProviderError(format!("Ollama server error: {}", body)),
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
@@ -447,13 +457,11 @@ impl Provider for OllamaProvider {
             .message
             .ok_or_else(|| ProviderError::ParseError("No message in response".to_string()))?;
 
-        let tool_calls = Self::parse_tool_calls(
-            if message.tool_calls.is_empty() {
-                None
-            } else {
-                Some(&message.tool_calls)
-            },
-        );
+        let tool_calls = Self::parse_tool_calls(if message.tool_calls.is_empty() {
+            None
+        } else {
+            Some(&message.tool_calls)
+        });
 
         let usage = ollama_response.eval_count.map(|completion| {
             let prompt = ollama_response.prompt_eval_count.unwrap_or(0);
@@ -476,7 +484,10 @@ impl Provider for OllamaProvider {
     async fn stream_chat(
         &self,
         turns: &[Turn],
-    ) -> Result<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>, ProviderError> {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>,
+        ProviderError,
+    > {
         let messages = self.convert_messages(turns);
         let request = OllamaRequest {
             model: self.config.model.clone(),
@@ -592,13 +603,11 @@ impl Provider for OllamaProvider {
             .message
             .ok_or_else(|| ProviderError::ParseError("No message in response".to_string()))?;
 
-        let tool_calls = Self::parse_tool_calls(
-            if message.tool_calls.is_empty() {
-                None
-            } else {
-                Some(&message.tool_calls)
-            },
-        );
+        let tool_calls = Self::parse_tool_calls(if message.tool_calls.is_empty() {
+            None
+        } else {
+            Some(&message.tool_calls)
+        });
 
         let usage = ollama_response.eval_count.map(|completion| {
             let prompt = ollama_response.prompt_eval_count.unwrap_or(0);

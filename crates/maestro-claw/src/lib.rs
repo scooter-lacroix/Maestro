@@ -14,49 +14,66 @@
 //! - `core-integration` - Integration with maestro-core traits (SecurityPolicy, Memory, Channel)
 
 pub mod agent;
+pub mod channels;
+pub mod config;
+pub mod cost;
+pub mod cron;
+pub mod daemon;
+pub mod doctor;
+pub mod health;
+pub mod heartbeat;
 pub mod hooks;
+pub mod observability;
+pub mod onboard;
+pub mod service;
 pub mod session;
+pub mod skills;
 pub mod tools;
 
 #[cfg(feature = "providers")]
 pub mod providers;
 
+#[cfg(feature = "gateway")]
+pub mod gateway;
+
 #[cfg(feature = "core-integration")]
 pub mod integration;
 
 // Re-export commonly used session types
-pub use session::{Session, SessionMetadata, Thread, Turn, TurnRole, ToolCall, ToolResult};
+pub use session::{Session, SessionMetadata, Thread, ToolCall, ToolResult, Turn, TurnRole};
 
 // Re-export tools types
+pub use tools::builtin::{
+    CommandRiskLevel, CronAddTool, CronListTool, CronRemoveTool, FileTool, FileToolConfig,
+    MemoryTool, ShellTool, ShellToolConfig,
+};
 pub use tools::{Tool, ToolOutput, ToolRegistry, ToolSpec};
-pub use tools::builtin::{FileTool, MemoryTool, ShellTool, CommandRiskLevel};
 
 // Re-export agent types
-pub use agent::{agent_loop, AgentConfig, AgentError, AgentResult, ErrorStrategy, Provider, ProviderAdapter, ProviderResponse};
+pub use agent::{
+    agent_loop, build_default_hook_system, build_default_tool_registry,
+    build_default_tool_registry_with_extras, build_default_tools, build_tool_registry, run_prompt,
+    run_thread, AgentConfig, AgentError, AgentResult, ErrorStrategy, Provider, ProviderAdapter,
+    ProviderResponse,
+};
 
 // Re-export hooks types
-pub use hooks::{Hook, HookContext, HookError, HookSystem};
 pub use hooks::builtin::{LoggingHook, MemoryHook};
+pub use hooks::{Hook, HookContext, HookError, HookSystem};
 
 // Re-export provider types when feature is enabled
 #[cfg(feature = "providers")]
 pub use providers::{
-    ChatResponse, Provider as LlmProvider, ProviderCapabilities, ProviderError,
-    StreamChunk, ToolCallDelta, TokenUsage,
-    OpenAIConfig, OpenAIProvider,
-    AnthropicConfig, AnthropicProvider,
-    OllamaConfig, OllamaProvider,
-    OpenRouterConfig, OpenRouterProvider,
+    AnthropicConfig, AnthropicProvider, ChatResponse, OllamaConfig, OllamaProvider, OpenAIConfig,
+    OpenAIProvider, OpenRouterConfig, OpenRouterProvider, Provider as LlmProvider,
+    ProviderCapabilities, ProviderError, StreamChunk, TokenUsage, ToolCallDelta,
 };
 
 // Re-export integration types when feature is enabled
 #[cfg(feature = "core-integration")]
 pub use integration::{
-    SecurityPolicyBridge, SecurityPolicyError,
-    MemoryBridge, MemoryBridgeError,
-    ChannelBridge, ChannelBridgeError,
-    AutonomyLevel, SecurityPolicy, SandboxManager, RuntimeAdapter,
-    ExecutionRequest, SandboxResult, ResourceLimits,
-    Memory, SearchResult,
-    Channel, ChannelPlugin, ChannelRegistry, IncomingMessage, OutgoingResponse,
+    ApprovalCallback, AutonomyLevel, Channel, ChannelBridge, ChannelBridgeError, ChannelPlugin,
+    ChannelRegistry, ExecutionRequest, IncomingMessage, Memory, MemoryBridge, MemoryBridgeError,
+    OutgoingResponse, ResourceLimits, RuntimeAdapter, SandboxManager, SandboxResult, SearchResult,
+    SecurityPolicy, SecurityPolicyBridge, SecurityPolicyError,
 };

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:watch": "vite build --watch",
     "preview": "vite preview",
+    "copy-to-apps": "cp dist/index.html ../../apps/tracklens-opencode/tracklens.html",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -27,10 +29,13 @@
     "vite-plugin-singlefile": "^2.3.0"
   },
   "dependencies": {
-    "@maestro/tracklens-ui": "workspace:*",
     "@maestro/tracklens-shared": "workspace:*",
+    "@maestro/tracklens-ui": "workspace:*",
     "@maestro/tracklens-web-highlighter": "workspace:*",
+    "@tailwindcss/postcss": "^4.2.1",
+    "postcss": "^8.5.8",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "tailwindcss": "^4.2.1"
   }
 }

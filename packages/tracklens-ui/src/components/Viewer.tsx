@@ -94,14 +94,25 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     applySharedAnnotations: (sharedAnnotations: Annotation[]) => {
       // Apply shared annotations to the document
       sharedAnnotations.forEach(ann => {
-        const range = ann.startMeta && ann.endMeta ? {
-          startContainer: containerRef.current?.querySelector(`[data-block-id="${ann.blockId}"]`)?.childNodes[ann.startMeta.parentIndex] || document.createTextNode(''),
-          startOffset: ann.startMeta.textOffset,
-          endContainer: containerRef.current?.querySelector(`[data-block-id="${ann.blockId}"]`)?.childNodes[ann.endMeta?.parentIndex || 0] || document.createTextNode(''),
-          endOffset: ann.endMeta?.textOffset || 0,
-        } : null;
-        if (range) {
-          highlighterRef.current?.applyHighlight(ann.id, range);
+        const blockEl = containerRef.current?.querySelector(`[data-block-id="${ann.blockId}"]`);
+        if (blockEl && ann.startMeta && ann.endMeta) {
+          try {
+            const range = document.createRange();
+            const startNode = blockEl.childNodes[ann.startMeta.parentIndex];
+            const endNode = blockEl.childNodes[ann.endMeta.parentIndex];
+            if (startNode && endNode) {
+              range.setStart(startNode, ann.startMeta.textOffset);
+              range.setEnd(endNode, ann.endMeta.textOffset);
+              highlighterRef.current?.highlight(range, {
+                id: ann.id,
+                text: ann.text,
+                startMeta: ann.startMeta,
+                endMeta: ann.endMeta,
+              });
+            }
+          } catch (e) {
+            console.warn('Failed to apply highlight:', e);
+          }
         }
       });
     },
@@ -109,7 +120,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   useEffect(() => {
     if (containerRef.current) {
-      highlighterRef.current = new Highlighter(containerRef.current);
+      highlighterRef.current = new Highlighter({ $root: containerRef.current });
     }
     return () => {
       highlighterRef.current?.clearAllHighlights();

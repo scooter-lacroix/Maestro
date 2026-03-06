@@ -24,6 +24,16 @@ npm run build
 npm run preview
 ```
 
+## Integration
+
+The editor is served by TrackLens servers (Rust Axum server in `leindex-core` and Node/Bun server in `tracklens-server`). Authentication tokens are injected via `window.TRACKLENS_AUTH_TOKEN`.
+
 ## Status
 
-🚧 **Under Construction** - Porting from Plannotator to TrackLens
+✅ **Operational** - Ported from Plannotator to TrackLens. Full feature parity with rebranded identity.
+
+## Known Limitations
+
+- Requires server-side HTML injection for auth token
+- Markdown rendering uses client-side libraries (Mermaid, ReactMarkdown)
+- Diff viewer expects unified diff format from server

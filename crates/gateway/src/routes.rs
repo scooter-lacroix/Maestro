@@ -7,15 +7,21 @@ use std::sync::Arc;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Json, Response},
+    response::{IntoResponse, Json},
     routing::{delete, get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
-use crate::state::GatewayState;
+use crate::agent::{
+    ApprovalDecisionRequest, McpAuthSubmitRequest, McpServerRegisterRequest,
+    PairingInitiateRequest, PairingVerifyRequest,
+};
+use crate::agent_runtime::{self, McpConnectOutcome};
+use crate::state::{scopes, GatewayState};
 
+#[cfg(test)]
 /// Generate a random number in the range [0, upper) using rejection sampling
 /// to avoid modulo bias.
 ///
@@ -47,21 +53,6 @@ pub struct HealthResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub uptime_secs: u64,
-}
-
-/// Pairing request
-#[derive(Debug, Deserialize)]
-pub struct PairRequest {
-    pub device_name: Option<String>,
-    pub code: Option<String>,
-}
-
-/// Pairing response
-#[derive(Debug, Serialize)]
-pub struct PairResponse {
-    pub paired: bool,
-    pub session_id: Option<String>,
-    pub message: String,
 }
 
 /// Webhook payload
@@ -116,27 +107,40 @@ pub fn create_routes() -> Router<Arc<GatewayState>> {
         .route("/api/dashboard", get(handle_dashboard))
         .route("/api/dashboard/jobs", get(handle_dashboard_jobs))
         .route("/api/dashboard/approvals", get(handle_dashboard_approvals))
+        .route(
+            "/api/dashboard/approvals/{id}",
+            post(handle_dashboard_approval_decision),
+        )
         // Pairing
         .route("/pair", post(handle_pair))
         .route("/pair/verify", post(handle_pair_verify))
+        .route("/api/pairings", get(handle_pairings))
+        .route("/api/tokens", get(handle_tokens))
+        .route("/api/tokens/{id}", delete(handle_token_revoke))
         // Webhooks
         .route("/webhook", post(handle_webhook))
         // Agent Session API (new agent endpoints)
         .route("/api/agent/sessions", get(handle_agent_session_list))
         .route("/api/agent/sessions", post(handle_agent_session_create))
         .route("/api/agent/sessions/{id}", get(handle_agent_session_get))
-        .route("/api/agent/sessions/{id}", delete(handle_agent_session_delete))
+        .route(
+            "/api/agent/sessions/{id}",
+            delete(handle_agent_session_delete),
+        )
         .route("/api/agent/execute", post(handle_agent_execute))
         // Legacy Session API
         .route("/api/session", get(handle_session_list))
         .route("/api/session/{id}", get(handle_session_get))
         // MCP API
         .route("/api/mcp/servers", get(handle_mcp_servers))
+        .route("/api/mcp/servers", post(handle_mcp_server_register))
+        .route("/api/mcp/servers/{name}", delete(handle_mcp_server_remove))
         .route("/api/mcp/servers/{name}/connect", post(handle_mcp_connect))
         .route(
             "/api/mcp/servers/{name}/disconnect",
             post(handle_mcp_disconnect),
         )
+        .route("/api/mcp/auth/{request_id}", post(handle_mcp_auth_submit))
         // Cron API
         .route("/api/cron/jobs", get(handle_cron_jobs))
         .route("/api/cron/jobs", post(handle_cron_create))
@@ -154,7 +158,16 @@ pub async fn handle_health(State(state): State<Arc<GatewayState>>) -> impl IntoR
 }
 
 /// API status endpoint
-pub async fn handle_api_status(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
+pub async fn handle_api_status(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SYSTEM))
+    {
+        return error.into_response();
+    }
+
     let methods: Vec<String> = state
         .method_registry
         .list_methods()
@@ -170,50 +183,70 @@ pub async fn handle_api_status(State(state): State<Arc<GatewayState>>) -> impl I
         connections,
         methods,
     })
+    .into_response()
 }
 
 /// Pairing initiation
 pub async fn handle_pair(
-    State(_state): State<Arc<GatewayState>>,
-    Json(req): Json<PairRequest>,
+    State(state): State<Arc<GatewayState>>,
+    Json(req): Json<PairingInitiateRequest>,
 ) -> impl IntoResponse {
     debug!("Pairing request from device: {:?}", req.device_name);
-
-    // Generate a pairing code if not provided
-    let code = req.code.unwrap_or_else(|| {
-        // Generate 6-digit code using rejection sampling for uniform distribution
-        format!("{:06}", random_uniform(1_000_000))
-    });
-
-    // In a real implementation, this would:
-    // 1. Store the pending pairing
-    // 2. Require confirmation via another channel (e.g., TUI)
-    // 3. Return a session token upon confirmation
-
-    Json(PairResponse {
-        paired: false,
-        session_id: None,
-        message: format!(
-            "Pairing initiated. Enter code {} on the device to confirm.",
-            code
-        ),
-    })
+    Json(agent_runtime::initiate_pairing(&state, &req))
 }
 
 /// Pairing verification
 pub async fn handle_pair_verify(
-    State(_state): State<Arc<GatewayState>>,
-    Json(_req): Json<PairRequest>,
+    State(state): State<Arc<GatewayState>>,
+    Json(req): Json<PairingVerifyRequest>,
 ) -> impl IntoResponse {
-    // In a real implementation, verify the pairing code and issue a session token
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(PairResponse {
-            paired: false,
-            session_id: None,
-            message: "Pairing verification not yet implemented".to_string(),
-        }),
-    )
+    match agent_runtime::verify_pairing_code(&state, &req) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+pub async fn handle_pairings(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SYSTEM))
+    {
+        return error.into_response();
+    }
+
+    Json(agent_runtime::list_pairings(&state)).into_response()
+}
+
+pub async fn handle_tokens(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SYSTEM))
+    {
+        return error.into_response();
+    }
+
+    Json(agent_runtime::list_tokens(&state)).into_response()
+}
+
+pub async fn handle_token_revoke(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SYSTEM))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::revoke_token(&state, &id) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 /// Webhook receiver
@@ -239,83 +272,210 @@ pub async fn handle_webhook(
 }
 
 /// List sessions
-pub async fn handle_session_list(State(_state): State<Arc<GatewayState>>) -> impl IntoResponse {
-    // TODO: Implement session listing from persistence
-    Json(Vec::<serde_json::Value>::new())
+pub async fn handle_session_list(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
+    }
+
+    Json(agent_runtime::list_sessions(&state)).into_response()
 }
 
 /// Get a specific session
 pub async fn handle_session_get(
-    State(_state): State<Arc<GatewayState>>,
-    axum::extract::Path(_id): axum::extract::Path<String>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    // TODO: Implement session retrieval from persistence
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"error": "Not found"})),
-    )
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::get_session_info(&state, &id) {
+        Some(info) => Json(info).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Session not found"})),
+        )
+            .into_response(),
+    }
 }
 
 /// List MCP servers
-pub async fn handle_mcp_servers(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
-    let (registered, connected) = state.mcp_manager.try_get_status();
+pub async fn handle_mcp_servers(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::TOOLS))
+    {
+        return error.into_response();
+    }
 
-    Json(serde_json::json!({
-        "registered": registered,
-        "connected": connected,
-    }))
+    Json(agent_runtime::list_mcp_servers(&state).await).into_response()
+}
+
+pub async fn handle_mcp_server_register(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Json(req): Json<McpServerRegisterRequest>,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::TOOLS))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::register_or_update_mcp_server(&state, &req).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+pub async fn handle_mcp_server_remove(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(name): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::TOOLS))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::remove_mcp_server(&state, &name).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 /// Connect to an MCP server
 pub async fn handle_mcp_connect(
     State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    match state.mcp_manager.connect(&name).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"connected": true}))),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": e.to_string()})),
-        ),
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::TOOLS))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::connect_mcp_server(state.clone(), &name).await {
+        Ok(McpConnectOutcome::Connected) => {
+            (StatusCode::OK, Json(serde_json::json!({"connected": true}))).into_response()
+        }
+        Ok(McpConnectOutcome::AuthRequired(auth)) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "connected": false,
+                "auth_required": true,
+                "auth": auth,
+            })),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+/// Submit an MCP/tool auth token for a pending auth request.
+pub async fn handle_mcp_auth_submit(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(request_id): axum::extract::Path<String>,
+    Json(req): Json<McpAuthSubmitRequest>,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::TOOLS))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::submit_mcp_auth(
+        &state,
+        &request_id,
+        agent_runtime::gateway_auth_token(req.token, req.token_type),
+    )
+    .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
 /// Disconnect from an MCP server
 pub async fn handle_mcp_disconnect(
     State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
     axum::extract::Path(name): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    match state.mcp_manager.disconnect(&name).await {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::TOOLS))
+    {
+        return error.into_response();
+    }
+
+    match agent_runtime::disconnect_mcp_server(&state, &name).await {
         Ok(()) => (
             StatusCode::OK,
             Json(serde_json::json!({"disconnected": true})),
-        ),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": e.to_string()})),
-        ),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
 /// List cron jobs
-pub async fn handle_cron_jobs(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
-    Json(state.cron_jobs.clone())
+pub async fn handle_cron_jobs(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::CRON))
+    {
+        return error.into_response();
+    }
+
+    Json(state.cron_jobs.clone()).into_response()
 }
 
 /// Create a cron job
 pub async fn handle_cron_create(
-    State(_state): State<Arc<GatewayState>>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
     Json(_job): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::CRON))
+    {
+        return error.into_response();
+    }
+
     // TODO: Implement cron job creation
     (
         StatusCode::NOT_IMPLEMENTED,
         Json(serde_json::json!({"error": "Not yet implemented"})),
     )
+        .into_response()
 }
 
 /// Dashboard overview
-pub async fn handle_dashboard(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
+pub async fn handle_dashboard(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SYSTEM))
+    {
+        return error.into_response();
+    }
+
     let (registered, connected) = state.mcp_manager.try_get_status();
     let policy = state.sandbox_manager.default_policy();
 
@@ -346,10 +506,20 @@ pub async fn handle_dashboard(State(state): State<Arc<GatewayState>>) -> impl In
                 .collect(),
         },
     })
+    .into_response()
 }
 
 /// Dashboard job monitoring
-pub async fn handle_dashboard_jobs(State(state): State<Arc<GatewayState>>) -> impl IntoResponse {
+pub async fn handle_dashboard_jobs(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SYSTEM))
+    {
+        return error.into_response();
+    }
+
     // Return cron jobs with additional monitoring info
     let jobs: Vec<serde_json::Value> = state
         .cron_jobs
@@ -377,140 +547,38 @@ pub async fn handle_dashboard_jobs(State(state): State<Arc<GatewayState>>) -> im
         })
         .collect();
 
-    Json(jobs)
+    Json(jobs).into_response()
 }
 
 /// Dashboard approval queue
 pub async fn handle_dashboard_approvals(
-    State(_state): State<Arc<GatewayState>>,
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    // TODO: Wire up to approval manager
-    // For now, return empty queue
-    Json(serde_json::json!({
-        "pending": [],
-        "count": 0,
-    }))
-}
-
-// ============================================================================
-// Agent API — Authentication helper (MED-8)
-// ============================================================================
-
-/// Verify the Bearer token on agent API requests.
-///
-/// If `GatewayConfig::agent_api_key` is `None`, all requests are allowed
-/// (useful for local development).  When a key is configured, the
-/// `Authorization: Bearer <key>` header must match exactly.
-fn verify_agent_auth(state: &GatewayState, headers: &HeaderMap) -> Result<(), Response> {
-    let Some(ref required) = state.config.agent_api_key else {
-        return Ok(()); // No key configured → open access
-    };
-
-    let bearer = headers
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
-
-    match bearer {
-        Some(token) if token == required.as_str() => Ok(()),
-        Some(_) => Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "Invalid API key"})),
-        )
-            .into_response()),
-        None => Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "Authorization: Bearer <key> header required"})),
-        )
-            .into_response()),
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::APPROVALS))
+    {
+        return error.into_response();
     }
+
+    Json(agent_runtime::approval_queue(&state)).into_response()
 }
 
-// ============================================================================
-// Agent API — Provider factory (MED-7)
-// ============================================================================
+pub async fn handle_dashboard_approval_decision(
+    State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(req): Json<ApprovalDecisionRequest>,
+) -> impl IntoResponse {
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::APPROVALS))
+    {
+        return error.into_response();
+    }
 
-/// Build a `maestro_claw::agent::Provider` from gateway config + request params.
-///
-/// The provider name is taken from `req.provider`, falling back to
-/// `config.default_llm_provider`.  The model is taken from `req.model`,
-/// falling back to `config.default_model`, then to a provider-specific
-/// built-in default.
-fn build_agent_provider(
-    config: &crate::state::GatewayConfig,
-    req: &crate::agent::AgentExecuteRequest,
-) -> Result<Arc<dyn maestro_claw::agent::Provider>, Response> {
-    use maestro_claw::{
-        AnthropicConfig, AnthropicProvider, OpenAIConfig, OpenAIProvider, ProviderAdapter,
-    };
-
-    let provider_name = req
-        .provider
-        .as_deref()
-        .unwrap_or(config.default_llm_provider.as_str());
-
-    let err = |msg: &str| -> Response {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"error": msg})),
-        )
-            .into_response()
-    };
-
-    match provider_name {
-        "openai" => {
-            let api_key = config
-                .openai_api_key
-                .as_deref()
-                .ok_or_else(|| err("OpenAI API key not configured (set openai_api_key)"))?;
-            let model = req
-                .model
-                .as_deref()
-                .or(config.default_model.as_deref())
-                .unwrap_or("gpt-4o");
-            let inner = OpenAIProvider::new(OpenAIConfig::new(
-                api_key.to_string(),
-                model.to_string(),
-            ))
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": e.to_string()})),
-                )
-                    .into_response()
-            })?;
-            Ok(Arc::new(ProviderAdapter::new(Arc::new(inner))))
-        }
-        "anthropic" => {
-            let api_key = config
-                .anthropic_api_key
-                .as_deref()
-                .ok_or_else(|| err("Anthropic API key not configured (set anthropic_api_key)"))?;
-            let model = req
-                .model
-                .as_deref()
-                .or(config.default_model.as_deref())
-                .unwrap_or("claude-3-5-sonnet-20241022");
-            let inner = AnthropicProvider::new(AnthropicConfig::new(
-                api_key.to_string(),
-                model.to_string(),
-            ))
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": e.to_string()})),
-                )
-                    .into_response()
-            })?;
-            Ok(Arc::new(ProviderAdapter::new(Arc::new(inner))))
-        }
-        unknown => Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": format!("Unknown provider '{}'. Supported: openai, anthropic", unknown)
-            })),
-        )
-            .into_response()),
+    match agent_runtime::resolve_approval_request(&state, &id, &req) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -523,17 +591,13 @@ pub async fn handle_agent_session_list(
     State(state): State<Arc<GatewayState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(r) = verify_agent_auth(&state, &headers) {
-        return r;
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
     }
 
-    let sessions: Vec<crate::agent::SessionInfo> = state
-        .session_store
-        .iter()
-        .map(|entry| entry.value().info.clone())
-        .collect();
-
-    Json(crate::agent::SessionListResponse::from_sessions(sessions)).into_response()
+    Json(agent_runtime::list_sessions(&state)).into_response()
 }
 
 /// Create a new agent session (Rec-4)
@@ -542,38 +606,15 @@ pub async fn handle_agent_session_create(
     headers: HeaderMap,
     Json(req): Json<crate::agent::SessionCreateRequest>,
 ) -> impl IntoResponse {
-    if let Err(r) = verify_agent_auth(&state, &headers) {
-        return r;
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
     }
 
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let created_at = chrono::Utc::now().to_rfc3339();
-
-    let info = crate::agent::SessionInfo {
-        id: session_id.clone(),
-        thread_count: 0,
-        turn_count: 0,
-        created_at: created_at.clone(),
-        status: "idle".to_string(),
-    };
-
-    state.session_store.insert(
-        session_id.clone(),
-        crate::state::StoredAgentSession {
-            info: info.clone(),
-            turns: Vec::new(),
-            provider: req.provider.clone(),
-            model: req.model.clone().unwrap_or_default(),
-        },
-    );
-
-    debug!("Created agent session: {}", session_id);
-
-    Json(crate::agent::SessionCreateResponse {
-        session_id,
-        created_at,
-    })
-    .into_response()
+    let created = agent_runtime::create_session(&state, &req);
+    debug!("Created agent session: {}", created.session_id);
+    Json(created).into_response()
 }
 
 /// Get a specific agent session (Rec-4)
@@ -582,12 +623,14 @@ pub async fn handle_agent_session_get(
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    if let Err(r) = verify_agent_auth(&state, &headers) {
-        return r;
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
     }
 
-    match state.session_store.get(&id) {
-        Some(entry) => Json(entry.value().info.clone()).into_response(),
+    match agent_runtime::get_session_info(&state, &id) {
+        Some(info) => Json(info).into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Session not found"})),
@@ -602,11 +645,13 @@ pub async fn handle_agent_session_delete(
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
-    if let Err(r) = verify_agent_auth(&state, &headers) {
-        return r;
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
     }
 
-    let removed = state.session_store.remove(&id).is_some();
+    let removed = agent_runtime::delete_session(&state, &id);
 
     if removed {
         debug!("Deleted agent session: {}", id);
@@ -634,177 +679,16 @@ pub async fn handle_agent_execute(
     headers: HeaderMap,
     Json(req): Json<crate::agent::AgentExecuteRequest>,
 ) -> impl IntoResponse {
-    // MED-8: Authenticate
-    if let Err(r) = verify_agent_auth(&state, &headers) {
-        return r;
+    if let Err(error) =
+        agent_runtime::verify_agent_auth_scoped(&state, &headers, None, Some(scopes::SESSIONS))
+    {
+        return error.into_response();
     }
 
     debug!("Agent execute: prompt_len={}", req.prompt.len());
-
-    // ------------------------------------------------------------------
-    // Build provider (MED-7)
-    // ------------------------------------------------------------------
-    let provider = match build_agent_provider(&state.config, &req) {
-        Ok(p) => p,
-        Err(r) => return r,
-    };
-
-    // EDGE-4: Garbage-collect stale/excess sessions before creating new ones
-    state.gc_sessions();
-
-    // ------------------------------------------------------------------
-    // Resolve session and extract prior turns (Rec-4)
-    //
-    // We extract turns without holding any DashMap lock so the lock is
-    // dropped before we enter the (potentially long) agent_loop await.
-    // ------------------------------------------------------------------
-    let (session_id, prior_turns) = if let Some(ref sid) = req.session_id {
-        // Look up existing session
-        let turns = match state.session_store.get(sid) {
-            Some(entry) => entry.value().turns.clone(),
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({"error": "Session not found"})),
-                )
-                    .into_response();
-            }
-        };
-        (sid.clone(), turns)
-        // DashMap Ref dropped here before .await
-    } else {
-        // Auto-create a new session
-        let new_id = uuid::Uuid::new_v4().to_string();
-        let created_at = chrono::Utc::now().to_rfc3339();
-        let info = crate::agent::SessionInfo {
-            id: new_id.clone(),
-            thread_count: 1,
-            turn_count: 0,
-            created_at,
-            status: "active".to_string(),
-        };
-        state.session_store.insert(
-            new_id.clone(),
-            crate::state::StoredAgentSession {
-                info,
-                turns: Vec::new(),
-                provider: req
-                    .provider
-                    .clone()
-                    .unwrap_or_else(|| state.config.default_llm_provider.clone()),
-                model: req.model.clone().unwrap_or_default(),
-            },
-        );
-        (new_id, Vec::new())
-    };
-
-    // ------------------------------------------------------------------
-    // Build a Thread hydrated with prior conversation history
-    // ------------------------------------------------------------------
-    let mut thread = maestro_claw::Thread::new(session_id.clone());
-    for turn in prior_turns {
-        thread.add_turn(turn);
-    }
-    thread.add_turn(maestro_claw::Turn::new(
-        maestro_claw::TurnRole::User,
-        req.prompt.clone(),
-    ));
-
-    let thread_id = thread.id().to_string();
-
-    // ------------------------------------------------------------------
-    // Broadcast "started" event
-    // ------------------------------------------------------------------
-    let prompt_preview = {
-        const PREVIEW_CHARS: usize = 97;
-        if req.prompt.chars().count() > PREVIEW_CHARS {
-            let truncated: String = req.prompt.chars().take(PREVIEW_CHARS).collect();
-            format!("{}...", truncated)
-        } else {
-            req.prompt.clone()
-        }
-    };
-    let _ = state.event_bus.send(crate::protocol::EventFrame::new(
-        "agent.execute.started",
-        Some(serde_json::json!({
-            "session_id": session_id,
-            "thread_id": thread_id,
-            "prompt_preview": prompt_preview,
-        })),
-        Some(state.next_seq()),
-    ));
-
-    // ------------------------------------------------------------------
-    // Run the agent loop (may take many seconds for multi-turn sessions)
-    // ------------------------------------------------------------------
-    let max_turns = req.max_turns.unwrap_or(20);
-    let config = maestro_claw::AgentConfig::default().with_max_turns(max_turns);
-    let tools = Arc::new(maestro_claw::ToolRegistry::new());
-    let hooks = Arc::new(maestro_claw::HookSystem::new());
-
-    let agent_result = maestro_claw::agent_loop(&mut thread, provider, tools, hooks, config).await;
-
-    // ------------------------------------------------------------------
-    // Persist updated turns back to the session store (Rec-4)
-    //
-    // This is done without holding any lock during the await above; now
-    // we briefly acquire the DashMap shard lock just to write.
-    // ------------------------------------------------------------------
-    {
-        let updated_turns = thread.turns.clone();
-        if let Some(mut entry) = state.session_store.get_mut(&session_id) {
-            entry.value_mut().turns = updated_turns;
-            entry.value_mut().info.turn_count = thread.turns.len();
-            entry.value_mut().info.thread_count = 1;
-            entry.value_mut().info.status = "idle".to_string();
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Build and return response
-    // ------------------------------------------------------------------
-    match agent_result {
-        Ok(result) => {
-            // Broadcast "completed" event
-            let _ = state.event_bus.send(crate::protocol::EventFrame::new(
-                "agent.execute.completed",
-                Some(serde_json::json!({
-                    "session_id": session_id,
-                    "thread_id": thread_id,
-                    "turns_used": result.total_turns,
-                    "tool_calls": result.tool_calls_executed,
-                    "completed_normally": result.completed_normally,
-                })),
-                Some(state.next_seq()),
-            ));
-
-            let response = crate::agent::AgentExecuteResponse {
-                session_id,
-                thread_id,
-                content: result.content().to_string(),
-                turns_used: result.total_turns,
-                tool_calls: result.tool_calls_executed,
-                completed_normally: result.completed_normally,
-                termination_reason: if !result.completed_normally {
-                    Some(result.termination_reason.clone())
-                } else {
-                    None
-                },
-            };
-            Json(response).into_response()
-        }
-        Err(e) => {
-            warn!("Agent loop error for session {}: {}", session_id, e);
-            // Update session status to error
-            if let Some(mut entry) = state.session_store.get_mut(&session_id) {
-                entry.value_mut().info.status = "error".to_string();
-            }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
-            )
-                .into_response()
-        }
+    match agent_runtime::execute_agent_request(state.clone(), req).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 

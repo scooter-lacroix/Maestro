@@ -11,9 +11,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex as AsyncMutex;
 
-use maestro_core::channel::{
-    ChannelPlugin, ChannelRegistry, IncomingMessage,
-};
+use maestro_core::channel::{ChannelPlugin, ChannelRegistry, IncomingMessage};
 
 /// Error from channel bridge operations
 #[derive(Debug, Clone, thiserror::Error)]
@@ -150,9 +148,9 @@ impl ChannelBridge {
                 .get(channel_id)
                 .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
 
-            let outbound = channel
-                .outbound()
-                .ok_or_else(|| ChannelBridgeError::SendFailed("No outbound interface".to_string()))?;
+            let outbound = channel.outbound().ok_or_else(|| {
+                ChannelBridgeError::SendFailed("No outbound interface".to_string())
+            })?;
 
             outbound
                 .send_text(account_id, to, text, reply_to)
@@ -189,9 +187,9 @@ impl ChannelBridge {
                 .get(channel_id)
                 .ok_or_else(|| ChannelBridgeError::ChannelNotFound(channel_id.to_string()))?;
 
-            let outbound = channel
-                .outbound()
-                .ok_or_else(|| ChannelBridgeError::SendFailed("No outbound interface".to_string()))?;
+            let outbound = channel.outbound().ok_or_else(|| {
+                ChannelBridgeError::SendFailed("No outbound interface".to_string())
+            })?;
 
             outbound
                 .send_typing(account_id, to)
@@ -210,10 +208,7 @@ impl Default for ChannelBridge {
 
 /// Convert an IncomingMessage from maestro-core to a maestro-claw Turn
 pub fn incoming_message_to_turn(msg: &IncomingMessage) -> crate::session::Turn {
-    crate::session::Turn::new(
-        crate::session::TurnRole::User,
-        msg.content.clone(),
-    )
+    crate::session::Turn::new(crate::session::TurnRole::User, msg.content.clone())
     // Note: Channel metadata is not stored on Turn as it doesn't have a metadata field.
     // Consumers should track this separately.
 }
@@ -246,7 +241,11 @@ pub struct ChannelNotifier {
 
 impl ChannelNotifier {
     /// Create a new channel notifier
-    pub fn new(bridge: Arc<ChannelBridge>, channel_id: impl Into<String>, account_id: impl Into<String>) -> Self {
+    pub fn new(
+        bridge: Arc<ChannelBridge>,
+        channel_id: impl Into<String>,
+        account_id: impl Into<String>,
+    ) -> Self {
         Self {
             bridge,
             channel_id: channel_id.into(),
@@ -255,7 +254,11 @@ impl ChannelNotifier {
     }
 
     /// Send a notification about agent status
-    pub async fn notify(&self, to: &str, notification: &AgentNotification) -> Result<(), ChannelBridgeError> {
+    pub async fn notify(
+        &self,
+        to: &str,
+        notification: &AgentNotification,
+    ) -> Result<(), ChannelBridgeError> {
         let message = match notification {
             AgentNotification::Started { session_id } => {
                 format!("Agent started processing (session: {})", session_id)
@@ -264,10 +267,7 @@ impl ChannelNotifier {
                 session_id,
                 turn_number,
             } => {
-                format!(
-                    "Turn {} completed (session: {})",
-                    turn_number, session_id
-                )
+                format!("Turn {} completed (session: {})", turn_number, session_id)
             }
             AgentNotification::Completed {
                 session_id,

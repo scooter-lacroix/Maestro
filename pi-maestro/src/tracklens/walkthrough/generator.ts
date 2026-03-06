@@ -348,7 +348,7 @@ function getTrackChangedFiles(
       return [];
     }
 
-    // Get changed files
+    // Get changed files (batched)
     const diffOutput = execSync(
       `git diff --name-status ${sinceCommit}^..HEAD`,
       { cwd: root, encoding: "utf-8" }
@@ -357,6 +357,55 @@ function getTrackChangedFiles(
     const files: ChangedFile[] = [];
     const fileEntries = diffOutput.trim().split("\n");
 
+    // Batch: Get all numstats in a single call
+    const statsMap = new Map<string, { additions: number; deletions: number }>();
+    try {
+      const allStats = execSync(
+        `git diff --numstat ${sinceCommit}^..HEAD`,
+        { cwd: root, encoding: "utf-8" }
+      );
+      for (const line of allStats.trim().split("\n")) {
+        const match = line.match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        if (match) {
+          const [, add, del, path] = match;
+          statsMap.set(path, {
+            additions: parseInt(add, 10) || 0,
+            deletions: parseInt(del, 10) || 0,
+          });
+        }
+      }
+    } catch (e) {
+      // Stats batch failed, continue without stats
+    }
+
+    // Batch: Get all diffs in a single call, then split by file
+    const diffsMap = new Map<string, string>();
+    if (includeDiffs) {
+      try {
+        const allDiffs = execSync(
+          `git diff ${sinceCommit}^..HEAD`,
+          { cwd: root, encoding: "utf-8" }
+        );
+
+        // Split by "diff --git" header to separate file diffs
+        const diffSections = allDiffs.split(/\ndiff --git /);
+        for (const section of diffSections) {
+          if (!section.trim()) continue;
+
+          // Extract file path from diff header
+          // Format: a/path/to/file b/path/to/file
+          const headerMatch = section.match(/^a\/(\S+)\s+b\/\S+/m);
+          if (headerMatch) {
+            const filePath = headerMatch[1];
+            diffsMap.set(filePath, "diff --git " + section.trim());
+          }
+        }
+      } catch (e) {
+        // Diffs batch failed, continue without diffs
+      }
+    }
+
+    // Process files with batched data
     for (const entry of fileEntries) {
       if (!entry) continue;
 
@@ -372,39 +421,12 @@ function getTrackChangedFiles(
         path,
         status: fileStatus,
         language,
-        additions: 0,
-        deletions: 0,
+        additions: statsMap.get(path)?.additions || 0,
+        deletions: statsMap.get(path)?.deletions || 0,
+        diff: diffsMap.get(path),
       };
 
-      // Get diff stats
-      try {
-        const stats = execSync(
-          `git diff --numstat ${sinceCommit}^..HEAD -- "${path}"`,
-          { cwd: root, encoding: "utf-8" }
-        );
-        const statsMatch = stats.trim().match(/^(\d+)\s+(\d+)\s+/);
-        if (statsMatch) {
-          changedFile.additions = parseInt(statsMatch[1], 10);
-          changedFile.deletions = parseInt(statsMatch[2], 10);
-        }
-      } catch (e) {
-        // Stats failed, continue without them
-      }
-
-      // Get full diff if requested
-      if (includeDiffs) {
-        try {
-          const diff = execSync(
-            `git diff ${sinceCommit}^..HEAD -- "${path}"`,
-            { cwd: root, encoding: "utf-8" }
-          );
-          changedFile.diff = diff.trim();
-        } catch (e) {
-          // Diff failed
-        }
-      }
-
-      // Extract snippet if requested
+      // Extract snippet if requested (still requires file read, but no git call)
       if (includeSnippets && path.match(/\.(ts|tsx|js|jsx|rs|go|py)$/)) {
         try {
           changedFile.snippet = extractCodeSnippet(
@@ -428,17 +450,55 @@ function getTrackChangedFiles(
 
 /**
  * Find the first commit for a track
+ *
+ * Strategy:
+ * 1. Check metadata.json for stored start_commit
+ * 2. Search for structured prefix [tracklens:trackName]
+ * 3. Fall back to unstructured grep (may produce false matches)
  */
 function findTrackStartCommit(root: string, trackName: string): string | undefined {
   try {
-    // Search for commits with track name in message
-    const logOutput = execSync(
-      `git log --all --grep="${trackName}" --format="%H" -n 1`,
-      { cwd: root, encoding: "utf-8" }
-    );
+    // Step 1: Check metadata.json for stored start_commit
+    const metadataPath = join(root, "maestro/tracks", trackName, "metadata.json");
+    if (existsSync(metadataPath)) {
+      try {
+        const metadata = JSON.parse(readFileSync(metadataPath, "utf-8"));
+        if (metadata.start_commit) {
+          return metadata.start_commit;
+        }
+      } catch (e) {
+        // Metadata read failed, continue to git search
+      }
+    }
 
-    const commit = logOutput.trim();
-    return commit || undefined;
+    // Step 2: Search with structured prefix [tracklens:trackName]
+    // Using --fixed-strings for literal search to avoid regex issues
+    const structuredPattern = `[tracklens:${trackName}]`;
+    try {
+      const logOutput = execSync(
+        `git log --all --fixed-strings --grep="${structuredPattern}" --format="%H" -n 1`,
+        { cwd: root, encoding: "utf-8" }
+      );
+      const commit = logOutput.trim();
+      if (commit) {
+        return commit;
+      }
+    } catch (e) {
+      // Structured search failed, continue to fallback
+    }
+
+    // Step 3: Fallback - search for track name in commit messages
+    // Note: This may produce false matches for similarly named tracks
+    try {
+      const logOutput = execSync(
+        `git log --all --grep="${trackName}" --format="%H" -n 1`,
+        { cwd: root, encoding: "utf-8" }
+      );
+      const commit = logOutput.trim();
+      return commit || undefined;
+    } catch (e) {
+      return undefined;
+    }
   } catch (e) {
     return undefined;
   }

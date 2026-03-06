@@ -52,7 +52,11 @@ pub struct ToolCall {
 impl ToolCall {
     /// Create a new tool call
     pub fn new(id: String, name: String, arguments: serde_json::Value) -> Self {
-        Self { id, name, arguments }
+        Self {
+            id,
+            name,
+            arguments,
+        }
     }
 }
 
@@ -71,7 +75,11 @@ pub struct ToolResult {
 impl ToolResult {
     /// Create a new tool result
     pub fn new(tool_call_id: String, content: String, is_error: bool) -> Self {
-        Self { tool_call_id, content, is_error }
+        Self {
+            tool_call_id,
+            content,
+            is_error,
+        }
     }
 }
 
@@ -166,7 +174,8 @@ impl Turn {
 
     /// Add a tool result to this turn
     pub fn add_tool_result(&mut self, tool_call_id: String, content: String, is_error: bool) {
-        self.tool_results.push(ToolResult::new(tool_call_id, content, is_error));
+        self.tool_results
+            .push(ToolResult::new(tool_call_id, content, is_error));
     }
 
     /// Set the tool call ID (for Tool role turns)

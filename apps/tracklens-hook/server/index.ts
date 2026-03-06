@@ -32,19 +32,28 @@ import {
   startAnnotateServer,
 } from "@maestro/tracklens-server/annotate";
 import { getGitContext, runGitDiff } from "@maestro/tracklens-server/git";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
-// Embed the built HTML at compile time
-// @ts-ignore - Bun import attribute for text
-import planHtml from "../dist/index.html" with { type: "text" };
-const planHtmlContent = planHtml as unknown as string;
+// Load HTML at runtime (since compile-time imports don't work from dist/)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-// @ts-ignore - Bun import attribute for text
-import reviewHtml from "../dist/review.html" with { type: "text" };
-const reviewHtmlContent = reviewHtml as unknown as string;
+// When running from dist/index.js, we need to go up to the packages directory
+async function loadHtmlContent(filename: string): Promise<string> {
+  const path = `${__dirname}/../../../packages/${filename}`;
+  const file = Bun.file(path);
+  if (await file.exists()) {
+    return await file.text();
+  }
+  // Provide more context in error message
+  throw new Error(`Could not load ${filename} from ${path}\nCurrent directory: ${__dirname}\nEnsure packages are built: bun run build`);
+}
 
-// @ts-ignore - Bun import attribute for text
-import annotateHtml from "../dist/annotate.html" with { type: "text" };
-const annotateHtmlContent = annotateHtml as unknown as string;
+// Load HTML content at startup (top-level await)
+const planHtmlContent = await loadHtmlContent("tracklens-editor/dist/index.html");
+const reviewHtmlContent = await loadHtmlContent("tracklens-review-editor/dist/index.html");
+const annotateHtmlContent = reviewHtmlContent;
 
 // Check for subcommand
 const args = process.argv.slice(2);
@@ -138,54 +147,77 @@ if (args[0] === "review") {
   // PLAN REVIEW MODE (default, hook-invoked)
   // ============================================
 
-  // Read hook event from stdin
-  const hookEventJson = await Bun.stdin.read();
-  const hookEventText = new TextDecoder().decode(hookEventJson);
-  const hookEvent = JSON.parse(hookEventText);
+  // Read hook event from stdin (using Bun.stdin.text() like original Plannotator)
+  const eventJson = await Bun.stdin.text();
 
-  // Extract plan content from the hook event
-  // The event contains user_message which has the plan markdown
-  const plan = hookEvent.user_message?.content || hookEvent.content || "";
-
-  if (!plan) {
-    console.error("No plan content found in hook event");
+  let planContent = "";
+  let permissionMode = "default";
+  try {
+    const event = JSON.parse(eventJson);
+    planContent = event.tool_input?.plan || "";
+    permissionMode = event.permission_mode || "default";
+  } catch {
+    console.error("Failed to parse hook event from stdin");
     process.exit(1);
   }
 
-  // Get current autonomy mode if present
-  const autonomyMode = hookEvent.autonomy_mode;
+  if (!planContent) {
+    console.error("No plan content in hook event");
+    process.exit(1);
+  }
 
-  // Start TrackLens server
+  // Start the plan review server
   const server = await startTrackLensServer({
-    plan,
+    plan: planContent,
     origin: "claude-code",
+    autonomyMode: permissionMode,
     htmlContent: planHtmlContent,
-    autonomyMode,
   });
 
-  // Wait for user decision
-  const decision = await server.waitForDecision();
+  // Wait for user decision (blocks until approve/deny)
+  const result = await server.waitForDecision();
 
   // Give browser time to receive response and update UI
   await Bun.sleep(1500);
 
-  // Output decision to stdout (captured by ExitPlanMode hook)
-  if (!decision.approved) {
-    console.log("\nPlan not approved.");
-    if (decision.feedback) {
-      console.log(`\nFeedback:\n${decision.feedback}`);
+  // Cleanup
+  server.stop();
+
+  // Output JSON for PermissionRequest hook decision control (ORIGINAL PLANNOTATOR FORMAT)
+  if (result.approved) {
+    // Build updatedPermissions to preserve the current permission mode
+    const updatedPermissions = [];
+    if (result.autonomyMode) {
+      updatedPermissions.push({
+        type: "setMode",
+        mode: result.autonomyMode,
+        destination: "session",
+      });
     }
-    process.exit(1);
-  }
 
-  // Handle agent switch
-  if (decision.agentSwitch) {
-    console.log(`\n[TrackLens] Switching to agent: ${decision.agentSwitch}`);
-  }
-
-  // Handle autonomy mode change
-  if (decision.autonomyMode && decision.autonomyMode !== autonomyMode) {
-    console.log(`\n[TrackLens] Autonomy mode changed to: ${decision.autonomyMode}`);
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: "allow",
+            ...(updatedPermissions.length > 0 && { updatedPermissions }),
+          },
+        },
+      })
+    );
+  } else {
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: "deny",
+            message: result.feedback || "Plan changes requested",
+          },
+        },
+      })
+    );
   }
 
   process.exit(0);
