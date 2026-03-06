@@ -1,6 +1,6 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
-use leindex_analyzers::orchestrate::model::IterationStatus;
+use leindex_core::orchestrate::model::IterationStatus;
 use super::pane::ConductorPane;
 
 pub fn render_iteration_history(frame: &mut Frame, area: Rect, pane: &mut ConductorPane, theme: &crate::theme::Theme) {

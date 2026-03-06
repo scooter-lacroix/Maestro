@@ -42,14 +42,20 @@ pub enum MemoryCommands {
 
 pub async fn run(cmd: MemoryCommands) -> Result<()> {
     match cmd {
-        MemoryCommands::Serve { port, host, db, debug } => {
-            super::memory_impl::serve(port, host, db, debug).await
-        }
+        MemoryCommands::Serve {
+            port,
+            host,
+            db,
+            debug,
+        } => super::memory_impl::serve(port, host, db, debug).await,
         MemoryCommands::Status { db } => super::memory_impl::status(db).await,
         MemoryCommands::Scan { depth, paths } => super::memory_impl::scan(paths, depth).await,
-        MemoryCommands::Store { content, category, importance, db } => {
-            super::memory_impl::store(content, category, importance, db).await
-        }
+        MemoryCommands::Store {
+            content,
+            category,
+            importance,
+            db,
+        } => super::memory_impl::store(content, category, importance, db).await,
     }
 }
 

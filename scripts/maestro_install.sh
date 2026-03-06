@@ -11,7 +11,7 @@
 #   ▒▒▒▒▒     ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒     ▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒    ▒▒▒▒▒▒▒
 #
 #
-#                                      ✨ Maestro v2.5 ✨
+#                                      ✨ Maestro v2 ✨
 #                                    THE CONDUCTOR WIZARD
 #                              Cross-Platform Linux Installer
 #
@@ -230,8 +230,8 @@ if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/maestro/leindex/rust" ]; then
     echo -e "${Y}  [!] Running from pipe — cloning Maestro repository...${NC}"
     TMPDIR="${TMPDIR:-/tmp}"
     REPO_TMP="$(mktemp -d "$TMPDIR/maestro-XXXXXX")"
-    # Default branch is v2.5, but can be overridden with MAESTRO_BRANCH env var
-    MAESTRO_BRANCH="${MAESTRO_BRANCH:-v2.5}"
+    # Default remote installs to main, but allow explicit override.
+    MAESTRO_BRANCH="${MAESTRO_BRANCH:-main}"
     echo -e "${C}    Cloning branch: ${MAESTRO_BRANCH}${NC}"
     git clone --depth 1 --branch "$MAESTRO_BRANCH" https://github.com/scooter-lacroix/Maestro.git "$REPO_TMP/Maestro"
     REPO_ROOT="$REPO_TMP/Maestro"

@@ -2,10 +2,14 @@
 //!
 //! Based on Ralph TUI's state machine and execution loop.
 
-use serde::{Deserialize, Serialize};
-use leindex_analyzers::orchestrate::model::LoopMode;
 use chrono::{DateTime, Utc};
+use leindex_core::{
+    memory::models::Memory,
+    orchestrate::model::{IterationLog, LoopMode, TaskDependency, TrackStatus},
+};
+use serde::{Deserialize, Serialize};
 use crate::maestro_paths::MaestroProject;
+use crate::omp::OmpWorkerStatus;
 
 /// Ralph: RalphStatus → Maestro: ConductorStatus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -128,9 +132,23 @@ pub struct ConductorState {
     /// Runtime status for discovered tracks (track_id -> status)
     pub track_runtime_statuses: std::collections::HashMap<String, ConductorStatus>,
     /// Recent iteration logs for the current track
-    pub iteration_logs: Vec<leindex_analyzers::orchestrate::model::IterationLog>,
+    pub iteration_logs: Vec<IterationLog>,
     /// Memories associated with the current track
-    pub track_memories: Vec<leindex_analyzers::memory::models::Memory>,
+    pub track_memories: Vec<Memory>,
+    /// Whether the OMP backend is available
+    pub omp_available: bool,
+    /// Whether the Pi-Mono backend is available
+    pub pi_mono_available: bool,
+    /// The currently selected agent role name
+    pub selected_agent_role: Option<String>,
+    /// Last observed OMP worker status
+    pub omp_agent_status: Option<OmpWorkerStatus>,
+    /// Cached LSP diagnostic error messages
+    pub lsp_diagnostics_errors: Vec<String>,
+    /// Cached LSP diagnostic warning messages
+    pub lsp_diagnostics_warnings: Vec<String>,
+    /// Names of currently running LSP servers
+    pub running_lsp_servers: Vec<String>,
 }
 
 impl Default for ConductorState {
@@ -163,6 +181,13 @@ impl Default for ConductorState {
             track_runtime_statuses: std::collections::HashMap::new(),
             iteration_logs: Vec::new(),
             track_memories: Vec::new(),
+            omp_available: false,
+            pi_mono_available: false,
+            selected_agent_role: None,
+            omp_agent_status: None,
+            lsp_diagnostics_errors: Vec::new(),
+            lsp_diagnostics_warnings: Vec::new(),
+            running_lsp_servers: Vec::new(),
         }
     }
 }
@@ -233,6 +258,14 @@ pub enum ConductorEvent {
     // Progress
     AllComplete { total_completed: usize, total_iterations: u64 },
     TasksRefreshed { task_count: usize },
+    DiagnosticsStarted {},
+    DiagnosticsCompleted {
+        error_count: usize,
+        warning_count: usize,
+        diagnostics: Vec<String>,
+    },
+    DiagnosticsFailed { error: String },
+    LspStatusUpdated { lsp_servers: Vec<String> },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -263,6 +296,8 @@ pub enum DetailsViewMode {
     Output,
     /// Rendered prompt preview
     Prompt,
+    /// Parallel worker/status view
+    Parallel,
 }
 
 /// Ralph: IterationTimingInfo
@@ -297,14 +332,14 @@ pub enum SelectableItem {
         id: String,
         title: String,
         depth: usize,
-        status: leindex_analyzers::orchestrate::model::TrackStatus,
+        status: TrackStatus,
         has_children: bool,
         is_expanded: bool,
         description: String,
         notes: String,
         is_blocked: bool,
         is_actionable: bool,
-        dependencies: Vec<leindex_core::orchestrate::model::TaskDependency>,
+        dependencies: Vec<TaskDependency>,
         dependency_statuses: Vec<DependencyStatus>,
     },
 }

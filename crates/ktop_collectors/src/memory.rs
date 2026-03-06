@@ -228,8 +228,8 @@ mod tests {
         let mut collector = MemoryCollector::new();
         let total_swap = collector.total_swap().expect("Failed to get total swap");
 
-        // Swap may be 0 if not configured
-        assert!(total_swap >= 0);
+        // Swap may be 0 if not configured; successful retrieval is the behavior under test.
+        let _ = total_swap;
     }
 
     #[test]

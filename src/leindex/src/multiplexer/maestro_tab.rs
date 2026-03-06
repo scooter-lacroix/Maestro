@@ -769,9 +769,7 @@ mod tests {
         mux.register_session_in_cache("test_session");
 
         // After registration, should have activity timestamp
-        let activity = mux.session_activity_from_cache("test_session");
-        // Activity should be Some if cache is valid
-        // Note: This depends on cache state, so we just verify it doesn't panic
+        let _activity = mux.session_activity_from_cache("test_session");
     }
 
     // ========== Terminal Detection Tests (Task 2.11.7) ==========
@@ -812,7 +810,7 @@ mod tests {
             || info.name.contains("term")
             || info.name.contains("xterm");
 
-        // Just verify we got some name (exact matching depends on environment)
+        let _ = is_known;
         assert!(!info.name.is_empty(), "Terminal name should not be empty");
     }
 
@@ -874,9 +872,7 @@ mod tests {
         let mux = MaestroTabMultiplexer::new();
 
         // Should fail gracefully for non-existent session
-        let result = mux.apply_transparency_to_session("nonexistent_session");
-        // Result is expected to be Err since session doesn't exist
-        // The important thing is it doesn't panic
+        let _result = mux.apply_transparency_to_session("nonexistent_session");
     }
 
     #[test]

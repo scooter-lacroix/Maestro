@@ -76,7 +76,8 @@ coverage.json
 *.tsbuildinfo
 telemetry-id
 .mcp.json
-maestro/tmp/
+/maestro/tmp/
+/maestro/tmp/**
 
 # Session files
 *.db-shm

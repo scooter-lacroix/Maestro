@@ -28,8 +28,13 @@ NC='\033[0m'
 clear
 echo -e "${C}    Preparing the Overture...${NC}"
 
-# Default branch (can be overridden with MAESTRO_BRANCH env var)
-MAESTRO_BRANCH="${MAESTRO_BRANCH:-v2.5}"
+# Default remote installs to main. Local installs stay on the current checkout
+# unless MAESTRO_BRANCH was explicitly provided by the caller.
+BRANCH_EXPLICIT=0
+if [[ -n "${MAESTRO_BRANCH:-}" ]]; then
+    BRANCH_EXPLICIT=1
+fi
+MAESTRO_BRANCH="${MAESTRO_BRANCH:-main}"
 REPO_URL="${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}"
 
 # Determine if we're running from a cloned repo or a remote install
@@ -58,13 +63,14 @@ fi
 # Change to the Rust directory
 cd "$INSTALL_DIR"
 
-# Verify we're on the correct branch (for local installs)
+# Respect the current local checkout unless a branch was explicitly requested.
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-if [[ "$CURRENT_BRANCH" != "$MAESTRO_BRANCH" && "$CURRENT_BRANCH" != "HEAD" ]]; then
-    echo -e "${Y}    [Warning] Current branch is '$CURRENT_BRANCH', but installing from branch '$MAESTRO_BRANCH'${NC}"
-    echo -e "${Y}    Switching to branch: $MAESTRO_BRANCH${NC}"
+if [[ "$BRANCH_EXPLICIT" -eq 1 && "$CURRENT_BRANCH" != "$MAESTRO_BRANCH" ]]; then
+    echo -e "${Y}    [Branch Override] Current branch is '$CURRENT_BRANCH'; switching to '$MAESTRO_BRANCH' as requested.${NC}"
     git fetch origin "$MAESTRO_BRANCH" || git fetch origin
     git checkout "$MAESTRO_BRANCH"
+elif [[ "$BRANCH_EXPLICIT" -eq 0 && "$CURRENT_BRANCH" != "HEAD" && "$CURRENT_BRANCH" != "unknown" ]]; then
+    echo -e "${C}    [Local Install] Using current branch: $CURRENT_BRANCH${NC}"
 fi
 
 cd "$INSTALL_DIR/src/leindex"

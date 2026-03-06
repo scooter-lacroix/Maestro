@@ -8,11 +8,14 @@ use crossterm::{
     cursor::MoveTo,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear as TerminalClear, ClearType,
+        EnterAlternateScreen, LeaveAlternateScreen,
+    },
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, BorderType, Borders, Paragraph, Tabs},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Tabs, Wrap},
 };
 use std::hash::{Hash, Hasher};
 use std::{
@@ -43,10 +46,7 @@ use crate::state::{
     AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
     ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };
-use crate::tabs::{
-    render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
-    render_sessions, render_settings, render_tracklens, session_log_tail,
-};
+use crate::tabs::render_tracklens;
 use crate::tracklens::TrackLensPane;
 
 // Re-export for use in tabs
@@ -917,15 +917,6 @@ impl App {
         }
     }
 
-    /// Refresh LSP status cache from Turso database
-    ///
-    /// Sets a flag to trigger async refresh in the main event loop.
-    /// This avoids the Tokio panic when calling async from sync context.
-    #[allow(dead_code)]
-    fn refresh_lsp_status(&mut self) {
-        self.refresh_lsp_status_impl(false);
-    }
-
     /// Refresh LSP status cache from Turso database (internal implementation)
     ///
     /// Sets a flag to trigger async refresh in the main event loop.
@@ -1401,7 +1392,7 @@ fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> 
     execute!(io::stdout(), LeaveAlternateScreen)?;
 
     // 3. Clear the main screen to ensure clean state for spawned app
-    execute!(io::stdout(), Clear(ClearType::All))?;
+    execute!(io::stdout(), TerminalClear(ClearType::All))?;
 
     // 4. Move cursor to home position
     execute!(io::stdout(), MoveTo(0, 0))?;
@@ -4136,7 +4127,7 @@ async fn run_app<B: Backend>(
                                         .first()
                                         .map(|s| s.project_path.clone())
                                         .unwrap_or_else(|| ".".to_string());
-                                    let prompt = crate::tabs::lsps::generate_agent_prompt(
+                                    let prompt = generate_agent_prompt(
                                         &app.lsp_diagnostics_cache,
                                         &project_path,
                                     );
@@ -5072,6 +5063,56 @@ async fn run_app<B: Backend>(
     Ok(())
 }
 
+fn generate_agent_prompt(
+    diagnostics: &[crate::state::LspDiagnosticDetail],
+    project_path: &str,
+) -> String {
+    let mut lines = vec![
+        "Investigate these LSP diagnostics and propose the smallest safe fix.".to_string(),
+        format!("Project path: {}", project_path),
+        String::new(),
+    ];
+
+    if diagnostics.is_empty() {
+        lines.push("No diagnostic details are currently cached.".to_string());
+        return lines.join("\n");
+    }
+
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        let location = match (diagnostic.line, diagnostic.column) {
+            (Some(line), Some(column)) => format!("{}:{}", line, column),
+            (Some(line), None) => line.to_string(),
+            _ => "?".to_string(),
+        };
+        let lsp_name = diagnostic.lsp_name.as_deref().unwrap_or("unknown-lsp");
+        let session = diagnostic
+            .session_title
+            .as_deref()
+            .or(diagnostic.session_id.as_deref())
+            .unwrap_or("unknown-session");
+
+        lines.push(format!(
+            "{}. [{}] {} :: {} ({})",
+            index + 1,
+            diagnostic.severity,
+            diagnostic.file_path,
+            location,
+            lsp_name
+        ));
+        lines.push(format!("   Session: {}", session));
+        lines.push(format!("   Message: {}", diagnostic.message));
+        if let Some(source) = diagnostic.source.as_deref() {
+            lines.push(format!("   Source: {}", source));
+        }
+        if let Some(code) = diagnostic.code.as_deref() {
+            lines.push(format!("   Code: {}", code));
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n")
+}
+
 fn ui(frame: &mut Frame, app: &mut App) {
     let theme = app.theme();
     frame.render_widget(
@@ -5307,79 +5348,6 @@ fn truncate_str(s: &str, max_width: usize) -> String {
         let truncated: String = s.chars().take(max_width.saturating_sub(3)).collect();
         format!("{}...", truncated)
     }
-}
-
-fn render_action_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, frame.area());
-    frame.render_widget(Clear, area);
-
-    let (title, prompt, value) = match app.input_mode {
-        InputMode::RenameGroup => (" Rename Group ", "New Name:", Some(&app.rename_buffer)),
-        InputMode::ForkSession => (" Fork Session ", "Fork Name:", Some(&app.rename_buffer)),
-        InputMode::KillConfirm => (" Kill Session ", "Are you sure? (y/n)", None),
-        InputMode::DeleteConfirm => (
-            " Permanent Delete ",
-            "Are you sure you want to PERMANENTLY delete? (y/n)",
-            None,
-        ),
-        InputMode::NewSessionTitle => (
-            " New Session ",
-            "Enter Title:",
-            Some(&app.new_session_title),
-        ),
-        InputMode::NewGroupTitle => (" New Group ", "Group Name:", Some(&app.rename_buffer)),
-        InputMode::MoveToGroup => (" Move to Group ", "Target Path:", Some(&app.rename_buffer)),
-        _ => ("", "", None),
-    };
-
-    let theme = app.theme();
-    let title_style = match app.input_mode {
-        InputMode::KillConfirm | InputMode::DeleteConfirm => {
-            Style::default().fg(theme.error).bold()
-        }
-        _ => Style::default().fg(theme.warning).bold(),
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .title(title)
-        .title_style(title_style);
-
-    let content = if let Some(v) = value {
-        format!("{}\n\n> {}", prompt, v)
-    } else {
-        prompt.to_string()
-    };
-
-    let para = Paragraph::new(content)
-        .block(block)
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true });
-
-    frame.render_widget(para, area);
-}
-
-fn render_spawning_overlay(frame: &mut Frame, app: &App) {
-    let area = centered_rect(40, 10, frame.area());
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(30, 0, 30)).fg(Color::Yellow));
-
-    let text = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  ⚡ ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(&app.status_message),
-        ]),
-    ];
-
-    let para = Paragraph::new(text)
-        .block(block)
-        .alignment(Alignment::Center);
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
 }
 
 fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -5761,430 +5729,6 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_stateful_widget(mcp_list, mcp_chunks[1], &mut app.mcp_state);
 }
 
-fn render_help_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    let theme = theme_from_name(&app.config.theme);
-    let block = Block::default()
-        .title(" Commands Cheat-sheet ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let text = build_help_text(app);
-
-    let para = Paragraph::new(text)
-        .block(block)
-        .alignment(Alignment::Left)
-        .scroll((app.help_scroll, 0))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
-}
-
-fn build_help_text(app: &App) -> Vec<Line<'static>> {
-    vec![
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " GLOBAL CONTROLS:",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   Tab / S-Tab   ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Cycle Tabs / Focus Preview (e.g. 1->2->3)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Navigate / Scroll Preview"),
-        ]),
-        Line::from(vec![
-            Span::styled("   / or ?        ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Open/close this modal"),
-        ]),
-        Line::from(vec![
-            Span::styled("   PgUp/PgDn     ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Scroll modal content"),
-        ]),
-        Line::from(vec![
-            Span::styled("   q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" Quit Maestro Cockpit"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("   Dash: k / d   ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Kill / Delete Highlighted Dashboard Session"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " SESSIONS (Tab 2):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled(
-                "   n             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" New Session Wizard (Title, Path, Tool)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   Enter         ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Attach (auto-resume if terminated)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   u             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Resume (restore shell + resume agent, best-effort)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   R             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Restart (restore shell + start tool fresh)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Session Hub (Rename, Move, Search history)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Focus Preview Pane (for scrolling history)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Alt + ↑/↓     ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Reorder group/session (persists to DB)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   m             ",
-                Style::default().fg(Color::Magenta).bold(),
-            ),
-            Span::raw(" Move Session to Group / Create New Group"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   G             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Create Standalone Group"),
-        ]),
-        Line::from(vec![
-            Span::styled("   k             ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" Kill tmux Session Process"),
-        ]),
-        Line::from(vec![
-            Span::styled("   d / Alt + D   ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" PURMANENT DELETE Session/Group from DB"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   f             ",
-                Style::default().fg(Color::Magenta).bold(),
-            ),
-            Span::raw(" Fork Session (Clone state to new session)"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " MEMORY (Tab 5):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Search memories (hybrid Tantivy/SQLite)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Clear memory search"),
-        ]),
-        Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Refresh/import system-wide memories"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " PROJECTS (Tab 3):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled(
-                "   Enter         ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Open Zide (File Picker + Editor)"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " ANALYSIS (Tab 4):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Enter Analysis Command Box"),
-        ]),
-        Line::from(""),
-        Line::from("  ---------------------------------- "),
-        Line::from(format!(
-            "  Maestro TUI Cockpit v2.0-beta-8  {}",
-            if (app.frame_count / 30) % 2 == 0 {
-                "⚡"
-            } else {
-                "  "
-            }
-        )),
-    ]
-}
-
-fn render_session_hub_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(80, 60, frame.area());
-    frame.render_widget(Clear, area);
-
-    let block = Block::default()
-        .title(" SESSION HUB Control ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 10, 15)));
-    frame.render_widget(block, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // RENAME
-            Constraint::Length(3), // GROUP
-            Constraint::Min(0),    // PREVIEW
-            Constraint::Length(3), // SEARCH
-        ])
-        .split(area);
-
-    // Rename Box
-    let rename_style = if app.hub_focus == HubFocus::Rename {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    let rename_title = if app.hub_focus == HubFocus::Rename {
-        ">> RENAME (Enter to Commit) "
-    } else {
-        " RENAME "
-    };
-    let rename = Paragraph::new(app.rename_buffer.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(rename_title)
-            .border_style(rename_style),
-    );
-    frame.render_widget(rename, chunks[0]);
-
-    // Group Box
-    let group_style = if app.hub_focus == HubFocus::Group {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default()
-    };
-    let group_title = if app.hub_focus == HubFocus::Group {
-        ">> GROUP ASSIGNMENT (Enter to change) "
-    } else {
-        " GROUP ASSIGNMENT "
-    };
-    let group = Paragraph::new("Current: /default (Press 'm' to Move)").block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(group_title)
-            .border_style(group_style),
-    );
-    frame.render_widget(group, chunks[1]);
-
-    // Search Results / Pane Preview
-    let preview = Paragraph::new(app.session_preview_content.as_str())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" PANE HISTORY PREVIEW / SEARCH RESULTS "),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(preview, chunks[2]);
-
-    // Search Input
-    let search_style = if app.hub_focus == HubFocus::Search {
-        Style::default().fg(Color::Magenta).bold()
-    } else {
-        Style::default()
-    };
-    let search_title = if app.hub_focus == HubFocus::Search {
-        ">> SEARCH IN PANE (Type to filter) "
-    } else {
-        " SEARCH IN PANE "
-    };
-    let search_content = if app.hub_focus == HubFocus::Search {
-        format!("{}_", app.hub_search_buffer)
-    } else {
-        app.hub_search_buffer.clone()
-    };
-    let search_input = Paragraph::new(search_content).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(search_title)
-            .border_style(search_style),
-    );
-    frame.render_widget(search_input, chunks[3]);
-}
-
-fn render_mcp_menu(frame: &mut Frame, app: &App) {
-    let area = centered_rect(40, 40, frame.area());
-    frame.render_widget(Clear, area);
-    let theme = theme_from_name(&app.config.theme);
-
-    let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
-    let block = Block::default()
-        .title(format!(" MCP: {} ", name))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let options = vec![
-        (McpOption::StartStop, "▶/■ Start/Stop Server"),
-        (McpOption::Pause, "⏸ Pause Connection"),
-        (McpOption::Logs, "📋 View Server Logs"),
-        (McpOption::Add, "➕ Add New Server"),
-        (McpOption::Remove, "❌ Remove from Pool"),
-        (McpOption::Install, "🛠️ Install Component"),
-    ];
-
-    let mut list_items = Vec::new();
-    for (opt, label) in options {
-        let style = if app.mcp_menu_option == opt {
-            Style::default()
-                .fg(Color::Yellow)
-                .bold()
-                .bg(Color::Rgb(40, 40, 60))
-        } else {
-            Style::default()
-        };
-        list_items.push(ListItem::new(vec![Line::from(vec![
-            Span::styled(
-                if app.mcp_menu_option == opt {
-                    " >> "
-                } else {
-                    "    "
-                },
-                style,
-            ),
-            Span::styled(label, style),
-        ])]));
-    }
-
-    let list = List::new(list_items).block(block);
-    frame.render_widget(list, area);
-}
-
-fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(80, 70, frame.area());
-    frame.render_widget(Clear, area);
-
-    // Determine if we're showing MCP or LSP logs
-    let is_lsp_logs = app.lsp_log_source.is_some();
-
-    let (title, content, scroll_offset) = if is_lsp_logs {
-        // LSP logs
-        let (session_id, lsp_name) = app.lsp_log_source.as_ref().unwrap();
-        let title = format!(
-            " LSP Logs: {} - Session {} (Esc to close) ",
-            lsp_name, session_id
-        );
-        let content = if app.lsp_log_content.is_empty() {
-            vec![
-                Line::from(""),
-                Line::from("  No logs found."),
-                Line::from(""),
-                Line::from("  Tip: LSP logs may not be enabled for this server."),
-            ]
-        } else {
-            app.lsp_log_content.lines().map(|l| Line::from(l)).collect()
-        };
-        let scroll_offset = (app.lsp_log_scroll, 0);
-        (title, content, scroll_offset)
-    } else {
-        // MCP logs
-        let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
-        let title = format!(" MCP Logs: {} (Esc to close) ", name);
-        let content = if app.mcp_log_lines.is_empty() {
-            vec![
-                Line::from(""),
-                Line::from("  No logs found."),
-                Line::from(""),
-                Line::from("  Tip: start the server to generate logs."),
-            ]
-        } else {
-            app.mcp_log_lines
-                .iter()
-                .map(|l| Line::from(l.as_str()))
-                .collect()
-        };
-        let scroll_offset = (app.mcp_log_scroll, 0);
-        (title, content, scroll_offset)
-    };
-
-    let theme = theme_from_name(&app.config.theme);
-    let block = Block::default()
-        .title(title)
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let para = Paragraph::new(content)
-        .scroll(scroll_offset)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(para, inner);
-}
-
-fn render_settings_menu_modal(frame: &mut Frame, app: &mut App) {
-    let theme = theme_from_name(&app.config.theme);
-    let area = centered_rect(60, 60, frame.area());
-    frame.render_widget(Clear, area);
-
-    let title = match app.settings_menu_kind {
-        Some(SettingsMenuKind::Editor) => " Select Preferred Editor ",
-        Some(SettingsMenuKind::Theme) => " Select Theme ",
-        None => " Select ",
-    };
-
-    let block = Block::default()
-        .title(title)
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let items: Vec<ListItem> = app
-        .settings_menu_items
-        .iter()
-        .map(|(_, label)| ListItem::new(label.clone()))
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(theme.highlight_bg)
-                .fg(theme.highlight_fg)
-                .bold(),
-        )
-        .highlight_symbol(">> ");
-
-    frame.render_stateful_widget(list, area, &mut app.settings_menu_state);
-}
-
 fn render_settings(frame: &mut Frame, app: &App) {
     let theme = theme_from_name(&app.config.theme);
     let area = frame.area();
@@ -6271,353 +5815,6 @@ fn render_settings(frame: &mut Frame, app: &App) {
         .alignment(Alignment::Center)
         .style(Style::default().fg(theme.muted));
     frame.render_widget(help, chunks[4]);
-}
-
-fn render_new_project_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    frame.render_widget(Clear, area);
-
-    let step = match app.input_mode {
-        InputMode::NewProjectName => 1,
-        InputMode::NewProjectPath => 2,
-        InputMode::NewProjectTool => 3,
-        _ => 1,
-    };
-
-    let block = Block::default()
-        .title(format!(" NEW PROJECT WIZARD (Step {} of 3) ", step))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(15, 10, 20)));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // Name
-            Constraint::Length(3), // Path
-            Constraint::Length(3), // Tool
-            Constraint::Min(0),    // Help/Hint
-        ])
-        .split(area);
-
-    let name_style = if step == 1 {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let name = Paragraph::new(app.new_project_name.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 1. PROJECT NAME ")
-            .border_style(name_style),
-    );
-    frame.render_widget(name, chunks[0]);
-
-    let path_style = if step == 2 {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let path = Paragraph::new(app.new_project_path.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 2. TARGET PATH (Enter for current) ")
-            .border_style(path_style),
-    );
-    frame.render_widget(path, chunks[1]);
-
-    let tool_style = if step == 3 {
-        Style::default().fg(Color::Magenta).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let tool = Paragraph::new(app.new_project_tool.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 3. INITIAL TOOL (None/claude/gemini) ")
-            .border_style(tool_style),
-    );
-    frame.render_widget(tool, chunks[2]);
-
-    let hint = Paragraph::new("Press 'Enter' to confirm step, 'Esc' to cancel\n\nThis will run /maestro:setup in the target directory.")
-        .alignment(Alignment::Center);
-    frame.render_widget(hint, chunks[3]);
-    frame.render_widget(block, area);
-}
-
-fn render_group_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    frame.render_widget(Clear, area);
-
-    let step = match app.input_mode {
-        InputMode::NewGroupTitle | InputMode::RenameGroup => 1,
-        InputMode::NewGroupCategory | InputMode::RenameGroupCategory => 2,
-        _ => 1,
-    };
-
-    let title = if matches!(
-        app.input_mode,
-        InputMode::RenameGroup | InputMode::RenameGroupCategory
-    ) {
-        " RENAME GROUP WIZARD "
-    } else {
-        " NEW GROUP WIZARD "
-    };
-
-    let block = Block::default()
-        .title(format!(" {} (Step {} of 2) ", title, step))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 20, 15)));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // Name
-            Constraint::Length(3), // Category
-            Constraint::Min(0),    // Help/Hint
-        ])
-        .split(area);
-
-    let name_style = if step == 1 {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let name = Paragraph::new(app.rename_buffer.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 1. GROUP NAME ")
-            .border_style(name_style),
-    );
-    frame.render_widget(name, chunks[0]);
-
-    let cat_style = if step == 2 {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let cat = Paragraph::new(app.new_group_category.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 2. CATEGORY (e.g. Work, Personal, Research) ")
-            .border_style(cat_style),
-    );
-    frame.render_widget(cat, chunks[1]);
-
-    let hint = Paragraph::new("Tab to switch fields, Enter: next/save, Esc to cancel\n\nGroups help you organize your coding sessions.")
-        .alignment(Alignment::Center);
-    frame.render_widget(hint, chunks[2]);
-    frame.render_widget(block, area);
-}
-
-fn render_new_track_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 30, frame.area());
-    frame.render_widget(Clear, area);
-
-    let step = match app.input_mode {
-        InputMode::NewTrackTitle => 1,
-        InputMode::NewTrackType => 2,
-        _ => 1,
-    };
-
-    let block = Block::default()
-        .title(format!(" NEW TRACK WIZARD (Step {} of 2) ", step))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 15, 20)));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // Title
-            Constraint::Length(3), // Type
-            Constraint::Min(0),    // Help/Hint
-        ])
-        .split(area);
-
-    let title_style = if step == 1 {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let title = Paragraph::new(app.new_track_title.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 1. TRACK TITLE ")
-            .border_style(title_style),
-    );
-    frame.render_widget(title, chunks[0]);
-
-    let type_style = if step == 2 {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let type_text = if app.new_track_is_master {
-        "[X] Master Track  [ ] Direct Track"
-    } else {
-        "[ ] Master Track  [X] Direct Track"
-    };
-    let track_type = Paragraph::new(type_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 2. TRACK TYPE (Space to toggle) ")
-            .border_style(type_style),
-    );
-    frame.render_widget(track_type, chunks[1]);
-
-    let hint = Paragraph::new("Press 'Enter' to confirm, 'Esc' to cancel\n\nThis will run /maestro:newTrack in the project.")
-        .alignment(Alignment::Center);
-    frame.render_widget(hint, chunks[2]);
-    frame.render_widget(block, area);
-}
-fn render_input_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, frame.area());
-    let block = Block::default()
-        .title(" New Session Wizard ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
-
-    let mut text = vec![Line::from("")];
-
-    // Title Field
-    let title_style = if app.input_mode == InputMode::NewSessionTitle {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    text.push(Line::from(vec![
-        Span::styled("  Session Title: ", title_style),
-        Span::raw(&app.new_session_title),
-        if app.input_mode == InputMode::NewSessionTitle {
-            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK))
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    // Path Field
-    let path_style = if app.input_mode == InputMode::NewSessionPath {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    text.push(Line::from(vec![
-        Span::styled("  Project Path:  ", path_style),
-        Span::raw(&app.new_session_path),
-        if app.input_mode == InputMode::NewSessionPath {
-            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK))
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    // Tool Field
-    let tool_style = if app.input_mode == InputMode::NewSessionTool {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    text.push(Line::from(vec![
-        Span::styled("  Tool (Cycle):  ", tool_style),
-        Span::styled(
-            &app.new_session_tool,
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        if app.input_mode == InputMode::NewSessionTool {
-            Span::raw(" (Press any key to cycle)")
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    text.push(Line::from(""));
-    text.push(Line::from("  [Enter] Next/Confirm  [Esc] Cancel"));
-
-    let para = Paragraph::new(text).block(block);
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
-}
-
-fn render_switcher_modal(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(50, 40, frame.area());
-    let theme = app.theme();
-    let block = Block::default()
-        .title(" Quick Session Switcher ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    if app.sessions.is_empty() {
-        let text = vec![Line::from("  No active sessions.")];
-        let para = Paragraph::new(text).block(block);
-        frame.render_widget(Clear, area);
-        frame.render_widget(para, area);
-    } else {
-        let items: Vec<ListItem> = app
-            .sessions
-            .iter()
-            .map(|s| {
-                let status_color =
-                    if s.status == leindex_core::memory::models::SessionStatus::Running {
-                        Color::Green
-                    } else {
-                        Color::Gray
-                    };
-                ListItem::new(vec![Line::from(vec![
-                    Span::styled(" * ", Style::default().fg(status_color)),
-                    Span::styled(&s.title, Style::default().bold().fg(Color::White)),
-                    Span::styled(
-                        format!(" [{}]", s.tool.as_deref().unwrap_or("?")),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ])])
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(
-                Style::default()
-                    .bg(theme.highlight_bg)
-                    .fg(theme.highlight_fg)
-                    .bold(),
-            )
-            .highlight_symbol(">> ");
-
-        frame.render_widget(Clear, area);
-        frame.render_stateful_widget(list, area, &mut app.switcher_state);
-    }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
 
 fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
@@ -7016,7 +6213,7 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
         ];
 
         for lsp_name in &missing_lsps {
-            let install_commands = App::get_lsp_install_command(lsp_name);
+            let install_commands = crate::tabs::lsps::get_lsp_install_command(lsp_name);
             missing_lines.push(Line::from(vec![
                 Span::styled(
                     format!("▸ {} ", lsp_name),
@@ -7525,6 +6722,5 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             .wrap(Wrap { trim: false })
             .scroll((app.preview_scroll, 0));
         frame.render_widget(preview, chunks[1]);
->>>>>>> 3ac143d5 (feat(v2.5): Complete Sub-Track 01 - Cockpit TUI Re-Org & Distribution)
     }
 }

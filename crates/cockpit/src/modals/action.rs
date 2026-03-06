@@ -8,10 +8,6 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
 use crate::state::InputMode;
-<<<<<<< HEAD
-=======
-use crate::theme::Theme;
->>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the action confirmation modal.

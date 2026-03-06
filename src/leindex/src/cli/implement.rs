@@ -7,12 +7,12 @@ use std::process::Command;
 
 // Import types from the library crate
 // These imports work because the CLI module is only compiled as part of the library
-use crate::multiplexer::TmuxMultiplexer;
-use crate::token_format::TokenFormatter;
-#[cfg(feature = "rusqlite")]
-use crate::memory::session_manager::SessionManager;
 #[cfg(feature = "rusqlite")]
 use crate::memory::service::MemoryService;
+#[cfg(feature = "rusqlite")]
+use crate::memory::session_manager::SessionManager;
+use crate::multiplexer::TmuxMultiplexer;
+use crate::token_format::TokenFormatter;
 
 use super::prompt;
 

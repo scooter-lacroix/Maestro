@@ -2,7 +2,9 @@
 
 use crate::config::Config;
 use crate::observability::{create_observer, Observer, ObserverEvent, TelemetryCorrelation};
-use anyhow::{anyhow, Result};
+#[cfg(feature = "channels")]
+use anyhow::anyhow;
+use anyhow::Result;
 use chrono::Utc;
 use std::future::Future;
 use std::path::PathBuf;

@@ -61,11 +61,7 @@ impl SessionManager {
     /// preventing the "Cannot start a runtime from within a runtime" panic when the
     /// SessionManager is used from within async contexts like the TUI.
     pub fn with_lsp_manager(self, manager: LspManager) -> Self {
-        if let Ok(mut guard) = self.lsp_manager.lock() {
-            *guard = Some(manager);
-            // Mark as initialized to prevent lazy init from creating a nested runtime
-            self.lsp_manager_init.call_once(|| {});
-        }
+        let _ = self.lsp_manager.set(manager);
         self
     }
 
@@ -81,7 +77,9 @@ impl SessionManager {
 
         // Check if we're already in a tokio runtime — can't create a nested one
         if Handle::try_current().is_ok() {
-            tracing::debug!("Skipping lazy LSP manager init in async context to avoid nested runtime panic");
+            tracing::debug!(
+                "Skipping lazy LSP manager init in async context to avoid nested runtime panic"
+            );
             tracing::debug!("LSP features will be unavailable. Use SessionManager::with_lsp_manager() to pre-initialize.");
             return None;
         }
@@ -155,7 +153,9 @@ impl SessionManager {
             session.session_id,
             session.started_at.format("%Y-%m-%d %H:%M:%S UTC")
         );
-        let _ = self.service.store_memory(&memory_content, MemoryCategory::Observation);
+        let _ = self
+            .service
+            .store_memory(&memory_content, MemoryCategory::Observation);
 
         // Auto-start LSPs for the session based on project language detection
         // Note: This is done in a separate task to avoid blocking session creation
@@ -840,7 +840,9 @@ impl SessionManager {
             session_id,
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
         );
-        let _ = self.service.store_memory(&memory_content, MemoryCategory::Observation);
+        let _ = self
+            .service
+            .store_memory(&memory_content, MemoryCategory::Observation);
 
         Ok(())
     }

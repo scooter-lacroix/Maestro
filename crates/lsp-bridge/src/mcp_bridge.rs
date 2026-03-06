@@ -43,7 +43,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::memory::LspType;
+use leindex_core::LspType;
 
 /// Maximum message size to prevent DoS (16MB)
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;

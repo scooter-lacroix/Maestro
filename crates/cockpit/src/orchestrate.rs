@@ -8,11 +8,10 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use std::path::PathBuf;
 
-<<<<<<< HEAD
-use leindex_analyzers::orchestrate::{
-    model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode},
-    parser::{parse_tracks_md, parse_plan_md},
-    setup::{SetupStatus, detect_setup_status, AgentTool},
+use leindex_core::orchestrate::{
+    model::{LoopMode, SessionStatus, Task, Track, TrackPlan, TrackStatus},
+    parser::{parse_plan_md, parse_tracks_md},
+    setup::{detect_setup_status, AgentTool, SetupStatus},
 };
 
 /// Setup state for the orchestrate pane
@@ -38,14 +37,6 @@ impl Default for SetupState {
         }
     }
 }
-
-=======
-use leindex_core::orchestrate::{
-    model::{Track, TrackPlan, Task, TrackStatus, SessionStatus, LoopMode},
-    parser::{parse_tracks_md, parse_plan_md},
-};
-
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 /// State for the Orchestrate pane
 pub struct OrchestratePane {
     /// List of tracks loaded from tracks.md
@@ -76,11 +67,8 @@ pub struct OrchestratePane {
     cached_plan: Option<TrackPlan>,
     /// Track index for which the plan is cached
     cached_plan_track_index: Option<usize>,
-<<<<<<< HEAD
     /// Setup state
     pub setup: SetupState,
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
 impl Default for OrchestratePane {
@@ -100,10 +88,7 @@ impl Default for OrchestratePane {
             error_message: None,
             cached_plan: None,
             cached_plan_track_index: None,
-<<<<<<< HEAD
             setup: Default::default(),
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         }
     }
 }
@@ -228,7 +213,6 @@ impl OrchestratePane {
         self.iteration_output.clear();
         self.output_scroll = 0;
     }
-<<<<<<< HEAD
 
     /// Check setup status and cache the result
     pub fn check_setup_status(&mut self) {
@@ -329,8 +313,6 @@ impl OrchestratePane {
     pub fn get_new_track_command(&self) -> String {
         "maestro newTrack".to_string()
     }
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 }
 
 /// Render the Orchestrate pane
@@ -464,22 +446,14 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
     // Split into details (top) and output (bottom)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-<<<<<<< HEAD
         .constraints([Constraint::Length(20), Constraint::Min(0)])
-=======
-        .constraints([Constraint::Length(15), Constraint::Min(0)])
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         .split(area);
 
     // Task details
     let details_block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-<<<<<<< HEAD
         .title(" Task Details & Commands ")
-=======
-        .title(" Task Details ")
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         .border_style(if !pane.output_focused {
             Style::default().fg(theme.muted)
         } else {
@@ -491,7 +465,6 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
             Line::from(""),
             Line::from("  No track selected."),
             Line::from(""),
-<<<<<<< HEAD
             Line::from("  Press 'n' to create a new track"),
             Line::from("  or run: maestro newTrack"),
             Line::from(""),
@@ -499,11 +472,6 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
     } else {
         let track = &pane.tracks[pane.selected_track];
         let start_cmd = pane.get_start_command(Some("claude"), false, false);
-=======
-        ]
-    } else {
-        let track = &pane.tracks[pane.selected_track];
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         vec![
             Line::from(vec![
                 Span::styled("Track: ", Style::default().fg(theme.accent_alt)),
@@ -531,7 +499,6 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
                 Span::styled(format!("{}", pane.current_iteration), Style::default()),
             ]),
             Line::from(""),
-<<<<<<< HEAD
             Line::from("Commands:"),
             Line::from(vec![
                 Span::styled("  [s] Start: ", Style::default().fg(theme.muted)),
@@ -550,8 +517,6 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
                 Span::styled(pane.get_status_command(), Style::default().fg(theme.fg)),
             ]),
             Line::from(""),
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         ]
     };
 
