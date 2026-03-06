@@ -14,9 +14,12 @@
 
 ## Overview
 
-Maestro v2 is a major architectural evolution that unifies three powerful systems into a cohesive, spec-driven development orchestration framework:
+Maestro v2.5 is a major architectural evolution that unifies powerful systems into a cohesive, spec-driven development orchestration framework:
 
+### Core Systems
 - **Maestro Core** - Spec-driven development with automatic agent selection and TDD enforcement
+- **MaestroClaw** - Unified agent execution framework with multi-provider support and streaming
+- **Tracklens** - Interactive walkthrough system for spec-driven development
 - **Unified Memory System** - Built-in project context with semantic search and coordination patterns
 - **109 Repurposed Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
 - **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
@@ -77,6 +80,62 @@ Complex (multi-file, >50)  → oracle/librarian + explore
 Analysis (>100KB)          → librarian
 Spec-driven/ambiguous      → oracle for specification
 ```
+
+### MaestroClaw - Agent Execution Framework
+
+MaestroClaw is the unified agent execution layer for Maestro, providing comprehensive capabilities for AI agent workflows:
+
+#### Modules (13+)
+- **`channels/`** - Multi-platform integrations (Discord, Slack, Telegram)
+- **`config/`** - Configuration schema and management
+- **`cost/`** - Token usage and cost tracking
+- **`cron/`** - Scheduled task execution with persistence
+- **`daemon/`** - Background service management
+- **`doctor/`** - Health check and diagnostics
+- **`gateway/`** - Gateway integration layer
+- **`health/`** - Health monitoring endpoints
+- **`heartbeat/`** - Liveness monitoring
+- **`observability/`** - Metrics and tracing
+- **`onboard/`** - New user/agent onboarding
+- **`service/`** - Service orchestration
+- **`skills/`** - Skill system integration
+- **`telemetry/`** - Event telemetry
+
+#### Agent Runtime
+- CLI provider support for local model execution
+- Enhanced provider adapters (Anthropic, OpenAI, Ollama, OpenRouter)
+- Streaming tool call deltas across all providers
+- Typed status system with proper error handling
+
+#### MCP Integration
+- Persistent connection design
+- Enhanced tool registry and built-in tools
+- File, memory, and shell tools with proper security
+
+**Documentation**: [MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md](docs/MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md) | [MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md](docs/MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md)
+
+### Tracklens - Walkthrough System
+
+Tracklens is an interactive walkthrough system that guides users through spec-driven development workflows:
+
+#### Features
+- **Visual Diff Viewer** - See plan changes with side-by-side comparison
+- **Step-by-Step Guidance** - Interactive walkthrough of development tasks
+- **Progress Tracking** - Track completion of walkthrough phases
+- **Screenshot Annotation** - Capture and annotate during walkthroughs
+- **Decision Points** - User controls key decisions in the development flow
+
+#### UI Components
+- Plan diff viewer with syntax highlighting
+- Sidebar navigation for walkthrough steps
+- Image annotation tools
+- Landing page for new users
+
+#### Backend
+- Consolidated save API for plans and documents
+- Bearer token authentication
+- Path traversal security
+- WebSocket support for real-time updates
 
 ### Nexus Memory System
 
@@ -249,6 +308,8 @@ maestro/
 │   ├── cli/              # maestro-cli (produces "maestro" binary)
 │   ├── cockpit/          # maestro-cockpit (ratatui TUI library)
 │   │                     # Tabs: Dashboard, Sessions, Projects, Analysis, LSP, Memory, Settings
+│   ├── maestro-claw/     # Agent execution framework (providers, tools, channels, runtime)
+│   ├── gateway/          # Gateway server (SSE, WebSocket, agent runtime)
 │   ├── pi-mono/          # Pi-Mono integration (detection, discovery, agents, execution)
 │   └── lsp-bridge/       # maestro-lsp-mcp-bridge (LSP protocol bridge)
 │
@@ -259,8 +320,10 @@ maestro/
 ### Dependency Rules (One-Way)
 
 ```
-cli → cockpit + leindex-core + pi-mono
+cli → cockpit + leindex-core + pi-mono + maestro-claw + gateway
 cockpit → leindex-core
+gateway → maestro-claw + leindex-core
+maestro-claw → leindex-core
 pi-mono → (standalone)
 leindex-core ↛ cockpit (forbidden)
 ```
@@ -497,6 +560,11 @@ maestro/
 │   ├── cmd/               # TUI commands
 │   ├── mcppool/           # MCP socket pooling
 │   └── docs/              # TUI documentation
+├── tracklens/             # Walkthrough system
+│   ├── editor/            # Visual plan editor (React + TypeScript)
+│   ├── review-editor/     # Diff viewer (React + TypeScript)
+│   ├── ui/                # UI components
+│   └── server/            # Node.js backend
 └── tracks/
     └── <track_id>/
         ├── spec.md         # Track specification
