@@ -21,7 +21,7 @@ Maestro v2.5 is a major architectural evolution that unifies powerful systems in
 - **MaestroClaw** - Unified agent execution framework with multi-provider support and streaming
 - **Tracklens** - Interactive walkthrough system for spec-driven development
 - **Unified Memory System** - Built-in project context with semantic search and coordination patterns
-- **109 Repurposed Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
+- **109 Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
 - **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
 - **16 Integrated Hooks** - Session start, tool use, coordination, and session end hooks
 - **LeIndex Code Analysis** - 5-layer code analysis with semantic indexing (TLDR compatibility alias)
@@ -111,8 +111,6 @@ MaestroClaw is the unified agent execution layer for Maestro, providing comprehe
 - Persistent connection design
 - Enhanced tool registry and built-in tools
 - File, memory, and shell tools with proper security
-
-**Documentation**: [MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md](docs/MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md) | [MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md](docs/MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md)
 
 ### Tracklens - Walkthrough System
 
@@ -618,7 +616,6 @@ These commands run in your terminal and require the full installation:
 - [Memory Integration Guide](maestro/memory/docs/memory_integration.md) - Current CLI memory command surface and architecture
 - [Memory Quick Start](maestro/memory/docs/quick_start.md) - 5-minute validation flow for memory commands
 - [TUI Configuration](maestro/tui/docs/CONFIG_FORMAT.md) - TUI setup guide
-- [Testing](maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md) - Test coverage details
 
 ## Dependencies
 
@@ -797,9 +794,6 @@ Maestro v2.5 includes comprehensive testing infrastructure:
 - **Integration tests** for memory system, coordination patterns, and TLDR
 - **E2E tests** for complete track workflows (newTrack, implement, status, revert)
 - **Performance benchmarks** for memory operations and semantic search
-- **CI/CD ready** with pytest, coverage, and automated regression detection
-
-See [Maestro v2 Track](maestro/tracks/maestro-v2_20260110/) for implementation details.
 
 ## Contributing
 
@@ -829,7 +823,7 @@ The Conductor module in Maestro Cockpit implements concepts from Ralph TUI, prov
 
 <div align="center">
 
-**Transform your AI-assisted development today**
+**Transform your AI-assisted development workflows today**
 
 [Get Started](docs/CLAUDE-CODE.md) · [Features](#key-features) · [Documentation](docs/) · [Web Dashboard](#nexus-memory-system)
 
