@@ -21,6 +21,7 @@ import {
   updateTrackMetadata,
   listAllTracks,
 } from "../lib/tracks";
+import { isTrackLensEnabled } from "../tracklens/extension/command";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -120,6 +121,7 @@ function isInMaestroProject(root: string): boolean {
 
 function buildMaestroWorkflow(context: { root: string; trackId?: string }): string {
   const { root, trackId } = context;
+  const trackLensEnabled = isTrackLensEnabled();
 
   return `# Maestro Implementation Protocol
 
@@ -258,6 +260,7 @@ ${trackId ? `
    - After completing each task, update plan.md
    - Change \`- [ ] Task: ...\` to \`- [x] Task: ...\`
 
+${trackLensEnabled ? `
 ## 4.0 TRACKLENS WALKTHROUGH REVIEW
 
 When all tasks in plan.md are complete, request TrackLens walkthrough review:
@@ -270,19 +273,18 @@ When all tasks in plan.md are complete, request TrackLens walkthrough review:
    \`\`\`
 
 2. **WAIT FOR USER DECISION:**
-   - **If approved:** Track walkthrough accepted by user
-   - **If denied with feedback:** Address the feedback and call tracklens_walkthrough again
+   - **If approved:** Proceed to finalize track (step 5.0)
+   - **If denied with annotations:** Parse annotations into remediation tasks, execute fixes, regenerate walkthrough, and call tracklens_walkthrough again
    - **If TrackLens unavailable:** Fall back to manual completion (skip to step 5.0)
 
-3. **REVIEW/DENIAL LOOP:**
-   - Present walkthrough in TrackLens UI with:
-     - Summary of track goals
-     - List of completed tasks
-     - Files changed with diffs
-     - Key decisions made
-     - Testing performed
-   - User can annotate with feedback
-   - Loop until user approves
+3. **REMEDIATION LOOP:**
+   - If user denies with annotations:
+     a. Parse each annotation into a remediation task
+     b. Add tasks to plan.md with - [ ] format
+     c. Execute remediation tasks
+     d. Regenerate walkthrough markdown
+     e. Call tracklens_walkthrough again
+     f. Loop until approved or max 3 iterations
 
 4. **MINIMAL TEXT FALLBACK:**
    If TrackLens UI is unavailable and manual review is needed:
@@ -292,19 +294,26 @@ When all tasks in plan.md are complete, request TrackLens walkthrough review:
 
 ## 5.0 FINALIZE TRACK
 
-After walkthrough approval:
+After walkthrough approval:` : `
+## 4.0 FINALIZE TRACK
+
+After completing all tasks:`}
 
 1. Update track status to complete:
    - Change \`## [~] Track: ...\` to \`## [x] Track: ...\`
 
-2. **BANK MEMORY: Track Completion** - Store track completion summary:
+2. **SAVE WALKTHROUGH-FINAL.MD:**
+   - Save the approved walkthrough to \`maestro/tracks/<track_id>/walkthrough-final.md\`
+   - Include: summary, completed tasks, files changed, key decisions
+
+3. **BANK MEMORY: Track Completion** - Store track completion summary:
    - Track ID and title
    - Total tasks completed
    - Final completion timestamp
    - Brief summary of changes made
    - Use the maestro memory CLI: \`maestro memory --store --category decision --content "Track completed: ..."\`
 
-3. Announce completion
+4. Announce completion
 
 ## 6.0 IMPORTANT NOTES
 
@@ -316,20 +325,19 @@ After walkthrough approval:
 
 ## 7.0 TRACKLENS INTEGRATION
 
-**TrackLens Walkthrough is DEFAULT-ON for implement workflow:**
+**TrackLens Walkthrough Status:** ${trackLensEnabled ? "ENABLED" : "DISABLED"}
+${trackLensEnabled ? `
 - All completed tracks require walkthrough review
 - User can approve, deny with feedback, or request changes
 - Review/denial loop continues until user approves
 
 **Toggle TrackLens Behavior:**
-- To disable walkthrough reviews: Use \`/tracklens toggle off\` command
-- To re-enable walkthrough reviews: Use \`/tracklens toggle on\` command
-- Default setting is ON (walkthrough required)
-
-**Minimal Text Fallback:**
-- If TrackLens UI is unavailable, system falls back to text-based walkthrough
-- This ensures workflow continues even without UI
-- User can still approve or request changes via chat
+- To disable walkthrough reviews: Use \`/tracklens off\` command
+- To re-enable walkthrough reviews: Use \`/tracklens on\` command
+` : `
+- Walkthrough reviews are currently DISABLED
+- To re-enable walkthrough reviews: Use \`/tracklens on\` command
+`}
 
 ## 6.0 TOOL MAPPING
 

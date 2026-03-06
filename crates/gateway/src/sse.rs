@@ -6,8 +6,12 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
-    response::sse::{Event, KeepAlive, Sse},
+    extract::{Query, State},
+    http::HeaderMap,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
 };
 use futures_util::stream::{self, Stream};
 use tokio_stream::StreamExt as _;
@@ -19,8 +23,18 @@ use crate::state::GatewayState;
 /// SSE endpoint for event streaming
 pub async fn sse_handler(
     State(state): State<Arc<GatewayState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    headers: HeaderMap,
+    Query(query): Query<crate::ws::WsQuery>,
+) -> Response {
+    let query_token = query.api_key.as_deref().or(query.access_token.as_deref());
+    let auth = match crate::agent_runtime::verify_agent_auth(&state, &headers, query_token) {
+        Ok(auth) => auth,
+        Err(error) => return error.into_response(),
+    };
+
     debug!("SSE connection established");
+    let requested_scopes = crate::agent_runtime::parse_event_scopes(query.scopes.as_deref());
+    let scopes = auth.intersect_scopes(&requested_scopes);
 
     // Subscribe to broadcast events
     let mut event_rx = state.event_bus.subscribe();
@@ -30,9 +44,12 @@ pub async fn sse_handler(
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    if !crate::agent_runtime::event_visible(&event, &scopes) {
+                        continue;
+                    }
                     // Convert EventFrame to SSE Event
                     let sse_event = event_to_sse(&event);
-                    yield Ok(sse_event);
+                    yield Ok::<Event, Infallible>(sse_event);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     debug!("SSE broadcast channel closed");
@@ -46,7 +63,9 @@ pub async fn sse_handler(
         }
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 /// Convert an EventFrame to an SSE Event
@@ -69,11 +88,21 @@ fn event_to_sse(frame: &EventFrame) -> Event {
 /// SSE endpoint for specific event types
 pub async fn sse_events_handler(
     State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Query(query): Query<crate::ws::WsQuery>,
     axum::extract::Path(event_types): axum::extract::Path<String>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Response {
+    let query_token = query.api_key.as_deref().or(query.access_token.as_deref());
+    let auth = match crate::agent_runtime::verify_agent_auth(&state, &headers, query_token) {
+        Ok(auth) => auth,
+        Err(error) => return error.into_response(),
+    };
+
     // Parse and own the event types
     let types: Vec<String> = event_types.split(',').map(|s| s.to_string()).collect();
     debug!("SSE filtered connection for events: {:?}", types);
+    let requested_scopes = crate::agent_runtime::parse_event_scopes(query.scopes.as_deref());
+    let scopes = auth.intersect_scopes(&requested_scopes);
 
     let mut event_rx = state.event_bus.subscribe();
 
@@ -81,10 +110,13 @@ pub async fn sse_events_handler(
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    if !crate::agent_runtime::event_visible(&event, &scopes) {
+                        continue;
+                    }
                     // Filter by event type
                     if types.is_empty() || types.iter().any(|t| event.event == *t || event.event.starts_with(t)) {
                         let sse_event = event_to_sse(&event);
-                        yield Ok(sse_event);
+                        yield Ok::<Event, Infallible>(sse_event);
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -97,7 +129,9 @@ pub async fn sse_events_handler(
         }
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 /// Heartbeat SSE endpoint for connection testing

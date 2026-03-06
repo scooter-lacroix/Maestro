@@ -8,32 +8,57 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        ConnectInfo, State,
+        ConnectInfo, Query, State,
     },
-    response::Response,
+    http::HeaderMap,
+    response::{IntoResponse, Response},
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::protocol::{RequestFrame, ResponseFrame};
-use crate::state::GatewayState;
+use crate::state::{scopes, AuthContext, GatewayState};
 
 /// Maximum allowed message size in bytes (1MB)
 const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct WsQuery {
+    pub api_key: Option<String>,
+    pub access_token: Option<String>,
+    pub scopes: Option<String>,
+}
 
 /// WebSocket connection handler
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<GatewayState>>,
+    headers: HeaderMap,
+    Query(query): Query<WsQuery>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_connection(socket, state, addr))
+    let query_token = query.api_key.as_deref().or(query.access_token.as_deref());
+    let auth = match crate::agent_runtime::verify_agent_auth(&state, &headers, query_token) {
+        Ok(auth) => auth,
+        Err(error) => return error.into_response(),
+    };
+
+    let requested_scopes = crate::agent_runtime::parse_event_scopes(query.scopes.as_deref());
+    let scopes = auth.intersect_scopes(&requested_scopes);
+    ws.on_upgrade(move |socket| handle_connection(socket, state, addr, scopes, auth))
 }
 
 /// Handle a WebSocket connection
-async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, remote_addr: SocketAddr) {
+async fn handle_connection(
+    socket: WebSocket,
+    state: Arc<GatewayState>,
+    remote_addr: SocketAddr,
+    scopes: std::collections::HashSet<String>,
+    auth: AuthContext,
+) {
     info!("WebSocket connection established from {}", remote_addr);
+    state.add_connection();
 
     // Generate a unique client ID for rate limiting
     let client_id = format!("ws:{}", remote_addr);
@@ -60,6 +85,9 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, remote_a
                 }
                 // Broadcast events
                 Ok(event) = event_rx.recv() => {
+                    if !crate::agent_runtime::event_visible(&event, &scopes) {
+                        continue;
+                    }
                     let json = event.to_json().unwrap_or_default();
                     if ws_tx.send(Message::Text(json.into())).await.is_err() {
                         debug!("WebSocket write error, client disconnected");
@@ -78,11 +106,13 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, remote_a
         while let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    handle_text_message(&text, &client_tx, &read_state, &read_client_id).await;
+                    handle_text_message(&text, &client_tx, &read_state, &read_client_id, &auth)
+                        .await;
                 }
                 Ok(Message::Binary(data)) => {
                     let text = String::from_utf8_lossy(&data);
-                    handle_text_message(&text, &client_tx, &read_state, &read_client_id).await;
+                    handle_text_message(&text, &client_tx, &read_state, &read_client_id, &auth)
+                        .await;
                 }
                 Ok(Message::Ping(data)) => {
                     debug!("Received ping: {} bytes", data.len());
@@ -108,6 +138,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, remote_a
         _ = read_handle => debug!("Read loop finished for {}", remote_addr),
     }
 
+    state.remove_connection();
     info!("WebSocket connection closed for {}", remote_addr);
 }
 
@@ -117,6 +148,7 @@ async fn handle_text_message(
     client_tx: &mpsc::Sender<String>,
     state: &Arc<GatewayState>,
     client_id: &str,
+    auth: &AuthContext,
 ) {
     // SECURITY: Check message size limit before processing
     if text.len() > MAX_MESSAGE_SIZE {
@@ -165,6 +197,23 @@ async fn handle_text_message(
         Ok(req) => {
             debug!("Received request: {} (id={})", req.method, req.id);
 
+            if let Some(required_scope) = required_scope_for_method(&req.method) {
+                if !auth.has_scope(required_scope) {
+                    let response = ResponseFrame::error(
+                        &req.id,
+                        format!(
+                            "Method '{}' requires '{}' scope",
+                            req.method, required_scope
+                        ),
+                        Some(403),
+                    );
+                    if let Ok(json) = response.to_json() {
+                        let _ = client_tx.send(json).await;
+                    }
+                    return;
+                }
+            }
+
             // Look up method handler
             let response = if let Some(handler) = state.method_registry.get(&req.method) {
                 handler(req.clone(), &state.clone()).await
@@ -194,6 +243,24 @@ async fn handle_text_message(
                 let _ = client_tx.send(json).await;
             }
         }
+    }
+}
+
+fn required_scope_for_method(method: &str) -> Option<&'static str> {
+    match method {
+        "agent/execute" | "agent/session/list" | "agent/session/create" | "agent/status" => {
+            Some(scopes::SESSIONS)
+        }
+        "approval/list" | "approval/resolve" => Some(scopes::APPROVALS),
+        "mcp/auth/list"
+        | "mcp/auth/submit"
+        | "mcp/server/list"
+        | "mcp/server/register"
+        | "mcp/server/remove"
+        | "mcp/server/connect"
+        | "mcp/server/disconnect" => Some(scopes::TOOLS),
+        "methods/list" | "session/status" => Some(scopes::SYSTEM),
+        _ => None,
     }
 }
 
@@ -289,35 +356,20 @@ pub fn builtin_handlers() -> Vec<(
         // Agent WebSocket methods
         ("agent/execute", |req, state| {
             Box::pin(async move {
-                // Parse the request
                 let exec_req: Result<crate::agent::AgentExecuteRequest, _> =
                     serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
 
                 match exec_req {
                     Ok(exec_req) => {
-                        // Broadcast event
-                        let event = crate::protocol::EventFrame::new(
-                            "agent.execute.started",
-                            Some(serde_json::json!({
-                                "prompt_preview": if exec_req.prompt.len() > 100 {
-                                    format!("{}...", &exec_req.prompt[..97])
-                                } else {
-                                    exec_req.prompt.clone()
-                                },
-                                "provider": exec_req.provider,
-                            })),
-                            Some(state.next_seq()),
-                        );
-                        let _ = state.event_bus.send(event);
-
-                        // TODO: Wire to maestro-claw agent_loop
-                        ResponseFrame::success(
-                            &req.id,
-                            Some(serde_json::json!({
-                                "status": "accepted",
-                                "message": "Agent execution queued (not yet wired to maestro-claw)",
-                            })),
-                        )
+                        match crate::agent_runtime::execute_agent_request(state.clone(), exec_req)
+                            .await
+                        {
+                            Ok(response) => ResponseFrame::success(
+                                &req.id,
+                                Some(serde_json::to_value(response).unwrap_or_default()),
+                            ),
+                            Err(error) => error.to_ws_response(&req.id),
+                        }
                     }
                     Err(e) => {
                         ResponseFrame::error(&req.id, format!("Invalid request: {}", e), None)
@@ -325,32 +377,28 @@ pub fn builtin_handlers() -> Vec<(
                 }
             })
         }),
-        ("agent/session/list", |req, _state| {
+        ("agent/session/list", |req, state| {
             Box::pin(async move {
-                // TODO: Wire to maestro-claw session store
                 ResponseFrame::success(
                     &req.id,
-                    Some(serde_json::to_value(crate::agent::SessionListResponse::empty()).unwrap()),
+                    Some(
+                        serde_json::to_value(crate::agent_runtime::list_sessions(&state))
+                            .unwrap_or_default(),
+                    ),
                 )
             })
         }),
-        ("agent/session/create", |req, _state| {
+        ("agent/session/create", |req, state| {
             Box::pin(async move {
-                // Parse the request
                 let create_req: Result<crate::agent::SessionCreateRequest, _> =
                     serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
 
                 match create_req {
                     Ok(create_req) => {
-                        // TODO: Wire to maestro-claw session creation
+                        let created = crate::agent_runtime::create_session(&state, &create_req);
                         ResponseFrame::success(
                             &req.id,
-                            Some(serde_json::json!({
-                                "session_id": uuid::Uuid::new_v4().to_string(),
-                                "provider": create_req.provider,
-                                "model": create_req.model,
-                                "status": "created",
-                            })),
+                            Some(serde_json::to_value(created).unwrap_or_default()),
                         )
                     }
                     Err(e) => {
@@ -359,17 +407,229 @@ pub fn builtin_handlers() -> Vec<(
                 }
             })
         }),
-        ("agent/status", |req, _state| {
+        ("agent/status", |req, state| {
             Box::pin(async move {
-                // TODO: Wire to actual agent status
                 ResponseFrame::success(
                     &req.id,
-                    Some(serde_json::json!({
-                        "status": "idle",
-                        "sessions": 0,
-                        "active_runs": 0,
-                    })),
+                    Some(
+                        serde_json::to_value(crate::agent_runtime::agent_status(&state))
+                            .unwrap_or_default(),
+                    ),
                 )
+            })
+        }),
+        ("approval/list", |req, state| {
+            Box::pin(async move {
+                ResponseFrame::success(
+                    &req.id,
+                    Some(
+                        serde_json::to_value(crate::agent_runtime::approval_queue(&state))
+                            .unwrap_or_default(),
+                    ),
+                )
+            })
+        }),
+        ("approval/resolve", |req, state| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct ApprovalResolveParams {
+                    request_id: String,
+                    decision: crate::agent::ApprovalDecisionValue,
+                }
+
+                let params: Result<ApprovalResolveParams, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match params {
+                    Ok(params) => match crate::agent_runtime::resolve_approval_request(
+                        &state,
+                        &params.request_id,
+                        &crate::agent::ApprovalDecisionRequest {
+                            decision: params.decision,
+                        },
+                    ) {
+                        Ok(response) => ResponseFrame::success(
+                            &req.id,
+                            Some(serde_json::to_value(response).unwrap_or_default()),
+                        ),
+                        Err(error) => error.to_ws_response(&req.id),
+                    },
+                    Err(error) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", error), None)
+                    }
+                }
+            })
+        }),
+        ("mcp/auth/list", |req, state| {
+            Box::pin(async move {
+                ResponseFrame::success(
+                    &req.id,
+                    Some(
+                        serde_json::to_value(crate::agent_runtime::pending_tool_auth(&state))
+                            .unwrap_or_default(),
+                    ),
+                )
+            })
+        }),
+        ("mcp/auth/submit", |req, state| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct AuthSubmitParams {
+                    request_id: String,
+                    token: String,
+                    #[serde(default)]
+                    token_type: Option<crate::agent::GatewayAuthTokenType>,
+                }
+
+                let params: Result<AuthSubmitParams, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match params {
+                    Ok(params) => match crate::agent_runtime::submit_mcp_auth(
+                        &state,
+                        &params.request_id,
+                        crate::agent_runtime::gateway_auth_token(params.token, params.token_type),
+                    )
+                    .await
+                    {
+                        Ok(response) => ResponseFrame::success(
+                            &req.id,
+                            Some(serde_json::to_value(response).unwrap_or_default()),
+                        ),
+                        Err(error) => error.to_ws_response(&req.id),
+                    },
+                    Err(error) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", error), None)
+                    }
+                }
+            })
+        }),
+        ("mcp/server/list", |req, state| {
+            Box::pin(async move {
+                ResponseFrame::success(
+                    &req.id,
+                    Some(
+                        serde_json::to_value(crate::agent_runtime::list_mcp_servers(&state).await)
+                            .unwrap_or_default(),
+                    ),
+                )
+            })
+        }),
+        ("mcp/server/register", |req, state| {
+            Box::pin(async move {
+                let params: Result<crate::agent::McpServerRegisterRequest, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match params {
+                    Ok(params) => {
+                        match crate::agent_runtime::register_or_update_mcp_server(&state, &params)
+                            .await
+                        {
+                            Ok(response) => ResponseFrame::success(
+                                &req.id,
+                                Some(serde_json::to_value(response).unwrap_or_default()),
+                            ),
+                            Err(error) => error.to_ws_response(&req.id),
+                        }
+                    }
+                    Err(error) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", error), None)
+                    }
+                }
+            })
+        }),
+        ("mcp/server/remove", |req, state| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct RemoveParams {
+                    name: String,
+                }
+
+                let params: Result<RemoveParams, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match params {
+                    Ok(params) => {
+                        match crate::agent_runtime::remove_mcp_server(&state, &params.name).await {
+                            Ok(response) => ResponseFrame::success(
+                                &req.id,
+                                Some(serde_json::to_value(response).unwrap_or_default()),
+                            ),
+                            Err(error) => error.to_ws_response(&req.id),
+                        }
+                    }
+                    Err(error) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", error), None)
+                    }
+                }
+            })
+        }),
+        ("mcp/server/connect", |req, state| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct ConnectParams {
+                    name: String,
+                }
+
+                let params: Result<ConnectParams, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match params {
+                    Ok(params) => {
+                        match crate::agent_runtime::connect_mcp_server(state.clone(), &params.name)
+                            .await
+                        {
+                            Ok(crate::agent_runtime::McpConnectOutcome::Connected) => {
+                                ResponseFrame::success(
+                                    &req.id,
+                                    Some(serde_json::json!({ "connected": true })),
+                                )
+                            }
+                            Ok(crate::agent_runtime::McpConnectOutcome::AuthRequired(auth)) => {
+                                ResponseFrame::success(
+                                    &req.id,
+                                    Some(serde_json::json!({
+                                        "connected": false,
+                                        "auth_required": true,
+                                        "auth": auth,
+                                    })),
+                                )
+                            }
+                            Err(error) => error.to_ws_response(&req.id),
+                        }
+                    }
+                    Err(error) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", error), None)
+                    }
+                }
+            })
+        }),
+        ("mcp/server/disconnect", |req, state| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct DisconnectParams {
+                    name: String,
+                }
+
+                let params: Result<DisconnectParams, _> =
+                    serde_json::from_value(req.params.clone().unwrap_or(serde_json::json!({})));
+
+                match params {
+                    Ok(params) => {
+                        match crate::agent_runtime::disconnect_mcp_server(&state, &params.name)
+                            .await
+                        {
+                            Ok(()) => ResponseFrame::success(
+                                &req.id,
+                                Some(serde_json::json!({ "disconnected": true })),
+                            ),
+                            Err(error) => error.to_ws_response(&req.id),
+                        }
+                    }
+                    Err(error) => {
+                        ResponseFrame::error(&req.id, format!("Invalid request: {}", error), None)
+                    }
+                }
             })
         }),
     ]
@@ -397,6 +657,7 @@ mod tests {
         assert!(handlers.iter().any(|(m, _)| *m == "ping"));
         assert!(handlers.iter().any(|(m, _)| *m == "echo"));
         assert!(handlers.iter().any(|(m, _)| *m == "methods/list"));
+        assert!(handlers.iter().any(|(m, _)| *m == "mcp/server/list"));
     }
 
     #[test]
@@ -410,5 +671,21 @@ mod tests {
         // Test that size limit is reasonable
         assert!(MAX_MESSAGE_SIZE > 0);
         assert!(MAX_MESSAGE_SIZE < 100 * 1024 * 1024); // Less than 100MB
+    }
+
+    #[test]
+    fn test_required_scope_for_mcp_management_methods() {
+        assert_eq!(
+            required_scope_for_method("mcp/server/list"),
+            Some(scopes::TOOLS)
+        );
+        assert_eq!(
+            required_scope_for_method("mcp/server/register"),
+            Some(scopes::TOOLS)
+        );
+        assert_eq!(
+            required_scope_for_method("mcp/server/disconnect"),
+            Some(scopes::TOOLS)
+        );
     }
 }

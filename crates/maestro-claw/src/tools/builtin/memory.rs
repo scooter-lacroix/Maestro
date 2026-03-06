@@ -259,14 +259,15 @@ impl Tool for MemoryTool {
                         Some(s) => s,
                         None => return ToolOutput::error("content must be a string".to_string()),
                     },
-                    None => return ToolOutput::error("content required for store operation".to_string()),
+                    None => {
+                        return ToolOutput::error(
+                            "content required for store operation".to_string(),
+                        )
+                    }
                 };
 
                 // Build metadata
-                let mut metadata = arguments
-                    .get("metadata")
-                    .cloned()
-                    .unwrap_or(json!({}));
+                let mut metadata = arguments.get("metadata").cloned().unwrap_or(json!({}));
 
                 // Add category if specified
                 if let Some(category) = arguments.get("category").and_then(|c| c.as_str()) {
@@ -284,7 +285,9 @@ impl Tool for MemoryTool {
                         Some(s) => s,
                         None => return ToolOutput::error("query must be a string".to_string()),
                     },
-                    None => return ToolOutput::error("query required for search operation".to_string()),
+                    None => {
+                        return ToolOutput::error("query required for search operation".to_string())
+                    }
                 };
 
                 let limit = arguments
@@ -311,7 +314,9 @@ impl Tool for MemoryTool {
                         Some(s) => s,
                         None => return ToolOutput::error("id must be a string".to_string()),
                     },
-                    None => return ToolOutput::error("id required for delete operation".to_string()),
+                    None => {
+                        return ToolOutput::error("id required for delete operation".to_string())
+                    }
                 };
 
                 self.delete_memory(id).await
@@ -424,7 +429,10 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["operation"]["enum"].is_array());
-        assert!(schema["required"].as_array().unwrap().contains(&json!("operation")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("operation")));
     }
 
     #[tokio::test]

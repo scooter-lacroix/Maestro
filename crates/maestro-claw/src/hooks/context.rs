@@ -111,7 +111,10 @@ mod tests {
             "thread-1".to_string(),
             "claude".to_string(),
         );
-        assert!(ctx.is_last_turn(), "zero max_turns should be treated as last turn");
+        assert!(
+            ctx.is_last_turn(),
+            "zero max_turns should be treated as last turn"
+        );
         assert_eq!(ctx.remaining_turns(), 0);
     }
 

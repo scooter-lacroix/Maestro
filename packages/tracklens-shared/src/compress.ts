@@ -19,15 +19,25 @@ export async function compress(data: unknown): Promise<string> {
   const buffer = await new Response(stream.readable).arrayBuffer();
   const compressed = new Uint8Array(buffer);
 
-  let binary = '';
-  for (let i = 0; i < compressed.length; i++) {
-    binary += String.fromCharCode(compressed[i]);
+  // Optimized: Use Buffer.from in Node/Bun environments for direct base64url conversion
+  // Falls back to char-by-char for browser-only environments
+  let base64: string;
+  if (typeof Buffer !== 'undefined') {
+    // Node/Bun: Direct conversion from Uint8Array to base64url
+    base64 = Buffer.from(compressed).toString('base64url');
+  } else {
+    // Browser fallback: Char-by-char conversion (unavoidable without Buffer)
+    let binary = '';
+    for (let i = 0; i < compressed.length; i++) {
+      binary += String.fromCharCode(compressed[i]);
+    }
+    base64 = btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
   }
-  const base64 = btoa(binary);
-  return base64
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
+
+  return base64;
 }
 
 export async function decompress(b64: string): Promise<unknown> {

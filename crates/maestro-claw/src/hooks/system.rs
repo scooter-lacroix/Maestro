@@ -55,7 +55,11 @@ impl HookSystem {
     /// If any hook returns an Abort error, the chain stops immediately.
     /// If a hook returns a regular error, the error is logged but the chain continues.
     /// Returns the potentially modified turn.
-    pub async fn execute_post(&self, context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+    pub async fn execute_post(
+        &self,
+        context: &HookContext,
+        turn: &Turn,
+    ) -> Result<Turn, HookError> {
         let mut current_turn = turn.clone();
 
         for hook in &self.hooks {
@@ -111,14 +115,22 @@ mod tests {
             &self.name
         }
 
-        async fn pre_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+        async fn pre_execute(
+            &self,
+            _context: &HookContext,
+            turn: &Turn,
+        ) -> Result<Turn, HookError> {
             // Add a marker to the content
             let mut modified = turn.clone();
             modified.content = format!("[pre:{}] {}", self.name, modified.content);
             Ok(modified)
         }
 
-        async fn post_execute(&self, _context: &HookContext, turn: &Turn) -> Result<Turn, HookError> {
+        async fn post_execute(
+            &self,
+            _context: &HookContext,
+            turn: &Turn,
+        ) -> Result<Turn, HookError> {
             // Add a marker to the content
             let mut modified = turn.clone();
             modified.content = format!("[post:{}] {}", self.name, modified.content);

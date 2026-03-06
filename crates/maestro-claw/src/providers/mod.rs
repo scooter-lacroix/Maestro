@@ -6,18 +6,20 @@
 //! - `ProviderError` - Error type for provider operations
 //! - Concrete implementations (OpenAI, Anthropic, Ollama, OpenRouter)
 
-mod r#trait;
+mod anthropic;
 mod capabilities;
 mod error;
-mod openai;
-mod anthropic;
 mod ollama;
+mod openai;
 mod openrouter;
+mod r#trait;
 
-pub use r#trait::{ChatResponse, Provider, StreamChunk, ToolCallDelta, TokenUsage, turn_to_message};
+pub use anthropic::{AnthropicConfig, AnthropicProvider};
 pub use capabilities::ProviderCapabilities;
 pub use error::ProviderError;
-pub use openai::{OpenAIConfig, OpenAIProvider};
-pub use anthropic::{AnthropicConfig, AnthropicProvider};
 pub use ollama::{OllamaConfig, OllamaProvider};
+pub use openai::{OpenAIConfig, OpenAIProvider};
 pub use openrouter::{OpenRouterConfig, OpenRouterProvider};
+pub use r#trait::{
+    turn_to_message, ChatResponse, Provider, StreamChunk, TokenUsage, ToolCallDelta,
+};

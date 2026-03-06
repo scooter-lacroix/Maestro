@@ -7,8 +7,8 @@
 //! - Built-in hooks for logging and memory
 
 mod context;
-mod r#trait;
 mod system;
+mod r#trait;
 
 pub mod builtin;
 

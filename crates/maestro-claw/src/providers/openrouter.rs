@@ -12,7 +12,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, ToolCallDelta, TokenUsage};
+use super::{
+    ChatResponse, Provider, ProviderCapabilities, ProviderError, StreamChunk, TokenUsage,
+    ToolCallDelta,
+};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -154,8 +157,9 @@ impl OpenRouterProvider {
 
     /// Create a provider from environment variable
     pub fn from_env(model: Option<&str>) -> Result<Self, ProviderError> {
-        let api_key = std::env::var("OPENROUTER_API_KEY")
-            .map_err(|_| ProviderError::ConfigurationError("OPENROUTER_API_KEY not set".to_string()))?;
+        let api_key = std::env::var("OPENROUTER_API_KEY").map_err(|_| {
+            ProviderError::ConfigurationError("OPENROUTER_API_KEY not set".to_string())
+        })?;
 
         let model = model
             .map(|s| s.to_string())
@@ -201,7 +205,9 @@ impl OpenRouterProvider {
         if let Some(tools) = tools {
             // LOW-1: avoid panicking on serialization failure
             match serde_json::to_value(tools) {
-                Ok(v) => { body["tools"] = v; }
+                Ok(v) => {
+                    body["tools"] = v;
+                }
                 Err(e) => {
                     tracing::warn!("Failed to serialize OpenRouter tools: {}", e);
                 }
@@ -211,7 +217,9 @@ impl OpenRouterProvider {
         if let Some(ref provider) = self.config.provider {
             // LOW-1: avoid panicking on serialization failure
             match serde_json::to_value(provider) {
-                Ok(v) => { body["provider"] = v; }
+                Ok(v) => {
+                    body["provider"] = v;
+                }
                 Err(e) => {
                     tracing::warn!("Failed to serialize OpenRouter provider config: {}", e);
                 }
@@ -246,13 +254,20 @@ impl OpenRouterProvider {
     ///
     /// `retry_after_secs` should be extracted from the `Retry-After` header
     /// before consuming the response body (LOW-5).
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
+    fn handle_error(
+        &self,
+        status: reqwest::StatusCode,
+        body: &str,
+        retry_after_secs: u64,
+    ) -> ProviderError {
         match status.as_u16() {
             401 => ProviderError::AuthenticationFailed("Invalid API key".to_string()),
             402 => ProviderError::ProviderError("Insufficient credits".to_string()),
             // LOW-5: use server-provided retry delay
             429 => ProviderError::RateLimitExceeded(retry_after_secs),
-            500 | 502 | 503 => ProviderError::Unavailable(format!("OpenRouter service error: {}", status)),
+            500 | 502 | 503 => {
+                ProviderError::Unavailable(format!("OpenRouter service error: {}", status))
+            }
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
         }
     }
@@ -370,10 +385,7 @@ impl Provider for OpenRouterProvider {
             request = request.header("X-Title", site_name);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(map_network_error)?;
+        let response = request.send().await.map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
@@ -393,11 +405,11 @@ impl Provider for OpenRouterProvider {
             .ok_or_else(|| ProviderError::ParseError("No choices in response".to_string()))?;
 
         let content = choice.message.content.clone().unwrap_or_default();
-        let tool_calls = Self::parse_tool_calls(choice.message.tool_calls.as_ref().map(|v| v.as_slice()));
-        let usage = or_response.usage.map(|u| TokenUsage::new(
-            u.prompt_tokens,
-            u.completion_tokens,
-        ));
+        let tool_calls =
+            Self::parse_tool_calls(choice.message.tool_calls.as_ref().map(|v| v.as_slice()));
+        let usage = or_response
+            .usage
+            .map(|u| TokenUsage::new(u.prompt_tokens, u.completion_tokens));
 
         Ok(ChatResponse {
             content,
@@ -411,7 +423,10 @@ impl Provider for OpenRouterProvider {
     async fn stream_chat(
         &self,
         turns: &[Turn],
-    ) -> Result<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>, ProviderError> {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>,
+        ProviderError,
+    > {
         let formatted = self.format_messages(turns);
         let body = self.build_request_body(formatted, None, true);
 
@@ -432,10 +447,7 @@ impl Provider for OpenRouterProvider {
             request = request.header("X-Title", site_name);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(map_network_error)?;
+        let response = request.send().await.map_err(map_network_error)?;
 
         let status = response.status();
         if !status.is_success() {
@@ -552,11 +564,11 @@ impl Provider for OpenRouterProvider {
             .ok_or_else(|| ProviderError::ParseError("No choices in response".to_string()))?;
 
         let content = choice.message.content.clone().unwrap_or_default();
-        let tool_calls = Self::parse_tool_calls(choice.message.tool_calls.as_ref().map(|v| v.as_slice()));
-        let usage = or_response.usage.map(|u| TokenUsage::new(
-            u.prompt_tokens,
-            u.completion_tokens,
-        ));
+        let tool_calls =
+            Self::parse_tool_calls(choice.message.tool_calls.as_ref().map(|v| v.as_slice()));
+        let usage = or_response
+            .usage
+            .map(|u| TokenUsage::new(u.prompt_tokens, u.completion_tokens));
 
         Ok(ChatResponse {
             content,
@@ -583,11 +595,15 @@ impl Provider for OpenRouterProvider {
             .map_err(map_network_error)?;
 
         if response.status() == 401 {
-            return Err(ProviderError::AuthenticationFailed("Invalid API key".to_string()));
+            return Err(ProviderError::AuthenticationFailed(
+                "Invalid API key".to_string(),
+            ));
         }
 
         if !response.status().is_success() {
-            return Err(ProviderError::Unavailable("OpenRouter API unavailable".to_string()));
+            return Err(ProviderError::Unavailable(
+                "OpenRouter API unavailable".to_string(),
+            ));
         }
 
         Ok(())
@@ -610,19 +626,25 @@ impl Provider for OpenRouterProvider {
                 });
 
                 if !turn.tool_calls.is_empty() {
-                    let tc_list = turn.tool_calls.iter().map(|tc| {
-                        serde_json::json!({
-                            "id": &tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": &tc.name,
-                                "arguments": tc.arguments.to_string()
-                            }
+                    let tc_list = turn
+                        .tool_calls
+                        .iter()
+                        .map(|tc| {
+                            serde_json::json!({
+                                "id": &tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": &tc.name,
+                                    "arguments": tc.arguments.to_string()
+                                }
+                            })
                         })
-                    }).collect::<Vec<_>>();
+                        .collect::<Vec<_>>();
                     // LOW-1: avoid panicking on serialization failure
                     match serde_json::to_value(tc_list) {
-                        Ok(v) => { msg["tool_calls"] = v; }
+                        Ok(v) => {
+                            msg["tool_calls"] = v;
+                        }
                         Err(e) => {
                             tracing::warn!("Failed to serialize OpenRouter tool_calls: {}", e);
                         }
@@ -695,7 +717,8 @@ mod tests {
 
     #[test]
     fn test_provider_name_and_model() {
-        let config = OpenRouterConfig::new("key".to_string(), "anthropic/claude-3-opus".to_string());
+        let config =
+            OpenRouterConfig::new("key".to_string(), "anthropic/claude-3-opus".to_string());
         let provider = OpenRouterProvider::new(config).unwrap();
         assert_eq!(provider.name(), "openrouter");
         assert_eq!(provider.model(), "anthropic/claude-3-opus");

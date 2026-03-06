@@ -24,6 +24,19 @@ npm run build
 npm run preview
 ```
 
+## Usage
+
+The review editor can be launched via:
+- Claude Code: `/tracklens-review` command
+- OpenCode: `tracklens_review` tool
+- CLI: `maestro tracklens review --diff-type unified`
+
 ## Status
 
-🚧 **Under Construction** - Porting from Plannotator to TrackLens
+✅ **Operational** - Ported from Plannotator to TrackLens. Supports multiple diff types (unified, split, side-by-side).
+
+## Known Limitations
+
+- Backend wiring pending (Phase 10 - currently uses demo data)
+- Requires git diff to be pre-generated and served via `/api/content`
+- Syntax highlighting limited to languages supported by bundled highlighter

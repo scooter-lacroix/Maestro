@@ -10,5 +10,5 @@ mod thread;
 mod turn;
 
 pub use session::{Session, SessionMetadata};
-pub use thread::{Thread, ProviderMessage, ToolCallMessage};
+pub use thread::{ProviderMessage, Thread, ToolCallMessage};
 pub use turn::{ToolCall, ToolResult, Turn, TurnRole};

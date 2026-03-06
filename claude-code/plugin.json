@@ -36,8 +36,35 @@
     "maestro:revert",
     "maestro:configure",
     "maestro:memory",
-    "maestro:tui"
+    "maestro:tui",
+    "maestro:leindex",
+    "maestro:orchestrate",
+    "maestro:tldr"
   ],
+  "hooks": {
+    "path": "maestro/hooks",
+    "phases": [
+      "session-start",
+      "pre-tool-use",
+      "post-tool-use",
+      "pre-compact",
+      "user-prompt-submit",
+      "subagent-stop",
+      "session-end"
+    ]
+  },
+  "skills": {
+    "path": "maestro/skills",
+    "categories": [
+      "meta",
+      "workflows",
+      "context",
+      "analysis",
+      "research",
+      "quality",
+      "planning"
+    ]
+  },
   "templates": [
     "workflow",
     "code_styleguides/general",

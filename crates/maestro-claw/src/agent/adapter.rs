@@ -138,8 +138,12 @@ mod tests {
 
     #[async_trait]
     impl providers::Provider for StubProvider {
-        fn name(&self) -> &str { "stub" }
-        fn model(&self) -> &str { "stub-model" }
+        fn name(&self) -> &str {
+            "stub"
+        }
+        fn model(&self) -> &str {
+            "stub-model"
+        }
 
         fn capabilities(&self) -> providers::ProviderCapabilities {
             let mut caps = providers::ProviderCapabilities::none();
@@ -147,13 +151,24 @@ mod tests {
             caps
         }
 
-        async fn chat(&self, _: &[Turn]) -> Result<providers::ChatResponse, providers::ProviderError> {
+        async fn chat(
+            &self,
+            _: &[Turn],
+        ) -> Result<providers::ChatResponse, providers::ProviderError> {
             Ok(providers::ChatResponse::text(self.response_content.clone()))
         }
 
         async fn stream_chat(
-            &self, _: &[Turn],
-        ) -> Result<Box<dyn Stream<Item = Result<providers::StreamChunk, providers::ProviderError>> + Send + Unpin>, providers::ProviderError> {
+            &self,
+            _: &[Turn],
+        ) -> Result<
+            Box<
+                dyn Stream<Item = Result<providers::StreamChunk, providers::ProviderError>>
+                    + Send
+                    + Unpin,
+            >,
+            providers::ProviderError,
+        > {
             unimplemented!("not needed in tests")
         }
 
@@ -163,14 +178,21 @@ mod tests {
             _: &[ToolSpec],
         ) -> Result<providers::ChatResponse, providers::ProviderError> {
             Ok(providers::ChatResponse::text(format!(
-                "{} (with tools)", self.response_content
+                "{} (with tools)",
+                self.response_content
             )))
         }
 
-        async fn warmup(&self) -> Result<(), providers::ProviderError> { Ok(()) }
-        async fn health_check(&self) -> Result<(), providers::ProviderError> { Ok(()) }
+        async fn warmup(&self) -> Result<(), providers::ProviderError> {
+            Ok(())
+        }
+        async fn health_check(&self) -> Result<(), providers::ProviderError> {
+            Ok(())
+        }
 
-        fn format_messages(&self, _: &[Turn]) -> Vec<serde_json::Value> { vec![] }
+        fn format_messages(&self, _: &[Turn]) -> Vec<serde_json::Value> {
+            vec![]
+        }
     }
 
     fn make_adapter(content: &str, supports_tools: bool) -> ProviderAdapter {

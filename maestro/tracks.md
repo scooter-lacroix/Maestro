@@ -488,5 +488,5 @@ Cleanup (parallel, no dependencies)
 
 ---
 
-## [x] Track: TrackLens Integration — Full Plannotator Port
+## [ ] Track: TrackLens Integration — Full Plannotator Port
 *Link: [./maestro/tracks/tracklens-fullport_20260304/](./maestro/tracks/tracklens-fullport_20260304/)*

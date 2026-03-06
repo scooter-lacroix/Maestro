@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tracklens",
+            "command": "bun",
+            "args": ["/mnt/WD-SSD/Prod/maestro/apps/tracklens-hook/dist/index.js"],
             "timeout": 345600
           }
         ]

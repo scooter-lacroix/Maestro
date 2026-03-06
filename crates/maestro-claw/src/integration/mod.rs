@@ -8,26 +8,28 @@
 //! These integrations are optional and require the `core-integration` feature.
 
 #[cfg(feature = "core-integration")]
-pub mod security;
+pub mod channel;
 #[cfg(feature = "core-integration")]
 pub mod memory;
 #[cfg(feature = "core-integration")]
-pub mod channel;
+pub mod security;
 
 // Re-export integration types when feature is enabled
 #[cfg(feature = "core-integration")]
-pub use security::{SecurityPolicyBridge, SecurityPolicyError};
+pub use channel::{ChannelBridge, ChannelBridgeError};
 #[cfg(feature = "core-integration")]
 pub use memory::{MemoryBridge, MemoryBridgeError};
 #[cfg(feature = "core-integration")]
-pub use channel::{ChannelBridge, ChannelBridgeError};
+pub use security::{ApprovalCallback, SecurityPolicyBridge, SecurityPolicyError};
 
 #[cfg(feature = "core-integration")]
 pub use maestro_core::capabilities::sandbox::{
-    AutonomyLevel, SecurityPolicy, SandboxManager, RuntimeAdapter,
-    ExecutionRequest, SandboxResult, ResourceLimits,
+    AutonomyLevel, ExecutionRequest, ResourceLimits, RuntimeAdapter, SandboxManager, SandboxResult,
+    SecurityPolicy,
+};
+#[cfg(feature = "core-integration")]
+pub use maestro_core::channel::{
+    Channel, ChannelPlugin, ChannelRegistry, IncomingMessage, OutgoingResponse,
 };
 #[cfg(feature = "core-integration")]
 pub use maestro_core::traits::{Memory, SearchResult};
-#[cfg(feature = "core-integration")]
-pub use maestro_core::channel::{Channel, ChannelPlugin, ChannelRegistry, IncomingMessage, OutgoingResponse};

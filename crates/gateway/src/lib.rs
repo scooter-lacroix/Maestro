@@ -42,6 +42,7 @@
 //! ```
 
 pub mod agent;
+mod agent_runtime;
 pub mod protocol;
 pub mod rate_limit;
 pub mod routes;
@@ -50,11 +51,15 @@ pub mod sse;
 pub mod state;
 pub mod ws;
 
+pub use agent::{
+    AgentExecuteRequest, AgentExecuteResponse, AgentStatusEvent, AgentStatusResponse,
+    AgentTurnEvent, ApprovalDecisionRequest, ApprovalDecisionResponse, ApprovalDecisionValue,
+    ApprovalQueueResponse, GatewayAuthTokenType, McpAuthSubmitRequest, McpAuthSubmitResponse,
+    PendingApproval, PendingApprovalStatus, PendingAuthStatus, PendingToolAuth,
+    PendingToolAuthResponse, SessionCreateRequest, SessionDeleteRequest, SessionInfo,
+    SessionListResponse, StreamingChunk, TokenListResponse, TokenRevokeResponse, ToolCallSummary,
+    ToolExecutionEvent,
+};
 pub use protocol::{EventFrame, RequestFrame, ResponseFrame};
 pub use server::run;
 pub use state::{GatewayConfig, GatewayState};
-pub use agent::{
-    AgentExecuteRequest, AgentExecuteResponse, AgentStatusEvent, AgentTurnEvent,
-    SessionCreateRequest, SessionDeleteRequest, SessionInfo, SessionListResponse,
-    StreamingChunk, ToolCallSummary, ToolExecutionEvent,
-};

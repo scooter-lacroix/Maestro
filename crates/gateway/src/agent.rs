@@ -3,8 +3,11 @@
 //! This module provides request and response types for agent execution
 //! endpoints in the gateway, including session management and event streaming.
 
+use maestro_core::{ApprovalDecision, AuthTokenType, OAuthConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use crate::state::{TokenInfo, TokenType};
 
 // ============================================================================
 // Agent Execution Types
@@ -193,6 +196,413 @@ impl SessionListResponse {
         let total = sessions.len();
         Self { sessions, total }
     }
+}
+
+// ============================================================================
+// Approval and Tool Auth Types
+// ============================================================================
+
+/// Serializable approval decision used by gateway APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApprovalDecisionValue {
+    Approve,
+    Reject,
+    Always,
+}
+
+impl From<ApprovalDecisionValue> for ApprovalDecision {
+    fn from(value: ApprovalDecisionValue) -> Self {
+        match value {
+            ApprovalDecisionValue::Approve => ApprovalDecision::Approve,
+            ApprovalDecisionValue::Reject => ApprovalDecision::Reject,
+            ApprovalDecisionValue::Always => ApprovalDecision::Always,
+        }
+    }
+}
+
+impl From<ApprovalDecision> for ApprovalDecisionValue {
+    fn from(value: ApprovalDecision) -> Self {
+        match value {
+            ApprovalDecision::Approve => ApprovalDecisionValue::Approve,
+            ApprovalDecision::Reject => ApprovalDecisionValue::Reject,
+            ApprovalDecision::Always => ApprovalDecisionValue::Always,
+        }
+    }
+}
+
+/// Approval lifecycle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingApprovalStatus {
+    Pending,
+    Approved,
+    Rejected,
+    AlwaysApproved,
+    Expired,
+}
+
+/// Pending or recently-resolved approval request metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingApproval {
+    pub request_id: String,
+    pub session_id: String,
+    pub thread_id: String,
+    pub tool_name: String,
+    pub operation: String,
+    pub details: serde_json::Value,
+    pub created_at: String,
+    pub status: PendingApprovalStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision: Option<ApprovalDecisionValue>,
+}
+
+/// Request body for resolving a pending approval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalDecisionRequest {
+    pub decision: ApprovalDecisionValue,
+}
+
+/// Response body for a resolved approval.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalDecisionResponse {
+    pub approval: PendingApproval,
+}
+
+/// Queue response for dashboard and WS approval listings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalQueueResponse {
+    pub pending: Vec<PendingApproval>,
+    pub count: usize,
+}
+
+impl ApprovalQueueResponse {
+    pub fn new(pending: Vec<PendingApproval>) -> Self {
+        let count = pending.len();
+        Self { pending, count }
+    }
+}
+
+/// Serializable token/auth kind used by gateway APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayAuthTokenType {
+    Bearer,
+    ApiKey,
+    Oauth,
+}
+
+impl GatewayAuthTokenType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GatewayAuthTokenType::Bearer => "bearer",
+            GatewayAuthTokenType::ApiKey => "api_key",
+            GatewayAuthTokenType::Oauth => "oauth",
+        }
+    }
+}
+
+impl From<GatewayAuthTokenType> for AuthTokenType {
+    fn from(value: GatewayAuthTokenType) -> Self {
+        match value {
+            GatewayAuthTokenType::Bearer => AuthTokenType::Bearer,
+            GatewayAuthTokenType::ApiKey => AuthTokenType::ApiKey,
+            GatewayAuthTokenType::Oauth => AuthTokenType::OAuth,
+        }
+    }
+}
+
+impl From<AuthTokenType> for GatewayAuthTokenType {
+    fn from(value: AuthTokenType) -> Self {
+        match value {
+            AuthTokenType::Bearer => GatewayAuthTokenType::Bearer,
+            AuthTokenType::ApiKey => GatewayAuthTokenType::ApiKey,
+            AuthTokenType::OAuth => GatewayAuthTokenType::Oauth,
+        }
+    }
+}
+
+/// Pending tool/MCP auth lifecycle state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingAuthStatus {
+    Pending,
+    Submitted,
+    Connected,
+    Failed,
+}
+
+/// Pending tool/MCP auth request metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingToolAuth {
+    pub request_id: String,
+    pub server_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub token_type: GatewayAuthTokenType,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthConfig>,
+    pub created_at: String,
+    pub status: PendingAuthStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+/// Queue response for MCP/tool auth requests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingToolAuthResponse {
+    pub pending: Vec<PendingToolAuth>,
+    pub count: usize,
+}
+
+impl PendingToolAuthResponse {
+    pub fn new(pending: Vec<PendingToolAuth>) -> Self {
+        let count = pending.len();
+        Self { pending, count }
+    }
+}
+
+/// Request body for submitting a token for a pending auth request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpAuthSubmitRequest {
+    pub token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_type: Option<GatewayAuthTokenType>,
+}
+
+/// Response body after accepting a tool/MCP auth token.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpAuthSubmitResponse {
+    pub auth: PendingToolAuth,
+    pub connected: bool,
+}
+
+/// Agent/gateway status snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentStatusResponse {
+    pub status: String,
+    pub sessions: usize,
+    pub active_runs: usize,
+    pub pending_approvals: usize,
+    pub pending_auth: usize,
+}
+
+// ============================================================================
+// Pairing and Token Types
+// ============================================================================
+
+/// Request to initiate a pairing challenge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingInitiateRequest {
+    /// Device name requesting pairing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    /// Scopes being requested (comma-separated or array)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<serde_json::Value>,
+}
+
+impl PairingInitiateRequest {
+    /// Parse scopes from the request into a HashSet.
+    pub fn parse_scopes(&self) -> std::collections::HashSet<String> {
+        let mut scopes = std::collections::HashSet::new();
+        if let Some(ref scopes_val) = self.scopes {
+            if let Some(arr) = scopes_val.as_array() {
+                for scope in arr {
+                    if let Some(s) = scope.as_str() {
+                        scopes.insert(s.to_string());
+                    }
+                }
+            } else if let Some(s) = scopes_val.as_str() {
+                for part in s.split(',') {
+                    let part = part.trim();
+                    if !part.is_empty() {
+                        scopes.insert(part.to_string());
+                    }
+                }
+            }
+        }
+        // Default to all scopes if none specified
+        if scopes.is_empty() {
+            scopes.insert("sessions".to_string());
+            scopes.insert("approvals".to_string());
+            scopes.insert("tools".to_string());
+            scopes.insert("cron".to_string());
+            scopes.insert("system".to_string());
+        }
+        scopes
+    }
+}
+
+/// Response to a pairing initiation request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingInitiateResponse {
+    /// The 6-digit verification code
+    pub code: String,
+    /// When this code expires (RFC3339)
+    pub expires_at: String,
+    /// Challenge ID for internal tracking
+    pub challenge_id: String,
+    /// Message explaining next steps
+    pub message: String,
+}
+
+/// Request to list issued tokens (admin only)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenListRequest {
+    /// Filter by token type (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_type: Option<TokenType>,
+}
+
+/// Request to revoke a token by ID
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenRevokeRequest {
+    /// Token ID to revoke
+    pub token_id: String,
+}
+
+/// Response for token listing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenListResponse {
+    pub tokens: Vec<TokenInfo>,
+    pub total: usize,
+}
+
+impl TokenListResponse {
+    pub fn new(tokens: Vec<TokenInfo>) -> Self {
+        let total = tokens.len();
+        Self { tokens, total }
+    }
+}
+
+/// Response for token revocation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenRevokeResponse {
+    pub revoked: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingVerifyRequest {
+    /// The 6-digit verification code
+    pub code: String,
+    /// Optional token TTL in seconds (default: 3600)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+}
+
+/// Response to a successful pairing verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingVerifyResponse {
+    /// The issued access token
+    pub access_token: String,
+    /// Stable token identifier for later management actions
+    pub token_id: String,
+    /// Token type (always "issued" for pairing flow)
+    pub token_type: String,
+    /// Scopes granted
+    pub scopes: Vec<String>,
+    /// Device name
+    pub device_name: Option<String>,
+    /// When the token expires (RFC3339)
+    pub expires_at: String,
+    /// Session ID created for this pairing
+    pub session_id: String,
+}
+
+/// Response for listing pending pairing challenges.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingListResponse {
+    pub pending: Vec<PendingPairingInfo>,
+    pub count: usize,
+}
+
+impl PairingListResponse {
+    pub fn new(pending: Vec<PendingPairingInfo>) -> Self {
+        let count = pending.len();
+        Self { pending, count }
+    }
+}
+
+/// Info about a pending pairing (for admin listing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingPairingInfo {
+    pub code: String,
+    pub device_name: Option<String>,
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+    pub created_at: String,
+}
+
+/// Request to register or update an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerRegisterRequest {
+    /// Server name/identifier
+    pub name: String,
+    /// Server URL (for SSE/HTTP)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Command to spawn (for stdio)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Arguments for stdio command
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variables
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    /// Whether OAuth is required
+    #[serde(default)]
+    pub requires_auth: bool,
+    /// OAuth configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_config: Option<OAuthConfig>,
+}
+
+/// Response after registering/updating an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerRegisterResponse {
+    pub name: String,
+    pub registered: bool,
+    pub updated: bool,
+}
+
+/// Response after removing an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerRemoveResponse {
+    pub name: String,
+    pub removed: bool,
+}
+
+/// Response listing all managed MCP servers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerListResponse {
+    pub servers: Vec<McpServerInfo>,
+    pub count: usize,
+}
+
+/// Info about a managed MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerInfo {
+    pub name: String,
+    pub url: Option<String>,
+    pub command: Option<String>,
+    pub requires_auth: bool,
+    pub has_oauth: bool,
+    pub state: String,
+    pub connected: bool,
+    pub has_auth_token: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_token_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_updated_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub tools_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_auth: Option<PendingToolAuth>,
 }
 
 // ============================================================================
@@ -409,15 +819,13 @@ mod tests {
 
     #[test]
     fn test_session_list_response() {
-        let sessions = vec![
-            SessionInfo {
-                id: "sess-1".into(),
-                thread_count: 2,
-                turn_count: 10,
-                created_at: "2026-02-23T12:00:00Z".into(),
-                status: "active".into(),
-            },
-        ];
+        let sessions = vec![SessionInfo {
+            id: "sess-1".into(),
+            thread_count: 2,
+            turn_count: 10,
+            created_at: "2026-02-23T12:00:00Z".into(),
+            status: "active".into(),
+        }];
         let response = SessionListResponse::from_sessions(sessions);
 
         assert_eq!(response.total, 1);
@@ -446,8 +854,8 @@ mod tests {
 
     #[test]
     fn test_tool_execution_event() {
-        let event = ToolExecutionEvent::new("sess-1", "bash", "call-1", "started")
-            .with_preview("ls -la");
+        let event =
+            ToolExecutionEvent::new("sess-1", "bash", "call-1", "started").with_preview("ls -la");
 
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["event_type"], "tool.execute");
@@ -469,5 +877,43 @@ mod tests {
 
         assert!(chunk.is_finished);
         assert!(chunk.delta.is_empty());
+    }
+
+    #[test]
+    fn approval_decision_round_trips() {
+        let value = ApprovalDecisionValue::Always;
+        let core: ApprovalDecision = value.into();
+        assert_eq!(
+            ApprovalDecisionValue::from(core),
+            ApprovalDecisionValue::Always
+        );
+    }
+
+    #[test]
+    fn auth_token_type_round_trips() {
+        let value = GatewayAuthTokenType::ApiKey;
+        let core: AuthTokenType = value.into();
+        assert_eq!(
+            GatewayAuthTokenType::from(core),
+            GatewayAuthTokenType::ApiKey
+        );
+    }
+
+    #[test]
+    fn approval_queue_response_counts_entries() {
+        let pending = vec![PendingApproval {
+            request_id: "req-1".into(),
+            session_id: "sess-1".into(),
+            thread_id: "thread-1".into(),
+            tool_name: "shell".into(),
+            operation: "shell_exec".into(),
+            details: serde_json::json!({"command": "pwd"}),
+            created_at: "2026-03-05T00:00:00Z".into(),
+            status: PendingApprovalStatus::Pending,
+            decision: None,
+        }];
+
+        let response = ApprovalQueueResponse::new(pending);
+        assert_eq!(response.count, 1);
     }
 }

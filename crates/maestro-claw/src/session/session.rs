@@ -175,7 +175,9 @@ mod tests {
     #[test]
     fn test_session_metadata() {
         let mut session = Session::new();
-        session.metadata_mut().insert("user".to_string(), "alice".to_string());
+        session
+            .metadata_mut()
+            .insert("user".to_string(), "alice".to_string());
 
         assert_eq!(session.metadata().get("user"), Some(&"alice".to_string()));
     }

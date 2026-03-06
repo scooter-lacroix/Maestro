@@ -4,9 +4,14 @@
   "description": "TrackLens Claude Code integration - visual review, annotation, and walkthrough system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "tracklens": "dist/index.js"
+  },
   "scripts": {
-    "build": "tsc && bun build:ui",
-    "build:ui": "cd ../tracklens-editor && bun run build && cd ../tracklens-review-editor && bun run build",
+    "build": "bun build:tsc && bun build:ui && bun copy:html",
+    "build:tsc": "tsc",
+    "build:ui": "cd ../tracklens-editor && bun run build && cd ../../packages/tracklens-review-editor && bun run build && cd ../../tracklens-hook",
+    "copy:html": "mkdir -p dist && cp ../../packages/tracklens-editor/dist/index.html dist/index.html && cp ../../packages/tracklens-review-editor/dist/index.html dist/review.html",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build"
   },

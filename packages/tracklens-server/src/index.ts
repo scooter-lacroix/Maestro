@@ -367,17 +367,30 @@ export async function startTrackLensServer(
             );
           }
 
-          // Collect all markdown files
+          // Collect all markdown files with depth/file limits
           const files: string[] = [];
-          const collectFiles = (dir: string, base = "") => {
+          const MAX_DEPTH = 10;
+          const MAX_FILES = 5000;
+
+          const collectFiles = (dir: string, base = "", depth = 0) => {
+            // Check depth limit
+            if (depth > MAX_DEPTH || files.length >= MAX_FILES) {
+              return;
+            }
+
             const items = readdirSync(dir, { withFileTypes: true });
 
             for (const item of items) {
+              // Check file count limit before processing each item
+              if (files.length >= MAX_FILES) {
+                return;
+              }
+
               const itemPath = join(dir, item.name);
               const relativePath = base ? `${base}/${item.name}` : item.name;
 
               if (item.isDirectory()) {
-                collectFiles(itemPath, relativePath);
+                collectFiles(itemPath, relativePath, depth + 1);
               } else if (item.name.endsWith(".md")) {
                 files.push(relativePath);
               }
@@ -420,7 +433,66 @@ export async function startTrackLensServer(
         }
       }
 
-      // API: Submit decision (approve/deny)
+      // API: Approve plan (ORIGINAL PLANNOTATOR ENDPOINT)
+      if (url.pathname === "/api/approve" && req.method === "POST") {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const {
+            feedback,
+            agentSwitch,
+            autonomyMode: requestedPermissionMode,
+          } = body as {
+            feedback?: string;
+            agentSwitch?: string;
+            permissionMode?: string;
+            autonomyMode?: string;
+          };
+
+          // Resolve decision promise with approval
+          if (resolveDecision) {
+            resolveDecision({
+              approved: true,
+              feedback,
+              agentSwitch,
+              autonomyMode: requestedPermissionMode || autonomyMode,
+            });
+          }
+
+          shouldAutoClose = true;
+          return Response.json({ ok: true });
+        } catch (error) {
+          return Response.json(
+            { error: error instanceof Error ? error.message : String(error) },
+            { status: 500 }
+          );
+        }
+      }
+
+      // API: Deny with feedback (ORIGINAL PLANNOTATOR ENDPOINT)
+      if (url.pathname === "/api/deny" && req.method === "POST") {
+        try {
+          const body = await req.json().catch(() => ({}));
+          let feedback = "Plan rejected by user";
+          if (body.feedback) {
+            feedback = body.feedback;
+          }
+
+          // Resolve decision promise with denial
+          if (resolveDecision) {
+            resolveDecision({ approved: false, feedback });
+          }
+
+          shouldAutoClose = true;
+          return Response.json({ ok: true });
+        } catch (error) {
+          return Response.json(
+            { error: error instanceof Error ? error.message : String(error) },
+            { status: 500 }
+          );
+        }
+      }
+
+      // API: Submit decision (approve/deny) - COMPATIBILITY ENDPOINT
       if (url.pathname === "/api/decision" && req.method === "POST") {
         // Validate authentication token
         const authHeader = req.headers.get("authorization");

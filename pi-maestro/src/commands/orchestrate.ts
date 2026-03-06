@@ -18,6 +18,7 @@ import {
   applyCriticalThinkForImplementation,
   applyCriticalThinkAfterAction,
 } from "../lib/criticalThink";
+import { isTrackLensEnabled } from "../tracklens/extension/command";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -75,6 +76,12 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
 
         if (result === "completed") {
           completedCount++;
+
+          // TrackLens walkthrough for completed sub-track (if enabled)
+          if (isTrackLensEnabled()) {
+            ctx.ui.notify(`Requesting TrackLens walkthrough for ${subtrackId}...`, "info");
+            // The implement workflow handles walkthrough; this is just a notification
+          }
         } else if (result === "failed") {
           failedCount++;
         }
@@ -84,6 +91,12 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
       if (failedCount === 0) {
         updateTrackStatus(root, trackId, "completed");
         updateTrackMetadata(root, trackId, { status: "completed" });
+
+        // TrackLens final walkthrough for master track
+        if (isTrackLensEnabled()) {
+          ctx.ui.notify("All sub-tracks complete. TrackLens walkthrough available.", "info");
+        }
+
         ctx.ui.notify(`Master track completed: ${trackId}`, "info");
       } else {
         ctx.ui.notify(

@@ -28,6 +28,10 @@ struct Args {
     #[arg(long, default_value_t = 30)]
     timeout: u64,
 
+    /// Workspace path used for MCP persistence and sandbox defaults
+    #[arg(long)]
+    workspace: Option<std::path::PathBuf>,
+
     /// Log level
     #[arg(short, long, default_value = "info")]
     log_level: String,
@@ -51,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
         port: args.port,
         max_connections: args.max_connections,
         request_timeout_secs: args.timeout,
+        workspace_path: args.workspace,
         ..Default::default()
     };
 

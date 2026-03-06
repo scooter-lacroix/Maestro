@@ -11,7 +11,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, ToolCallDelta, TokenUsage};
+use super::{
+    ChatResponse, Provider, ProviderCapabilities, ProviderError, StreamChunk, TokenUsage,
+    ToolCallDelta,
+};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -123,8 +126,9 @@ impl AnthropicProvider {
 
     /// Create a provider from environment variable
     pub fn from_env(model: Option<&str>) -> Result<Self, ProviderError> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| ProviderError::ConfigurationError("ANTHROPIC_API_KEY not set".to_string()))?;
+        let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+            ProviderError::ConfigurationError("ANTHROPIC_API_KEY not set".to_string())
+        })?;
 
         let model = model
             .map(|s| s.to_string())
@@ -136,10 +140,7 @@ impl AnthropicProvider {
 
     /// Get the API URL
     fn api_url(&self) -> &str {
-        self.config
-            .base_url
-            .as_deref()
-            .unwrap_or(ANTHROPIC_API_URL)
+        self.config.base_url.as_deref().unwrap_or(ANTHROPIC_API_URL)
     }
 
     /// Build the request body for messages API
@@ -166,7 +167,9 @@ impl AnthropicProvider {
         if let Some(tools) = tools {
             // LOW-1: avoid panicking on serialization failure
             match serde_json::to_value(tools) {
-                Ok(v) => { body["tools"] = v; }
+                Ok(v) => {
+                    body["tools"] = v;
+                }
                 Err(e) => {
                     tracing::warn!("Failed to serialize Anthropic tools: {}", e);
                 }
@@ -270,11 +273,9 @@ impl AnthropicProvider {
         content
             .iter()
             .filter_map(|c| match c {
-                AnthropicResponseContent::ToolUse { id, name, input } => Some(ToolCall::new(
-                    id.clone(),
-                    name.clone(),
-                    input.clone(),
-                )),
+                AnthropicResponseContent::ToolUse { id, name, input } => {
+                    Some(ToolCall::new(id.clone(), name.clone(), input.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -296,12 +297,19 @@ impl AnthropicProvider {
     ///
     /// `retry_after_secs` should be extracted from the `Retry-After` response
     /// header **before** the body is consumed (LOW-5).
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
+    fn handle_error(
+        &self,
+        status: reqwest::StatusCode,
+        body: &str,
+        retry_after_secs: u64,
+    ) -> ProviderError {
         match status.as_u16() {
             401 => ProviderError::AuthenticationFailed("Invalid API key".to_string()),
             // LOW-5: use server-provided retry delay instead of hardcoded 60
             429 => ProviderError::RateLimitExceeded(retry_after_secs),
-            500 | 502 | 503 => ProviderError::Unavailable(format!("Anthropic service error: {}", status)),
+            500 | 502 | 503 => {
+                ProviderError::Unavailable(format!("Anthropic service error: {}", status))
+            }
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
         }
     }
@@ -447,7 +455,10 @@ impl Provider for AnthropicProvider {
     async fn stream_chat(
         &self,
         turns: &[Turn],
-    ) -> Result<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>, ProviderError> {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>,
+        ProviderError,
+    > {
         let (messages, system) = self.convert_messages(turns);
         let body = self.build_request_body(messages, None, system.as_deref());
 
@@ -496,15 +507,22 @@ impl Provider for AnthropicProvider {
                                     continue;
                                 }
                                 let data = &line[6..];
-                                if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
+                                if let Ok(event) =
+                                    serde_json::from_str::<AnthropicStreamEvent>(data)
+                                {
                                     match event {
-                                        AnthropicStreamEvent::ContentBlockDelta { index, delta } => {
+                                        AnthropicStreamEvent::ContentBlockDelta {
+                                            index,
+                                            delta,
+                                        } => {
                                             let delta_type = delta
                                                 .get("type")
                                                 .and_then(|t| t.as_str())
                                                 .unwrap_or("");
                                             if delta_type == "text_delta" {
-                                                if let Some(t) = delta.get("text").and_then(|t| t.as_str()) {
+                                                if let Some(t) =
+                                                    delta.get("text").and_then(|t| t.as_str())
+                                                {
                                                     results.push(Ok(StreamChunk {
                                                         delta: Some(t.to_string()),
                                                         tool_call_delta: None,
@@ -523,7 +541,9 @@ impl Provider for AnthropicProvider {
                                                             index: index as usize,
                                                             id: None,
                                                             name: None,
-                                                            arguments_delta: Some(partial.to_string()),
+                                                            arguments_delta: Some(
+                                                                partial.to_string(),
+                                                            ),
                                                         }),
                                                         finish_reason: None,
                                                     }));
@@ -535,9 +555,7 @@ impl Provider for AnthropicProvider {
                                             index,
                                             content_block,
                                         } => {
-                                            if content_block
-                                                .get("type")
-                                                .and_then(|t| t.as_str())
+                                            if content_block.get("type").and_then(|t| t.as_str())
                                                 == Some("tool_use")
                                             {
                                                 let id = content_block
@@ -657,7 +675,9 @@ impl Provider for AnthropicProvider {
             .map_err(|e| ProviderError::NetworkError(e.to_string()))?;
 
         if response.status() == 401 {
-            return Err(ProviderError::AuthenticationFailed("Invalid API key".to_string()));
+            return Err(ProviderError::AuthenticationFailed(
+                "Invalid API key".to_string(),
+            ));
         }
 
         Ok(())
@@ -716,7 +736,10 @@ mod tests {
 
     #[test]
     fn test_config_creation() {
-        let config = AnthropicConfig::new("test-key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let config = AnthropicConfig::new(
+            "test-key".to_string(),
+            "claude-3-sonnet-20240229".to_string(),
+        );
         assert_eq!(config.api_key, "test-key");
         assert_eq!(config.model, "claude-3-sonnet-20240229");
         assert_eq!(config.max_tokens, 4096);
@@ -739,7 +762,8 @@ mod tests {
 
     #[test]
     fn test_provider_capabilities() {
-        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let config =
+            AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
         let provider = AnthropicProvider::new(config).unwrap();
         let caps = provider.capabilities();
         assert!(caps.streaming);
@@ -749,7 +773,8 @@ mod tests {
 
     #[test]
     fn test_convert_messages() {
-        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let config =
+            AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
         let provider = AnthropicProvider::new(config).unwrap();
 
         let turns = vec![
@@ -766,7 +791,8 @@ mod tests {
     #[test]
     fn test_multiple_system_turns_concatenated() {
         // LOW-11: Multiple System turns must be concatenated rather than dropped.
-        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let config =
+            AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
         let provider = AnthropicProvider::new(config).unwrap();
 
         let turns = vec![
@@ -776,16 +802,27 @@ mod tests {
         ];
 
         let (messages, system) = provider.convert_messages(&turns);
-        assert_eq!(messages.len(), 1, "Only the User turn should appear in messages");
+        assert_eq!(
+            messages.len(),
+            1,
+            "Only the User turn should appear in messages"
+        );
         let sys = system.unwrap();
-        assert!(sys.contains("Persona: assistant"), "First system content must be present");
-        assert!(sys.contains("Rules: be concise"), "Second system content must be concatenated");
+        assert!(
+            sys.contains("Persona: assistant"),
+            "First system content must be present"
+        );
+        assert!(
+            sys.contains("Rules: be concise"),
+            "Second system content must be concatenated"
+        );
     }
 
     #[test]
     fn test_tool_turn_is_error_propagated() {
         // MED-4: is_error from tool_results must be passed to the provider message.
-        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let config =
+            AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
         let provider = AnthropicProvider::new(config).unwrap();
 
         let mut tool_turn = Turn::new(TurnRole::Tool, "Tool failed!".to_string());
@@ -806,7 +843,8 @@ mod tests {
     #[test]
     fn test_tool_turn_no_id_warns() {
         // MED-4: Tool turn with no tool_call_id and no tool_results should be skipped (not panic).
-        let config = AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
+        let config =
+            AnthropicConfig::new("key".to_string(), "claude-3-sonnet-20240229".to_string());
         let provider = AnthropicProvider::new(config).unwrap();
 
         // Turn with no tool_call_id and no tool_results
@@ -814,7 +852,11 @@ mod tests {
 
         let (messages, _) = provider.convert_messages(&[tool_turn]);
         // Should produce no messages (turn is skipped with a warning)
-        assert_eq!(messages.len(), 0, "Orphan tool turn must be silently skipped");
+        assert_eq!(
+            messages.len(),
+            0,
+            "Orphan tool turn must be silently skipped"
+        );
     }
 
     /// LOW-10: Anthropic ContentBlockStart for tool_use must deserialise id and name
@@ -833,7 +875,10 @@ mod tests {
 
         let event: AnthropicStreamEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicStreamEvent::ContentBlockStart { index, content_block } => {
+            AnthropicStreamEvent::ContentBlockStart {
+                index,
+                content_block,
+            } => {
                 assert_eq!(index, 1);
                 assert_eq!(
                     content_block.get("type").and_then(|t| t.as_str()),

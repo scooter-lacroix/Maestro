@@ -69,3 +69,22 @@ export function isTrackLensEnabled(): boolean {
 export function setTrackLensEnabled(enabled: boolean): void {
   trackLensEnabled = enabled;
 }
+
+/**
+ * Get TrackLens status for Pi sidebar display
+ *
+ * @returns Object with status information for UI display
+ */
+export function getTrackLensStatus(): {
+  enabled: boolean;
+  label: string;
+  description: string;
+} {
+  return {
+    enabled: trackLensEnabled,
+    label: trackLensEnabled ? "TrackLens: On" : "TrackLens: Off",
+    description: trackLensEnabled
+      ? "Walkthrough reviews enabled"
+      : "Walkthrough reviews disabled",
+  };
+}

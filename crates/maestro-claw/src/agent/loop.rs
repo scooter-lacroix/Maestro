@@ -31,8 +31,10 @@ impl Default for AgentConfig {
             max_turns: 20,
             turn_timeout_secs: 60,
             error_strategy: ErrorStrategy::Retry(3),
-            summary_prompt: "Please provide a brief 2–3 sentence summary of our conversation so far, \
-                            covering the key points discussed.".to_string(),
+            summary_prompt:
+                "Please provide a brief 2–3 sentence summary of our conversation so far, \
+                            covering the key points discussed."
+                    .to_string(),
         }
     }
 }
@@ -316,10 +318,7 @@ pub async fn agent_loop(
                 Some(t) => t,
                 None => {
                     // Tool not found - create error result
-                    let error_content = format!(
-                        "Tool '{}' not found in registry",
-                        tool_call.name
-                    );
+                    let error_content = format!("Tool '{}' not found in registry", tool_call.name);
                     let mut tool_turn = Turn::new(TurnRole::Tool, error_content.clone());
                     tool_turn.set_tool_call_id(tool_call.id.clone());
                     // MED-4: store is_error=true so providers can relay error status
@@ -332,23 +331,21 @@ pub async fn agent_loop(
             // Rec-7: Validate required arguments before executing the tool.
             // This surfaces missing-argument errors to the LLM rather than
             // letting each individual tool impl produce ad-hoc error messages.
-            let tool_result = match ToolRegistry::validate_arguments(
-                tool.as_ref(),
-                &tool_call.arguments,
-            ) {
-                Err(validation_err) => {
-                    tracing::warn!(
-                        tool_name = %tool_call.name,
-                        error = %validation_err,
-                        "Tool argument validation failed before execution"
-                    );
-                    ToolOutput::error(validation_err)
-                }
-                Ok(()) => {
-                    // Execute tool - ToolOutput already contains is_error flag
-                    tool.execute(tool_call.arguments.clone()).await
-                }
-            };
+            let tool_result =
+                match ToolRegistry::validate_arguments(tool.as_ref(), &tool_call.arguments) {
+                    Err(validation_err) => {
+                        tracing::warn!(
+                            tool_name = %tool_call.name,
+                            error = %validation_err,
+                            "Tool argument validation failed before execution"
+                        );
+                        ToolOutput::error(validation_err)
+                    }
+                    Ok(()) => {
+                        // Execute tool - ToolOutput already contains is_error flag
+                        tool.execute(tool_call.arguments.clone()).await
+                    }
+                };
 
             tool_calls_executed += 1;
 
@@ -422,9 +419,7 @@ mod tests {
 
     #[test]
     fn test_agent_config_builder() {
-        let config = AgentConfig::default()
-            .with_max_turns(5)
-            .with_timeout(30);
+        let config = AgentConfig::default().with_max_turns(5).with_timeout(30);
         assert_eq!(config.max_turns, 5);
         assert_eq!(config.turn_timeout_secs, 30);
     }

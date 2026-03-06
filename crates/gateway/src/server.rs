@@ -16,6 +16,7 @@ use tower_http::{
 };
 use tracing::{info, warn};
 
+use crate::agent_runtime;
 use crate::routes::create_routes;
 use crate::sse::{sse_handler, sse_heartbeat};
 use crate::state::{GatewayConfig, GatewayState};
@@ -24,6 +25,7 @@ use crate::ws::ws_handler;
 /// Run the gateway server
 pub async fn run(config: GatewayConfig) -> anyhow::Result<()> {
     let state = Arc::new(GatewayState::with_config(config.clone()));
+    agent_runtime::hydrate_workspace_mcp_servers(&state).await?;
 
     run_with_state(config, state).await
 }

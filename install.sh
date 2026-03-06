@@ -37,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 INSTALL_DIR=""
 
 # Check if we're in a valid Maestro repo
-if [[ -f "$SCRIPT_DIR/install.sh" && -d "$SCRIPT_DIR/maestro/leindex/rust" ]]; then
+if [[ -f "$SCRIPT_DIR/install.sh" && -d "$SCRIPT_DIR/src/leindex" ]]; then
     # Running from a cloned repo
     INSTALL_DIR="$SCRIPT_DIR"
     echo -e "${G}    [Local Install]${NC} Installing from: $INSTALL_DIR"
@@ -67,7 +67,7 @@ if [[ "$CURRENT_BRANCH" != "$MAESTRO_BRANCH" && "$CURRENT_BRANCH" != "HEAD" ]]; 
     git checkout "$MAESTRO_BRANCH"
 fi
 
-cd "$INSTALL_DIR/maestro/leindex/rust"
+cd "$INSTALL_DIR/src/leindex"
 
 # Check for basic build tools and dependencies
 echo -e "${C}    Revising system requirements...${NC}"
@@ -102,6 +102,14 @@ ensure_package "tmux" "tmux"
 ensure_package "gcc" "build-essential"
 ensure_package "pkg-config" "pkg-config"
 
+# Check for Bun (required for TrackLens)
+if ! command -v bun &> /dev/null; then
+    echo -e "${Y}  [!] Bun not found.${NC} Installing Bun..."
+    curl -fsSL https://bun.sh/install | bash
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+fi
+
 # Check for Rust/Cargo
 if ! command -v cargo &> /dev/null; then
     echo -e "${Y}  [!] Rust not found.${NC} Rust is required to build the Conductor Wizard."
@@ -110,9 +118,53 @@ if ! command -v cargo &> /dev/null; then
     source $HOME/.cargo/env
 fi
 
+# Build TrackLens packages
+echo -e "${C}    Building TrackLens packages...${NC}"
+cd "$INSTALL_DIR"
+if command -v bun &> /dev/null; then
+    bun install || true
+    # Install tracklens-hook dependencies
+    cd "$INSTALL_DIR/apps/tracklens-hook" && bun install 2>/dev/null || true
+    cd "$INSTALL_DIR"
+    bun run build:tracklens || echo -e "${Y}  [!] TrackLens build failed, continuing...${NC}"
+    # Copy HTML files to tracklens-hook dist
+    cd "$INSTALL_DIR/apps/tracklens-hook" && bun run copy:html 2>/dev/null || echo -e "${Y}  [!] HTML copy failed, continuing...${NC}"
+else
+    npm install && npm run build:tracklens || echo -e "${Y}  [!] TrackLens build failed, continuing...${NC}"
+    # Install tracklens-hook dependencies
+    cd "$INSTALL_DIR/apps/tracklens-hook" && npm install 2>/dev/null || true
+    cd "$INSTALL_DIR"
+fi
+
+# Install TrackLens Claude Code Plugin
+echo -e "${C}    Installing TrackLens Claude Code Plugin...${NC}"
+mkdir -p "$HOME/.claude/plugins/tracklens"
+cp -r "$INSTALL_DIR/apps/tracklens-hook/"* "$HOME/.claude/plugins/tracklens/"
+
+# Install OpenCode Skill
+echo -e "${C}    Installing OpenCode Skill...${NC}"
+mkdir -p "$HOME/.opencode/skill/maestro"
+cp -r "$INSTALL_DIR/opencode/skill/maestro/"* "$HOME/.opencode/skill/maestro/" 2>/dev/null || true
+
+# Install Claude Hooks
+echo -e "${C}    Installing Claude Hooks...${NC}"
+if [ -f "$HOME/.claude/settings.json" ]; then
+    # Backup existing settings
+    cp "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.bak"
+    
+    # Add hooks if not already present
+    if ! grep -q "tracklens" "$HOME/.claude/settings.json" 2>/dev/null; then
+        echo -e "${Y}  [!] Adding TrackLens hooks to settings.json...${NC}"
+        # Note: Claude Code hooks are handled by the plugin system
+    fi
+fi
+
 # Build and Run the Conductor Wizard
 echo -e "${G}    Launching Maestro Conductor Wizard...${NC}"
 echo -e "    ${C}Please wait while the orchestra tunes (compiling setup tool)${NC}"
+
+# Change to leindex Rust directory
+cd "$INSTALL_DIR/src/leindex"
 
 # Check if we have a TTY for the TUI
 if [[ -t 0 ]]; then

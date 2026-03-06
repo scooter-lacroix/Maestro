@@ -11,7 +11,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-use super::{ChatResponse, ProviderCapabilities, ProviderError, Provider, StreamChunk, ToolCallDelta, TokenUsage};
+use super::{
+    ChatResponse, Provider, ProviderCapabilities, ProviderError, StreamChunk, TokenUsage,
+    ToolCallDelta,
+};
 use crate::session::{ToolCall, Turn, TurnRole};
 use crate::tools::ToolSpec;
 
@@ -128,10 +131,7 @@ impl OpenAIProvider {
 
     /// Get the API URL
     fn api_url(&self) -> &str {
-        self.config
-            .base_url
-            .as_deref()
-            .unwrap_or(OPENAI_API_URL)
+        self.config.base_url.as_deref().unwrap_or(OPENAI_API_URL)
     }
 
     /// Build the request body
@@ -162,7 +162,9 @@ impl OpenAIProvider {
         if let Some(tools) = tools {
             // LOW-1: avoid panicking on serialization failure
             match serde_json::to_value(tools) {
-                Ok(v) => { body["tools"] = v; }
+                Ok(v) => {
+                    body["tools"] = v;
+                }
                 Err(e) => {
                     tracing::warn!("Failed to serialize OpenAI tools: {}", e);
                 }
@@ -173,9 +175,7 @@ impl OpenAIProvider {
     }
 
     /// Parse tool calls from OpenAI response
-    fn parse_tool_calls(
-        tool_calls: &[OpenAIToolCall],
-    ) -> Vec<ToolCall> {
+    fn parse_tool_calls(tool_calls: &[OpenAIToolCall]) -> Vec<ToolCall> {
         tool_calls
             .iter()
             .map(|tc| {
@@ -192,12 +192,19 @@ impl OpenAIProvider {
     /// Handle API error response
     /// `retry_after_secs` should be extracted from the `Retry-After` header before
     /// the response body is consumed (LOW-5).
-    fn handle_error(&self, status: reqwest::StatusCode, body: &str, retry_after_secs: u64) -> ProviderError {
+    fn handle_error(
+        &self,
+        status: reqwest::StatusCode,
+        body: &str,
+        retry_after_secs: u64,
+    ) -> ProviderError {
         match status.as_u16() {
             401 => ProviderError::AuthenticationFailed("Invalid API key".to_string()),
             // LOW-5: use server-provided retry delay
             429 => ProviderError::RateLimitExceeded(retry_after_secs),
-            500 | 502 | 503 => ProviderError::Unavailable(format!("OpenAI service error: {}", status)),
+            500 | 502 | 503 => {
+                ProviderError::Unavailable(format!("OpenAI service error: {}", status))
+            }
             _ => ProviderError::ProviderError(format!("API error ({}): {}", status, body)),
         }
     }
@@ -335,10 +342,9 @@ impl Provider for OpenAIProvider {
             .map(|tc| Self::parse_tool_calls(tc))
             .unwrap_or_default();
 
-        let usage = openai_response.usage.map(|u| TokenUsage::new(
-            u.prompt_tokens,
-            u.completion_tokens,
-        ));
+        let usage = openai_response
+            .usage
+            .map(|u| TokenUsage::new(u.prompt_tokens, u.completion_tokens));
 
         Ok(ChatResponse {
             content,
@@ -352,7 +358,10 @@ impl Provider for OpenAIProvider {
     async fn stream_chat(
         &self,
         messages: &[Turn],
-    ) -> Result<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>, ProviderError> {
+    ) -> Result<
+        Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>,
+        ProviderError,
+    > {
         let formatted = self.format_messages(messages);
         let body = self.build_request_body(formatted, None, true);
 
@@ -490,10 +499,9 @@ impl Provider for OpenAIProvider {
             .map(|tc| Self::parse_tool_calls(tc))
             .unwrap_or_default();
 
-        let usage = openai_response.usage.map(|u| TokenUsage::new(
-            u.prompt_tokens,
-            u.completion_tokens,
-        ));
+        let usage = openai_response
+            .usage
+            .map(|u| TokenUsage::new(u.prompt_tokens, u.completion_tokens));
 
         Ok(ChatResponse {
             content,
@@ -521,11 +529,15 @@ impl Provider for OpenAIProvider {
             .map_err(map_network_error)?;
 
         if response.status() == 401 {
-            return Err(ProviderError::AuthenticationFailed("Invalid API key".to_string()));
+            return Err(ProviderError::AuthenticationFailed(
+                "Invalid API key".to_string(),
+            ));
         }
 
         if !response.status().is_success() {
-            return Err(ProviderError::Unavailable("OpenAI API unavailable".to_string()));
+            return Err(ProviderError::Unavailable(
+                "OpenAI API unavailable".to_string(),
+            ));
         }
 
         Ok(())
@@ -549,19 +561,25 @@ impl Provider for OpenAIProvider {
 
                 // Add tool calls for assistant messages
                 if !turn.tool_calls.is_empty() {
-                    let tc_list = turn.tool_calls.iter().map(|tc| {
-                        serde_json::json!({
-                            "id": &tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": &tc.name,
-                                "arguments": tc.arguments.to_string()
-                            }
+                    let tc_list = turn
+                        .tool_calls
+                        .iter()
+                        .map(|tc| {
+                            serde_json::json!({
+                                "id": &tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": &tc.name,
+                                    "arguments": tc.arguments.to_string()
+                                }
+                            })
                         })
-                    }).collect::<Vec<_>>();
+                        .collect::<Vec<_>>();
                     // LOW-1: avoid panicking on serialization failure
                     match serde_json::to_value(tc_list) {
-                        Ok(v) => { msg["tool_calls"] = v; }
+                        Ok(v) => {
+                            msg["tool_calls"] = v;
+                        }
                         Err(e) => {
                             tracing::warn!("Failed to serialize OpenAI tool_calls: {}", e);
                         }

@@ -44,6 +44,8 @@ pub struct ShellToolConfig {
     pub allow_dangerous: bool,
     /// Working directory for commands
     pub working_directory: Option<std::path::PathBuf>,
+    /// Optional command allowlist. Empty means any command name is eligible.
+    pub allowed_commands: Vec<String>,
 }
 
 impl Default for ShellToolConfig {
@@ -54,6 +56,7 @@ impl Default for ShellToolConfig {
             allow_moderate: true,
             allow_dangerous: false,
             working_directory: None,
+            allowed_commands: Vec::new(),
         }
     }
 }
@@ -105,7 +108,7 @@ impl ShellTool {
             "rm -rf /*",
             "mkfs",
             "dd if=",
-            ":(){ :|:& };:",  // Fork bomb
+            ":(){ :|:& };:", // Fork bomb
             "> /dev/sda",
             "chmod -R 777 /",
             "chown -R",
@@ -118,8 +121,8 @@ impl ShellTool {
             "systemctl disable",
             "iptables -F",
             "ufw disable",
-            "sudo",           // MED-2: privilege escalation bypasses all guards
-            "eval",           // MED-2: dynamic evaluation bypasses classification
+            "sudo", // MED-2: privilege escalation bypasses all guards
+            "eval", // MED-2: dynamic evaluation bypasses classification
         ];
 
         for pattern in &blocked_patterns {
@@ -137,21 +140,65 @@ impl ShellTool {
         // bypass the pattern/name checks above (e.g. `bash -c "rm -rf /"`).
         // They require `allow_dangerous: true` to execute.
         let dangerous_commands = [
-            "rm", "rmdir", "del", "format", "fdisk", "parted", "wipefs",
-            "chmod", "chown", "chgrp", "attr", "setfacl",
-            "kill", "killall", "pkill", "xkill",
-            "apt", "apt-get", "dpkg", "yum", "dnf", "pacman", "snap", "flatpak",
-            "pip", "pip3", "npm", "yarn", "cargo install",
-            "git push", "git reset --hard", "git clean -fdx",
-            "docker rm", "docker rmi", "docker system prune",
+            "rm",
+            "rmdir",
+            "del",
+            "format",
+            "fdisk",
+            "parted",
+            "wipefs",
+            "chmod",
+            "chown",
+            "chgrp",
+            "attr",
+            "setfacl",
+            "kill",
+            "killall",
+            "pkill",
+            "xkill",
+            "apt",
+            "apt-get",
+            "dpkg",
+            "yum",
+            "dnf",
+            "pacman",
+            "snap",
+            "flatpak",
+            "pip",
+            "pip3",
+            "npm",
+            "yarn",
+            "cargo install",
+            "git push",
+            "git reset --hard",
+            "git clean -fdx",
+            "docker rm",
+            "docker rmi",
+            "docker system prune",
             "kubectl delete",
             // Shell interpreters (MED-2)
-            "bash", "sh", "zsh", "dash", "fish", "ksh", "csh", "tcsh",
+            "bash",
+            "sh",
+            "zsh",
+            "dash",
+            "fish",
+            "ksh",
+            "csh",
+            "tcsh",
             // Scripting language runtimes (MED-2)
-            "python", "python2", "python3",
-            "perl", "ruby", "php",
-            "node", "nodejs", "deno", "bun",
-            "lua", "tclsh", "wish",
+            "python",
+            "python2",
+            "python3",
+            "perl",
+            "ruby",
+            "php",
+            "node",
+            "nodejs",
+            "deno",
+            "bun",
+            "lua",
+            "tclsh",
+            "wish",
             // exec replaces current process — treat as dangerous
             "exec",
         ];
@@ -164,13 +211,26 @@ impl ShellTool {
 
         // Moderate risk commands
         let moderate_commands = [
-            "mkdir", "touch", "cp", "mv", "ln",
-            "echo", "cat", "tee",
-            "curl", "wget",
-            "tar", "zip", "unzip",
-            "git add", "git commit", "git checkout",
-            "docker run", "docker build",
-            "make", "cmake",
+            "mkdir",
+            "touch",
+            "cp",
+            "mv",
+            "ln",
+            "echo",
+            "cat",
+            "tee",
+            "curl",
+            "wget",
+            "tar",
+            "zip",
+            "unzip",
+            "git add",
+            "git commit",
+            "git checkout",
+            "docker run",
+            "docker build",
+            "make",
+            "cmake",
         ];
 
         for moderate in &moderate_commands {
@@ -185,12 +245,23 @@ impl ShellTool {
 
     /// Check if a command is allowed based on configuration
     fn is_command_allowed(&self, command: &str) -> Result<CommandRiskLevel, String> {
+        if !self.config.allowed_commands.is_empty() {
+            let cmd_name = command.split_whitespace().next().unwrap_or("").trim();
+            let allowed = self
+                .config
+                .allowed_commands
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(cmd_name));
+
+            if !allowed {
+                return Err(format!("Command is not allowlisted: {}", command));
+            }
+        }
+
         let risk_level = Self::classify_command(command);
 
         match risk_level {
-            CommandRiskLevel::Blocked => {
-                Err(format!("Command is blocked: {}", command))
-            }
+            CommandRiskLevel::Blocked => Err(format!("Command is blocked: {}", command)),
             CommandRiskLevel::Dangerous => {
                 if self.config.allow_dangerous {
                     Ok(risk_level)
@@ -344,10 +415,9 @@ impl Tool for ShellTool {
                 }
             }
             Ok(Err(e)) => ToolOutput::error(format!("Failed to execute command: {}", e)),
-            Err(_) => ToolOutput::error(format!(
-                "Command timed out after {} seconds",
-                timeout_secs
-            )),
+            Err(_) => {
+                ToolOutput::error(format!("Command timed out after {} seconds", timeout_secs))
+            }
         }
     }
 }
@@ -363,10 +433,7 @@ mod tests {
             ShellTool::classify_command("ls -la"),
             CommandRiskLevel::Safe
         );
-        assert_eq!(
-            ShellTool::classify_command("pwd"),
-            CommandRiskLevel::Safe
-        );
+        assert_eq!(ShellTool::classify_command("pwd"), CommandRiskLevel::Safe);
         assert_eq!(
             ShellTool::classify_command("whoami"),
             CommandRiskLevel::Safe
@@ -489,6 +556,18 @@ mod tests {
     }
 
     #[test]
+    fn test_non_allowlisted_command_rejected() {
+        let config = ShellToolConfig {
+            allowed_commands: vec!["ls".into()],
+            ..Default::default()
+        };
+        let tool = ShellTool::with_config(config);
+        let output = tool.execute_sync("pwd");
+        assert!(output.is_error);
+        assert!(output.content.contains("allowlisted"));
+    }
+
+    #[test]
     fn test_interpreter_bypass_rejected_by_default() {
         // MED-2: Shell interpreters are Dangerous and must be rejected without
         // allow_dangerous: true, preventing `bash -c "rm -rf /"` style bypasses.
@@ -542,7 +621,10 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["command"]["type"].is_string());
-        assert!(schema["required"].as_array().unwrap().contains(&json!("command")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("command")));
     }
 
     #[test]
@@ -592,9 +674,7 @@ mod tests {
         let tool = ShellTool::with_config(config);
 
         // Use sleep command that exceeds timeout
-        let output = tool
-            .execute(json!({"command": "sleep 5"}))
-            .await;
+        let output = tool.execute(json!({"command": "sleep 5"})).await;
         assert!(output.is_error);
         assert!(output.content.contains("timed out"));
     }

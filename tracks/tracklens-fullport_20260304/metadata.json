@@ -1,0 +1,76 @@
+{
+  "track_id": "tracklens-fullport_20260304",
+  "title": "TrackLens Full Port and Remediation",
+  "description": "Complete port and remediation of Plannotator to TrackLens with full web UI reconstruction and Maestro integration",
+  "type": "remediation",
+  "status": "in_progress",
+  "priority": "p0",
+  "created_at": "2026-03-04T00:00:00Z",
+  "updated_at": "2026-03-05T00:00:00Z",
+  "owner": "maestro",
+  "tags": [
+    "tracklens",
+    "plannotator",
+    "port",
+    "remediation",
+    "ui",
+    "integration",
+    "newtrack",
+    "implement",
+    "orchestrate"
+  ],
+  "parent_track": null,
+  "estimated_effort": "very_high",
+  "phases": [
+    {
+      "name": "Component Inventory and Analysis",
+      "status": "completed",
+      "order": 1
+    },
+    {
+      "name": "UI Component Port",
+      "status": "completed",
+      "order": 2
+    },
+    {
+      "name": "Review Editor Port",
+      "status": "completed",
+      "order": 3
+    },
+    {
+      "name": "Server Completion",
+      "status": "completed",
+      "order": 4
+    },
+    {
+      "name": "Editor Enhancement",
+      "status": "completed",
+      "order": 5
+    },
+    {
+      "name": "Maestro Integration",
+      "status": "in_progress",
+      "order": 6
+    },
+    {
+      "name": "Build System",
+      "status": "in_progress",
+      "order": 7
+    },
+    {
+      "name": "Testing and Verification",
+      "status": "pending",
+      "order": 8
+    }
+  ],
+  "integration_points": [
+    "newTrack",
+    "implement",
+    "orchestrate"
+  ],
+  "platforms": [
+    "claude-code",
+    "opencode",
+    "pi-mono"
+  ]
+}

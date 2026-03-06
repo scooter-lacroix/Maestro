@@ -142,7 +142,10 @@ impl FileTool {
 
         // Component-level check: reject any `..` path component.
         // This catches a bare `".."` that the string patterns above miss.
-        if path.components().any(|c| c == std::path::Component::ParentDir) {
+        if path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
             return Err("Path traversal detected".to_string());
         }
 
@@ -161,13 +164,10 @@ impl FileTool {
         // When a sandbox base_directory is configured we verify that the fully-resolved
         // path (after following all symlinks in the existing prefix) still lives under it.
         if let Some(ref base) = self.config.base_directory {
-            let canonical_base = std::fs::canonicalize(base)
-                .unwrap_or_else(|_| base.clone());
+            let canonical_base = std::fs::canonicalize(base).unwrap_or_else(|_| base.clone());
             let canonical_resolved = canonicalize_best_effort(&resolved);
             if !canonical_resolved.starts_with(&canonical_base) {
-                return Err(
-                    "Path traversal detected (resolved outside sandbox)".to_string()
-                );
+                return Err("Path traversal detected (resolved outside sandbox)".to_string());
             }
         }
 
@@ -295,11 +295,7 @@ impl FileTool {
         let mut items = Vec::new();
         while let Ok(Some(entry)) = entries.next_entry().await {
             let name = entry.file_name().to_string_lossy().to_string();
-            let is_dir = entry
-                .file_type()
-                .await
-                .map(|t| t.is_dir())
-                .unwrap_or(false);
+            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
             items.push(if is_dir { format!("{}/", name) } else { name });
         }
 
@@ -752,7 +748,10 @@ mod tests {
         // An absolute path outside the sandbox must be rejected when
         // base_directory is set — the canonicalize check (MED-1) enforces this.
         let result = tool.validate_path("/etc/passwd");
-        assert!(result.is_err(), "Absolute path outside sandbox should be rejected");
+        assert!(
+            result.is_err(),
+            "Absolute path outside sandbox should be rejected"
+        );
         assert!(result.unwrap_err().contains("traversal"));
     }
 
@@ -763,8 +762,14 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["operation"]["enum"].is_array());
-        assert!(schema["required"].as_array().unwrap().contains(&json!("operation")));
-        assert!(schema["required"].as_array().unwrap().contains(&json!("path")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("operation")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("path")));
     }
 
     #[test]

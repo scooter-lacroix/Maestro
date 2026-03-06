@@ -124,7 +124,10 @@ pub trait Provider: Send + Sync {
     async fn stream_chat(
         &self,
         messages: &[Turn],
-    ) -> Result<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>, ProviderError>;
+    ) -> Result<
+        Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send + Unpin>,
+        ProviderError,
+    >;
 
     /// Send a chat completion request with tool support
     async fn chat_with_tools(
