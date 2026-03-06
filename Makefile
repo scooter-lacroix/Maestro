@@ -1,92 +1,77 @@
 # Maestro Makefile
-.PHONY: help build install clean test tui-build tui-install tui-clean tui-test install-all
+.PHONY: help build install clean test install-all
 
 # Default target
 help:
-	@echo "Maestro 2.0 - Unified Development Framework"
+	@echo "Maestro 2.5 - Rust-First Unified Development Framework"
 	@echo ""
-	@echo "Python targets:"
-	@echo "  make install       Install Maestro Python CLI"
-	@echo "  make test          Run Python tests"
-	@echo "  make clean         Clean Python build artifacts"
-	@echo ""
-	@echo "TUI targets (Go):"
-	@echo "  make tui-build     Build maestro-tui Go binary"
-	@echo "  make tui-install   Install maestro-tui to ~/.local/bin"
-	@echo "  make tui-test      Run Go tests"
-	@echo "  make tui-clean     Clean Go build artifacts"
+	@echo "Rust targets:"
+	@echo "  make build         Build Rust workspace (release mode)"
+	@echo "  make install        Install Rust binaries to ~/.cargo/bin"
+	@echo "  make test          Run Rust tests"
+	@echo "  make clean         Clean Rust build artifacts"
 	@echo ""
 	@echo "Combined targets:"
-	@echo "  make install-all   Install both Python and TUI"
-	@echo "  make test-all      Run all tests"
-	@echo "  make clean         Clean all build artifacts"
+	@echo "  make install-all   Build and install all Maestro components"
 
-# Python variables
-PYTHON=python3
-PIP=pip
-
-# TUI variables (Go)
-TUI_DIR=maestro/tui
-TUI_BINARY=maestro-tui
-TUI_BUILD_DIR=$(TUI_DIR)/build
-TUI_INSTALL_DIR=$(HOME)/.local/bin
+# Rust variables
+CARGO=cargo
+WORKSPACE_ROOT=.
+INSTALL_DIR=$(HOME)/.cargo/bin
 
 # ============================================================================
-# Python targets
+# Rust targets
 # ============================================================================
 
-install:
-	$(PIP) install -e .
+apply-vendor-patches:
+	@if [ -x scripts/apply-vendor-patches.sh ]; then \
+		scripts/apply-vendor-patches.sh; \
+	else \
+		echo "⚠️  scripts/apply-vendor-patches.sh not found or not executable"; \
+	fi
+
+build: apply-vendor-patches
+	$(CARGO) build --workspace --release
+	@echo "✅ Rust binaries built: $(INSTALL_DIR)/maestro, $(INSTALL_DIR)/maestro-setup"
+
+install: build
+	@echo "✅ Rust binaries installed via cargo to $(INSTALL_DIR)/"
 
 test:
-	$(PYTHON) -m pytest maestro/memory/tests/ -v
+	$(CARGO) test --workspace
 
-clean-py:
-	rm -rf dist/ build/ *.egg-info
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
+clean:
+	$(CARGO) clean
+	@echo "✅ Rust build artifacts cleaned"
 
-# ============================================================================
-# TUI targets (Go)
-# ============================================================================
-
-tui-build:
-	cd $(TUI_DIR) && go build -o $(TUI_BUILD_DIR)/$(TUI_BINARY) ./cmd/maestro-tui
-	@echo "✅ TUI binary built: $(TUI_BUILD_DIR)/$(TUI_BINARY)"
-
-tui-install: tui-build
-	mkdir -p $(TUI_INSTALL_DIR)
-	cp $(TUI_BUILD_DIR)/$(TUI_BINARY) $(TUI_INSTALL_DIR)/
-	@echo "✅ Maestro TUI installed to $(TUI_INSTALL_DIR)/$(TUI_BINARY)"
-
-tui-clean:
-	cd $(TUI_DIR) && go clean
-	rm -rf $(TUI_BUILD_DIR)
-	@echo "✅ TUI build artifacts cleaned"
-
-tui-test:
-	cd $(TUI_DIR) && go test ./...
-
-# ============================================================================
-# Combined targets
-# ============================================================================
-
-install-all: install tui-install
-	@echo "✅ Maestro + TUI installed successfully"
-
-test-all: test tui-test
-	@echo "✅ All tests passed"
-
-clean: clean-py tui-clean
-	@echo "✅ All build artifacts cleaned"
-
-# ============================================================================
 # Development targets
-# ============================================================================
+dev-build: apply-vendor-patches
+	$(CARGO) build --workspace
 
-dev-install:
-	$(PIP) install -e ".[dev]"
-	cd $(TUI_DIR) && go mod tidy
+dev-test:
+	$(CARGO) test --workspace
 
-dev-tui:
-	cd $(TUI_DIR) && go run ./cmd/maestro-tui
+# Check code (faster than full build)
+check:
+	$(CARGO) check --workspace
+
+# Policy checks - enforce architectural rules
+policy-check:
+	@echo "Checking for forbidden maestro.tldr imports outside archive..."
+	@rg -n "maestro\.tldr" --glob '!maestro/archive/**' --glob '!*.txt' --glob '!**/tracks.md' --glob '!**/plan.md' --glob '!Makefile' --glob '!**/SKILL.md' --glob '!**/spec.md' . && echo "❌ ERROR: Found maestro.tldr references outside archive/" && exit 1 || echo "✅ No maestro.tldr imports outside archive/"
+	@echo "Checking for archive/tldr execution paths in runtime code..."
+	@rg -n "from.*archive.*tldr|import.*archive.*tldr" --glob '!*.txt' --glob '!*.md' --glob '!maestro/archive/**' maestro/ && echo "❌ ERROR: Found archive/tldr imports in runtime code" && exit 1 || echo "✅ No archive/tldr execution paths"
+
+# Run clippy for linting
+lint:
+	$(CARGO) clippy --workspace --all-targets
+
+# Format code
+fmt:
+	$(CARGO) fmt --all
+
+# Install from local source (force reinstall)
+install-local:
+	$(CARGO) install --path crates/cli --force
+	$(CARGO) install --path src/leindex --bin maestro-setup --force
+	@echo "✅ Maestro binaries installed to $(INSTALL_DIR)/"

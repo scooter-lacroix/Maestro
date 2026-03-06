@@ -4,8 +4,8 @@
 //! the system is performing async operations like spawning new sessions.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::widgets::Clear;
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use crate::app::App;
 
@@ -20,10 +20,11 @@ use crate::app::App;
 /// * `app` - Reference to the application state
 pub fn render_spawning_overlay(frame: &mut Frame, app: &App) {
     let area = crate::modals::centered_rect(40, 10, frame.area());
+    let theme = app.theme();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(30, 0, 30)).fg(Color::Yellow));
+        .style(Style::default().bg(theme.panel_bg).fg(Color::Yellow));
 
     let text = vec![
         Line::from(""),

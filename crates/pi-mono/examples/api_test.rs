@@ -1,11 +1,20 @@
 // Verify public API exports
 use maestro_pi_mono::{
+    default_mappings as default_agent_mappings,
+    default_presets,
+    get_preset,
+    preset_names,
+    role_to_pi_agent_type,
+    AgentMapping,
     // Mapping types
-    AgentRole, PiAgentType, ToolAccess, TaskComplexity, AgentMapping,
-    default_mappings as default_agent_mappings, role_to_pi_agent_type,
+    AgentRole,
+    PiAgentType,
+    TaskComplexity,
+    ToolAccess,
     // Workflow types
-    WorkflowMode, WorkflowStep, WorkflowPreset,
-    default_presets, get_preset, preset_names,
+    WorkflowMode,
+    WorkflowPreset,
+    WorkflowStep,
 };
 
 fn main() {

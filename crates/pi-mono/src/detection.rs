@@ -48,12 +48,7 @@ impl Capabilities {
     }
 
     /// Create a new Capabilities instance with custom settings
-    pub fn with_capabilities(
-        subagent: bool,
-        streaming: bool,
-        parallel: bool,
-        chain: bool,
-    ) -> Self {
+    pub fn with_capabilities(subagent: bool, streaming: bool, parallel: bool, chain: bool) -> Self {
         Self {
             subagent,
             streaming,
@@ -84,10 +79,11 @@ pub struct PiDetection {
 impl PiDetection {
     /// Search for pi-mono executable in standard locations
     ///
-    /// This method searches for the pi-mono executable in the following order:
-    /// 1. `~/.local/bin/pi` - User local installation
-    /// 2. `/usr/local/bin/pi` - System-wide installation
-    /// 3. `$PATH` - Using the `which` command
+    /// This method searches for the pi-mono executable using PATH-first discovery:
+    /// 1. `$PATH` - Using the `which` command (priority)
+    /// 2. `~/.local/bin/pi` - User local installation (XDG_BIN_HOME)
+    /// 3. `~/.cargo/bin/pi` - Cargo-installed
+    /// 4. Custom path via `PI_MONO_PATH` environment variable
     ///
     /// Each path is validated to ensure it exists, is a regular file, and has execute permissions.
     ///
@@ -123,20 +119,9 @@ impl PiDetection {
             path.exists() && path.is_file()
         }
 
-        // Search paths in priority order
-        // NOTE: Spec requires searching /home/stan/pi-mono/pi for development
-        // This is a user-specific path for stan's development environment
-        let paths: Vec<Option<PathBuf>> = vec![
-            // Development path (user-specific, as per spec)
-            Some(PathBuf::from("/home/stan/pi-mono/pi")),
-            // User local installation (portable)
-            dirs::home_dir().map(|d| d.join(".local/bin/pi")),
-            // System-wide installation (portable)
-            Some(PathBuf::from("/usr/local/bin/pi")),
-        ];
-
-        // Check each path
-        for path in paths.into_iter().flatten() {
+        // 1. Check custom path via environment variable
+        if let Ok(custom_path) = std::env::var("PI_MONO_PATH") {
+            let path = PathBuf::from(custom_path);
             if is_valid_executable(&path) {
                 return Ok(Self {
                     executable_path: path,
@@ -146,13 +131,35 @@ impl PiDetection {
             }
         }
 
-        // Fallback to which to search in PATH (which validates executables)
+        // 2. Check PATH first (most portable)
         if let Ok(path) = which("pi") {
             return Ok(Self {
                 executable_path: path,
                 version: None,
                 capabilities: Capabilities::default(),
             });
+        }
+
+        // 3. Check common user-local installation paths (XDG-compliant)
+        // Note: No hardcoded absolute paths - all computed from home directory
+        let search_paths: Vec<Option<PathBuf>> = vec![
+            // XDG_BIN_HOME (~/.local/bin by default)
+            dirs::home_dir().map(|d| d.join(".local/bin/pi")),
+            // Cargo bin directory
+            dirs::home_dir().map(|d| d.join(".cargo/bin/pi")),
+            // User bin directory
+            dirs::home_dir().map(|d| d.join("bin/pi")),
+        ];
+
+        // Check each path
+        for path in search_paths.into_iter().flatten() {
+            if is_valid_executable(&path) {
+                return Ok(Self {
+                    executable_path: path,
+                    version: None,
+                    capabilities: Capabilities::default(),
+                });
+            }
         }
 
         Err(Error::Detection(DetectionError::NotFound))
@@ -193,24 +200,28 @@ impl PiDetection {
         let output = tokio::time::timeout(
             Duration::from_secs(5),
             tokio::task::spawn_blocking(move || {
-                Command::new(&executable_path)
-                    .arg("--version")
-                    .output()
-            })
+                Command::new(&executable_path).arg("--version").output()
+            }),
         )
         .await
-        .map_err(|_| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str.clone(),
-            reason: "Command timed out after 5 seconds".to_string(),
-        }))?
-        .map_err(|e| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str.clone(),
-            reason: format!("Task join failed: {}", e),
-        }))?
-        .map_err(|e| Error::Detection(DetectionError::ExecutionFailed {
-            command: executable_path_str,
-            reason: format!("Failed to execute: {}", e),
-        }))?;
+        .map_err(|_| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str.clone(),
+                reason: "Command timed out after 5 seconds".to_string(),
+            })
+        })?
+        .map_err(|e| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str.clone(),
+                reason: format!("Task join failed: {}", e),
+            })
+        })?
+        .map_err(|e| {
+            Error::Detection(DetectionError::ExecutionFailed {
+                command: executable_path_str,
+                reason: format!("Failed to execute: {}", e),
+            })
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -232,12 +243,11 @@ impl PiDetection {
             version_str.to_string()
         } else {
             // Try to extract version from the last word
-            let last_word = version_str
-                .split_whitespace()
-                .last()
-                .ok_or_else(|| Error::Detection(DetectionError::VersionParseFailed {
+            let last_word = version_str.split_whitespace().last().ok_or_else(|| {
+                Error::Detection(DetectionError::VersionParseFailed {
                     output: version_str.to_string(),
-                }))?;
+                })
+            })?;
 
             if let Ok(_v) = last_word.parse::<semver::Version>() {
                 last_word.to_string()
@@ -359,13 +369,18 @@ mod tests {
 
     #[test]
     fn test_pi_detection_creation() {
+        // Use a portable path for testing
+        let test_path = dirs::home_dir()
+            .map(|h| h.join(".local/bin/pi"))
+            .unwrap_or_else(|| PathBuf::from(".local/bin/pi"));
+
         let detection = PiDetection {
-            executable_path: PathBuf::from("/usr/local/bin/pi"),
+            executable_path: test_path.clone(),
             version: Some("0.49.3".to_string()),
             capabilities: Capabilities::default(),
         };
 
-        assert_eq!(detection.executable_path, PathBuf::from("/usr/local/bin/pi"));
+        assert_eq!(detection.executable_path, test_path);
         assert_eq!(detection.version, Some("0.49.3".to_string()));
         assert!(detection.capabilities.streaming);
     }
@@ -378,23 +393,20 @@ mod tests {
     }
 
     #[test]
-    fn test_search_paths_order() {
-        // Verify the search paths are in the correct order
+    fn test_search_paths_are_portable() {
+        // Verify that search paths are computed from home directory
+        // (no hardcoded absolute paths)
         let home = dirs::home_dir().expect("No home directory");
-        let paths = vec![
-            PathBuf::from("/home/stan/pi-mono/pi"),
-            home.join(".local/bin/pi"),
-            PathBuf::from("/usr/local/bin/pi"),
-        ];
 
-        // First priority: development path (user-specific, as per spec)
-        assert_eq!(paths[0], PathBuf::from("/home/stan/pi-mono/pi"));
+        // These paths should all be relative to home
+        let user_local = home.join(".local/bin/pi");
+        let cargo_bin = home.join(".cargo/bin/pi");
+        let user_bin = home.join("bin/pi");
 
-        // Second priority: user local bin
-        assert_eq!(paths[1], home.join(".local/bin/pi"));
-
-        // Third priority: system-wide installation
-        assert_eq!(paths[2], PathBuf::from("/usr/local/bin/pi"));
+        // All should be under home directory
+        assert!(user_local.starts_with(&home));
+        assert!(cargo_bin.starts_with(&home));
+        assert!(user_bin.starts_with(&home));
     }
 
     #[test]
@@ -449,8 +461,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_capabilities() {
+        // Use a portable path for testing
+        let test_path = dirs::home_dir()
+            .map(|h| h.join(".local/bin/pi"))
+            .unwrap_or_else(|| PathBuf::from(".local/bin/pi"));
+
         let mut detection = PiDetection {
-            executable_path: PathBuf::from("/usr/local/bin/pi"),
+            executable_path: test_path,
             version: None,
             capabilities: Capabilities {
                 subagent: false,

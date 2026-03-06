@@ -240,11 +240,28 @@ Ask the user for a brief description of the track (feature, bug fix, chore, etc.
    - Read maestro/critical_think/templates/criticalthink_after_action.md
    - Execute post-documentation validation
 
-6. User Confirmation:
-   Ask user to review spec.md:
-   - **If AskUserQuestion available:** Use tool with options: "Approve", "Suggest Changes"
-   - **If ctx.ui methods available:** Use ctx.ui.confirm() or ctx.ui.select()
-   - **Fallback (no tools):** Ask: "Does the spec.md look good? (1) Approve - proceed to plan, (2) Suggest changes - tell me what to modify"
+6. **CREATE TRACK DIRECTORY AND SPEC FILE**
+   - Generate Track ID: Format: shortname_YYYYMMDD
+   - Check for existing names in maestro/tracks/
+   - Create directory: maestro/tracks/<track_id>/
+   - Write spec.md to maestro/tracks/<track_id>/spec.md
+
+ 7. **TRACKLENS REVIEW CHECKPOINT (3.6)**
+    Call the tracklens_review tool to request visual review:
+    \`\`\`
+    tracklens_review with:
+    - markdown: <spec.md full content as string>
+    - documentType: "spec.md"
+    - mode: "review"
+    \`\`\`
+
+    Wait for user decision in TrackLens UI:
+    - **If approved:** Proceed to plan generation
+    - **If denied with annotations:** Parse annotations and feedback, revise spec.md in place, and call tracklens_review again
+    - **If TrackLens unavailable:** Fall back to manual confirmation:
+      - **If AskUserQuestion available:** Use tool with options: "Approve", "Suggest Changes"
+      - **If ctx.ui methods available:** Use ctx.ui.confirm() or ctx.ui.select()
+      - **Fallback:** Ask: "Does the spec.md look good? (1) Approve - proceed to plan, (2) Suggest changes - tell me what to modify"
 
 ## 4.0 INTERACTIVE PLAN GENERATION (plan.md)
 
@@ -265,43 +282,58 @@ Ask the user for a brief description of the track (feature, bug fix, chore, etc.
    - Read maestro/critical_think/templates/criticalthink_after_action.md
    - Execute post-plan validation
 
-5. User Confirmation:
-   Ask user to review plan.md:
-   - **If AskUserQuestion available:** Use tool with options: "Approve", "Suggest Changes"
-   - **If ctx.ui methods available:** Use ctx.ui.confirm() or ctx.ui.select()
-   - **Fallback (no tools):** Ask: "Does the plan.md look good? (1) Approve, (2) Suggest changes"
-
-## 5.0 CREATE TRACK ARTIFACTS
-
-1. Generate Track ID: Format: shortname_YYYYMMDD
-   - Shortname: lowercase, hyphens for spaces, max 30 chars
-   - Example: add-auth_20250127
-
-2. Check for existing names:
-   - List existing track directories in maestro/tracks/
-   - If shortname matches, halt and suggest different name
-
-3. Create directory: maestro/tracks/<track_id>/
-
-4. Create metadata.json with this format:
-${jsonTemplate}
-
-5. Write files:
-   - Write spec.md to maestro/tracks/<track_id>/spec.md
+5. **WRITE PLAN FILE**
    - Write plan.md to maestro/tracks/<track_id>/plan.md
 
-6. Update tracks.md:
+6. **TRACKLENS REVIEW CHECKPOINT (4.5)**
+    Call the tracklens_review tool to request visual review:
+    \`\`\`
+    tracklens_review with:
+    - markdown: <plan.md full content as string>
+    - documentType: "plan.md"
+    - mode: "review"
+    \`\`\`
+
+    Wait for user decision in TrackLens UI:
+    - **If approved:** Proceed to finalize track
+    - **If denied with annotations:** Parse annotations and feedback, revise plan.md in place, and call tracklens_review again
+    - **If TrackLens unavailable:** Fall back to manual confirmation:
+      - **If AskUserQuestion available:** Use tool with options: "Approve", "Suggest Changes"
+      - **If ctx.ui methods available:** Use ctx.ui.confirm() or ctx.ui.select()
+      - **Fallback:** Ask: "Does the plan.md look good? (1) Approve, (2) Suggest changes"
+
+## 5.0 FINALIZE TRACK ARTIFACTS
+
+1. Create metadata.json with this format:
+${jsonTemplate}
+
+2. Update tracks.md:
    Append to end of maestro/tracks.md:
 ${tracksMdTemplate}
 
-7. **BANK MEMORY: Track Creation** - Store track creation memory:
+3. **BANK MEMORY: Track Creation** - Store track creation memory:
    - Track ID and title
    - Track type and description
    - Creation timestamp
    - Use: \`maestro memory --store --category context --content "Track created: ..."\`
 
-8. Announce completion:
-   "New track '<track_id>' has been created. You can now start implementation by running /maestro:implement <track_id>."
+4. **TRACKLENS CONSOLIDATED REVIEW CHECKPOINT (5.7)**
+    Call the tracklens_review tool for final consolidated review (present both spec.md and plan.md):
+    \`\`\`
+    tracklens_review with:
+    - markdown: <consolidated spec.md and plan.md content>
+    - documentType: "consolidated"
+    - trackId: "<track_id>"
+    - mode: "review"
+    \`\`\`
+
+    Wait for final user approval:
+   - **If approved:** Track is ready for implementation
+   - **If denied with feedback:** Address the feedback, update files, and request review again
+   - **If TrackLens unavailable:** Skip consolidated review (spec and plan already approved individually)
+
+5. Announce completion:
+   "New track '<track_id>' has been created and approved. You can now start implementation by running /maestro:implement <track_id>."
 
 ---
 Begin track creation now.`;

@@ -83,6 +83,7 @@ droid
 # (specific commands depend on Droid's MCP interface)
 ```
 
+<<<<<<< HEAD
 ## Pi-Mono Integration
 
 Maestro v2.5 includes Pi-Mono integration for subagent workflows with adaptive model selection.
@@ -116,6 +117,8 @@ maestro implement my-track --pi-parallel scout,kraken
 
 Pi-Mono settings are stored in: `~/.maestro/config/pi-mono.yaml`
 
+=======
+>>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 ## Troubleshooting
 
 ### "LeIndex not available in Droid"

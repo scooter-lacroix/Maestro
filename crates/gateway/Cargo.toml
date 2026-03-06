@@ -1,0 +1,65 @@
+[package]
+name = "maestro-gateway"
+version.workspace = true
+edition.workspace = true
+description = "Maestro Web Gateway with SSE/WebSocket streaming"
+authors.workspace = true
+
+[lib]
+name = "maestro_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "maestro-gateway"
+path = "src/main.rs"
+
+[dependencies]
+# Core library
+maestro-core = { path = "../core" }
+# AI agent framework (MED-7/MED-8/Rec-4: session storage + agent execution + auth)
+maestro-claw = { path = "../maestro-claw", features = ["providers", "core-integration"] }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = "0.1"
+tokio-stream = "0.1"
+
+# Web framework
+axum = { version = "0.8", features = ["ws", "macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5", features = ["limit", "timeout", "util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util"] }
+hyper = { version = "1.0", features = ["full"] }
+http-body-util = "0.1"
+
+# WebSocket
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+async-stream = "0.3"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+dashmap = "6.0"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3.10"
+tokio-test = "0.4"

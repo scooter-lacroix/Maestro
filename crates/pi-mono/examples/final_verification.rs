@@ -1,8 +1,7 @@
 // Final Verification Program
 use maestro_pi_mono::{
-    WorkflowMode, WorkflowStep, WorkflowPreset,
-    default_presets, get_preset, preset_names,
-    AgentRole, PiAgentType,
+    default_presets, get_preset, preset_names, AgentRole, PiAgentType, WorkflowMode,
+    WorkflowPreset, WorkflowStep,
 };
 
 fn main() {
@@ -33,7 +32,10 @@ fn main() {
     assert!(implement.steps[2].depends_on_previous);
     println!("✓ /implement preset verified:");
     println!("  Mode: {:?}", implement.mode);
-    println!("  Steps: {:?}", implement.steps.iter().map(|s| &s.role).collect::<Vec<_>>());
+    println!(
+        "  Steps: {:?}",
+        implement.steps.iter().map(|s| &s.role).collect::<Vec<_>>()
+    );
     println!();
 
     // 4. Verify /implement-and-review preset
@@ -46,7 +48,14 @@ fn main() {
     assert_eq!(implement_review.steps[2].role, AgentRole::Kraken);
     println!("✓ /implement-and-review preset verified:");
     println!("  Mode: {:?}", implement_review.mode);
-    println!("  Steps: {:?}", implement_review.steps.iter().map(|s| &s.role).collect::<Vec<_>>());
+    println!(
+        "  Steps: {:?}",
+        implement_review
+            .steps
+            .iter()
+            .map(|s| &s.role)
+            .collect::<Vec<_>>()
+    );
     println!();
 
     // 5. Verify /parallel-review preset
@@ -60,7 +69,10 @@ fn main() {
     assert!(!parallel.steps[2].depends_on_previous);
     println!("✓ /parallel-review preset verified:");
     println!("  Mode: {:?}", parallel.mode);
-    println!("  Steps: {:?}", parallel.steps.iter().map(|s| &s.role).collect::<Vec<_>>());
+    println!(
+        "  Steps: {:?}",
+        parallel.steps.iter().map(|s| &s.role).collect::<Vec<_>>()
+    );
     println!();
 
     // 6. Verify helper methods

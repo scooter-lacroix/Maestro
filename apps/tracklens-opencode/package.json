@@ -1,0 +1,32 @@
+{
+  "name": "@maestro/tracklens-opencode",
+  "version": "0.1.0",
+  "description": "TrackLens OpenCode integration - visual review and annotation tools",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test src/",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "maestro",
+    "tracklens",
+    "opencode",
+    "code-review",
+    "annotation"
+  ],
+  "author": "Maestro",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@maestro/tracklens-server": "workspace:*",
+    "@maestro/tracklens-review-editor": "workspace:*",
+    "@opencode-ai/plugin": "latest"
+  }
+}

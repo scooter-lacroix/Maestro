@@ -1,9 +1,22 @@
 [workspace]
 members = [
-    "maestro/leindex/rust",
+    "src/leindex",
     "crates/cockpit",
     "crates/cli",
+    "crates/lsp-bridge",
     "crates/pi-mono",
+    "crates/ktop_collectors",
+    "crates/core",
+    "crates/gateway",
+    "crates/maestro-claw",
+    # maestro-tab: Forked tab-rs terminal multiplexer
+    "src/maestro-tab/tab",
+    "src/maestro-tab/tab-command",
+    "src/maestro-tab/tab-daemon",
+    "src/maestro-tab/tab-pty",
+    "src/maestro-tab/common/tab-api",
+    "src/maestro-tab/common/tab-websocket",
+    "src/maestro-tab/maestro-integration",
 ]
 resolver = "2"
 
@@ -31,3 +44,7 @@ panic = "abort"
 
 [patch.crates-io]
 libsql = { path = "vendor/libsql" }
+
+# Note: maestro-tab crates (tab-api, tab-command, etc.) are now referenced
+# directly via path dependencies in their respective Cargo.toml files,
+# so patches are no longer needed.

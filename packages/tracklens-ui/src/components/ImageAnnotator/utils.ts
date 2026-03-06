@@ -1,0 +1,120 @@
+/**
+ * TrackLens UI - Image Annotator Utils
+ *
+ * Utility functions for rendering annotation strokes.
+ *
+ * REBRANDED: Plannotator → TrackLens
+ */
+
+import type { Point, Stroke } from './types';
+
+export function renderArrow(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  color: string,
+  size: number,
+  scale = 1
+) {
+  const x1 = start.x * scale;
+  const y1 = start.y * scale;
+  const x2 = end.x * scale;
+  const y2 = end.y * scale;
+
+  const lineWidth = size * scale * 0.75;
+  const headLength = size * scale * 3;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(
+    x2 - headLength * Math.cos(angle - Math.PI / 6),
+    y2 - headLength * Math.sin(angle - Math.PI / 6)
+  );
+  ctx.lineTo(
+    x2 - headLength * Math.cos(angle + Math.PI / 6),
+    y2 - headLength * Math.sin(angle + Math.PI / 6)
+  );
+  ctx.closePath();
+  ctx.fill();
+}
+
+export function renderCircle(
+  ctx: CanvasRenderingContext2D,
+  start: Point,
+  end: Point,
+  color: string,
+  size: number,
+  scale = 1
+) {
+  const x1 = start.x * scale;
+  const y1 = start.y * scale;
+  const x2 = end.x * scale;
+  const y2 = end.y * scale;
+
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  const radius = Math.hypot(x2 - x1, y2 - y1) / 2;
+  const lineWidth = size * scale * 0.75;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+export function renderPenStroke(
+  ctx: CanvasRenderingContext2D,
+  points: Point[],
+  color: string,
+  size: number,
+  scale = 1
+) {
+  if (points.length < 2) return;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = size * scale;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+
+  const first = points[0];
+  ctx.moveTo(first.x * scale, first.y * scale);
+
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i];
+    ctx.lineTo(p.x * scale, p.y * scale);
+  }
+
+  ctx.stroke();
+}
+
+export function renderStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: Stroke,
+  scale = 1
+) {
+  if (stroke.points.length < 2) return;
+
+  switch (stroke.tool) {
+    case 'pen':
+      renderPenStroke(ctx, stroke.points, stroke.color, stroke.size, scale);
+      break;
+    case 'arrow':
+      renderArrow(ctx, stroke.points[0], stroke.points[stroke.points.length - 1], stroke.color, stroke.size, scale);
+      break;
+    case 'circle':
+      renderCircle(ctx, stroke.points[0], stroke.points[stroke.points.length - 1], stroke.color, stroke.size, scale);
+      break;
+  }
+}

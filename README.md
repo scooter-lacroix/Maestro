@@ -1,10 +1,10 @@
-# Maestro v2 - The Unified Development Framework
+# Maestro v2.5 - The Unified Development Framework
 
 <div align="center">
 
 **Transform AI interactions into production-ready software**
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](VERSION)
+[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-supported-purple.svg)](docs/CLAUDE-CODE.md)
 [![OpenCode](https://img.shields.io/badge/OpenCode-supported-orange.svg)](docs/OPENCODE.md)
@@ -14,15 +14,20 @@
 
 ## Overview
 
-Maestro v2 is a major architectural evolution that unifies three powerful systems into a cohesive, spec-driven development orchestration framework:
+Maestro v2.5 is a major architectural evolution that unifies powerful systems into a cohesive, spec-driven development orchestration framework:
 
+### Core Systems
 - **Maestro Core** - Spec-driven development with automatic agent selection and TDD enforcement
+- **MaestroClaw** - Unified agent execution framework with multi-provider support and streaming
+- **Tracklens** - Interactive walkthrough system for spec-driven development
 - **Unified Memory System** - Built-in project context with semantic search and coordination patterns
 - **109 Repurposed Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
 - **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
 - **16 Integrated Hooks** - Session start, tool use, coordination, and session end hooks
-- **TLDR Code Analysis** - 5-layer code analysis with semantic indexing
-- **Maestro TUI** - Terminal User Interface for session and MCP management
+- **LeIndex Code Analysis** - 5-layer code analysis with semantic indexing (TLDR compatibility alias)
+- **Conductor Engine** - Token-efficient track-based automation (inspired by Ralph TUI)
+- **Pi-Mono Integration** - Unified agent discovery, detection, and execution across mono-repos
+- **Cockpit TUI** - Rust-based Terminal UI for session, MCP, and orchestration management
 
 Transform AI chat interactions into professional software engineering workflows with:
 
@@ -76,6 +81,62 @@ Analysis (>100KB)          → librarian
 Spec-driven/ambiguous      → oracle for specification
 ```
 
+### MaestroClaw - Agent Execution Framework
+
+MaestroClaw is the unified agent execution layer for Maestro, providing comprehensive capabilities for AI agent workflows:
+
+#### Modules (13+)
+- **`channels/`** - Multi-platform integrations (Discord, Slack, Telegram)
+- **`config/`** - Configuration schema and management
+- **`cost/`** - Token usage and cost tracking
+- **`cron/`** - Scheduled task execution with persistence
+- **`daemon/`** - Background service management
+- **`doctor/`** - Health check and diagnostics
+- **`gateway/`** - Gateway integration layer
+- **`health/`** - Health monitoring endpoints
+- **`heartbeat/`** - Liveness monitoring
+- **`observability/`** - Metrics and tracing
+- **`onboard/`** - New user/agent onboarding
+- **`service/`** - Service orchestration
+- **`skills/`** - Skill system integration
+- **`telemetry/`** - Event telemetry
+
+#### Agent Runtime
+- CLI provider support for local model execution
+- Enhanced provider adapters (Anthropic, OpenAI, Ollama, OpenRouter)
+- Streaming tool call deltas across all providers
+- Typed status system with proper error handling
+
+#### MCP Integration
+- Persistent connection design
+- Enhanced tool registry and built-in tools
+- File, memory, and shell tools with proper security
+
+**Documentation**: [MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md](docs/MAESTROCLAW_FUNCTIONAL_PARITY_MATRIX.md) | [MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md](docs/MAESTROCLAW_REMEDIATION_PHASES_2_3_4.md)
+
+### Tracklens - Walkthrough System
+
+Tracklens is an interactive walkthrough system that guides users through spec-driven development workflows:
+
+#### Features
+- **Visual Diff Viewer** - See plan changes with side-by-side comparison
+- **Step-by-Step Guidance** - Interactive walkthrough of development tasks
+- **Progress Tracking** - Track completion of walkthrough phases
+- **Screenshot Annotation** - Capture and annotate during walkthroughs
+- **Decision Points** - User controls key decisions in the development flow
+
+#### UI Components
+- Plan diff viewer with syntax highlighting
+- Sidebar navigation for walkthrough steps
+- Image annotation tools
+- Landing page for new users
+
+#### Backend
+- Consolidated save API for plans and documents
+- Bearer token authentication
+- Path traversal security
+- WebSocket support for real-time updates
+
 ### Nexus Memory System
 
 Built directly into Maestro - no external MCP required:
@@ -87,14 +148,56 @@ Built directly into Maestro - no external MCP required:
 - **Web Dashboard**: Visual browser for all stored memories
 - **Data Import**: Import from external memory systems
 
-### Maestro TUI
+### Cockpit TUI
 
-Terminal-based session and MCP management:
+Rust-based (ratatui) Terminal UI for complete project management:
 
+- **7 Tabs**: Dashboard, Sessions, Projects, Analysis, LSP, Memory, Settings
 - **Session Management**: Create, fork, and group tmux sessions by project
-- **Fuzzy Search**: Quickly find and switch between sessions
+- **Conductor Module**: Track-based task automation with live output (replaces Orchestrate)
+- **LSP Management**: Status, toggle, restart, and log viewing
 - **MCP Pooling**: Efficient socket pooling reduces memory usage by 50%+
-- **Configuration**: TOML-based config at `~/.maestro/config.toml`
+- **Configuration**: TOML-based config at `~/.config/maestro/config.toml`
+
+Access via:
+```bash
+maestro tui
+```
+
+### Conductor Engine
+
+Token-efficient track-based automation (inspired by [subsy/ralph-tui](https://github.com/subsy/ralph-tui)):
+
+- **Track/Task Model**: Lossless parsing of tracks.md and plan.md
+- **LeIndex Integration**: 5-phase context bundles for minimal token usage
+- **Iteration Loop**: Select → Prompt → Run → Detect → Update
+- **Error Strategies**: Retry, Skip, Abort with exponential backoff
+- **Session Persistence**: Lock files, crash recovery, journal logs
+- **Multi-Agent Support**: claude, gemini, qwen, opencode runners
+
+Access via TUI or CLI:
+```bash
+maestro conductor start <track> --mode building
+maestro conductor status
+maestro conductor pause
+```
+
+### Pi-Mono Integration
+
+Unified agent discovery and execution for mono-repo environments:
+
+- **Detection**: Automatic detection of Pi-enabled projects and configurations
+- **Discovery**: Scan and catalog available agents across the workspace
+- **Config Management**: TOML-based configuration for agent settings
+- **Agent Execution**: Unified interface for running detected agents
+- **Cross-Project Coordination**: Manage agents across multiple sub-projects
+
+Located at `crates/pi-mono/` with modules:
+- `detection.rs` - Pi project detection
+- `discovery.rs` - Agent discovery scanning
+- `config/` - Configuration management
+- `agents/` - Agent definitions and registry
+- `execution/` - Agent execution runtime
 
 ### Web Dashboard
 
@@ -112,33 +215,44 @@ maestro memory serve
 # Visit http://localhost:18765
 ```
 
-### TLDR & LeIndex
+### LeIndex Code Analysis
 
-Powerful code analysis and search capabilities (ported from llm-tldr):
+Powerful Rust-based code analysis (TLDR is now a compatibility alias):
+
+- **5-Phase Analysis System**: Progressive codebase understanding
+  - Phase 1: Structural scan (files, directories, dependencies)
+  - Phase 2: Dependency mapping (import/export relationships)
+  - Phase 3: Targeted file context (signatures, call edges)
+  - Phase 4: CFG/DFG analysis (control flow, data flow)
+  - Phase 5: Program slicing (backward/forward slicing)
 
 - **5-Layer Code Analysis**:
-  - Layer 1 (AST): Extract functions, classes, imports
-  - Layer 2 (Call Graph): Who calls what
-  - Layer 3 (Control Flow): Code complexity and decision points
-  - Layer 4 (Data Flow): Where data goes
-  - Layer 5 (Program Slicing): What affects a line
+  - AST: Extract functions, classes, imports
+  - Call Graph: Who calls what
+  - CFG: Code complexity and decision points
+  - DFG: Where data goes
+  - Slicing: What affects a line
 
+- **Token-Efficient Output**:
+  - `ultra` mode: ~2500 chars (exploration)
+  - `balanced` mode: ~6000 chars (implementation-ready)
+  - `json` mode: machine-readable
+
+- **Multi-Language**: Python, TypeScript, JavaScript, Rust, Go, Java, C, C++
 - **Automatic Hooks**: Context injection during your sessions
-- **Full-Text + Semantic Search**: Fast code search with intelligent results
-- **95% Token Reduction**: Optimized context for LLM consumption
 
-Access via slash commands:
+Access via slash commands (TLDR is a compatibility alias):
 ```bash
-/maestro:tldr ast src/auth.py           # Analyze structure
-/maestro:tldr callers authenticate      # See who calls a function
-/maestro:tldr cfg src/utils.py          # Analyze complexity
+/maestro:tldr ast src/auth.py           # Analyze structure (delegates to LeIndex)
+/maestro:tldr callers authenticate      # See who calls a function (delegates to LeIndex)
 /maestro:leindex search "auth"          # Search code
 ```
 
-Or via CLI:
+Or via CLI (direct LeIndex access):
 ```bash
-leindex-search "authentication pattern"
-leindex stats
+maestro analyze src/auth.py --mode ast
+maestro le-index phase1 . --mode ultra
+maestro le-index phase2 . --mode balanced
 ```
 
 ### Metacognitive Analysis
@@ -177,8 +291,49 @@ Maestro solves these problems by:
 5. **Systematic Analysis**: Metacognitive analysis prevents AI pitfalls and ensures quality
 6. **Memory Aware**: Built-in Nexus Memory learns your project context
 7. **Git Integrated**: Tracks progress alongside commits for complete history
-8. **Session Management**: TUI for managing complex multi-project workflows
-9. **Visual Dashboard**: Web interface for memory and project exploration
+8. **Rust-First Architecture**: Native performance, memory safety, modular crates
+9. **Conductor Engine**: Token-efficient automation with LeIndex context
+10. **Session Management**: Cockpit TUI for managing complex workflows
+11. **Visual Dashboard**: Web interface for memory and project exploration
+
+## Architecture
+
+Maestro v2.5 is built with a **Rust-first architecture**:
+
+### Modular Crates
+
+```
+maestro/
+├── crates/
+│   ├── cli/              # maestro-cli (produces "maestro" binary)
+│   ├── cockpit/          # maestro-cockpit (ratatui TUI library)
+│   │                     # Tabs: Dashboard, Sessions, Projects, Analysis, LSP, Memory, Settings
+│   ├── maestro-claw/     # Agent execution framework (providers, tools, channels, runtime)
+│   ├── gateway/          # Gateway server (SSE, WebSocket, agent runtime)
+│   ├── pi-mono/          # Pi-Mono integration (detection, discovery, agents, execution)
+│   └── lsp-bridge/       # maestro-lsp-mcp-bridge (LSP protocol bridge)
+│
+└── leindex/
+    └── rust/             # leindex-core (core library + analysis engine, Turso/libsql)
+```
+
+### Dependency Rules (One-Way)
+
+```
+cli → cockpit + leindex-core + pi-mono + maestro-claw + gateway
+cockpit → leindex-core
+gateway → maestro-claw + leindex-core
+maestro-claw → leindex-core
+pi-mono → (standalone)
+leindex-core ↛ cockpit (forbidden)
+```
+
+### Legacy Code Archive
+
+- `archive/legacy-python-cli/` - Historical reference only (Python `cli.py`)
+- `archive/tui-go/` - Historical reference only (Go TUI)
+
+**Note**: CI gates prevent any runtime imports from archived code.
 
 ## Quick Start
 
@@ -343,14 +498,17 @@ Interact with the Nexus Memory System.
 # Browse memory via web dashboard
 maestro memory serve
 
-# Import data from external memory
-maestro memory import <db_path>
+# Check memory system status
+maestro memory status
 
-# Search memory
-maestro memory search "authentication flow"
+# Scan directories for Maestro projects
+maestro memory scan . --depth 3
 
-# Get statistics
-maestro memory stats
+# Store a memory entry
+maestro memory store \
+  --content "authentication flow validated" \
+  --category decision \
+  --importance high
 ```
 
 ### 6. TUI Session Management
@@ -402,6 +560,11 @@ maestro/
 │   ├── cmd/               # TUI commands
 │   ├── mcppool/           # MCP socket pooling
 │   └── docs/              # TUI documentation
+├── tracklens/             # Walkthrough system
+│   ├── editor/            # Visual plan editor (React + TypeScript)
+│   ├── review-editor/     # Diff viewer (React + TypeScript)
+│   ├── ui/                # UI components
+│   └── server/            # Node.js backend
 └── tracks/
     └── <track_id>/
         ├── spec.md         # Track specification
@@ -437,11 +600,8 @@ These commands run in your terminal and require the full installation:
 |---------|-------------|
 | `maestro memory serve` | Launch web dashboard (http://localhost:18765) |
 | `maestro memory status` | Show memory system statistics |
-| `maestro memory import <db>` | Import from external memory systems |
-| `maestro memory search <query>` | Search memories by query |
-| `maestro memory stats` | Display memory statistics |
-| `maestro memory export <file>` | Export memories to JSON |
-| `maestro memory import <file>` | Import memories from JSON |
+| `maestro memory scan <path> --depth <n>` | Scan directories for Maestro projects |
+| `maestro memory store --content <text> --category <type> --importance <level>` | Store a memory entry |
 
 #### TUI Commands
 | Command | Description |
@@ -455,6 +615,8 @@ These commands run in your terminal and require the full installation:
 - [Marketplace](docs/MARKETPLACE.md) - Plugin marketplace and distribution
 - [Agent Usage](docs/AGENTS.md) - All 8+ agents explained
 - [Memory System](maestro/memory/docs/) - Nexus Memory documentation
+- [Memory Integration Guide](maestro/memory/docs/memory_integration.md) - Current CLI memory command surface and architecture
+- [Memory Quick Start](maestro/memory/docs/quick_start.md) - 5-minute validation flow for memory commands
 - [TUI Configuration](maestro/tui/docs/CONFIG_FORMAT.md) - TUI setup guide
 - [Testing](maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md) - Test coverage details
 
@@ -467,7 +629,7 @@ These commands run in your terminal and require the full installation:
 - **16 Hooks**: Session, tool use, coordination, and event-driven automation
 - **TLDR Analysis**: 5-layer code analysis with semantic indexing
 - **Web Dashboard**: Built with React 18 + TypeScript + Vite
-- **TUI**: Go-based terminal interface
+- **Cockpit TUI**: Rust-based terminal interface (ratatui)
 
 ### Optional Enhancements
 - **tmux**: Required for TUI session management
@@ -527,8 +689,17 @@ maestro memory serve
 # - View project and track progress
 # - Visualize memory statistics
 
-# Search from CLI
-maestro memory search "JWT implementation details"
+# Check status from CLI
+maestro memory status
+
+# Scan current directory for projects
+maestro memory scan . --depth 2
+
+# Store from CLI
+maestro memory store \
+  --content "JWT implementation details captured" \
+  --category observation \
+  --importance normal
 ```
 
 ### TUI Session Management
@@ -546,6 +717,62 @@ maestro tui
 # - View socket pooling statistics
 ```
 
+### Conductor Module (Ralph-Style Autonomous Execution)
+
+The Cockpit TUI includes a Conductor module for autonomous track execution, inspired by [Ralph TUI](https://github.com/subsy/ralph-tui). The Conductor replaces the legacy Orchestrate pane.
+
+**Key Features:**
+- **Track/Task Tree**: Left panel shows all tracks with expandable task hierarchies
+- **Live Output**: Right panel displays real-time iteration output with scrolling
+- **Session Management**: Start, pause, resume, or abort conductor loops
+- **LeIndex Integration**: Token-efficient context injection using 5-phase analysis
+- **Crash-Safe Persistence**: Session state saved to `~/.maestro/conductor/` with lock files
+
+**Modes:**
+- **Planning Mode**: Generate/update plans without implementation. Focus on analysis and architecture.
+- **Building Mode**: Execute tasks iteratively with auto-commit and completion detection.
+
+**Keybindings:**
+- `O` / `Shift+O`: Cycle through tracks
+- `Space`: Expand/collapse task nodes
+- `s`: Start conductor loop
+- `p`: Pause conductor loop
+- `r`: Resume paused loop
+- `x`: Abort conductor loop
+- `?`: Show help overlay
+
+**Safety Notes:**
+- **Session Locks**: Each track has a lock file to prevent concurrent execution. Stale locks (>1 hour) are automatically cleaned.
+- **Crash Recovery**: If the conductor process crashes, session state is preserved. Resume with `r` key.
+- **Dangerous Mode**: When using auto-approval agents, consider enabling sandbox mode (future enhancement) for file isolation.
+- **Context Budget**: LeIndex context budget is configurable (default: 50K tokens). Ultra mode (<50K) uses minimal context; Balanced mode (>50K) provides full analysis.
+
+**State Directory:**
+```
+~/.maestro/conductor/
+├── locks/           # Per-track lock files
+├── sessions/        # Session state JSON
+└── logs/            # Iteration logs (JSONL)
+```
+
+**Example Workflow:**
+
+1. Launch Cockpit: `maestro tui`
+2. Navigate to Analysis tab and select a track
+3. Select a track using `O` key
+4. Press `s` to start conductor loop
+5. Monitor progress in live output panel
+6. Press `p` to pause if needed
+7. Press `r` to resume
+8. Press `x` to abort when complete
+
+**Completion Detection:**
+The conductor engine detects task completion through:
+- Plan.md status marker updates (`[~]` → `[x]`)
+- Git commits with descriptive messages
+- `<promise>COMPLETE</promise>` token in agent output
+- Backpressure validation (tests passing)
+
 ## Development Philosophy
 
 Maestro embodies these principles:
@@ -562,7 +789,7 @@ Maestro embodies these principles:
 
 ## Testing
 
-Maestro v2 includes comprehensive testing infrastructure:
+Maestro v2.5 includes comprehensive testing infrastructure:
 
 - **250+ tests** across unit, integration, E2E, and performance suites
 - **Target >98% code coverage** for critical paths
@@ -587,6 +814,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Built for Claude Code and OpenCode ecosystems
 - Inspired by test-driven development and spec-first methodologies
 - Integrates Council of Agents framework
+- **Conductor Module**: Inspired by [subsy/ralph-tui](https://github.com/subsy/ralph-tui) (MIT License) - Terminal UI for autonomous task execution
+- **Ralph Methodology**: Inspired by [ghuntley/how-to-ralph-wiggum](https://github.com/ghuntley/how-to-ralph-wiggum) - Autonomous AI development patterns
+
+The Conductor module in Maestro Cockpit implements concepts from Ralph TUI, providing autonomous task execution with track-based planning, LeIndex-powered context injection, and crash-safe session persistence.
 
 ## Support
 
@@ -602,6 +833,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 [Get Started](docs/CLAUDE-CODE.md) · [Features](#key-features) · [Documentation](docs/) · [Web Dashboard](#nexus-memory-system)
 
-**Maestro - The Unified Development Framework**
+**Maestro v2.5 - The Unified Development Framework**
 
 </div>

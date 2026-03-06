@@ -2,7 +2,7 @@
 
 Maestro has a **single installer entrypoint**: `install.sh`.
 
-`install.sh` launches the Rust **Conductor Wizard** (`maestro-setup`) which can configure multiple AI coding tools in one run (Claude Code, OpenCode, Codex, Gemini, Qwen, Amp, Droid).
+`install.sh` launches the Rust **Conductor Wizard** (`maestro-setup`) which can configure multiple AI coding tools in one run (Claude Code, OpenCode, Codex, Gemini, Qwen, Amp, Droid), Pi-Mono integration for subagent workflows, and LSP server auto-installation.
 
 ## Quick Install
 
@@ -17,6 +17,43 @@ Local (from a clone):
 
 ---
 
+## Supported Platforms
+
+The installer supports the following platforms with automatic distribution detection:
+
+### Linux
+
+| Distribution | Package Manager | Status |
+|--------------|-----------------|--------|
+| **Debian** | apt-get | ✅ Full Support |
+| **Ubuntu** | apt-get | ✅ Full Support |
+| **Linux Mint** | apt-get | ✅ Full Support |
+| **Pop!_OS** | apt-get | ✅ Full Support |
+| **Arch Linux** | pacman | ✅ Full Support |
+| **CachyOS** | pacman | ✅ Full Support |
+| **Manjaro** | pacman | ✅ Full Support |
+| **EndeavourOS** | pacman | ✅ Full Support |
+| **Fedora** | dnf | ✅ Full Support |
+| **RHEL/CentOS** | dnf | ✅ Full Support |
+| **AlmaLinux** | dnf | ✅ Full Support |
+| **Rocky Linux** | dnf | ✅ Full Support |
+| **Other** | Generic | ⚠️ Fallback Mode |
+
+### macOS
+
+| Package Manager | Status |
+|-----------------|--------|
+| **Homebrew** | ✅ Full Support |
+
+### Windows
+
+| Platform | Status |
+|----------|--------|
+| **WSL** | ✅ Full Support |
+| **Native** | ❌ Not Supported |
+
+---
+
 ## What Gets Installed
 
 The wizard configures the following components (depending on which toggles you enable in the TUI):
@@ -25,7 +62,9 @@ The wizard configures the following components (depending on which toggles you e
 |-----------|-------------|
 | **Maestro protocols** | Canonical command protocols installed under `~/.maestro/integrations/commands/` (or your chosen install path) |
 | **Tool command packs** | Installs the tool-specific command/prompt pack (Claude Code commands, OpenCode skill, Codex prompts, Gemini/Qwen commands) |
-| **LeIndex MCP wiring** | Adds a `leindex` MCP server entry pointing at `maestro mcp tool-search` in each tool’s config format |
+| **LeIndex MCP wiring** | Adds a `leindex` MCP server entry pointing at `maestro mcp tool-search` in each tool's config format |
+| **Pi-Mono integration** | Subagent workflow orchestration via `crates/pi-mono/` |
+| **LSP servers** | Auto-installs lsp-bridge and language servers for supported languages |
 | **Optional search stack** | Go + Zoekt (if enabled) |
 | **Rust CLI** | Installs the Rust `maestro` binary to `~/.local/bin/maestro` (after build) |
 
@@ -35,16 +74,25 @@ The wizard configures the following components (depending on which toggles you e
 
 ### Required
 
-- **Rust + Cargo** - Required to build Maestro’s Rust core (installer will install via rustup if missing)
+- **Rust + Cargo** - Required to build Maestro's Rust core (installer will install via rustup if missing)
 - **git** - For version control integration
-- **build tools** - `gcc`, `pkg-config`, `libssl-dev` (installed via the wizard on Debian/Ubuntu)
+- **build tools** - Platform-specific (see table below)
+- **Turso/libsql** - Required for Pi-Mono persistent storage (auto-installed by wizard)
+
+### Platform-Specific Build Dependencies
+
+| Platform | Build Tools | SSL | Package Config |
+|----------|-------------|-----|----------------|
+| Debian/Ubuntu | `build-essential` | `libssl-dev` | `pkg-config` |
+| Arch/CachyOS/Manjaro | `base-devel` | `openssl` | `pkgconf` |
+| Fedora/RHEL | `@development-tools` | `openssl-devel` | `pkgconfig` |
+| macOS | Xcode CLI | `openssl` (brew) | `pkg-config` (brew) |
 
 ### Optional (Recommended)
 
 - **Node.js + npm** - Required to build the Memory Dashboard frontend step (`npm install && npm run build`)
 - **Go** - Required if you enable Zoekt
-
-The wizard installs some dependencies automatically (Debian/Ubuntu). For other platforms, install equivalents manually.
+- **lsp-bridge** - Enhanced LSP support (wizard provides installation guidance)
 
 ---
 
@@ -63,9 +111,13 @@ The wizard installs some dependencies automatically (Debian/Ubuntu). For other p
   - Qwen Code
   - Amp CLI
   - Droid CLI
+- Enable Pi-Mono integration for subagent workflows
+- Configure LSP server auto-installation (wizard provides guidance)
 - Optionally enable Go/Zoekt, tmux tooling, etc
 
-### Step 2: What “first-class integration” means (per tool)
+The TUI will display your detected distribution and package manager at startup.
+
+### Step 2: What "first-class integration" means (per tool)
 
 - **Claude Code**: installs commands to `~/.claude/commands/`, templates to `~/.claude/maestro-templates/`, and upserts `mcpServers.leindex` in `~/.claude/.mcp.json`
 - **OpenCode**: installs the skill to `~/.config/opencode/skill/maestro/`, copies command protocols to `~/.config/opencode/commands/`, and updates `~/.config/opencode/opencode.json` (commands + MCP)
@@ -134,6 +186,20 @@ Run `/maestro:configure` to enable enhanced agent capabilities:
 
 This checks for external CLI tools (gemini-cli, qwen-cli, codex-cli) and creates agent configurations for available tools. Maestro works without this step, but with expanded capabilities when configured.
 
+### Optional: Configure Pi-Mono
+
+Run `/maestro:configure --pi-mono` to enable Pi-Mono subagent workflows:
+
+```
+/maestro:configure --pi-mono
+```
+
+Verify Pi-Mono status:
+
+```bash
+maestro pi-status
+```
+
 ---
 
 ## Manual Installation
@@ -168,15 +234,44 @@ cp -r claude-code/templates/* ~/.claude/maestro-templates/
 
 ## Manual Dependency Installation
 
-### Install Go
+### Install Build Tools
 
-**Linux (Debian/Ubuntu):**
+**Debian/Ubuntu:**
 ```bash
 sudo apt-get update
+sudo apt-get install build-essential pkg-config libssl-dev
+```
+
+**Arch/CachyOS/Manjaro:**
+```bash
+sudo pacman -S --needed base-devel pkgconf openssl
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf group install "Development Tools"
+sudo dnf install pkgconfig openssl-devel
+```
+
+**macOS:**
+```bash
+xcode-select --install
+brew install pkg-config openssl
+```
+
+### Install Go
+
+**Debian/Ubuntu:**
+```bash
 sudo apt-get install golang-go
 ```
 
-**Linux (RedHat/Fedora):**
+**Arch/CachyOS/Manjaro:**
+```bash
+sudo pacman -S --needed go
+```
+
+**Fedora/RHEL:**
 ```bash
 sudo dnf install golang
 ```
@@ -187,6 +282,23 @@ brew install go
 ```
 
 **Or download from:** https://golang.org/dl/
+
+### Install Tmux Dependencies
+
+**Debian/Ubuntu:**
+```bash
+sudo apt-get install libncurses-dev libevent-dev tmux
+```
+
+**Arch/CachyOS/Manjaro:**
+```bash
+sudo pacman -S --needed ncurses libevent tmux
+```
+
+**Fedora/RHEL:**
+```bash
+sudo dnf install ncurses-devel libevent-devel tmux
+```
 
 ### Install Zoekt
 
@@ -242,9 +354,17 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 **Solution:** Install Go first, then Zoekt:
 ```bash
-# Install Go
-sudo apt-get install golang-go  # Linux
-brew install go                   # macOS
+# Install Go (Debian/Ubuntu)
+sudo apt-get install golang-go
+
+# Install Go (Arch)
+sudo pacman -S go
+
+# Install Go (Fedora)
+sudo dnf install golang
+
+# Install Go (macOS)
+brew install go
 
 # Then install Zoekt
 go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest
@@ -276,13 +396,34 @@ npm run build
 python3 -c "import json; json.load(open('~/.claude/.mcp.json'))"
 ```
 
+### Package not found on Arch/Fedora
+
+**Cause:** Package name differs between distributions.
+
+**Solution:** The installer handles most package name mappings automatically. If a package fails:
+- **Arch:** Check AUR for the package
+- **Fedora:** Try `sudo dnf search <package>`
+- **Debian:** Package may have a different name on your distro
+
+### Unknown distribution detected
+
+**Cause:** Your distribution is not in the recognized list.
+
+**Solution:** The installer will fall back to generic mode. You may need to install dependencies manually. Check the Manual Dependency Installation section above.
+
 ---
 
 ## Platform-Specific Notes
 
 ### Linux
 
-All distributions supported (Debian, Ubuntu, Fedora, RedHat, etc.). The installer detects your distribution and uses the appropriate package manager.
+All major distributions are supported with automatic detection:
+
+- **Debian/Ubuntu:** Full support with apt-get
+- **Arch-based (Arch, CachyOS, Manjaro, EndeavourOS):** Full support with pacman
+- **Fedora-based (Fedora, RHEL, CentOS, AlmaLinux, Rocky):** Full support with dnf
+
+The installer detects your distribution from `/etc/os-release` and uses the appropriate package manager.
 
 ### macOS
 
@@ -291,6 +432,8 @@ Homebrew is recommended for dependency installation. The installer will use `bre
 ### Windows/WSL
 
 Full support via WSL (Windows Subsystem for Linux). Native Windows is not supported.
+
+When using WSL, the installer will detect your Linux distribution (typically Ubuntu) and install accordingly.
 
 ---
 

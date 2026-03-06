@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "maestro-leindex"
 version = "0.1.0"
@@ -13,9 +15,20 @@ chrono = { version = "0.4", features = ["serde"] }
 libsql = { version = "0.4", features = ["hrana"] }
 tokio = { version = "1.0", features = ["full"] }
 tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+# HNSW for vector search
+hnsw_rs = "0.1"
+
+# Vector storage
+rusqlite = "0.30"
+rusqlite_migration = "1.0"
 
 [dev-dependencies]
 tempfile = "3.8"
+rand = "0.8"
 
 [lib]
 path = "src/lib.rs"

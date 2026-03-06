@@ -5,11 +5,11 @@
 //! multi-step input processes.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 
-use crate::state::InputMode;
 use crate::app::App;
+use crate::state::InputMode;
 
 /// Renders the new project wizard modal.
 ///
@@ -23,6 +23,7 @@ use crate::app::App;
 /// * `app` - Reference to the application state
 pub fn render_new_project_modal(frame: &mut Frame, app: &App) {
     let area = crate::modals::centered_rect(60, 40, frame.area());
+    let theme = app.theme();
     frame.render_widget(Clear, area);
 
     let step = match app.input_mode {
@@ -37,7 +38,7 @@ pub fn render_new_project_modal(frame: &mut Frame, app: &App) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(15, 10, 20)));
+        .style(Style::default().bg(theme.panel_bg));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -109,6 +110,7 @@ pub fn render_new_project_modal(frame: &mut Frame, app: &App) {
 /// * `app` - Reference to the application state
 pub fn render_group_modal(frame: &mut Frame, app: &App) {
     let area = crate::modals::centered_rect(60, 40, frame.area());
+    let theme = app.theme();
     frame.render_widget(Clear, area);
 
     let step = match app.input_mode {
@@ -131,7 +133,7 @@ pub fn render_group_modal(frame: &mut Frame, app: &App) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 20, 15)));
+        .style(Style::default().bg(theme.panel_bg));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -187,6 +189,7 @@ pub fn render_group_modal(frame: &mut Frame, app: &App) {
 /// * `app` - Reference to the application state
 pub fn render_new_track_modal(frame: &mut Frame, app: &App) {
     let area = crate::modals::centered_rect(60, 30, frame.area());
+    let theme = app.theme();
     frame.render_widget(Clear, area);
 
     let step = match app.input_mode {
@@ -200,7 +203,7 @@ pub fn render_new_track_modal(frame: &mut Frame, app: &App) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 15, 20)));
+        .style(Style::default().bg(theme.panel_bg));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -264,12 +267,13 @@ pub fn render_new_track_modal(frame: &mut Frame, app: &App) {
 /// * `app` - Reference to the application state
 pub fn render_input_modal(frame: &mut Frame, app: &App) {
     let area = crate::modals::centered_rect(60, 20, frame.area());
+    let theme = app.theme();
     let block = Block::default()
         .title(" New Session Wizard ")
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
+        .style(Style::default().bg(theme.panel_bg));
 
     let mut text = vec![Line::from("")];
 

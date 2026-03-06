@@ -7,7 +7,11 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem};
 
 use crate::state::SettingsMenuKind;
+<<<<<<< HEAD
 use crate::theme::theme_from_name;
+=======
+use crate::theme::{theme_from_name, Theme};
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the settings menu modal.
@@ -51,7 +55,8 @@ pub fn render_settings_menu_modal(frame: &mut Frame, app: &mut App) {
             Style::default()
                 .bg(theme.highlight_bg)
                 .fg(theme.highlight_fg)
-                .bold(),
+                .bold()
+                .add_modifier(ratatui::style::Modifier::UNDERLINED),
         )
         .highlight_symbol(">> ");
 

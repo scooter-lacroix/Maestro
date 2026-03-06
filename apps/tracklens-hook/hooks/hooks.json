@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["/mnt/WD-SSD/Prod/maestro/apps/tracklens-hook/dist/index.js"],
+            "timeout": 345600
+          }
+        ]
+      }
+    ]
+  }
+}

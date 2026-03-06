@@ -7,7 +7,11 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::text::Line;
 
+<<<<<<< HEAD
 use crate::theme::theme_from_name;
+=======
+use crate::theme::{theme_from_name, Theme};
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the help modal.
@@ -125,6 +129,13 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::raw(" Focus Preview Pane (for scrolling history)"),
         ]),
         Line::from(vec![
+            Span::styled(
+                "   Alt + c       ",
+                Style::default().fg(Color::Green).bold(),
+            ),
+            Span::raw(" Create New Group"),
+        ]),
+        Line::from(vec![
             Span::styled("   Alt + ↑/↓     ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Reorder group/session (persists to DB)"),
         ]),
@@ -133,7 +144,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
                 "   m             ",
                 Style::default().fg(Color::Magenta).bold(),
             ),
-            Span::raw(" Move Session to Group / Create New Group"),
+            Span::raw(" Move Session to Existing Group"),
         ]),
         Line::from(vec![
             Span::styled(
@@ -159,7 +170,49 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
+<<<<<<< HEAD
             " CONDUCTOR (Tab 3):",
+=======
+            " MEMORY (Tab 6):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Search memories (hybrid Tantivy/SQLite)"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Clear memory search"),
+        ]),
+        Line::from(vec![
+            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Refresh/import system-wide memories"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " PROJECTS (Tab 3):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   Enter         ",
+                Style::default().fg(Color::Green).bold(),
+            ),
+            Span::raw(" Open Zide (File Picker + Editor)"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " ANALYSIS (Tab 3):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Enter Analysis Command Box"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " ORCHESTRATE (Tab 4):",
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -190,6 +243,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::styled("   c             ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Clear Output"),
         ]),
+<<<<<<< HEAD
         Line::from(vec![
             Span::styled("   Alt + 1-3     ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Switch View Mode (Details, Output, Prompt)"),
@@ -238,7 +292,28 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " LSPs (Tab 7):",
+            " KRUSTOP (Tab 7):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Force refresh metrics"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Pause/Resume updates"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + + / -   ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Adjust refresh rate (1-10s)"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + Tab     ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Cycle section focus"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " LSPs (Tab 8):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -255,7 +330,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " SETTINGS (Tab 8):",
+            " SETTINGS (Tab 9):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -266,11 +341,13 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
             Span::raw(" Change setting"),
         ]),
+=======
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
         Line::from(""),
         Line::from("  ---------------------------------- "),
         Line::from(format!(
             "  Maestro TUI Cockpit v2.0-beta-8  {}",
-            if (app.frame_count / 30) % 2 == 0 {
+            if (app.frame_count / 30).is_multiple_of(2) {
                 "⚡"
             } else {
                 "  "

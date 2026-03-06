@@ -6,7 +6,7 @@
 use crate::{
     config::models::PiMonoConfig,
     detection::PiDetection,
-    error::{Result, Error},
+    error::{Error, Result},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -158,7 +158,7 @@ pub fn default_mappings() -> Vec<AgentMapping> {
                     set.insert("grep".to_string());
                     set.insert("find".to_string());
                     set
-                }
+                },
             },
             complexity_range: (TaskComplexity::Trivial, TaskComplexity::Simple),
             description: "Fast reconnaissance and information gathering".to_string(),
@@ -177,7 +177,7 @@ pub fn default_mappings() -> Vec<AgentMapping> {
                     set.insert("find".to_string());
                     set.insert("read".to_string());
                     set
-                }
+                },
             },
             complexity_range: (TaskComplexity::Simple, TaskComplexity::Complex),
             description: "Architecture design and planning".to_string(),
@@ -195,7 +195,7 @@ pub fn default_mappings() -> Vec<AgentMapping> {
                     set.insert("grep".to_string());
                     set.insert("read".to_string());
                     set
-                }
+                },
             },
             complexity_range: (TaskComplexity::Simple, TaskComplexity::Complex),
             description: "Code review and quality analysis".to_string(),
@@ -216,7 +216,7 @@ pub fn default_mappings() -> Vec<AgentMapping> {
                     set.insert("write".to_string());
                     set.insert("execute".to_string());
                     set
-                }
+                },
             },
             complexity_range: (TaskComplexity::Medium, TaskComplexity::Expert),
             description: "Implementation and execution".to_string(),
@@ -229,7 +229,7 @@ pub fn role_to_pi_agent_type(role: &AgentRole) -> Option<PiAgentType> {
     default_mappings()
         .iter()
         .find(|m| &m.maestro_role == role)
-        .map(|m| m.pi_agent_type.clone())
+        .map(|m| m.pi_agent_type)
 }
 
 /// Registered agent with all execution information
@@ -290,12 +290,7 @@ impl AgentRegistry {
             .role_assignments
             .get(&role_key)
             .map(|assignment| assignment.model_id.clone())
-            .ok_or_else(|| {
-                Error::Other(format!(
-                    "No model assignment found for role: {:?}",
-                    role
-                ))
-            })
+            .ok_or_else(|| Error::Other(format!("No model assignment found for role: {:?}", role)))
     }
 
     /// Validate tool access for a role
@@ -325,12 +320,13 @@ impl AgentRegistry {
     }
 
     /// Check if a role can handle a task complexity
-    pub fn can_handle_complexity(&self, role: AgentRole, complexity: TaskComplexity) -> Result<bool> {
+    pub fn can_handle_complexity(
+        &self,
+        role: AgentRole,
+        complexity: TaskComplexity,
+    ) -> Result<bool> {
         let agent = self.get_agent(role)?;
-        Ok(
-            complexity >= agent.complexity_range.0
-                && complexity <= agent.complexity_range.1,
-        )
+        Ok(complexity >= agent.complexity_range.0 && complexity <= agent.complexity_range.1)
     }
 
     /// Get all registered roles
@@ -348,10 +344,7 @@ impl AgentRegistry {
             // Get model assignment from config or use a default
             let (model_id, provider) =
                 if let Some(assignment) = self.config.role_assignments.get(&role_key) {
-                    (
-                        assignment.model_id.clone(),
-                        assignment.provider.clone(),
-                    )
+                    (assignment.model_id.clone(), assignment.provider.clone())
                 } else {
                     // Default fallback when no assignment exists
                     ("claude-haiku-4-5".to_string(), "anthropic".to_string())
@@ -673,14 +666,8 @@ mod tests {
             scout_mapping.complexity_range,
             (TaskComplexity::Trivial, TaskComplexity::Simple)
         );
-        assert!(scout_mapping
-            .tool_access
-            .allowed_tools
-            .contains("grep"));
-        assert!(scout_mapping
-            .tool_access
-            .allowed_tools
-            .contains("find"));
+        assert!(scout_mapping.tool_access.allowed_tools.contains("grep"));
+        assert!(scout_mapping.tool_access.allowed_tools.contains("find"));
     }
 
     #[test]
@@ -779,9 +766,10 @@ mod tests {
             let pi_type = role_to_pi_agent_type(&role);
             assert_eq!(
                 pi_type,
-                Some(expected_pi_type.clone()),
+                Some(expected_pi_type),
                 "Role {:?} should map to {:?}",
-                role, expected_pi_type
+                role,
+                expected_pi_type
             );
         }
     }
@@ -789,7 +777,7 @@ mod tests {
     // AgentRegistry tests
     mod agent_registry_tests {
         use super::*;
-        use crate::config::models::{RoleAssignment, PiMonoConfig};
+        use crate::config::models::{PiMonoConfig, RoleAssignment};
         use std::collections::HashMap;
 
         fn create_test_config() -> PiMonoConfig {
@@ -963,7 +951,10 @@ mod tests {
             // Should return error when no assignment exists
             let result = registry.get_model_for_role(AgentRole::Scout);
             assert!(result.is_err());
-            assert!(result.unwrap_err().to_string().contains("No model assignment found"));
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("No model assignment found"));
         }
 
         #[test]
@@ -972,15 +963,29 @@ mod tests {
             let registry = AgentRegistry::new(config);
 
             // Scout can use tools in allowed_tools list (grep, find from default mappings)
-            assert!(registry.validate_tool_access(AgentRole::Scout, "grep").unwrap());
-            assert!(registry.validate_tool_access(AgentRole::Scout, "find").unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Scout, "grep")
+                .unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Scout, "find")
+                .unwrap());
 
             // Scout cannot use tools not in allowed_tools list
-            assert!(!registry.validate_tool_access(AgentRole::Scout, "read-file").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Scout, "search").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Scout, "write-file").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Scout, "execute").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Scout, "run-command").unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Scout, "read-file")
+                .unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Scout, "search")
+                .unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Scout, "write-file")
+                .unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Scout, "execute")
+                .unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Scout, "run-command")
+                .unwrap());
         }
 
         #[test]
@@ -989,11 +994,21 @@ mod tests {
             let registry = AgentRegistry::new(config);
 
             // Kraken can use tools in allowed_tools list (grep, find, read, write, execute from default mappings)
-            assert!(registry.validate_tool_access(AgentRole::Kraken, "grep").unwrap());
-            assert!(registry.validate_tool_access(AgentRole::Kraken, "find").unwrap());
-            assert!(registry.validate_tool_access(AgentRole::Kraken, "read").unwrap());
-            assert!(registry.validate_tool_access(AgentRole::Kraken, "write").unwrap());
-            assert!(registry.validate_tool_access(AgentRole::Kraken, "execute").unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Kraken, "grep")
+                .unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Kraken, "find")
+                .unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Kraken, "read")
+                .unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Kraken, "write")
+                .unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Kraken, "execute")
+                .unwrap());
         }
 
         #[test]
@@ -1002,11 +1017,17 @@ mod tests {
             let registry = AgentRegistry::new(config);
 
             // Scout has specific allowed tools in the mapping
-            assert!(registry.validate_tool_access(AgentRole::Scout, "grep").unwrap());
-            assert!(registry.validate_tool_access(AgentRole::Scout, "find").unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Scout, "grep")
+                .unwrap());
+            assert!(registry
+                .validate_tool_access(AgentRole::Scout, "find")
+                .unwrap());
 
             // Tool not in allowed_tools list
-            assert!(!registry.validate_tool_access(AgentRole::Scout, "custom-tool").unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Scout, "custom-tool")
+                .unwrap());
         }
 
         #[test]
@@ -1016,9 +1037,15 @@ mod tests {
 
             // Empty tool name should return false
             assert!(!registry.validate_tool_access(AgentRole::Scout, "").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Kraken, "").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Architect, "").unwrap());
-            assert!(!registry.validate_tool_access(AgentRole::Critic, "").unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Kraken, "")
+                .unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Architect, "")
+                .unwrap());
+            assert!(!registry
+                .validate_tool_access(AgentRole::Critic, "")
+                .unwrap());
         }
 
         #[test]

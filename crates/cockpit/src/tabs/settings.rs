@@ -2,9 +2,9 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
-    widgets::{Block, Borders, BorderType, Paragraph},
-    Frame,
     prelude::*,
+    widgets::{Block, BorderType, Borders, Paragraph},
+    Frame,
 };
 
 use crate::app::App;
@@ -36,8 +36,13 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
         ])
         .split(inner_area);
 
-    let editor_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Editor {
-        ratatui::style::Style::default().fg(theme.warning).bold()
+    let editor_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Editor
+    {
+        ratatui::style::Style::default()
+            .fg(theme.warning)
+            .bold()
+            .bg(theme.highlight_bg)
     } else {
         ratatui::style::Style::default()
     };
@@ -49,8 +54,13 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(editor, chunks[0]);
 
-    let theme_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Theme {
-        ratatui::style::Style::default().fg(theme.warning).bold()
+    let theme_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Theme
+    {
+        ratatui::style::Style::default()
+            .fg(theme.warning)
+            .bold()
+            .bg(theme.highlight_bg)
     } else {
         ratatui::style::Style::default()
     };
@@ -67,8 +77,13 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(theme_field, chunks[1]);
 
-    let transparent_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Transparent {
-        ratatui::style::Style::default().fg(theme.warning).bold()
+    let transparent_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Transparent
+    {
+        ratatui::style::Style::default()
+            .fg(theme.warning)
+            .bold()
+            .bg(theme.highlight_bg)
     } else {
         ratatui::style::Style::default()
     };
@@ -85,8 +100,13 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(transparent, chunks[2]);
 
-    let path_style = if app.tab_index == 7 && app.settings_option == SettingsOption::InstallPath {
-        ratatui::style::Style::default().fg(theme.warning).bold()
+    let path_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::InstallPath
+    {
+        ratatui::style::Style::default()
+            .fg(theme.warning)
+            .bold()
+            .bg(theme.highlight_bg)
     } else {
         ratatui::style::Style::default()
     };
@@ -98,8 +118,13 @@ pub fn render_settings(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(path, chunks[3]);
 
-    let save_style = if app.tab_index == 7 && app.settings_option == SettingsOption::Save {
-        ratatui::style::Style::default().bg(theme.success).fg(ratatui::style::Color::Black).bold()
+    let save_style = if app.tab_index == crate::app::tabs::SETTINGS
+        && app.settings_option == SettingsOption::Save
+    {
+        ratatui::style::Style::default()
+            .bg(theme.success)
+            .fg(ratatui::style::Color::Black)
+            .bold()
     } else {
         ratatui::style::Style::default().fg(theme.success)
     };

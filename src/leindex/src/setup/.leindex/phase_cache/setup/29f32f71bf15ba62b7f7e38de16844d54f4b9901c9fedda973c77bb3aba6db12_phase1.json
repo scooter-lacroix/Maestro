@@ -1,0 +1,26 @@
+{
+  "project_id": "setup",
+  "generation": "29f32f71bf15ba62b7f7e38de16844d54f4b9901c9fedda973c77bb3aba6db12",
+  "phase": 1,
+  "options_hash": null,
+  "payload": {
+    "total_files": 4,
+    "parsed_files": 4,
+    "parse_failures": 0,
+    "signatures": 124,
+    "language_distribution": {
+      "Rust": 108,
+      "external": 19
+    },
+    "parser_completeness": [
+      {
+        "language": "rust",
+        "signatures": 124,
+        "calls_ratio": 0.6451613,
+        "imports_ratio": 1.0,
+        "byte_range_ratio": 0.8467742,
+        "score": 0.83064514
+      }
+    ]
+  }
+}

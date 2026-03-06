@@ -26,6 +26,9 @@ which = "7.0"
 dirs = "5.0"
 semver = "1.0"
 
+# Command parsing
+shell-words = "1.1"
+
 # Error handling
 anyhow = { workspace = true }
 thiserror = { workspace = true }

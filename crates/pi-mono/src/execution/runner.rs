@@ -25,16 +25,16 @@
 //! ```
 
 use crate::{
+    agents::mapping::PiAgentType,
     detection::PiDetection,
-    execution::{SubagentResult, StreamEvent},
-    error::{Result, Error},
-    agents::mapping::{PiAgentType},
+    error::{Error, Result},
+    execution::{StreamEvent, SubagentResult},
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::process::Stdio;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -177,6 +177,10 @@ pub struct RunnerConfig {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_retries: usize,
+    /// Optional session metadata to propagate into spawned tools (TUI, MCP, LSP, etc.).
+    pub maestro_session_id: Option<String>,
+    pub maestro_project_path: Option<PathBuf>,
+    pub maestro_mcp_config: Option<PathBuf>,
 }
 
 /// Shared configuration wrapper for efficient parallel execution
@@ -218,6 +222,9 @@ impl Default for RunnerConfig {
             provider: None,
             model: None,
             max_retries: 3,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         }
     }
 }
@@ -233,11 +240,7 @@ pub struct ParallelTask {
 
 impl ParallelTask {
     /// Create a new parallel task
-    pub fn new(
-        id: String,
-        agent_type: PiAgentType,
-        task: String,
-    ) -> Self {
+    pub fn new(id: String, agent_type: PiAgentType, task: String) -> Self {
         Self {
             id,
             agent_type,
@@ -355,15 +358,8 @@ impl SubagentRunner {
         prompt: Option<&str>,
         cancel_token: Option<&CancellationToken>,
     ) -> Result<SubagentResult> {
-        self.run_with_stream_internal(
-            agent_type,
-            task,
-            prompt,
-            |_| {},
-            true,
-            cancel_token,
-        )
-        .await
+        self.run_with_stream_internal(agent_type, task, prompt, |_| {}, true, cancel_token)
+            .await
     }
 
     /// Run with streaming callback
@@ -378,14 +374,8 @@ impl SubagentRunner {
     where
         F: FnMut(StreamEvent),
     {
-        self.run_with_stream_and_token(
-            agent_type,
-            task,
-            prompt,
-            stream_callback,
-            None,
-        )
-        .await
+        self.run_with_stream_and_token(agent_type, task, prompt, stream_callback, None)
+            .await
     }
 
     /// Run with streaming callback and cancellation token
@@ -470,7 +460,10 @@ impl SubagentRunner {
                     Some(attempt.to_string()),
                 ));
 
-                info!("Retry attempt {}/{} for task: {}", attempt, self.config.max_retries, task);
+                info!(
+                    "Retry attempt {}/{} for task: {}",
+                    attempt, self.config.max_retries, task
+                );
 
                 // Exponential backoff with overflow protection
                 // Cap at 30 seconds (30000ms) to prevent overflow and excessive waits
@@ -509,7 +502,7 @@ impl SubagentRunner {
                 Ok((out, exit_code)) => {
                     // Success only if exit code is Some(0)
                     // Signal termination (None) is treated as failure
-                    if exit_code.map_or(false, |code| code == 0) {
+                    if exit_code == Some(0) {
                         let duration = start_time.elapsed();
                         let result = SubagentResult::success(
                             task.clone(),
@@ -540,7 +533,10 @@ impl SubagentRunner {
             .map(|e| e.to_string())
             .unwrap_or_else(|| "Unknown error".to_string());
 
-        error!("Task failed after {} attempts: {}", self.config.max_retries, error_msg);
+        error!(
+            "Task failed after {} attempts: {}",
+            self.config.max_retries, error_msg
+        );
 
         stream_callback(StreamEvent::error(format!("Task failed: {}", error_msg)));
 
@@ -604,7 +600,58 @@ impl SubagentRunner {
         // This allows users to include "--" in their task content (e.g., "Explain --help flag")
         cmd.arg("--");
 
+        // Ensure downstream tools inherit Maestro session context.
+        for (key, value) in self.collect_maestro_env() {
+            cmd.env(key, value);
+        }
+
         cmd
+    }
+
+    fn collect_maestro_env(&self) -> Vec<(String, String)> {
+        let mut envs = Vec::new();
+
+        if let Some(id) = self
+            .config
+            .maestro_session_id
+            .clone()
+            .or_else(|| std::env::var("MAESTRO_SESSION_ID").ok())
+        {
+            envs.push(("MAESTRO_SESSION_ID".to_string(), id));
+        }
+
+        if let Some(path) = self
+            .config
+            .maestro_project_path
+            .clone()
+            .or_else(|| {
+                std::env::var("MAESTRO_PROJECT_PATH")
+                    .ok()
+                    .map(PathBuf::from)
+            })
+            .or_else(|| std::env::current_dir().ok())
+        {
+            envs.push((
+                "MAESTRO_PROJECT_PATH".to_string(),
+                path.display().to_string(),
+            ));
+        }
+
+        if let Some(path) = self
+            .config
+            .maestro_mcp_config
+            .clone()
+            .or_else(|| std::env::var("MAESTRO_MCP_CONFIG").ok().map(PathBuf::from))
+            .or_else(|| {
+                dirs::home_dir()
+                    .map(|h| h.join(".codex").join("config.toml"))
+                    .filter(|p| p.exists())
+            })
+        {
+            envs.push(("MAESTRO_MCP_CONFIG".to_string(), path.display().to_string()));
+        }
+
+        envs
     }
 
     /// Execute command with timeout
@@ -663,12 +710,18 @@ impl SubagentRunner {
 
                 // Return Option<i32> to properly handle signal termination (None)
                 // and normal exit codes (Some(code))
-                if exit_code.map_or(false, |code| code != 0) {
-                    return Err(Error::Execution(crate::error::ExecutionError::NonZeroExit {
-                        command: format!("{:?}", cmd),
-                        exit_code: exit_code.unwrap_or(-1),
-                        stderr: if stderr.is_empty() { None } else { Some(stderr) },
-                    }));
+                if exit_code.is_some_and(|code| code != 0) {
+                    return Err(Error::Execution(
+                        crate::error::ExecutionError::NonZeroExit {
+                            command: format!("{:?}", cmd),
+                            exit_code: exit_code.unwrap_or(-1),
+                            stderr: if stderr.is_empty() {
+                                None
+                            } else {
+                                Some(stderr)
+                            },
+                        },
+                    ));
                 }
 
                 Ok((stdout, exit_code))
@@ -714,7 +767,7 @@ impl SubagentRunner {
                 let _permit = permit.acquire().await.unwrap();
                 let agent_type = task.agent_type;
                 let task_desc = task.task.clone();
-                let prompt = task.prompt.map(|p| p.clone());
+                let prompt = task.prompt;
 
                 // Create a temporary runner for this task
                 let temp_runner = SubagentRunner { config: config_arc };
@@ -735,7 +788,11 @@ impl SubagentRunner {
 
         while let Some(result) = join_set.join_next().await {
             completed_count += 1;
-            debug!("Completed {}/{} tasks", completed_count, join_set.len() + completed_count);
+            debug!(
+                "Completed {}/{} tasks",
+                completed_count,
+                join_set.len() + completed_count
+            );
 
             match result {
                 Ok((task_id, Ok(subagent_result))) => {
@@ -752,7 +809,9 @@ impl SubagentRunner {
                     let error_msg = format!("Task join error: {}", e);
                     error!("{}", error_msg);
                     // Use generic ID since we can't access task_id from JoinError
-                    parallel_result.errors.insert("unknown-task".to_string(), error_msg);
+                    parallel_result
+                        .errors
+                        .insert("unknown-task".to_string(), error_msg);
                 }
             }
         }
@@ -805,7 +864,12 @@ impl SubagentRunner {
         info!("Starting chain execution with {} steps", steps.len());
 
         for (idx, step) in steps.iter().enumerate() {
-            info!("Executing chain step {}/{}: {:?}", idx + 1, steps.len(), step.agent_type);
+            info!(
+                "Executing chain step {}/{}: {:?}",
+                idx + 1,
+                steps.len(),
+                step.agent_type
+            );
 
             // Validate the original task template (before substitution)
             validate_task_content(&step.task)?;
@@ -815,7 +879,10 @@ impl SubagentRunner {
 
             // Substitute {previous} placeholder in task and prompt
             let task = self.substitute_previous(&step.task, &previous_output);
-            let prompt = step.prompt.as_ref().map(|p| self.substitute_previous(p, &previous_output));
+            let prompt = step
+                .prompt
+                .as_ref()
+                .map(|p| self.substitute_previous(p, &previous_output));
 
             debug!("Chain step {} task after substitution: {}", idx + 1, task);
 
@@ -879,7 +946,10 @@ impl SubagentRunner {
         let mut previous_output = String::new();
         let mut failed_at_step = None;
 
-        info!("Starting chain execution with {} steps (with cancellation)", steps.len());
+        info!(
+            "Starting chain execution with {} steps (with cancellation)",
+            steps.len()
+        );
 
         for (idx, step) in steps.iter().enumerate() {
             // Check for cancellation
@@ -890,7 +960,12 @@ impl SubagentRunner {
                 }
             }
 
-            info!("Executing chain step {}/{}: {:?}", idx + 1, steps.len(), step.agent_type);
+            info!(
+                "Executing chain step {}/{}: {:?}",
+                idx + 1,
+                steps.len(),
+                step.agent_type
+            );
 
             // Validate the original task template (before substitution)
             validate_task_content(&step.task)?;
@@ -900,7 +975,10 @@ impl SubagentRunner {
 
             // Substitute {previous} placeholder in task and prompt
             let task = self.substitute_previous(&step.task, &previous_output);
-            let prompt = step.prompt.as_ref().map(|p| self.substitute_previous(p, &previous_output));
+            let prompt = step
+                .prompt
+                .as_ref()
+                .map(|p| self.substitute_previous(p, &previous_output));
 
             // Execute the step
             let result = self
@@ -951,14 +1029,13 @@ impl SubagentRunner {
     ///
     /// Limits the size of previous output to prevent data loss from excessive substitutions.
     /// Uses MAX_PREVIOUS_OUTPUT_SIZE (100KB) as the limit.
-    fn substitute_previous(
-        &self,
-        text: &str,
-        previous_output: &str,
-    ) -> String {
+    fn substitute_previous(&self, text: &str, previous_output: &str) -> String {
         // Truncate previous_output if it exceeds the maximum size
         let truncated_output = if previous_output.len() > MAX_PREVIOUS_OUTPUT_SIZE {
-            let mut truncated = previous_output.chars().take(MAX_PREVIOUS_OUTPUT_SIZE).collect::<String>();
+            let mut truncated = previous_output
+                .chars()
+                .take(MAX_PREVIOUS_OUTPUT_SIZE)
+                .collect::<String>();
             truncated.push_str("...[truncated]");
             truncated
         } else {
@@ -978,9 +1055,9 @@ impl Default for SubagentRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
-    use std::fs;
 
     /// Create a mock pi executable for testing
     ///
@@ -1123,6 +1200,9 @@ exit 1
             provider: Some("anthropic".to_string()),
             model: Some("claude-3".to_string()),
             max_retries: 5,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         };
 
         assert_eq!(config.pi_path, PathBuf::from("/custom/path/pi"));
@@ -1148,6 +1228,9 @@ exit 1
             provider: Some("test-provider".to_string()),
             model: Some("test-model".to_string()),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         };
 
         let runner = SubagentRunner::with_config(config.clone());
@@ -1237,6 +1320,43 @@ exit 1
         // Command building succeeds with model config
     }
 
+    #[test]
+    fn test_collect_maestro_env_defaults() {
+        let runner = SubagentRunner::new();
+        let envs = runner.collect_maestro_env();
+        let mut map = std::collections::HashMap::new();
+        for (k, v) in envs {
+            map.insert(k, v);
+        }
+        // We always inject a project path (falls back to current_dir).
+        assert!(map.contains_key("MAESTRO_PROJECT_PATH"));
+    }
+
+    #[test]
+    fn test_collect_maestro_env_overrides() {
+        let config = RunnerConfig {
+            maestro_session_id: Some("sess-123".to_string()),
+            maestro_project_path: Some(PathBuf::from("/tmp/project")),
+            maestro_mcp_config: Some(PathBuf::from("/tmp/mcp.toml")),
+            ..Default::default()
+        };
+        let runner = SubagentRunner::with_config(config);
+        let envs = runner.collect_maestro_env();
+        let mut map = std::collections::HashMap::new();
+        for (k, v) in envs {
+            map.insert(k, v);
+        }
+        assert_eq!(map.get("MAESTRO_SESSION_ID"), Some(&"sess-123".to_string()));
+        assert_eq!(
+            map.get("MAESTRO_PROJECT_PATH"),
+            Some(&"/tmp/project".to_string())
+        );
+        assert_eq!(
+            map.get("MAESTRO_MCP_CONFIG"),
+            Some(&"/tmp/mcp.toml".to_string())
+        );
+    }
+
     #[tokio::test]
     async fn test_run_success() {
         let mock_pi = MockPi::new(true);
@@ -1295,17 +1415,14 @@ exit 1
         let mut events = Vec::new();
 
         let result = runner
-            .run_with_stream(
-                PiAgentType::Worker,
-                "streamed task",
-                None,
-                |event| events.push(event),
-            )
+            .run_with_stream(PiAgentType::Worker, "streamed task", None, |event| {
+                events.push(event)
+            })
             .await
             .unwrap();
 
         assert!(result.is_success());
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
 
         // Verify we got start and complete events
         let event_types: Vec<_> = events.iter().map(|e| e.event_type.clone()).collect();
@@ -1388,6 +1505,9 @@ exit 1
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 3,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             timeout: Duration::from_secs(1),
             ..Default::default()
         };
@@ -1427,6 +1547,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_millis(100), // Very short timeout
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -1451,6 +1574,9 @@ exit 1
             provider: Some("test".to_string()),
             model: Some("model".to_string()),
             max_retries: 2,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
         };
 
         let cloned = config.clone();
@@ -1478,7 +1604,11 @@ exit 1
             .unwrap();
 
         assert!(result.is_success());
-        assert!(result.duration.as_millis() > 0);
+        // Duration should be valid - use microseconds for sub-millisecond precision
+        assert!(
+            result.duration.as_micros() > 0,
+            "Duration should be greater than 0 microseconds"
+        );
     }
 
     #[tokio::test]
@@ -1515,6 +1645,9 @@ exit 1
         let config = RunnerConfig {
             pi_path: mock_pi_path,
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -1522,16 +1655,11 @@ exit 1
         let mut got_error = false;
 
         let _result = runner
-            .run_with_stream(
-                PiAgentType::Scout,
-                "error test",
-                None,
-                |event| {
-                    if event.event_type == crate::execution::StreamEventType::Error {
-                        got_error = true;
-                    }
-                },
-            )
+            .run_with_stream(PiAgentType::Scout, "error test", None, |event| {
+                if event.event_type == crate::execution::StreamEventType::Error {
+                    got_error = true;
+                }
+            })
             .await
             .unwrap();
 
@@ -1650,7 +1778,11 @@ exit 1
             ParallelTask::new("t1".to_string(), PiAgentType::Scout, "Task 1".to_string()),
             ParallelTask::new("t2".to_string(), PiAgentType::Planner, "Task 2".to_string()),
             ParallelTask::new("t3".to_string(), PiAgentType::Worker, "Task 3".to_string()),
-            ParallelTask::new("t4".to_string(), PiAgentType::Reviewer, "Task 4".to_string()),
+            ParallelTask::new(
+                "t4".to_string(),
+                PiAgentType::Reviewer,
+                "Task 4".to_string(),
+            ),
         ];
 
         // Limit to 2 concurrent tasks
@@ -1693,8 +1825,16 @@ exit 1
         // For this test, we'll verify the logic by checking all succeed
         // The failure handling is tested separately with custom mock
         let tasks = vec![
-            ParallelTask::new("task-1".to_string(), PiAgentType::Scout, "Task 1".to_string()),
-            ParallelTask::new("task-2".to_string(), PiAgentType::Worker, "Task 2".to_string()),
+            ParallelTask::new(
+                "task-1".to_string(),
+                PiAgentType::Scout,
+                "Task 1".to_string(),
+            ),
+            ParallelTask::new(
+                "task-2".to_string(),
+                PiAgentType::Worker,
+                "Task 2".to_string(),
+            ),
         ];
 
         // Note: This test uses a mock executable that is kept alive for the duration
@@ -1726,9 +1866,21 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let tasks = vec![
-            ParallelTask::new("task-1".to_string(), PiAgentType::Scout, "Analyze".to_string()),
-            ParallelTask::new("task-2".to_string(), PiAgentType::Planner, "Plan".to_string()),
-            ParallelTask::new("task-3".to_string(), PiAgentType::Worker, "Build".to_string()),
+            ParallelTask::new(
+                "task-1".to_string(),
+                PiAgentType::Scout,
+                "Analyze".to_string(),
+            ),
+            ParallelTask::new(
+                "task-2".to_string(),
+                PiAgentType::Planner,
+                "Plan".to_string(),
+            ),
+            ParallelTask::new(
+                "task-3".to_string(),
+                PiAgentType::Worker,
+                "Build".to_string(),
+            ),
         ];
 
         let result = runner.execute_parallel(tasks, Some(3)).await.unwrap();
@@ -1779,8 +1931,16 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let tasks = vec![
-            ParallelTask::new("task-1".to_string(), PiAgentType::Scout, "Task 1".to_string()),
-            ParallelTask::new("task-2".to_string(), PiAgentType::Worker, "Task 2".to_string()),
+            ParallelTask::new(
+                "task-1".to_string(),
+                PiAgentType::Scout,
+                "Task 1".to_string(),
+            ),
+            ParallelTask::new(
+                "task-2".to_string(),
+                PiAgentType::Worker,
+                "Task 2".to_string(),
+            ),
         ];
 
         let result = runner.execute_parallel(tasks, Some(2)).await.unwrap();
@@ -1819,7 +1979,9 @@ exit 1
         assert_eq!(result.error_count(), 0);
 
         // Add an error
-        result.errors.insert("task-2".to_string(), "Task failed".to_string());
+        result
+            .errors
+            .insert("task-2".to_string(), "Task failed".to_string());
 
         assert!(!result.all_success());
         assert!(result.any_success());
@@ -1840,10 +2002,26 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let tasks = vec![
-            ParallelTask::new("scout-task".to_string(), PiAgentType::Scout, "Scout task".to_string()),
-            ParallelTask::new("planner-task".to_string(), PiAgentType::Planner, "Planner task".to_string()),
-            ParallelTask::new("reviewer-task".to_string(), PiAgentType::Reviewer, "Reviewer task".to_string()),
-            ParallelTask::new("worker-task".to_string(), PiAgentType::Worker, "Worker task".to_string()),
+            ParallelTask::new(
+                "scout-task".to_string(),
+                PiAgentType::Scout,
+                "Scout task".to_string(),
+            ),
+            ParallelTask::new(
+                "planner-task".to_string(),
+                PiAgentType::Planner,
+                "Planner task".to_string(),
+            ),
+            ParallelTask::new(
+                "reviewer-task".to_string(),
+                PiAgentType::Reviewer,
+                "Reviewer task".to_string(),
+            ),
+            ParallelTask::new(
+                "worker-task".to_string(),
+                PiAgentType::Worker,
+                "Worker task".to_string(),
+            ),
         ];
 
         let result = runner.execute_parallel(tasks, Some(4)).await.unwrap();
@@ -1904,8 +2082,16 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let tasks = vec![
-            ParallelTask::new("task-1".to_string(), PiAgentType::Scout, "Task 1".to_string()),
-            ParallelTask::new("task-2".to_string(), PiAgentType::Worker, "Task 2".to_string()),
+            ParallelTask::new(
+                "task-1".to_string(),
+                PiAgentType::Scout,
+                "Task 1".to_string(),
+            ),
+            ParallelTask::new(
+                "task-2".to_string(),
+                PiAgentType::Worker,
+                "Task 2".to_string(),
+            ),
         ];
 
         // Pass None for concurrent_limit, should use default of 4
@@ -1920,10 +2106,7 @@ exit 1
 
     #[test]
     fn test_chain_step_new() {
-        let step = ChainStep::new(
-            PiAgentType::Scout,
-            "Analyze codebase".to_string(),
-        );
+        let step = ChainStep::new(PiAgentType::Scout, "Analyze codebase".to_string());
 
         assert_eq!(step.agent_type, PiAgentType::Scout);
         assert_eq!(step.task, "Analyze codebase");
@@ -1932,11 +2115,8 @@ exit 1
 
     #[test]
     fn test_chain_step_with_prompt() {
-        let step = ChainStep::new(
-            PiAgentType::Worker,
-            "Fix bug".to_string(),
-        )
-        .with_prompt("Use TDD approach".to_string());
+        let step = ChainStep::new(PiAgentType::Worker, "Fix bug".to_string())
+            .with_prompt("Use TDD approach".to_string());
 
         assert_eq!(step.agent_type, PiAgentType::Worker);
         assert_eq!(step.task, "Fix bug");
@@ -1945,11 +2125,8 @@ exit 1
 
     #[test]
     fn test_chain_step_clone() {
-        let step1 = ChainStep::new(
-            PiAgentType::Planner,
-            "Create plan".to_string(),
-        )
-        .with_prompt("Detailed plan".to_string());
+        let step1 = ChainStep::new(PiAgentType::Planner, "Create plan".to_string())
+            .with_prompt("Detailed plan".to_string());
 
         let step2 = step1.clone();
 
@@ -2025,14 +2202,8 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let steps = vec![
-            ChainStep::new(
-                PiAgentType::Scout,
-                "Analyze code".to_string(),
-            ),
-            ChainStep::new(
-                PiAgentType::Worker,
-                "Implement feature".to_string(),
-            ),
+            ChainStep::new(PiAgentType::Scout, "Analyze code".to_string()),
+            ChainStep::new(PiAgentType::Worker, "Implement feature".to_string()),
         ];
 
         let result = runner.execute_chain(steps).await.unwrap();
@@ -2059,14 +2230,8 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let steps = vec![
-            ChainStep::new(
-                PiAgentType::Scout,
-                "First task".to_string(),
-            ),
-            ChainStep::new(
-                PiAgentType::Planner,
-                "Review: {previous}".to_string(),
-            ),
+            ChainStep::new(PiAgentType::Scout, "First task".to_string()),
+            ChainStep::new(PiAgentType::Planner, "Review: {previous}".to_string()),
         ];
 
         let result = runner.execute_chain(steps).await.unwrap();
@@ -2081,18 +2246,6 @@ exit 1
 
     #[tokio::test]
     async fn test_execute_chain_stops_on_first_failure() {
-        let _mock_pi_success = MockPi::new(true);
-        let _mock_pi_failure = MockPi::new(false);
-
-        // For this test, we'll verify the logic by checking single step success
-        // The failure handling is tested in test_execute_chain_tracks_failed_at_step
-        let steps = vec![
-            ChainStep::new(
-                PiAgentType::Scout,
-                "First task".to_string(),
-            ),
-        ];
-
         // Note: This test uses a mock executable that is kept alive for the duration
         // of the test and automatically cleaned up when dropped
         let mock_pi = MockPi::new(true);
@@ -2100,14 +2253,25 @@ exit 1
             pi_path: mock_pi.path().clone(),
             timeout: Duration::from_secs(5),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         });
+
+        // For this test, we'll verify the logic by checking single step success
+        // The failure handling is tested in test_execute_chain_tracks_failed_at_step
+        let steps = vec![ChainStep::new(PiAgentType::Scout, "First task".to_string())];
 
         let result = runner.execute_chain(steps).await.unwrap();
 
         // Single step should succeed
+        assert!(
+            result.steps[0].is_success(),
+            "First step should succeed but got: {:?}",
+            result.steps[0].output
+        );
         assert_eq!(result.steps.len(), 1);
-        assert!(result.steps[0].is_success());
         assert!(result.failed_at_step.is_none());
     }
 
@@ -2119,23 +2283,17 @@ exit 1
             pi_path: mock_pi_path,
             timeout: Duration::from_secs(5),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
         let runner = SubagentRunner::with_config(config);
         let steps = vec![
-            ChainStep::new(
-                PiAgentType::Scout,
-                "Task 1".to_string(),
-            ),
-            ChainStep::new(
-                PiAgentType::Worker,
-                "Task 2".to_string(),
-            ),
-            ChainStep::new(
-                PiAgentType::Planner,
-                "Task 3".to_string(),
-            ),
+            ChainStep::new(PiAgentType::Scout, "Task 1".to_string()),
+            ChainStep::new(PiAgentType::Worker, "Task 2".to_string()),
+            ChainStep::new(PiAgentType::Planner, "Task 3".to_string()),
         ];
 
         let result = runner.execute_chain(steps).await.unwrap();
@@ -2162,7 +2320,10 @@ exit 1
         // Empty chains should now fail validation
         let result = runner.execute_chain(steps).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("at least one step"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least one step"));
     }
 
     #[tokio::test]
@@ -2209,16 +2370,10 @@ exit 1
 
         let runner = SubagentRunner::with_config(config);
         let steps = vec![
-            ChainStep::new(
-                PiAgentType::Scout,
-                "Analyze".to_string(),
-            )
-            .with_prompt("Focus on architecture".to_string()),
-            ChainStep::new(
-                PiAgentType::Worker,
-                "Build: {previous}".to_string(),
-            )
-            .with_prompt("Use best practices".to_string()),
+            ChainStep::new(PiAgentType::Scout, "Analyze".to_string())
+                .with_prompt("Focus on architecture".to_string()),
+            ChainStep::new(PiAgentType::Worker, "Build: {previous}".to_string())
+                .with_prompt("Use best practices".to_string()),
         ];
 
         let result = runner.execute_chain(steps).await.unwrap();
@@ -2249,9 +2404,7 @@ exit 1
         assert!(result.total_duration.as_millis() > 0);
 
         // Total duration should be at least the sum of individual step durations
-        let steps_duration: Duration = result.steps.iter()
-            .map(|s| s.duration)
-            .sum();
+        let steps_duration: Duration = result.steps.iter().map(|s| s.duration).sum();
 
         assert!(result.total_duration >= steps_duration);
     }
@@ -2294,11 +2447,8 @@ exit 1
         let runner = SubagentRunner::with_config(config);
         let steps = vec![
             ChainStep::new(PiAgentType::Scout, "First".to_string()),
-            ChainStep::new(
-                PiAgentType::Worker,
-                "Second task".to_string(),
-            )
-            .with_prompt("Based on: {previous}".to_string()),
+            ChainStep::new(PiAgentType::Worker, "Second task".to_string())
+                .with_prompt("Based on: {previous}".to_string()),
         ];
 
         let result = runner.execute_chain(steps).await.unwrap();
@@ -2311,15 +2461,13 @@ exit 1
     #[test]
     fn test_chain_result_debug_format() {
         let result = ChainResult {
-            steps: vec![
-                SubagentResult::success(
-                    "Task 1".to_string(),
-                    "agent-1".to_string(),
-                    "scout".to_string(),
-                    "Output 1".to_string(),
-                    Duration::from_millis(100),
-                ),
-            ],
+            steps: vec![SubagentResult::success(
+                "Task 1".to_string(),
+                "agent-1".to_string(),
+                "scout".to_string(),
+                "Output 1".to_string(),
+                Duration::from_millis(100),
+            )],
             final_output: "Final output".to_string(),
             total_duration: Duration::from_millis(500),
             failed_at_step: None,
@@ -2428,6 +2576,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_millis(100), // Very short timeout
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2477,6 +2628,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_secs(20), // Long timeout
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2508,7 +2662,13 @@ exit 1
         let subagent_result = result.unwrap();
         // The task might succeed if it completes before cancellation, or fail if cancelled
         // Either way, the test verifies the cancellation mechanism works
-        assert!(subagent_result.is_success() || subagent_result.error.as_ref().map_or(false, |e| e.contains("cancelled") || e.contains("timed out")));
+        assert!(
+            subagent_result.is_success()
+                || subagent_result
+                    .error
+                    .as_ref()
+                    .is_some_and(|e| e.contains("cancelled") || e.contains("timed out"))
+        );
     }
 
     #[tokio::test]
@@ -2535,6 +2695,9 @@ exit 1
             pi_path: mock_path.clone(),
             timeout: Duration::from_secs(20),
             max_retries: 1,
+            maestro_session_id: None,
+            maestro_project_path: None,
+            maestro_mcp_config: None,
             ..Default::default()
         };
 
@@ -2656,7 +2819,10 @@ exit 1
         // Should fail validation for concurrent_limit of 0
         let result = runner.execute_parallel(tasks, Some(0)).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be greater than 0"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must be greater than 0"));
     }
 
     #[tokio::test]
@@ -2675,7 +2841,10 @@ exit 1
         // Should fail validation for empty chain
         let result = runner.execute_chain(steps).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("at least one step"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("at least one step"));
     }
 
     #[tokio::test]

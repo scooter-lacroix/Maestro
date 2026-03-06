@@ -7,6 +7,7 @@ allowed-tools:
   - Edit
   - Bash
   - AskUserQuestion
+  - ExitPlanMode
 model: sonnet
 ---
 
@@ -185,19 +186,26 @@ AskUserQuestion:
        - **Step 5:** What risks or issues were found?
        - **Step 6:** Is the spec ready for user review? Any revisions needed?
 
-7.  **User Confirmation:** Present the drafted `spec.md` content to the user for review and approval using `AskUserQuestion`:
-    ```
-    AskUserQuestion:
-      question: "I've drafted the specification for this track. Please review and decide:"
-      header: "Review Spec"
-      options:
-        - label: "Approve"
-          description: "The specification is accurate and we can proceed"
-        - label: "Suggest Changes"
-          description: "Tell me what to modify"
-      multiSelect: false
-    ```
-    Await user feedback and revise the `spec.md` content until confirmed.
+7.  **TrackLens Spec Review:**
+    -   **CRITICAL:** After drafting `spec.md`, you MUST present it for TrackLens review before proceeding.
+    -   **Create Temp Spec File:** Write the drafted spec content to a temporary file:
+        ```bash
+        # Write spec content to temp file
+        cat > /tmp/tracklens-spec-review.md << 'SPEC_EOF'
+        <paste spec content here>
+        SPEC_EOF
+        ```
+    -   **Run TrackLens Review:** Use the Bash tool to start the review:
+        ```bash
+        maestro tracklens review /tmp/tracklens-spec-review.md --mode review
+        ```
+    -   This will:
+        - Start a TrackLens review server and open it in your browser
+        - Wait for your approval/denial decision
+    -   **Handle Feedback:**
+        - If approved: Proceed to plan generation
+        - If denied with feedback: Revise the spec based on feedback and re-run TrackLens review
+        - Repeat until approved
 
 ### 2.3 Interactive Plan Generation (`plan.md`)
 
@@ -236,21 +244,42 @@ AskUserQuestion:
        - **Step 5:** What issues were found in the plan structure?
        - **Step 6:** Is the plan ready for user review? Any refinements needed?
 
-6.  **User Confirmation:** Present the drafted `plan.md` to the user for review and approval using `AskUserQuestion`:
-    ```
-    AskUserQuestion:
-      question: "I've drafted the implementation plan. Please review and decide:"
-      header: "Review Plan"
-      options:
-        - label: "Approve"
-          description: "The plan is correct and covers all necessary steps"
-        - label: "Suggest Changes"
-          description: "Tell me what to modify"
-      multiSelect: false
-    ```
-    Await user feedback and revise the `plan.md` content until confirmed.
+6.  **User Confirmation with TrackLens Visual Review:**
+
+    a. **Present to TrackLens for Visual Review:** After drafting `plan.md`, invoke the ExitPlanMode tool to launch TrackLens visual review:
+       ```
+       ExitPlanMode:
+         plan: <content of drafted plan.md>
+       ```
+       This will trigger the TrackLens hook which opens a browser-based visual editor for the plan.
+
+    b. **Await TrackLens Decision:** The TrackLens server will:
+       - Open a browser with the plan loaded in a visual editor
+       - Allow the user to review, annotate, and approve/deny
+       - Return a decision with optional feedback
+
+    c. **Handle TrackLens Decision:**
+       - **If APPROVED:** Proceed to step 7 (Create Track Artifacts)
+       - **If DENIED with feedback:** The hook will provide feedback. Revise the `plan.md` based on the feedback and re-invoke ExitPlanMode. Repeat until approved.
+
+    d. **Fallback (if TrackLens unavailable):** If ExitPlanMode fails or TrackLens is not available, fall back to manual review using `AskUserQuestion`:
+       ```
+       AskUserQuestion:
+         question: "I've drafted the implementation plan. Please review and decide:"
+         header: "Review Plan"
+         options:
+           - label: "Approve"
+             description: "The plan is correct and covers all necessary steps"
+           - label: "Suggest Changes"
+             description: "Tell me what to modify"
+         multiSelect: false
+       ```
+
+    e. **Revise and Re-submit:** If user requests changes (either through TrackLens feedback or manual fallback), revise the `plan.md` content and re-submit for approval until confirmed.
 
 ### 2.4 Create Track Artifacts and Update Main Plan
+
+**NOTE: This section only proceeds AFTER the plan has been approved through TrackLens (or manual fallback).**
 
 1.  **Check for existing track name:** Before generating a new Track ID, list all existing track directories in `maestro/tracks/`. Extract the short names from these track IDs (e.g., ``shortname_YYYYMMDD`` -> `shortname`). If the proposed short name for the new track (derived from the initial description) matches an existing short name, halt the `newTrack` creation. Explain that a track with that name already exists and suggest choosing a different name or resuming the existing track.
 2.  **Generate Track ID:** Create a unique Track ID (e.g., ``shortname_YYYYMMDD``).
@@ -340,3 +369,12 @@ AskUserQuestion:
        ```python
        db_session.commit()
        ```
+
+    **CLI Alternative (for tools without Python access):**
+
+    If you don't have Python access, use the Maestro CLI to store the memory:
+    ```bash
+    maestro memory store --content "Track created: ${track_id} - ${title}. Type: ${track_type}. Description: ${description}" --category context --importance normal
+    ```
+
+    This CLI-based approach achieves the same result as the Python approach above.

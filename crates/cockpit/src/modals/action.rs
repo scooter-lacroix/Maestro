@@ -8,6 +8,10 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
 use crate::state::InputMode;
+<<<<<<< HEAD
+=======
+use crate::theme::Theme;
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the action confirmation modal.
@@ -43,7 +47,7 @@ pub fn render_action_modal(frame: &mut Frame, app: &App) {
             Some(&app.new_session_title),
         ),
         InputMode::NewGroupTitle => (" New Group ", "Group Name:", Some(&app.rename_buffer)),
-        InputMode::MoveToGroup => (" Move to Group ", "Target Path:", Some(&app.rename_buffer)),
+        InputMode::MoveToGroup => (" Move to Group ", "Group Name:", Some(&app.rename_buffer)),
         _ => ("", "", None),
     };
 

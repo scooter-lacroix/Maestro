@@ -2,8 +2,8 @@
 //!
 //! Internal event bus to decouple engine polling from UI rendering.
 
-use tokio::sync::broadcast;
 use crate::conductor::model::ConductorEvent;
+use tokio::sync::broadcast;
 
 /// Global telemetry bus
 pub struct TelemetryBus {

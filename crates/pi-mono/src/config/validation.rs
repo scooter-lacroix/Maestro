@@ -24,7 +24,11 @@ pub struct ValidationWarning {
 
 impl ValidationWarning {
     /// Create a new validation warning
-    pub fn new(field: impl Into<String>, message: impl Into<String>, severity: ValidationSeverity) -> Self {
+    pub fn new(
+        field: impl Into<String>,
+        message: impl Into<String>,
+        severity: ValidationSeverity,
+    ) -> Self {
         Self {
             field: field.into(),
             message: message.into(),
@@ -114,11 +118,10 @@ pub fn validate_pi_path(config: &PiMonoConfig, detection: &Option<PiDetection>) 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let metadata = std::fs::metadata(path)
-                .map_err(|e| ConfigError::LoadFailed {
-                    location: path_str.clone(),
-                    reason: format!("Failed to read file metadata: {}", e),
-                })?;
+            let metadata = std::fs::metadata(path).map_err(|e| ConfigError::LoadFailed {
+                location: path_str.clone(),
+                reason: format!("Failed to read file metadata: {}", e),
+            })?;
             let permissions = metadata.permissions();
             let mode = permissions.mode();
 
@@ -412,20 +415,17 @@ fn validate_role_tier_compatibility(
 ///     Err(e) => println!("Validation failed: {}", e),
 /// }
 /// ```
-pub fn validate_config_ext(config: &PiMonoConfig, detection: &Option<PiDetection>) -> Result<Vec<ValidationWarning>> {
+pub fn validate_config_ext(
+    config: &PiMonoConfig,
+    detection: &Option<PiDetection>,
+) -> Result<Vec<ValidationWarning>> {
     let mut warnings = Vec::new();
 
     // Validate pi-mono path
-    if let Err(e) = validate_pi_path(config, detection) {
-        // Path validation errors are critical
-        return Err(e);
-    }
+    validate_pi_path(config, detection)?;
 
     // Validate model assignments
-    if let Err(e) = validate_model_assignments(config) {
-        // Model assignment errors are critical
-        return Err(e);
-    }
+    validate_model_assignments(config)?;
 
     // Add informational warnings for non-critical issues
 
@@ -646,7 +646,9 @@ mod tests {
 
             let err = result.unwrap_err();
             let err_msg = err.to_string();
-            assert!(err_msg.contains("invalid configuration path") || err_msg.contains("not found"));
+            assert!(
+                err_msg.contains("invalid configuration path") || err_msg.contains("not found")
+            );
         }
 
         #[test]
@@ -741,9 +743,11 @@ mod tests {
 
             // The error message should mention the paths don't match
             // It could be "does not match detected" or could contain the actual paths
-            assert!(err_msg.contains("does not match detected") ||
-                    err_msg.contains("/different/path/to/pi") ||
-                    err_msg.contains("Configured path"));
+            assert!(
+                err_msg.contains("does not match detected")
+                    || err_msg.contains("/different/path/to/pi")
+                    || err_msg.contains("Configured path")
+            );
 
             // Cleanup individual file
             let _ = fs::remove_file(&test_file);
@@ -1141,13 +1145,14 @@ mod tests {
             assert!(!warnings.is_empty());
 
             // Check for expected warnings
-            let warning_messages: Vec<_> = warnings
-                .iter()
-                .map(|w| w.field.as_str())
-                .collect();
+            let warning_messages: Vec<_> = warnings.iter().map(|w| w.field.as_str()).collect();
 
-            assert!(warning_messages.iter().any(|m| m.contains("model_preferences")));
-            assert!(warning_messages.iter().any(|m| m.contains("role_assignments")));
+            assert!(warning_messages
+                .iter()
+                .any(|m| m.contains("model_preferences")));
+            assert!(warning_messages
+                .iter()
+                .any(|m| m.contains("role_assignments")));
             assert!(warning_messages.iter().any(|m| m.contains("providers")));
         }
 
@@ -1174,9 +1179,7 @@ mod tests {
                 .collect();
 
             assert!(!provider_warnings.is_empty());
-            assert!(provider_warnings[0]
-                .message
-                .contains("OPENAI_API_KEY"));
+            assert!(provider_warnings[0].message.contains("OPENAI_API_KEY"));
         }
 
         #[test]
@@ -1187,10 +1190,7 @@ mod tests {
             assert!(result.is_ok());
 
             let warnings = result.unwrap();
-            let path_warnings: Vec<_> = warnings
-                .iter()
-                .filter(|w| w.field == "path")
-                .collect();
+            let path_warnings: Vec<_> = warnings.iter().filter(|w| w.field == "path").collect();
 
             assert!(!path_warnings.is_empty());
         }
@@ -1209,10 +1209,7 @@ mod tests {
             assert!(result.is_ok());
 
             let warnings = result.unwrap();
-            let path_warnings: Vec<_> = warnings
-                .iter()
-                .filter(|w| w.field == "path")
-                .collect();
+            let path_warnings: Vec<_> = warnings.iter().filter(|w| w.field == "path").collect();
 
             // Should have an info-level warning about using auto-detected path
             assert!(!path_warnings.is_empty());
@@ -1280,8 +1277,12 @@ mod tests {
             let warnings = result.unwrap();
 
             // Check that we have different severity levels
-            let _has_info = warnings.iter().any(|w| w.severity == ValidationSeverity::Info);
-            let has_warning = warnings.iter().any(|w| w.severity == ValidationSeverity::Warning);
+            let _has_info = warnings
+                .iter()
+                .any(|w| w.severity == ValidationSeverity::Info);
+            let has_warning = warnings
+                .iter()
+                .any(|w| w.severity == ValidationSeverity::Warning);
 
             // At minimum should have warnings
             assert!(has_warning);
@@ -1338,7 +1339,8 @@ mod tests {
 
         #[test]
         fn test_validation_warning_new() {
-            let warning = ValidationWarning::new("test_field", "test message", ValidationSeverity::Error);
+            let warning =
+                ValidationWarning::new("test_field", "test message", ValidationSeverity::Error);
             assert_eq!(warning.field, "test_field");
             assert_eq!(warning.message, "test message");
             assert_eq!(warning.severity, ValidationSeverity::Error);

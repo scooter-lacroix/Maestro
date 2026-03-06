@@ -165,3 +165,54 @@ nanobanana-output/
 # Rust build artifacts
 maestro/leindex/rust/target/
 target/
+.leindex_data/
+
+# LeIndex databases and caches (never commit these)
+.leindex/
+**/.leindex/
+*.leindex.db
+
+# Runtime state and configs
+.omx/
+.gemini/
+
+# Vibe CLI session logs
+.vibe/logs/
+
+# Build artifacts - NEVER commit these
+node_modules/
+node_modules/**/
+packages/**/node_modules/
+**/*.lock
+bun.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Frontend build artifacts
+**/.vite/
+**/dist/
+**/.nuxt/
+**/.output/
+**/.next/
+
+# LeIndex databases and cache (NEVER commit)
+.leindex/
+**/.leindex/
+*.leindex.db
+.leindex_data/
+**/.leindex_data/
+
+# Cargo.lock (optional - uncomment if you don't want to track it)
+# Cargo.lock
+
+# Rust build artifacts
+**/*.rlib
+**/*.rmeta
+**/*.d
+target/
+**/target/
+
+# Omex metrics (local state)
+.omx/
+**/.omx/

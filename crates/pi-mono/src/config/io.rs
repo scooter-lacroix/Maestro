@@ -19,11 +19,11 @@
 //! io::save_config(&config).unwrap();
 //! ```
 
-use crate::config::models::{PiMonoConfig, ProviderConfig, ExecutionSettings};
-use crate::error::{Result, Error, ConfigError};
+use crate::config::models::{ExecutionSettings, PiMonoConfig, ProviderConfig};
+use crate::error::{ConfigError, Error, Result};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 /// Configuration directory name within the user's home directory
 const CONFIG_DIR_NAME: &str = ".maestro";
@@ -58,10 +58,11 @@ const STANDARD_PROVIDERS: &[(&str, &str, &str)] = &[
 /// assert!(config_dir.ends_with(".maestro/config"));
 /// ```
 pub fn config_dir() -> Result<PathBuf> {
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| Error::Config(ConfigError::InvalidPath {
+    let home_dir = dirs::home_dir().ok_or_else(|| {
+        Error::Config(ConfigError::InvalidPath {
             path: "Home directory not found".to_string(),
-        }))?;
+        })
+    })?;
 
     Ok(home_dir.join(CONFIG_DIR_NAME).join(CONFIG_SUBDIR))
 }
@@ -99,10 +100,12 @@ pub fn ensure_config_dir() -> Result<PathBuf> {
     let dir = config_dir()?;
 
     if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| Error::Config(ConfigError::LoadFailed {
-            location: dir.to_string_lossy().to_string(),
-            reason: format!("failed to create directory: {}", e),
-        }))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            Error::Config(ConfigError::LoadFailed {
+                location: dir.to_string_lossy().to_string(),
+                reason: format!("failed to create directory: {}", e),
+            })
+        })?;
     }
 
     Ok(dir)
@@ -145,16 +148,19 @@ pub fn load_config() -> Result<PiMonoConfig> {
 /// let config = io::load_config_from_path(Path::new("/path/to/config.yaml"));
 /// ```
 pub fn load_config_from_path(path: &Path) -> Result<PiMonoConfig> {
-    let contents = std::fs::read_to_string(path).map_err(|e| Error::Config(ConfigError::LoadFailed {
-        location: path.to_string_lossy().to_string(),
-        reason: format!("failed to read file: {}", e),
-    }))?;
+    let contents = std::fs::read_to_string(path).map_err(|e| {
+        Error::Config(ConfigError::LoadFailed {
+            location: path.to_string_lossy().to_string(),
+            reason: format!("failed to read file: {}", e),
+        })
+    })?;
 
-    let config: PiMonoConfig = serde_yaml::from_str(&contents)
-        .map_err(|e| Error::Config(ConfigError::LoadFailed {
+    let config: PiMonoConfig = serde_yaml::from_str(&contents).map_err(|e| {
+        Error::Config(ConfigError::LoadFailed {
             location: path.to_string_lossy().to_string(),
             reason: format!("failed to parse YAML: {}", e),
-        }))?;
+        })
+    })?;
 
     validate_config(&config)?;
 
@@ -200,18 +206,21 @@ pub fn save_config_to_path(config: &PiMonoConfig, path: &Path) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            std::fs::create_dir_all(parent).map_err(|e| Error::Config(ConfigError::LoadFailed {
-                location: parent.to_string_lossy().to_string(),
-                reason: format!("failed to create directory: {}", e),
-            }))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                Error::Config(ConfigError::LoadFailed {
+                    location: parent.to_string_lossy().to_string(),
+                    reason: format!("failed to create directory: {}", e),
+                })
+            })?;
         }
     }
 
-    let yaml = serde_yaml::to_string(config)
-        .map_err(|e| Error::Config(ConfigError::LoadFailed {
+    let yaml = serde_yaml::to_string(config).map_err(|e| {
+        Error::Config(ConfigError::LoadFailed {
             location: path.to_string_lossy().to_string(),
             reason: format!("failed to serialize YAML: {}", e),
-        }))?;
+        })
+    })?;
 
     // Use atomic write pattern: write to temp file, then rename
     // This prevents race conditions where multiple processes might read
@@ -219,29 +228,35 @@ pub fn save_config_to_path(config: &PiMonoConfig, path: &Path) -> Result<()> {
     let temp_path = path.with_extension("tmp");
 
     {
-        let mut file = std::fs::File::create(&temp_path).map_err(|e| Error::Config(ConfigError::LoadFailed {
-            location: temp_path.to_string_lossy().to_string(),
-            reason: format!("failed to create temp file: {}", e),
-        }))?;
+        let mut file = std::fs::File::create(&temp_path).map_err(|e| {
+            Error::Config(ConfigError::LoadFailed {
+                location: temp_path.to_string_lossy().to_string(),
+                reason: format!("failed to create temp file: {}", e),
+            })
+        })?;
 
-        file.write_all(yaml.as_bytes())
-            .map_err(|e| Error::Config(ConfigError::LoadFailed {
+        file.write_all(yaml.as_bytes()).map_err(|e| {
+            Error::Config(ConfigError::LoadFailed {
                 location: temp_path.to_string_lossy().to_string(),
                 reason: format!("failed to write file: {}", e),
-            }))?;
+            })
+        })?;
 
-        file.flush()
-            .map_err(|e| Error::Config(ConfigError::LoadFailed {
+        file.flush().map_err(|e| {
+            Error::Config(ConfigError::LoadFailed {
                 location: temp_path.to_string_lossy().to_string(),
                 reason: format!("failed to flush file: {}", e),
-            }))?;
+            })
+        })?;
     }
 
     // Atomic rename from temp file to actual path
-    std::fs::rename(&temp_path, path).map_err(|e| Error::Config(ConfigError::LoadFailed {
-        location: path.to_string_lossy().to_string(),
-        reason: format!("failed to rename temp file: {}", e),
-    }))?;
+    std::fs::rename(&temp_path, path).map_err(|e| {
+        Error::Config(ConfigError::LoadFailed {
+            location: path.to_string_lossy().to_string(),
+            reason: format!("failed to rename temp file: {}", e),
+        })
+    })?;
 
     Ok(())
 }
@@ -314,7 +329,10 @@ pub fn validate_config(config: &PiMonoConfig) -> Result<()> {
     if config.settings.timeout < 1 || config.settings.timeout > 3600 {
         return Err(Error::Config(ConfigError::LoadFailed {
             location: "settings.timeout".to_string(),
-            reason: format!("timeout must be between 1 and 3600 seconds, got {}", config.settings.timeout),
+            reason: format!(
+                "timeout must be between 1 and 3600 seconds, got {}",
+                config.settings.timeout
+            ),
         }));
     }
 
@@ -322,7 +340,10 @@ pub fn validate_config(config: &PiMonoConfig) -> Result<()> {
     if config.settings.parallel_limit < 1 || config.settings.parallel_limit > 64 {
         return Err(Error::Config(ConfigError::LoadFailed {
             location: "settings.parallel_limit".to_string(),
-            reason: format!("parallel_limit must be between 1 and 64, got {}", config.settings.parallel_limit),
+            reason: format!(
+                "parallel_limit must be between 1 and 64, got {}",
+                config.settings.parallel_limit
+            ),
         }));
     }
 
@@ -507,7 +528,7 @@ mod tests {
         fn test_default_config_providers_not_configured() {
             let config = default_config();
 
-            for (_name, provider) in &config.providers {
+            for provider in config.providers.values() {
                 assert!(!provider.is_configured);
             }
         }
@@ -633,12 +654,14 @@ mod tests {
         #[test]
         fn test_validate_config_rejects_empty_model_id() {
             let mut config = default_config();
-            config.model_preferences.push(crate::config::models::ModelPreference {
-                model_id: "".to_string(),
-                provider: "anthropic".to_string(),
-                tier: crate::config::models::ModelTier::Balanced,
-                is_default: false,
-            });
+            config
+                .model_preferences
+                .push(crate::config::models::ModelPreference {
+                    model_id: "".to_string(),
+                    provider: "anthropic".to_string(),
+                    tier: crate::config::models::ModelTier::Balanced,
+                    is_default: false,
+                });
             let result = validate_config(&config);
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("model_id"));
@@ -647,12 +670,14 @@ mod tests {
         #[test]
         fn test_validate_config_rejects_empty_provider_in_preferences() {
             let mut config = default_config();
-            config.model_preferences.push(crate::config::models::ModelPreference {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "".to_string(),
-                tier: crate::config::models::ModelTier::Balanced,
-                is_default: false,
-            });
+            config
+                .model_preferences
+                .push(crate::config::models::ModelPreference {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "".to_string(),
+                    tier: crate::config::models::ModelTier::Balanced,
+                    is_default: false,
+                });
             let result = validate_config(&config);
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("provider"));
@@ -696,12 +721,14 @@ mod tests {
         fn test_validate_config_rejects_fallback_model_not_in_preferences() {
             let mut config = default_config();
             // Add a model preference
-            config.model_preferences.push(crate::config::models::ModelPreference {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                tier: crate::config::models::ModelTier::Balanced,
-                is_default: true,
-            });
+            config
+                .model_preferences
+                .push(crate::config::models::ModelPreference {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    tier: crate::config::models::ModelTier::Balanced,
+                    is_default: true,
+                });
             // Add role assignment with fallback model not in preferences
             config.role_assignments.insert(
                 "test_role".to_string(),
@@ -721,18 +748,22 @@ mod tests {
         fn test_validate_config_accepts_fallback_models_in_preferences() {
             let mut config = default_config();
             // Add model preferences
-            config.model_preferences.push(crate::config::models::ModelPreference {
-                model_id: "claude-sonnet-4-5".to_string(),
-                provider: "anthropic".to_string(),
-                tier: crate::config::models::ModelTier::Balanced,
-                is_default: true,
-            });
-            config.model_preferences.push(crate::config::models::ModelPreference {
-                model_id: "gpt-4o-mini".to_string(),
-                provider: "openai".to_string(),
-                tier: crate::config::models::ModelTier::Fast,
-                is_default: false,
-            });
+            config
+                .model_preferences
+                .push(crate::config::models::ModelPreference {
+                    model_id: "claude-sonnet-4-5".to_string(),
+                    provider: "anthropic".to_string(),
+                    tier: crate::config::models::ModelTier::Balanced,
+                    is_default: true,
+                });
+            config
+                .model_preferences
+                .push(crate::config::models::ModelPreference {
+                    model_id: "gpt-4o-mini".to_string(),
+                    provider: "openai".to_string(),
+                    tier: crate::config::models::ModelTier::Fast,
+                    is_default: false,
+                });
             // Add role assignment with valid fallback models
             config.role_assignments.insert(
                 "test_role".to_string(),
@@ -954,8 +985,11 @@ settings:
             assert_eq!(loaded_config.enabled, original_config.enabled);
             assert_eq!(loaded_config.path, original_config.path);
             assert_eq!(loaded_config.version_info, original_config.version_info);
-            assert_eq!(loaded_config.providers.len(), original_config.providers.len());
-            assert_eq!(loaded_config.providers["anthropic"].is_configured, true);
+            assert_eq!(
+                loaded_config.providers.len(),
+                original_config.providers.len()
+            );
+            assert!(loaded_config.providers["anthropic"].is_configured);
             assert_eq!(loaded_config.settings.timeout, 450);
             assert_eq!(loaded_config.settings.parallel_limit, 6);
         }
@@ -1059,12 +1093,14 @@ settings:
                 }
 
                 // Add model preferences
-                config.model_preferences.push(crate::config::models::ModelPreference {
-                    model_id: "claude-sonnet-4-5".to_string(),
-                    provider: "anthropic".to_string(),
-                    tier: crate::config::models::ModelTier::Balanced,
-                    is_default: true,
-                });
+                config
+                    .model_preferences
+                    .push(crate::config::models::ModelPreference {
+                        model_id: "claude-sonnet-4-5".to_string(),
+                        provider: "anthropic".to_string(),
+                        tier: crate::config::models::ModelTier::Balanced,
+                        is_default: true,
+                    });
 
                 config
             };

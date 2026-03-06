@@ -478,7 +478,134 @@ Before marking any task complete:
 3. Review manual overrides (if available)
 4. Provide clearer requirements
 
+## Pi-Mono Integration
+
+Pi-Mono enables Maestro to leverage subagent workflows with adaptive model selection. This integration provides parallel, chain, and single execution modes with automatic model discovery based on authenticated LLM providers.
+
+### Agent Mappings
+
+Pi-Mono maps Maestro roles to specialized subagents:
+
+| Maestro Role | Pi-Mono Subagent | Purpose |
+|--------------|------------------|---------|
+| `scout` | `scout` | Fast reconnaissance and codebase exploration |
+| `architect` | `planner` | Architecture design and strategic planning |
+| `critic` | `reviewer` | Code review and quality validation |
+| `kraken` | `worker` | Implementation and code generation |
+
+### Workflow Presets
+
+Pre-configured workflows for common development patterns:
+
+#### `/implement` (Chain Mode)
+Full implementation workflow with reconnaissance and architecture:
+```
+scout -> architect -> kraken
+```
+- Scout explores codebase context
+- Architect designs the implementation strategy
+- Kraken implements the solution
+
+#### `/implement-and-review` (Chain Mode)
+Implementation with iterative code review:
+```
+kraken -> critic -> kraken
+```
+- Kraken creates initial implementation
+- Critic reviews and provides feedback
+- Kraken applies improvements
+
+#### `/parallel-review`
+Parallel critic execution for multi-file review:
+- Multiple critic instances review different files simultaneously
+- Configurable concurrency limit (default: 4)
+
+### Execution Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **single** | Single subagent execution | Simple tasks, targeted operations |
+| **parallel** | Concurrent subagent execution | Multi-file processing, batch operations |
+| **chain** | Sequential execution with output passing | Complex workflows, iterative refinement |
+
+Chain mode supports the `{previous}` placeholder to pass output between agents.
+
+### Configuration
+
+Pi-Mono configuration is stored at `~/.maestro/config/pi-mono.yaml`:
+
+```yaml
+version: "1.0"
+enabled: true
+path: "/home/stan/pi-mono/pi"
+
+role_assignments:
+  scout:
+    model_id: "claude-haiku-4-5"
+    provider: "anthropic"
+    fallback_models: ["gpt-4o-mini"]
+  architect:
+    model_id: "claude-sonnet-4-5"
+    provider: "anthropic"
+    use_reasoning: true
+  critic:
+    model_id: "claude-sonnet-4-5"
+    provider: "anthropic"
+  kraken:
+    model_id: "claude-sonnet-4-5"
+    provider: "anthropic"
+
+settings:
+  timeout: 300
+  parallel_limit: 4
+  chain_mode: true
+  streaming: true
+```
+
+### Pi-Mono Commands
+
+| Command | Description |
+|---------|-------------|
+| `/maestro:pi-status` | Display pi-mono configuration and provider status |
+| `/maestro:pi-test` | Test subagent functionality and connectivity |
+| `/maestro:pi-agents` | List available pi agents and their model assignments |
+
+### Implement Command Flags
+
+Enhanced `/maestro:implement` with pi-mono options:
+
+```bash
+# Single agent execution
+/maestro:implement --pi-agent scout "Explore authentication module"
+
+# Chain execution (comma-separated)
+/maestro:implement --pi-chain scout,architect,kraken "Build user service"
+
+# Parallel execution
+/maestro:implement --pi-parallel critic "Review all changed files"
+```
+
+### Model Discovery
+
+Pi-Mono automatically discovers available models from authenticated providers:
+- **Anthropic**: Claude models (Opus, Sonnet, Haiku)
+- **OpenAI**: GPT-4, GPT-4o, GPT-4o-mini
+- **Google**: Gemini models
+- **Groq**: Fast inference models
+- **OpenRouter**: Multi-provider access
+
+Model discovery results are cached for 24 hours.
+
+### Fallback Behavior
+
+When pi-mono is unavailable, Maestro gracefully degrades:
+
+1. **Detection Failure**: Uses built-in agent selection
+2. **Provider Unavailable**: Falls back to alternative models in `fallback_models`
+3. **Subagent Error**: Retries with exponential backoff, then reports failure
+
 ## See Also
 
 - [Claude Code Guide](CLAUDE-CODE.md) - Using Maestro with Claude Code
 - [OpenCode Guide](OPENCODE.md) - Using Maestro with OpenCode
+- [Pi-Mono Spec](../maestro/tracks/pi-mono_20260123/spec.md) - Full integration specification

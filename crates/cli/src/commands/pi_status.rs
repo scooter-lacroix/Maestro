@@ -5,9 +5,7 @@
 //! provider authentication, and agent role assignments.
 
 use anyhow::Result;
-use maestro_pi_mono::{
-    load_config, PiDetection, ModelDiscovery, ModelConfig,
-};
+use maestro_pi_mono::{load_config, ModelConfig, ModelDiscovery, PiDetection};
 use std::path::PathBuf;
 use tracing::debug;
 
@@ -17,11 +15,7 @@ use tracing::debug;
 /// - Configuration status (enabled/disabled, path, version)
 /// - Provider authentication status
 /// - Agent role assignments
-pub async fn run(
-    _config_path: Option<PathBuf>,
-    verbose: bool,
-    json: bool,
-) -> Result<()> {
+pub async fn run(_config_path: Option<PathBuf>, verbose: bool, json: bool) -> Result<()> {
     debug!("Running pi-status command");
 
     // Load configuration - load_config returns ModelConfig (full config)
@@ -37,10 +31,7 @@ pub async fn run(
 }
 
 /// Print status in human-readable format
-async fn print_status_human(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<()> {
+async fn print_status_human(config: &ModelConfig, verbose: bool) -> Result<()> {
     println!();
     println!("═══════════════════════════════════════════════════════════════");
     println!("  Pi-Mono Status");
@@ -70,10 +61,7 @@ async fn print_status_human(
 }
 
 /// Print status in JSON format
-async fn print_status_json(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<()> {
+async fn print_status_json(config: &ModelConfig, verbose: bool) -> Result<()> {
     use serde_json::json;
 
     let mut status = json!({
@@ -127,22 +115,44 @@ async fn print_status_json(
 fn print_config_status(config: &ModelConfig) {
     println!("Configuration Status:");
     let status_symbol = if config.enabled { "✓" } else { "✗" };
-    println!("  Status: {} {}", status_symbol, if config.enabled { "Enabled" } else { "Disabled" });
-    println!("  Path: {}", config.path.as_ref().map(|p| p.as_str()).unwrap_or("Not configured"));
-    println!("  Version: {}", config.version_info.as_ref().map(|v| v.as_str()).unwrap_or("Unknown"));
+    println!(
+        "  Status: {} {}",
+        status_symbol,
+        if config.enabled {
+            "Enabled"
+        } else {
+            "Disabled"
+        }
+    );
+    println!(
+        "  Path: {}",
+        config
+            .path
+            .as_ref()
+            .map(|p| p.as_str())
+            .unwrap_or("Not configured")
+    );
+    println!(
+        "  Version: {}",
+        config
+            .version_info
+            .as_ref()
+            .map(|v| v.as_str())
+            .unwrap_or("Unknown")
+    );
     println!("  Schema Version: {}", config.version);
 }
 
 /// Print detection status
-async fn print_detection_status(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<bool> {
+async fn print_detection_status(config: &ModelConfig, verbose: bool) -> Result<bool> {
     println!("Detection Status:");
 
     match PiDetection::detect() {
         Ok(mut detection) => {
-            println!("  ✓ Found pi-mono at: {}", detection.executable_path.display());
+            println!(
+                "  ✓ Found pi-mono at: {}",
+                detection.executable_path.display()
+            );
 
             // Try to detect version
             match detection.detect_version().await {
@@ -168,10 +178,38 @@ async fn print_detection_status(
 
             if verbose {
                 println!("  Capabilities:");
-                println!("    Subagent: {}", if detection.capabilities.subagent { "✓" } else { "✗" });
-                println!("    Streaming: {}", if detection.capabilities.streaming { "✓" } else { "✗" });
-                println!("    Parallel: {}", if detection.capabilities.parallel { "✓" } else { "✗" });
-                println!("    Chain: {}", if detection.capabilities.chain { "✓" } else { "✗" });
+                println!(
+                    "    Subagent: {}",
+                    if detection.capabilities.subagent {
+                        "✓"
+                    } else {
+                        "✗"
+                    }
+                );
+                println!(
+                    "    Streaming: {}",
+                    if detection.capabilities.streaming {
+                        "✓"
+                    } else {
+                        "✗"
+                    }
+                );
+                println!(
+                    "    Parallel: {}",
+                    if detection.capabilities.parallel {
+                        "✓"
+                    } else {
+                        "✗"
+                    }
+                );
+                println!(
+                    "    Chain: {}",
+                    if detection.capabilities.chain {
+                        "✓"
+                    } else {
+                        "✗"
+                    }
+                );
             }
 
             Ok(true)
@@ -185,10 +223,7 @@ async fn print_detection_status(
 }
 
 /// Print provider authentication status
-async fn print_provider_status(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<()> {
+async fn print_provider_status(config: &ModelConfig, verbose: bool) -> Result<()> {
     println!("Provider Authentication:");
 
     if config.providers.is_empty() {
@@ -197,7 +232,11 @@ async fn print_provider_status(
         return Ok(());
     }
 
-    let configured_count = config.providers.values().filter(|p| p.is_configured).count();
+    let configured_count = config
+        .providers
+        .values()
+        .filter(|p| p.is_configured)
+        .count();
     let total_count = config.providers.len();
 
     println!("  Configured: {}/{}", configured_count, total_count);
@@ -205,7 +244,10 @@ async fn print_provider_status(
 
     for (_name, provider) in &config.providers {
         let status = if provider.is_configured { "✓" } else { "✗" };
-        println!("  {} {} ({})", status, provider.display_name, provider.env_var);
+        println!(
+            "  {} {} ({})",
+            status, provider.display_name, provider.env_var
+        );
     }
 
     // Try model discovery to verify provider status
@@ -242,10 +284,7 @@ async fn print_provider_status(
 }
 
 /// Print agent role assignments
-async fn print_agent_assignments(
-    config: &ModelConfig,
-    verbose: bool,
-) -> Result<()> {
+async fn print_agent_assignments(config: &ModelConfig, verbose: bool) -> Result<()> {
     println!("Agent Role Assignments:");
 
     if config.role_assignments.is_empty() {
@@ -262,7 +301,10 @@ async fn print_agent_assignments(
         };
 
         println!("  {}:", role_name);
-        println!("    Model: {} ({}){}", assignment.model_id, assignment.provider, reasoning_status);
+        println!(
+            "    Model: {} ({}){}",
+            assignment.model_id, assignment.provider, reasoning_status
+        );
 
         if verbose {
             if let Some(fallbacks) = &assignment.fallback_models {
@@ -315,7 +357,9 @@ fn print_status_summary(config: &ModelConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maestro_pi_mono::config::models::{PiMonoConfig, ProviderConfig, RoleAssignment, ExecutionSettings};
+    use maestro_pi_mono::config::models::{
+        ExecutionSettings, PiMonoConfig, ProviderConfig, RoleAssignment,
+    };
     use std::collections::HashMap;
 
     /// Test helper to create a test configuration

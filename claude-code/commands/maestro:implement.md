@@ -184,7 +184,26 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
                - **Step 5:** What issues were found in agent's work?
                - **Step 6:** Is work ready to proceed? What revisions are needed?
 
-5.  **Finalize Track:**
+5.  **TrackLens Walkthrough Review:**
+    -   **CRITICAL:** After all tasks in the track's local `plan.md` are completed, you MUST generate and present a TrackLens walkthrough for user review BEFORE marking the track as complete.
+    -   **Generate Walkthrough:** Use the Bash tool to run:
+        ```bash
+        maestro tracklens walkthrough <track_id> --full-diffs
+        ```
+    -   This command will:
+        - Generate a comprehensive walkthrough of all completed work
+        - Start a TrackLens review server and open it in your browser
+        - Wait for your approval/denial decision
+    -   **Handle Denial with Annotations:** If you deny with annotations, the system will:
+        - Create remediation tasks from your annotations
+        - Add them to the track's `plan.md`
+        - Re-run the walkthrough for re-review
+        - Loop until approved or max iterations (3) reached
+    -   **Only After Approval:** Once the walkthrough is approved, proceed to finalize the track.
+
+6.  **Finalize Track:**
+
+
     -   After all tasks in the track's local `plan.md` are completed, you MUST update the track's status in the tracks file.
     -   This requires finding the specific heading for the track (e.g., `## [~] Track: <Description>`) and replacing it with the completed status (e.g., `## [x] Track: <Description>`).
     -   Announce that the track is fully complete and the tracks file has been updated.
@@ -274,9 +293,23 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
        db_session.commit()
        ```
 
+    **CLI Alternative (for tools without Python access):**
+
+    If you don't have Python access, use the Maestro CLI to store completion memories:
+
+    ```bash
+    # After task completion:
+    maestro memory store --content "Task completed in track ${track_id}: ${task_title}. Files: ${files_modified}" --category decision --importance normal
+
+    # After track completion:
+    maestro memory store --content "Track '${track_id}' completed successfully. Total tasks: ${task_count}. Changes: ${summary}" --category decision --importance high
+    ```
+
+    This CLI-based approach achieves the same result as the Python approach above.
+
 ---
 
-## 6.0 SYNCHRONIZE PROJECT DOCUMENTATION
+## 7.0 SYNCHRONIZE PROJECT DOCUMENTATION
 **PROTOCOL: Update project-level documentation based on the completed track.**
 
 1.  **Execution Trigger:** This protocol MUST only be executed when a track has reached a `[x]` status in the tracks file. DO NOT execute this protocol for any other track status changes.
@@ -351,7 +384,7 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
 
 ---
 
-## 7.0 TRACK CLEANUP
+## 8.0 TRACK CLEANUP
 **PROTOCOL: Offer to archive or delete the completed track.**
 
 1.  **Execution Trigger:** This protocol MUST only be executed after the current track has been successfully implemented and the `SYNCHRONIZE PROJECT DOCUMENTATION` step is complete.

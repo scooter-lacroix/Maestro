@@ -2,31 +2,53 @@
 name = "maestro-lsp-mcp-bridge"
 version = "2.5.0"
 edition = "2021"
-description = "Maestro LSP to MCP Bridge - Protocol translation"
+description = "Maestro LSP to MCP Bridge - Protocol translation between LSP and MCP"
 authors = ["Maestro Project"]
+
+[lib]
+name = "maestro_lsp_mcp_bridge"
+path = "src/lib.rs"
 
 [[bin]]
 name = "maestro-lsp-mcp-bridge"
 path = "src/main.rs"
 
+[features]
+# Enable rusqlite integration for persisting LSP diagnostics to memory
+rusqlite = ["leindex-core/rusqlite"]
+
 [dependencies]
-# Core library
-leindex-core = { path = "../../maestro/leindex/rust" }
+# Core library - provides LSP type definitions and LspManager
+leindex-core = { path = "../../src/leindex" }
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
 
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true }
 
 # Error handling
-anyhow = "1.0"
-thiserror = "1.0"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 # LSP types
 lsp-types = "0.97"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# URL encoding for file:// URIs
+urlencoding = "2.1"
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# Testing
+tokio-test = "0.4"
+futures = "0.3"

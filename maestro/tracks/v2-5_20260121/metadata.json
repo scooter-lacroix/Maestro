@@ -1,0 +1,31 @@
+{
+  "track_id": "v2-5_20260121",
+  "type": "master",
+  "status": "in-progress",
+  "created_at": "2026-01-21T00:00:00Z",
+  "updated_at": "2026-01-23T00:00:00Z",
+  "description": "Maestro v2.5 - Cockpit v2 main TUI, LeIndex pure-Rust core (TLDR absorbed), and Orchestrate pane (Ralph port) integrated into Maestro.",
+  "sub_tracks": [
+    "01-cockpit-tui-reorg",
+    "02-leindex-core-rust",
+    "03-orchestrate-pane-ralph",
+    "04-cli-first-class-integrations"
+  ],
+  "phases": {
+    "phase_1": "Cockpit TUI Re-Org & Distribution",
+    "phase_2": "LeIndex Core (Rust) = TLDR",
+    "phase_3": "Orchestrate Pane Integration",
+    "phase_4": "First-Class Integrations",
+    "phase_5": "Enhanced Features & Polish (Optional)",
+    "phase_6": "Final Integration / Release Gate"
+  },
+  "phase_status": {
+    "phase_1": "completed",
+    "phase_2": "completed",
+    "phase_3": "completed",
+    "phase_4": "completed",
+    "phase_5": "completed",
+    "phase_6": "pending"
+  },
+  "notes": "Phase 5 complete! All optional enhancements implemented: Cockpit UI refactoring, LeIndex 5-phase analysis workflows, rate-limit detection/recovery, headless execution with sandbox, setup-on-first-run flow, Maestro command integration, integration config validation, and enhanced diagnostic commands."
+}

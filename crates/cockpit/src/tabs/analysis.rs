@@ -4,11 +4,11 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    prelude::*,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
-    prelude::*,
 };
 
 use crate::app::App;
@@ -49,7 +49,10 @@ pub fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
     // Quick Action Buttons Display
     let quick_actions = vec![
         Line::from(vec![
-            Span::styled(" QUICK WORKFLOWS: ", Style::default().fg(Color::Yellow).bold()),
+            Span::styled(
+                " QUICK WORKFLOWS: ",
+                Style::default().fg(Color::Yellow).bold(),
+            ),
             Span::styled("[F]", Style::default().fg(Color::Green)),
             Span::styled(" Fast  ", Style::default().fg(Color::Gray)),
             Span::styled("[I]", Style::default().fg(Color::Green)),
@@ -111,17 +114,23 @@ pub fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(Color::DarkGray).italic(),
         )]));
         history_lines.push(Line::from(""));
-        history_lines.push(Line::from(vec![
-            Span::styled(" Quick Start:", Style::default().fg(Color::Yellow)),
-        ]));
+        history_lines.push(Line::from(vec![Span::styled(
+            " Quick Start:",
+            Style::default().fg(Color::Yellow),
+        )]));
         history_lines.push(Line::from("   Press [F] for fast orientation (ultra mode)"));
-        history_lines.push(Line::from("   Press [I] for implementation-ready (balanced mode)"));
+        history_lines.push(Line::from(
+            "   Press [I] for implementation-ready (balanced mode)",
+        ));
         history_lines.push(Line::from("   Press [1-5] for individual phases"));
-        history_lines.push(Line::from("   Press [M] to toggle between Ultra/Balanced modes"));
+        history_lines.push(Line::from(
+            "   Press [M] to toggle between Ultra/Balanced modes",
+        ));
         history_lines.push(Line::from(""));
-        history_lines.push(Line::from(vec![
-            Span::styled(" Examples:", Style::default().fg(Color::Yellow)),
-        ]));
+        history_lines.push(Line::from(vec![Span::styled(
+            " Examples:",
+            Style::default().fg(Color::Yellow),
+        )]));
         history_lines.push(Line::from("   /phase1 . --mode ultra --files 20"));
         history_lines.push(Line::from("   /phase1 . --mode balanced --files 50"));
         history_lines.push(Line::from("   /phase2 . (dependency map)"));
@@ -131,12 +140,10 @@ pub fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         // Show most recent history entries first (reversed)
         for entry in app.analysis_history.iter().rev().take(10) {
-            history_lines.push(Line::from(vec![
-                Span::styled(
-                    format!(" • {}", entry),
-                    Style::default().fg(Color::Gray),
-                ),
-            ]));
+            history_lines.push(Line::from(vec![Span::styled(
+                format!(" • {}", entry),
+                Style::default().fg(Color::Gray),
+            )]));
             history_lines.push(Line::from(""));
         }
     }
@@ -144,7 +151,10 @@ pub fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
     let history_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(format!(" History ({} shown, max 20) ", app.analysis_history.len()))
+        .title(format!(
+            " History ({} shown, max 20) ",
+            app.analysis_history.len()
+        ))
         .title_style(Style::default().fg(theme.accent_alt));
 
     let history = Paragraph::new(history_lines)

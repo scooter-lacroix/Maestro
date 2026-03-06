@@ -9,9 +9,28 @@ authors = ["Maestro Project"]
 name = "maestro_cockpit"
 crate-type = ["rlib"]
 
+[[bin]]
+name = "maestro-cockpit"
+path = "src/main.rs"
+
 [dependencies]
 # Core library (shared data layer)
-leindex-analyzers = { path = "../../maestro/leindex/rust" }
+leindex-core = { path = "../../src/leindex" }
+
+# Maestro core capabilities (Phase 3)
+maestro-core = { path = "../core" }
+
+# Maestro Claw agent framework
+maestro-claw = { path = "../maestro-claw" }
+
+# Pi-Mono agent integration
+maestro-pi-mono = { path = "../pi-mono" }
+
+# Cancellation token support (CancellationToken is in default)
+tokio-util = "0.7"
+
+# Ktop collectors for system metrics
+ktop_collectors = { path = "../ktop_collectors" }
 
 # TUI framework
 ratatui = "0.29"
@@ -19,6 +38,9 @@ crossterm = "0.28"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# Async trait support
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -34,6 +56,9 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2"
 lazy_static = "1.4"
+which = "6.0"
+cli-clipboard = "0.4"
+dirs = "5.0"
 
 [dev-dependencies]
 tempfile = "3.10"

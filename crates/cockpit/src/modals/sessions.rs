@@ -5,9 +5,17 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
+<<<<<<< HEAD
 use leindex_analyzers::memory::SessionStatus;
 
 use crate::state::HubFocus;
+=======
+use leindex_core::memory::models::McpStatus;
+use leindex_core::memory::SessionStatus;
+
+use crate::state::HubFocus;
+use crate::theme::Theme;
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the session hub modal.
@@ -25,6 +33,7 @@ use crate::app::App;
 /// * `app` - Reference to the application state
 pub fn render_session_hub_modal(frame: &mut Frame, app: &App) {
     let area = crate::modals::centered_rect(80, 60, frame.area());
+    let theme = app.theme();
     frame.render_widget(Clear, area);
 
     let block = Block::default()
@@ -32,7 +41,7 @@ pub fn render_session_hub_modal(frame: &mut Frame, app: &App) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 10, 15)));
+        .style(Style::default().bg(theme.panel_bg));
     frame.render_widget(block, area);
 
     let chunks = Layout::default()

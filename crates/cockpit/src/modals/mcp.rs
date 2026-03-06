@@ -8,7 +8,11 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragr
 use ratatui::text::Line;
 
 use crate::state::McpOption;
+<<<<<<< HEAD
 use crate::theme::theme_from_name;
+=======
+use crate::theme::{theme_from_name, Theme};
+>>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
 
 /// Renders the MCP menu modal.
@@ -104,7 +108,7 @@ pub fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
                 Line::from("  Tip: LSP logs may not be enabled for this server."),
             ]
         } else {
-            app.lsp_log_content.lines().map(|l| Line::from(l)).collect()
+            app.lsp_log_content.lines().map(Line::from).collect()
         };
         let scroll_offset = (app.lsp_log_scroll, 0);
         (title, content, scroll_offset)

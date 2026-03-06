@@ -1,0 +1,41 @@
+{
+  "name": "@maestro/tracklens-editor",
+  "version": "0.1.0",
+  "description": "TrackLens editor React app - plan/spec/walkthrough review UI",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:watch": "vite build --watch",
+    "preview": "vite preview",
+    "copy-to-apps": "cp dist/index.html ../../apps/tracklens-opencode/tracklens.html",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "maestro",
+    "tracklens",
+    "editor",
+    "react",
+    "code-review"
+  ],
+  "author": "Maestro",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  },
+  "dependencies": {
+    "@maestro/tracklens-shared": "workspace:*",
+    "@maestro/tracklens-ui": "workspace:*",
+    "@maestro/tracklens-web-highlighter": "workspace:*",
+    "@tailwindcss/postcss": "^4.2.1",
+    "postcss": "^8.5.8",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tailwindcss": "^4.2.1"
+  }
+}
