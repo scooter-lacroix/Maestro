@@ -1,0 +1,16 @@
+{
+  "project_id": "docs",
+  "generation": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+  "phase": 2,
+  "options_hash": null,
+  "payload": {
+    "internal_import_edges": 0,
+    "external_import_edges": 0,
+    "unresolved_modules": 0,
+    "confidence_bands": [
+      0,
+      0,
+      0
+    ]
+  }
+}
