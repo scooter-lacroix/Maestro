@@ -578,7 +578,7 @@ mod tests {
             let config = PiMonoConfig {
                 version: "1.0".to_string(),
                 enabled: true,
-                path: Some("/home/stan/pi-mono/pi".to_string()),
+                path: Some("/usr/local/bin/pi".to_string()),
                 version_info: Some("0.49.3".to_string()),
                 providers,
                 model_preferences,
@@ -588,7 +588,7 @@ mod tests {
 
             assert_eq!(config.version, "1.0");
             assert!(config.enabled);
-            assert_eq!(config.path.unwrap(), "/home/stan/pi-mono/pi");
+            assert_eq!(config.path.unwrap(), "/usr/local/bin/pi");
             assert_eq!(config.version_info.unwrap(), "0.49.3");
             assert_eq!(config.providers.len(), 1);
             assert_eq!(config.model_preferences.len(), 1);
@@ -653,7 +653,7 @@ mod tests {
             let config = PiMonoConfig {
                 version: "1.0".to_string(),
                 enabled: true,
-                path: Some("/home/stan/pi-mono/pi".to_string()),
+                path: Some("/usr/local/bin/pi".to_string()),
                 version_info: Some("0.49.3".to_string()),
                 providers,
                 model_preferences,

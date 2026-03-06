@@ -190,14 +190,16 @@ AskUserQuestion:
     -   **CRITICAL:** After drafting `spec.md`, you MUST present it for TrackLens review before proceeding.
     -   **Create Temp Spec File:** Write the drafted spec content to a temporary file:
         ```bash
-        # Write spec content to temp file
-        cat > /tmp/tracklens-spec-review.md << 'SPEC_EOF'
+        # Write spec content to a portable temp file
+        mkdir -p "${TMPDIR:-$PWD/.maestro/tmp}"
+        SPEC_REVIEW_FILE="$(mktemp "${TMPDIR:-$PWD/.maestro/tmp}/tracklens-spec-review.XXXXXX.md")"
+        cat > "$SPEC_REVIEW_FILE" << 'SPEC_EOF'
         <paste spec content here>
         SPEC_EOF
         ```
     -   **Run TrackLens Review:** Use the Bash tool to start the review:
         ```bash
-        maestro tracklens review /tmp/tracklens-spec-review.md --mode review
+        maestro tracklens review "$SPEC_REVIEW_FILE" --mode review
         ```
     -   This will:
         - Start a TrackLens review server and open it in your browser

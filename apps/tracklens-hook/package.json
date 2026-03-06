@@ -10,7 +10,7 @@
   "scripts": {
     "build": "bun build:tsc && bun build:ui && bun copy:html",
     "build:tsc": "tsc",
-    "build:ui": "cd ../tracklens-editor && bun run build && cd ../../packages/tracklens-review-editor && bun run build && cd ../../tracklens-hook",
+    "build:ui": "bun run --cwd ../../packages/tracklens-editor build && bun run --cwd ../../packages/tracklens-review-editor build",
     "copy:html": "mkdir -p dist && cp ../../packages/tracklens-editor/dist/index.html dist/index.html && cp ../../packages/tracklens-review-editor/dist/index.html dist/review.html",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build"

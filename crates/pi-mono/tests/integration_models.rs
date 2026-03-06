@@ -184,7 +184,7 @@ fn test_complete_configuration_example() {
     let config = ModelConfig {
         version: "1.0".to_string(),
         enabled: true,
-        path: Some("/home/stan/pi-mono/pi".to_string()),
+        path: Some("/usr/local/bin/pi".to_string()),
         version_info: Some("0.49.3".to_string()),
         providers,
         model_preferences,
@@ -195,7 +195,7 @@ fn test_complete_configuration_example() {
     // Verify all fields
     assert_eq!(config.version, "1.0");
     assert!(config.enabled);
-    assert_eq!(config.path.unwrap(), "/home/stan/pi-mono/pi");
+    assert_eq!(config.path.unwrap(), "/usr/local/bin/pi");
     assert_eq!(config.version_info.unwrap(), "0.49.3");
     assert_eq!(config.providers.len(), 5);
     assert_eq!(config.model_preferences.len(), 2);
