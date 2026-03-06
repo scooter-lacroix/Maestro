@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "Maestro TrackLens - Code review and annotation system",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/tracklens-*"
   ],
   "scripts": {
-    "build": "bun run build:deps && bun run build:editor && bun run build:review-editor",
+    "build": "bun run build:deps && bun run build:editor && bun run build:review-editor && bun run build:apps",
     "build:tracklens": "bun run build",
     "build:deps": "bun run build:shared && bun run build:web-highlighter && bun run build:ui && bun run build:server",
     "build:shared": "bun run --cwd packages/tracklens-shared build",
@@ -15,6 +16,9 @@
     "build:server": "bun run --cwd packages/tracklens-server build",
     "build:editor": "bun run --cwd packages/tracklens-editor build",
     "build:review-editor": "bun run --cwd packages/tracklens-review-editor build",
+    "build:apps": "bun run build:hook && bun run build:opencode",
+    "build:hook": "bun run --cwd apps/tracklens-hook build",
+    "build:opencode": "bun run --cwd apps/tracklens-opencode build",
     "dev": "bun run build:deps && concurrently \"bun run dev:editor\" \"bun run dev:review-editor\"",
     "dev:editor": "bun run --cwd packages/tracklens-editor dev",
     "dev:review-editor": "bun run --cwd packages/tracklens-review-editor dev",
@@ -25,7 +29,7 @@
     "watch:ui": "bun run --cwd packages/tracklens-ui dev",
     "watch:server": "bun run --cwd packages/tracklens-server dev",
     "clean": "rm -rf packages/*/dist apps/tracklens-opencode/tracklens.html apps/tracklens-opencode/tracklens-review.html",
-    "install:all": "bun install && cd packages/tracklens-shared && bun install && cd ../tracklens-web-highlighter && bun install && cd ../tracklens-ui && bun install && cd ../tracklens-server && bun install && cd ../tracklens-editor && bun install && cd ../tracklens-review-editor && bun install"
+    "install:all": "bun install"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",

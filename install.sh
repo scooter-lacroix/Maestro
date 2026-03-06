@@ -121,20 +121,15 @@ fi
 # Build TrackLens packages
 echo -e "${C}    Building TrackLens packages...${NC}"
 cd "$INSTALL_DIR"
-if command -v bun &> /dev/null; then
-    bun install || true
-    # Install tracklens-hook dependencies
-    cd "$INSTALL_DIR/apps/tracklens-hook" && bun install 2>/dev/null || true
-    cd "$INSTALL_DIR"
-    bun run build:tracklens || echo -e "${Y}  [!] TrackLens build failed, continuing...${NC}"
-    # Copy HTML files to tracklens-hook dist
-    cd "$INSTALL_DIR/apps/tracklens-hook" && bun run copy:html 2>/dev/null || echo -e "${Y}  [!] HTML copy failed, continuing...${NC}"
-else
-    npm install && npm run build:tracklens || echo -e "${Y}  [!] TrackLens build failed, continuing...${NC}"
-    # Install tracklens-hook dependencies
-    cd "$INSTALL_DIR/apps/tracklens-hook" && npm install 2>/dev/null || true
-    cd "$INSTALL_DIR"
+if ! command -v bun &> /dev/null; then
+    echo -e "${R}  [!] Bun is required to install the TrackLens workspace.${NC}"
+    exit 1
 fi
+
+echo -e "${C}    Installing TrackLens workspace dependencies with Bun...${NC}"
+bun install
+echo -e "${C}    Building TrackLens workspace (packages and apps)...${NC}"
+bun run build:tracklens
 
 # Install TrackLens Claude Code Plugin
 echo -e "${C}    Installing TrackLens Claude Code Plugin...${NC}"
