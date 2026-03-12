@@ -5,6 +5,9 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use walkdir::WalkDir;
 
+use crate::memory::models::{McpServer, McpStatus, McpTransport};
+use crate::memory::service::MemoryService;
+
 pub mod distro;
 pub mod package_manager;
 pub mod password;
@@ -146,6 +149,12 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         });
     }
 
+    steps.push(Step {
+        name: "MCP Pool".to_string(),
+        description: "Registering LeIndex in the Maestro MCP pool...".to_string(),
+        action: StepAction::Internal(Box::new(register_leindex_pool)),
+    });
+
     // Handle Tooling Granularly
     for tool in &config.selected_tools {
         match tool.as_str() {
@@ -274,7 +283,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             dst_tpl.display()
                         ));
 
-                        // MCP config (best-effort): ensure LeIndex is reachable via `maestro mcp tool-search`.
+                        // MCP config (best-effort): route LeIndex through the Maestro MCP pool.
                         let mcp_path = home_dir()?.join(".claude").join(".mcp.json");
                         let mut mcp_logs = upsert_json_server(
                             &mcp_path,
@@ -282,7 +291,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "tool-search"],
+                                "args": ["mcp", "proxy", "leindex"],
                                 "type": "stdio"
                             }),
                         )?;
@@ -333,11 +342,32 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "tool-search"]
+                                "args": ["mcp", "proxy", "leindex"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
 
+                        Ok(logs)
+                    })),
+                });
+            }
+            "iFlow CLI (by iFlow)" => {
+                steps.push(Step {
+                    name: "Strings - iFlow".to_string(),
+                    description: "Integrating Maestro into iFlow CLI...".to_string(),
+                    action: StepAction::Internal(Box::new(|| {
+                        let cfg_path = home_dir()?.join(".iflow").join("settings.json");
+                        let mut logs = Vec::new();
+                        let mut cfg_logs = upsert_json_server(
+                            &cfg_path,
+                            "mcpServers",
+                            "leindex",
+                            serde_json::json!({
+                                "command": "maestro",
+                                "args": ["mcp", "proxy", "leindex"]
+                            }),
+                        )?;
+                        logs.append(&mut cfg_logs);
                         Ok(logs)
                     })),
                 });
@@ -373,7 +403,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             &cfg_path,
                             "leindex",
                             "maestro",
-                            &["mcp", "tool-search"],
+                            &["mcp", "proxy", "leindex"],
                         )?;
                         logs.append(&mut cfg_logs);
 
@@ -463,7 +493,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "tool-search"]
+                                "args": ["mcp", "proxy", "leindex"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -499,7 +529,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "tool-search"]
+                                "args": ["mcp", "proxy", "leindex"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -521,7 +551,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             serde_json::json!({
                                 "type": "stdio",
                                 "command": "maestro",
-                                "args": ["mcp", "tool-search"]
+                                "args": ["mcp", "proxy", "leindex"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -1457,11 +1487,38 @@ fn upsert_opencode_mcp(root: &mut serde_json::Map<String, serde_json::Value>) ->
     mcp_map.insert(
         "leindex".to_string(),
         serde_json::json!({
-            "command": ["maestro", "mcp", "tool-search"],
+            "command": ["maestro", "mcp", "proxy", "leindex"],
             "environment": {}
         }),
     );
     Ok(())
+}
+
+fn register_leindex_pool() -> Result<Vec<String>> {
+    let service = MemoryService::new(None)?;
+    service.initialize()?;
+
+    let server = McpServer {
+        id: 0,
+        name: "leindex".to_string(),
+        transport: McpTransport::Stdio,
+        command: "leindex".to_string(),
+        args: vec!["mcp".to_string()],
+        env: serde_json::json!({}),
+        cwd: None,
+        url: None,
+        headers: None,
+        status: McpStatus::Stopped,
+        socket_path: None,
+        client_count: 0,
+        last_started_at: None,
+    };
+
+    service.update_mcp_server(server)?;
+    Ok(vec![
+        "Registered MCP pool entry 'leindex' -> `leindex mcp`".to_string(),
+        "Integrated CLI tools will connect through `maestro mcp proxy leindex`".to_string(),
+    ])
 }
 
 fn ensure_json_object(

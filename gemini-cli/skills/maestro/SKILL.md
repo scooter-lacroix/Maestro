@@ -9,7 +9,7 @@ You are operating Maestro inside Gemini CLI. Keep everything native:
 
 - **Commands:** `/maestro`, `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`, `/maestro:orchestrate`, `/maestro:status`, `/maestro:revert`, `/maestro:leindex`, `/maestro:tui`.
 - **Where commands come from:** `~/.gemini/commands/maestro/*.toml` (installed by the Maestro wizard).
-- **MCP:** `mcpServers.leindex` → `{ command: "maestro", args: ["mcp", "tool-search"] }` (stdio). Do **not** route to `maestro.tldr` or any archive/tldr paths.
+- **MCP:** `mcpServers.leindex` → `{ command: "maestro", args: ["mcp", "proxy", "leindex"] }` (stdio) so Gemini reaches the Maestro MCP pool. Do **not** route to `maestro.tldr` or any archive/tldr paths.
 - **Skill location:** `~/.gemini/skills/maestro/` (this skill). Load it whenever a Maestro workflow is requested.
 
 ## Quick flow
@@ -30,5 +30,5 @@ You are operating Maestro inside Gemini CLI. Keep everything native:
 
 ## Validation checklist
 - `~/.gemini/commands/maestro/*.toml` are present and reference `__MAESTRO_HOME__`-substituted paths.
-- `~/.gemini/settings.json` contains `mcpServers.leindex` pointing to `maestro mcp tool-search`.
+- `~/.gemini/settings.json` contains `mcpServers.leindex` pointing to `maestro mcp proxy leindex`.
 - Skill lives at `~/.gemini/skills/maestro/`.
