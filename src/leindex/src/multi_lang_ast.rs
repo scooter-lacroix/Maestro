@@ -807,8 +807,8 @@ impl MultiLangASTAnalyzer {
                 .imports
                 .iter()
                 .take(10)
-                .map(|i| i.module.split('/').last().unwrap_or(&i.module))
-                .map(|s| s.split('.').last().unwrap_or(s))
+                .map(|i| i.module.rsplit('/').next().unwrap_or(&i.module))
+                .map(|s| s.rsplit('.').next().unwrap_or(s))
                 .collect();
             lines.push(format!("imp:{}", imp_names.join(",")));
         }

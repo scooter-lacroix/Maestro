@@ -281,12 +281,13 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
         .trim_start_matches("Task ")
         .trim_start_matches("task ")
         .to_lowercase();
+    #[allow(clippy::collapsible_str_replace)]
     let id = normalized
         .replace(' ', "-")
         .replace('.', "-")
         .replace(':', "-")
         .replace('_', "-")
-        .replace('/', "-")  // Allow consecutive replaces
+        .replace('/', "-")
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-')
         .collect::<String>();

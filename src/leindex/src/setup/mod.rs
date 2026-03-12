@@ -932,7 +932,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     config
                         .password_cache
                         .sudo_with_password(&clean_command)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                        .map_err(std::io::Error::other)
                 } else {
                     Command::new("bash")
                         .arg("-c")
@@ -956,7 +956,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // Send stderr to TUI logs (but filter password prompts)
                         if !out.stderr.is_empty() {
                             let s = String::from_utf8_lossy(&out.stderr);
-                            let max_lines = if is_long_running { 10 } else { 10 };
+                            let max_lines: usize = 10;
                             for line in s.lines().take(max_lines) {
                                 // Don't send password prompts to logs - they'll be handled separately
                                 if !line.contains("[sudo]") || !line.contains("password") {

@@ -312,7 +312,7 @@ impl SlicingAnalyzer {
 
             // Update definition points
             for var in defs {
-                var_defs.entry(var).or_insert_with(Vec::new).push(line_idx);
+                var_defs.entry(var).or_default().push(line_idx);
             }
         }
     }
