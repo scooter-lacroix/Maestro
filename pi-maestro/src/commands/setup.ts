@@ -42,10 +42,13 @@ export function registerSetup(pi: ExtensionAPI, commandName: string) {
         workflow: fs.existsSync(path.join(maestroDir, "workflow.md")),
         tracks: fs.existsSync(path.join(maestroDir, "tracks.md")),
         tracksDir: fs.existsSync(path.join(maestroDir, "tracks")),
-        criticalThink: fs.existsSync(path.join(maestroDir, "critical_think", "templates")),
+        criticalThink: fs.existsSync(
+          path.join(maestroDir, "critical_think", "templates"),
+        ),
       };
 
-      const hasAllCoreFiles = files.product && files.techStack && files.workflow && files.tracks;
+      const hasAllCoreFiles =
+        files.product && files.techStack && files.workflow && files.tracks;
 
       if (hasAllCoreFiles) {
         // All core files exist - refresh
@@ -80,7 +83,7 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
   // Gather project information
   const productName = await ctx.ui.input(
     "Product Name",
-    "What is the name of this project?"
+    "What is the name of this project?",
   );
 
   if (!productName) {
@@ -90,11 +93,15 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
 
   const productDescription = await ctx.ui.input(
     "Product Description",
-    "Briefly describe what this project does"
+    "Briefly describe what this project does",
   );
 
   // Generate product.md
-  const productMd = generateProductMd(productName, productDescription || "", isBrownfield);
+  const productMd = generateProductMd(
+    productName,
+    productDescription || "",
+    isBrownfield,
+  );
   writeMaestroFile(root, "product.md", productMd);
 
   // Generate tech-stack.md
@@ -117,8 +124,15 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
  */
 async function refreshMaestroProject(
   root: string,
-  files: { product: boolean; techStack: boolean; workflow: boolean; tracks: boolean; tracksDir: boolean; criticalThink: boolean },
-  ctx: any
+  files: {
+    product: boolean;
+    techStack: boolean;
+    workflow: boolean;
+    tracks: boolean;
+    tracksDir: boolean;
+    criticalThink: boolean;
+  },
+  ctx: any,
 ): Promise<void> {
   // Show what's in place
   const status = [];
@@ -135,9 +149,14 @@ async function refreshMaestroProject(
 
   // Count tracks
   const tracksDir = path.join(root, "maestro/tracks");
-  const trackCount = fs.existsSync(tracksDir) ? fs.readdirSync(tracksDir).length : 0;
+  const trackCount = fs.existsSync(tracksDir)
+    ? fs.readdirSync(tracksDir).length
+    : 0;
 
-  ctx.ui.notify(`Maestro project: ${status.join(", ")} | ${trackCount} tracks`, "info");
+  ctx.ui.notify(
+    `Maestro project: ${status.join(", ")} | ${trackCount} tracks`,
+    "info",
+  );
 }
 
 /**
@@ -147,9 +166,10 @@ function detectBrownfield(root: string): boolean {
   const hasGit = fs.existsSync(path.join(root, ".git"));
   const hasPackageJson = fs.existsSync(path.join(root, "package.json"));
   const hasCargoToml = fs.existsSync(path.join(root, "Cargo.toml"));
-  const hasSourceCode = fs.existsSync(path.join(root, "src")) ||
-                       fs.existsSync(path.join(root, "lib")) ||
-                       fs.existsSync(path.join(root, "app"));
+  const hasSourceCode =
+    fs.existsSync(path.join(root, "src")) ||
+    fs.existsSync(path.join(root, "lib")) ||
+    fs.existsSync(path.join(root, "app"));
 
   return hasGit || hasPackageJson || hasCargoToml || hasSourceCode;
 }
@@ -157,7 +177,11 @@ function detectBrownfield(root: string): boolean {
 /**
  * Generate product.md content
  */
-function generateProductMd(name: string, description: string, isBrownfield: boolean): string {
+function generateProductMd(
+  name: string,
+  description: string,
+  isBrownfield: boolean,
+): string {
   return `# Product: ${name}
 
 ## Description
@@ -194,12 +218,15 @@ async function generateTechStackMd(root: string, ctx: any): Promise<string> {
   const techs: string[] = [];
 
   if (fs.existsSync(path.join(root, "package.json"))) {
-    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
+    const pkgJson = JSON.parse(
+      fs.readFileSync(path.join(root, "package.json"), "utf-8"),
+    );
     if (pkgJson.dependencies?.react) techs.push("React");
     if (pkgJson.dependencies?.vue) techs.push("Vue");
     if (pkgJson.dependencies?.next) techs.push("Next.js");
     if (pkgJson.dependencies?.typescript) techs.push("TypeScript");
-    if (pkgJson.dependencies?.["@" + "mariozechner/pi-coding-agent"]) techs.push("pi-mono");
+    if (pkgJson.dependencies?.["@" + "mariozechner/pi-coding-agent"])
+      techs.push("pi-mono");
   }
 
   if (fs.existsSync(path.join(root, "Cargo.toml"))) {
@@ -210,7 +237,7 @@ async function generateTechStackMd(root: string, ctx: any): Promise<string> {
 
 ## Languages
 
-${techs.length > 0 ? techs.map(t => `- ${t}`).join("\n") : "- To be determined"}
+${techs.length > 0 ? techs.map((t) => `- ${t}`).join("\n") : "- To be determined"}
 
 ## Frameworks
 
@@ -219,6 +246,7 @@ ${techs.length > 0 ? techs.map(t => `- ${t}`).join("\n") : "- To be determined"}
 ## Tools
 
 - Maestro (spec-driven development)
+- TrackLens (visual review system)
 - pi-mono (AI coding agent)
 
 ## Development Standards
@@ -239,7 +267,8 @@ function generateWorkflowMd(): string {
 
 1. **Planning Phase**
    - Use /maestro:newTrack to create a new track with spec.md and plan.md
-   - Review and approve the specification and implementation plan
+   - **TrackLens Review**: Visual review of specification and implementation plan.
+   - Review and approve artifacts in the TrackLens UI before proceeding.
    - Track is created in maestro/tracks/<track_id>/
 
 2. **Implementation Phase**
@@ -253,8 +282,16 @@ function generateWorkflowMd(): string {
    - Make adjustments as needed
 
 4. **Completion Phase**
+   - **TrackLens Walkthrough**: Visual summary of completed work for final sign-off.
    - Mark track as completed when all tasks are done
    - Update tracks.md with completion status
+
+## TrackLens Integration
+
+This project uses TrackLens for visual verification:
+- Visual specification review (\`spec.md\`)
+- Visual implementation plan review (\`plan.md\`)
+- Automated walkthrough generation after implementation
 
 ## Critical Think Integration
 

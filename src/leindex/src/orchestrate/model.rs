@@ -318,17 +318,14 @@ pub enum IterationStatus {
 /// Error strategy for handling failures
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ErrorStrategy {
+    #[default]
     Retry,
     Skip,
     Abort,
 }
 
-impl Default for ErrorStrategy {
-    fn default() -> Self {
-        Self::Retry
-    }
-}
 
 /// Pi-Mono subagent configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

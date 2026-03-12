@@ -201,6 +201,11 @@ impl WizardState {
             "architect".to_string(),
             "critic".to_string(),
             "kraken".to_string(),
+            "sentinel".to_string(),
+            "warden".to_string(),
+            "mender".to_string(),
+            "cartographer".to_string(),
+            "prism".to_string(),
         ]
     }
 }
@@ -1004,11 +1009,16 @@ mod tests {
         fn test_wizard_state_get_roles() {
             let state = WizardState::default();
             let roles = state.get_roles();
-            assert_eq!(roles.len(), 4);
+            assert_eq!(roles.len(), 9);
             assert!(roles.contains(&"scout".to_string()));
             assert!(roles.contains(&"architect".to_string()));
             assert!(roles.contains(&"critic".to_string()));
             assert!(roles.contains(&"kraken".to_string()));
+            assert!(roles.contains(&"sentinel".to_string()));
+            assert!(roles.contains(&"warden".to_string()));
+            assert!(roles.contains(&"mender".to_string()));
+            assert!(roles.contains(&"cartographer".to_string()));
+            assert!(roles.contains(&"prism".to_string()));
         }
     }
 

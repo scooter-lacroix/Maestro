@@ -81,6 +81,23 @@ categories:
           - Tech stack verification
           - Best practices check
 
+      - name: cartographer
+        file: planners/cartographer.md
+        model: opus
+        description: "Discovery researcher for ambiguous early-stage work, trend analysis, and pre-spec investigation"
+        tools: [Read, Bash, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Pre-spec discovery and research
+          - Trend and product landscape analysis
+          - User feedback synthesis
+          - Greenfield track exploration
+        output_path: ".maestro/cache/agents/cartographer/latest-output.md"
+        fallback_for: []
+        requires_visual_evidence: false
+        external_backstops: []
+        supports_graceful_fallback: true
+
   # Explorers analyze codebases and research external information
   explorers:
     description: "Codebase exploration, pattern finding, and external research"
@@ -214,6 +231,23 @@ categories:
           - Full-stack testing
         output_path: ".maestro/cache/agents/atlas/latest-output.md"
 
+      - name: sentinel
+        file: validators/sentinel.md
+        model: opus
+        description: "Evidence-focused QA validation requiring concrete proof before acceptance"
+        tools: [Bash, Read, Write, Glob, Grep]
+        complexity_threshold: small
+        best_for:
+          - Evidence collection and verification
+          - UI acceptance validation
+          - Walkthrough review
+          - Screenshot-based QA
+        output_path: ".maestro/cache/agents/sentinel/latest-output.md"
+        fallback_for: [external-qa-reviewer]
+        requires_visual_evidence: true
+        external_backstops: [gemini-cli, codex-cli]
+        supports_graceful_fallback: true
+
   # Reviewers analyze code quality and provide feedback
   reviewers:
     description: "Code review, refactoring review, and integration review"
@@ -265,6 +299,40 @@ categories:
           - Security assessment
           - Resilience verification
         output_path: ".maestro/cache/agents/liaison/latest-output.md"
+
+      - name: warden
+        file: reviewers/warden.md
+        model: opus
+        description: "Skeptical final reviewer biased toward rejection until evidence is strong"
+        tools: [Read, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Final review gate
+          - Pre-completion verification
+          - Phase-close review
+          - Cross-checking claims against evidence
+        output_path: ".maestro/cache/agents/warden/latest-output.md"
+        fallback_for: [external-final-reviewer]
+        requires_visual_evidence: false
+        external_backstops: [codex-cli, gemini-cli, qwen-cli]
+        supports_graceful_fallback: true
+
+      - name: prism
+        file: reviewers/prism.md
+        model: sonnet
+        description: "UX architecture reviewer for UI structure, frontend patterns, and interaction design"
+        tools: [Read, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - UI structure review
+          - Frontend architecture assessment
+          - Interaction flow coherence
+          - Visual review readiness
+        output_path: ".maestro/cache/agents/prism/latest-output.md"
+        fallback_for: [external-ux-reviewer]
+        requires_visual_evidence: true
+        external_backstops: [gemini-cli]
+        supports_graceful_fallback: true
 
   # Specialized agents handle specific tasks
   specialized:
@@ -360,6 +428,23 @@ categories:
           - Learning capture
           - Mental model analysis
 
+      - name: mender
+        file: specialized/mender.md
+        model: opus
+        description: "Remediation coordinator that turns review findings into fix tasks with context preservation"
+        tools: [Read, Write, Edit, Bash, Grep, Glob]
+        complexity_threshold: small
+        best_for:
+          - Review finding remediation
+          - Fix task coordination
+          - Retry context preservation
+          - Escalation management
+        output_path: ".maestro/cache/agents/mender/latest-output.md"
+        fallback_for: []
+        requires_visual_evidence: false
+        external_backstops: []
+        supports_graceful_fallback: true
+
 # ============================================================================
 # COMPLEXITY THRESHOLDS
 # ============================================================================
@@ -375,7 +460,7 @@ complexity:
     description: "Feature changes, multi-file edits, basic refactoring"
     max_files: 5
     max_phases: 2
-    suggested_agents: [scout, architect, plan, sleuth, debug, critic, judge, arbiter, oracle, pathfinder, herald, chronicler, onboard]
+    suggested_agents: [scout, architect, plan, sleuth, debug, critic, judge, arbiter, oracle, pathfinder, herald, chronicler, onboard, cartographer, sentinel, warden, prism, mender]
 
   medium:
     description: "Complex features, cross-cutting changes, significant refactoring"
@@ -421,11 +506,23 @@ selection:
       - judge
       - liaison
       - surveyor
+      - warden
     explore:
       - scout
       - pathfinder
     research:
       - oracle
+      - cartographer
+    discover:
+      - cartographer
+    evidence-qa:
+      - sentinel
+    final-review:
+      - warden
+    remediate:
+      - mender
+    ux-review:
+      - prism
     migrate:
       - phoenix
       - surveyor

@@ -1,5 +1,7 @@
 use crate::{
-    message::pty::{MainShutdown, PtyOptions, PtyRequest, PtyResponse, PtyShutdown, PtyOutputBarrier},
+    message::pty::{
+        MainShutdown, PtyOptions, PtyOutputBarrier, PtyRequest, PtyResponse, PtyShutdown,
+    },
     prelude::*,
 };
 use postage::{broadcast, mpsc};

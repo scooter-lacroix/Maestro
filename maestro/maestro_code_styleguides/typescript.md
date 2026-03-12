@@ -1,43 +1,43 @@
-# Google TypeScript Style Guide Summary
+# TypeScript Guide
 
-This document summarizes key rules and best practices from the Google TypeScript Style Guide, which is enforced by the `gts` tool.
+When I write TypeScript, I use the type system to make invalid states harder to represent and refactors safer to perform.
 
-## 1. Language Features
-- **Variable Declarations:** Always use `const` or `let`. **`var` is forbidden.** Use `const` by default.
-- **Modules:** Use ES6 modules (`import`/`export`). **Do not use `namespace`.**
-- **Exports:** Use named exports (`export {MyClass};`). **Do not use default exports.**
-- **Classes:**
-  - **Do not use `#private` fields.** Use TypeScript's `private` visibility modifier.
-  - Mark properties never reassigned outside the constructor with `readonly`.
-  - **Never use the `public` modifier** (it's the default). Restrict visibility with `private` or `protected` where possible.
-- **Functions:** Prefer function declarations for named functions. Use arrow functions for anonymous functions/callbacks.
-- **String Literals:** Use single quotes (`'`). Use template literals (`` ` ``) for interpolation and multi-line strings.
-- **Equality Checks:** Always use triple equals (`===`) and not equals (`!==`).
-- **Type Assertions:** **Avoid type assertions (`x as SomeType`) and non-nullability assertions (`y!`)**. If you must use them, provide a clear justification.
+These rules are mandatory defaults for new code. I only break them when a project constraint is real, documented, and local.
 
-## 2. Disallowed Features
-- **`any` Type:** **Avoid `any`**. Prefer `unknown` or a more specific type.
-- **Wrapper Objects:** Do not instantiate `String`, `Boolean`, or `Number` wrapper classes.
-- **Automatic Semicolon Insertion (ASI):** Do not rely on it. **Explicitly end all statements with a semicolon.**
-- **`const enum`:** Do not use `const enum`. Use plain `enum` instead.
-- **`eval()` and `Function(...string)`:** Forbidden.
+## What I optimize for
 
-## 3. Naming
-- **`UpperCamelCase`:** For classes, interfaces, types, enums, and decorators.
-- **`lowerCamelCase`:** For variables, parameters, functions, methods, and properties.
-- **`CONSTANT_CASE`:** For global constant values, including enum values.
-- **`_` Prefix/Suffix:** **Do not use `_` as a prefix or suffix** for identifiers, including for private properties.
+- Precise types at boundaries and simple runtime code in the middle.
+- Small modules with explicit contracts.
+- A strict compiler configuration that catches drift early.
+- Readable code that does not force the type system to become a puzzle.
 
-## 4. Type System
-- **Type Inference:** Rely on type inference for simple, obvious types. Be explicit for complex types.
-- **`undefined` and `null`:** Both are supported. Be consistent within your project.
-- **Optional vs. `|undefined`:** Prefer optional parameters and fields (`?`) over adding `|undefined` to the type.
-- **`Array<T>` Type:** Use `T[]` for simple types. Use `Array<T>` for more complex union types (e.g., `Array<string | number>`).
-- **`{}` Type:** **Do not use `{}`**. Prefer `unknown`, `Record<string, unknown>`, or `object`.
+## Required defaults
 
-## 5. Comments and Documentation
-- **JSDoc:** Use `/** JSDoc */` for documentation, `//` for implementation comments.
-- **Redundancy:** **Do not declare types in `@param` or `@return` blocks** (e.g., `/** @param {string} user */`). This is redundant in TypeScript.
-- **Add Information:** Comments must add information, not just restate the code.
+- Turn on strict mode and keep it on. If the codebase can support `noUncheckedIndexedAccess` and related strict flags, I prefer them too.
+- Use `type` aliases by default for unions and data shapes; use `interface` when open extension or declaration merging is actually useful.
+- Prefer discriminated unions, branded types, or narrow enums over piles of booleans and string literals drifting through the codebase.
+- Treat `unknown` as the right starting point for untrusted input and validate it before narrowing.
+- Use `const` heavily, keep functions small, and make return types explicit when they clarify the contract.
 
-*Source: [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html)*
+## Architecture
+
+- Validate requests, environment values, storage records, and third-party payloads at the boundary so the core can trust its inputs.
+- Keep domain types separate from transport types when external shape and internal meaning differ.
+- Prefer plain functions and focused modules over class-heavy design unless lifecycle or polymorphism is central to the problem.
+- Model state transitions with explicit result types instead of `null` plus comment conventions.
+
+## Verification
+
+- Test runtime behavior, not just type behavior; the compiler cannot prove external inputs are honest.
+- Use linting and formatting so review can focus on logic and boundaries.
+- Watch compile-time complexity in over-generic code; a perfect type that nobody can maintain is not a win.
+- Keep build-time and runtime module boundaries aligned so imports behave predictably in tooling and production.
+
+## Explicitly prohibited
+
+The following practices are prohibited in new code unless the guide names a narrow, explicit exception.
+
+- `any`, broad type assertions, and non-null assertions used as routine escape hatches.
+- Generic utility types that make ordinary data flow impossible to read.
+- Default exports in large codebases when named exports make navigation easier.
+- Runtime logic that depends on compile-time types without doing real validation.

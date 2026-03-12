@@ -4,11 +4,11 @@
 //! keyboard shortcut and command reference for the Cockpit TUI.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
-use crate::theme::theme_from_name;
 use crate::app::App;
+use crate::theme::theme_from_name;
 
 /// Renders the help modal.
 ///
@@ -178,15 +178,24 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::raw(" Toggle Task Expansion"),
         ]),
         Line::from(vec![
-            Span::styled("   s             ", Style::default().fg(Color::Green).bold()),
+            Span::styled(
+                "   s             ",
+                Style::default().fg(Color::Green).bold(),
+            ),
             Span::raw(" Start Orchestrate Loop"),
         ]),
         Line::from(vec![
-            Span::styled("   p             ", Style::default().fg(Color::Yellow).bold()),
+            Span::styled(
+                "   p             ",
+                Style::default().fg(Color::Yellow).bold(),
+            ),
             Span::raw(" Pause Orchestrate Loop"),
         ]),
         Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Green).bold()),
+            Span::styled(
+                "   r             ",
+                Style::default().fg(Color::Green).bold(),
+            ),
             Span::raw(" Resume Orchestrate Loop"),
         ]),
         Line::from(vec![
@@ -281,7 +290,10 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
-            Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
+            Span::styled(
+                "   Enter         ",
+                Style::default().fg(Color::Green).bold(),
+            ),
             Span::raw(" Toggle Start/Stop LSP"),
         ]),
         Line::from(vec![
@@ -302,7 +314,10 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::raw(" Navigate options"),
         ]),
         Line::from(vec![
-            Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
+            Span::styled(
+                "   Enter         ",
+                Style::default().fg(Color::Green).bold(),
+            ),
             Span::raw(" Change setting"),
         ]),
         Line::from(""),

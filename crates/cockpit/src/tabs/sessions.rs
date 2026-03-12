@@ -154,12 +154,9 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     ])]));
                 }
                 SessionEntry::Session(s) => {
-                    let is_running =
-                        s.status == SessionStatus::Running;
-                    let is_terminated =
-                        s.status == SessionStatus::Terminated;
-                    let is_waiting =
-                        s.status == SessionStatus::Waiting;
+                    let is_running = s.status == SessionStatus::Running;
+                    let is_terminated = s.status == SessionStatus::Terminated;
+                    let is_waiting = s.status == SessionStatus::Waiting;
 
                     let (status_icon, status_color) = if is_running {
                         (" * ", Color::Green)

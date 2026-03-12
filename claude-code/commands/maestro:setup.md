@@ -496,13 +496,51 @@ AskUserQuestion:
 6.  **Commit State:** After claude-hud configuration is complete, write to `maestro/setup_state.json` with the exact content:
     `{"last_successful_step": "2.6_claude_hud"}`
 
-### 2.7 Finalization
+### 2.7 Configure TrackLens Visual Review (Interactive)
+1.  **Introduce TrackLens:**
+    -   **Explain:** "TrackLens is Maestro's visual review system. It provides a browser-based interface for reviewing and annotating specifications, plans, and completed work."
+    -   **Benefits:**
+        - Side-by-side visual review of complex plans
+        - Inline annotation and feedback loop
+        - Automated walkthrough generation
+        - Integration with Obsidian/Bear for permanent notes
+
+2.  **Verify TrackLens Availability:**
+    -   Run: `maestro tracklens --help` to ensure the TrackLens CLI is available.
+    -   If the command fails, explain that TrackLens requires the `maestro` binary to be in the PATH.
+
+3.  **Configure TrackLens Autonomy:**
+    -   **Ask** using `AskUserQuestion`:
+        ```
+        AskUserQuestion:
+          question: "How would you like TrackLens to handle autonomy after review approval?"
+          header: "TrackLens Configuration"
+          options:
+            - label: "Semi-Auto (Recommended)"
+              description: "Auto-approve file edits, ask for other tools"
+            - label: "Full-Auto"
+              description: "Auto-approve all tool calls after review approval"
+            - label: "Checkpoint"
+              description: "Manually approve each tool call"
+          multiSelect: false
+        ```
+    -   **Apply Configuration:**
+        - Explain that this preference will be respected during track implementation.
+
+4.  **Document Configuration:**
+    -   Ensure `maestro/workflow.md` includes the TrackLens integration steps.
+
+5.  **Commit State:** After TrackLens configuration is complete, write to `maestro/setup_state.json` with the exact content:
+    `{"last_successful_step": "2.7_tracklens"}`
+
+### 2.8 Finalization
 1.  **Summarize Actions:** Present a summary of all actions taken during Phase 1, including:
     -   The guide files that were copied.
     -   The workflow file that was copied.
     -   The workflow mode that was configured.
     -   The "Tzar of Excellence" review agent that was selected.
     -   The claude-hud integration status.
+    -   The TrackLens visual review configuration.
 2.  **Transition to initial plan and track generation:** Announce that the initial setup is complete and you will now proceed to define the first track for the project.
 
 ---

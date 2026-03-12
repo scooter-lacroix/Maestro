@@ -7,9 +7,8 @@
 
 use anyhow::{anyhow, Result};
 use leindex_core::tracklens::{
-    TrackLensServer, ServerConfig, WalkthroughGenerator,
-    WalkthroughConfig, ReviewMode, TrackLensDecision, DecisionBehavior,
-    ReviewContent, ReviewMetadata,
+    DecisionBehavior, ReviewContent, ReviewMetadata, ReviewMode, ServerConfig, TrackLensDecision,
+    TrackLensServer, WalkthroughConfig, WalkthroughGenerator,
 };
 use std::path::PathBuf;
 use tracing::info;
@@ -27,9 +26,9 @@ pub enum TrackLensCommands {
         #[arg(short, long, default_value = "review")]
         mode: String,
 
-        /// Open in browser
-        #[arg(long, default_value_t = true)]
-        browser: bool,
+        /// Do not open browser automatically
+        #[arg(long)]
+        no_browser: bool,
     },
 
     /// Generate and review walkthrough for completed track
@@ -41,9 +40,9 @@ pub enum TrackLensCommands {
         #[arg(long)]
         full_diffs: bool,
 
-        /// Open in browser
-        #[arg(long, default_value_t = true)]
-        browser: bool,
+        /// Do not open browser automatically
+        #[arg(long)]
+        no_browser: bool,
     },
 
     /// Code review mode (git diff)
@@ -52,23 +51,27 @@ pub enum TrackLensCommands {
         #[arg(default_value = "HEAD")]
         commit: String,
 
-        /// Open in browser
-        #[arg(long, default_value_t = true)]
-        browser: bool,
+        /// Do not open browser automatically
+        #[arg(long)]
+        no_browser: bool,
     },
 }
 
 /// Run TrackLens command
 pub async fn run(command: TrackLensCommands) -> Result<()> {
     match command {
-        TrackLensCommands::Review { file, mode, browser } => {
-            run_review(file, mode, browser).await
-        }
-        TrackLensCommands::Walkthrough { track_id, full_diffs, browser } => {
-            run_walkthrough(track_id, full_diffs, browser).await
-        }
-        TrackLensCommands::CodeReview { commit, browser } => {
-            run_code_review(commit, browser).await
+        TrackLensCommands::Review {
+            file,
+            mode,
+            no_browser,
+        } => run_review(file, mode, !no_browser).await,
+        TrackLensCommands::Walkthrough {
+            track_id,
+            full_diffs,
+            no_browser,
+        } => run_walkthrough(track_id, full_diffs, !no_browser).await,
+        TrackLensCommands::CodeReview { commit, no_browser } => {
+            run_code_review(commit, !no_browser).await
         }
     }
 }
@@ -120,7 +123,8 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
     println!();
 
     // Read file content
-    let content = tokio::fs::read_to_string(&file).await
+    let content = tokio::fs::read_to_string(&file)
+        .await
         .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))?;
 
     // Parse review mode
@@ -162,7 +166,13 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
     // Output decision
     print_decision(&decision);
 
-    Ok(())
+    // Return error on deny so agents can detect rejection via exit code
+    match decision.behavior {
+        DecisionBehavior::Allow => Ok(()),
+        DecisionBehavior::Deny => Err(anyhow!(
+            "Review denied. See annotations above for required changes."
+        )),
+    }
 }
 
 /// Generate and review a track walkthrough
@@ -206,7 +216,8 @@ async fn run_walkthrough(track_id: String, full_diffs: bool, browser: bool) -> R
     let walkthrough = generator.generate(&track_id, &spec, &plan)?;
     let markdown = generator.to_markdown(&walkthrough);
 
-    info!("Walkthrough generated: {} tasks, {} files changed",
+    info!(
+        "Walkthrough generated: {} tasks, {} files changed",
         walkthrough.completed_tasks.len(),
         walkthrough.files.len()
     );
@@ -258,7 +269,10 @@ async fn run_walkthrough(track_id: String, full_diffs: bool, browser: bool) -> R
                 anyhow::bail!("Security error: Output path escapes tracks directory");
             }
 
-            let content = server.state.content.read()
+            let content = server
+                .state
+                .content
+                .read()
                 .map_err(|e| anyhow!("Failed to read content: {}", e))?;
             if let Some(ref c) = *content {
                 tokio::fs::write(&output_path, &c.content).await?;
@@ -339,7 +353,13 @@ async fn run_code_review(commit: String, browser: bool) -> Result<()> {
     // Output decision
     print_decision(&decision);
 
-    Ok(())
+    // Return error on deny so agents can detect rejection via exit code
+    match decision.behavior {
+        DecisionBehavior::Allow => Ok(()),
+        DecisionBehavior::Deny => Err(anyhow!(
+            "Code review denied. See annotations above for required changes."
+        )),
+    }
 }
 
 /// Print review decision to console
@@ -386,7 +406,7 @@ mod tests {
         let cmd = TrackLensCommands::Review {
             file: PathBuf::from("test.md"),
             mode: "review".to_string(),
-            browser: true,
+            no_browser: false,
         };
         assert!(format!("{:?}", cmd).contains("Review"));
     }
@@ -396,7 +416,7 @@ mod tests {
         let cmd = TrackLensCommands::Walkthrough {
             track_id: "test-track".to_string(),
             full_diffs: true,
-            browser: false,
+            no_browser: true,
         };
         assert!(format!("{:?}", cmd).contains("Walkthrough"));
     }
@@ -405,7 +425,7 @@ mod tests {
     fn test_tracklens_code_review_command() {
         let cmd = TrackLensCommands::CodeReview {
             commit: "HEAD~1".to_string(),
-            browser: true,
+            no_browser: false,
         };
         assert!(format!("{:?}", cmd).contains("CodeReview"));
     }

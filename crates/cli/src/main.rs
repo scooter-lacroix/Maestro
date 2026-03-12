@@ -10,13 +10,13 @@ use std::path::PathBuf;
 use leindex_core::cli::analyze;
 use leindex_core::cli::implement::ImplementSessionTarget;
 use leindex_core::cli::leindex_cmd;
-use leindex_core::cli::memory_impl as memory;
 use leindex_core::cli::mcp;
+use leindex_core::cli::memory_impl as memory;
 use leindex_core::cli::orchestrate;
 
 // Local CLI commands
 mod commands;
-use commands::{configure, pi_status, pi_test, pi_agents};
+use commands::{configure, pi_agents, pi_status, pi_test};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -180,6 +180,9 @@ enum Commands {
 enum McpCommands {
     /// Start pooled stdio MCP servers on UNIX sockets
     Serve,
+    /// Register an MCP server directly in the Maestro pool
+    #[command(visible_alias = "install")]
+    Add(mcp::AddServerArgs),
     /// Bridge stdio to a pooled UNIX socket server
     Proxy {
         /// MCP server name
@@ -398,9 +401,23 @@ async fn main() -> Result<()> {
             pi_agent,
             pi_chain,
             pi_parallel,
-        } => commands::implement::run(command, description, session, tool, path, title, pi_agent, pi_chain, pi_parallel).await,
+        } => {
+            commands::implement::run(
+                command,
+                description,
+                session,
+                tool,
+                path,
+                title,
+                pi_agent,
+                pi_chain,
+                pi_parallel,
+            )
+            .await
+        }
         Commands::Mcp { command } => match command {
             McpCommands::Serve => mcp::serve().await,
+            McpCommands::Add(args) => mcp::add(args).await,
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
         },
@@ -433,43 +450,80 @@ async fn main() -> Result<()> {
                         pi_agent,
                         pi_chain,
                         pi_parallel,
-                    }
-                }).await
+                    },
+                })
+                .await
             }
-            OrchestrateCommands::Pause { track_id, tracks_dir } => {
+            OrchestrateCommands::Pause {
+                track_id,
+                tracks_dir,
+            } => {
                 orchestrate::run(orchestrate::OrchestrateCommand {
-                    command: orchestrate::OrchestrateSubcommand::Pause { track_id, tracks_dir },
-                }).await
+                    command: orchestrate::OrchestrateSubcommand::Pause {
+                        track_id,
+                        tracks_dir,
+                    },
+                })
+                .await
             }
-            OrchestrateCommands::Resume { track_id, tracks_dir } => {
+            OrchestrateCommands::Resume {
+                track_id,
+                tracks_dir,
+            } => {
                 orchestrate::run(orchestrate::OrchestrateCommand {
-                    command: orchestrate::OrchestrateSubcommand::Resume { track_id, tracks_dir },
-                }).await
+                    command: orchestrate::OrchestrateSubcommand::Resume {
+                        track_id,
+                        tracks_dir,
+                    },
+                })
+                .await
             }
-            OrchestrateCommands::Abort { track_id, tracks_dir } => {
+            OrchestrateCommands::Abort {
+                track_id,
+                tracks_dir,
+            } => {
                 orchestrate::run(orchestrate::OrchestrateCommand {
-                    command: orchestrate::OrchestrateSubcommand::Abort { track_id, tracks_dir },
-                }).await
+                    command: orchestrate::OrchestrateSubcommand::Abort {
+                        track_id,
+                        tracks_dir,
+                    },
+                })
+                .await
             }
-            OrchestrateCommands::Status { track_id, tracks_dir } => {
+            OrchestrateCommands::Status {
+                track_id,
+                tracks_dir,
+            } => {
                 orchestrate::run(orchestrate::OrchestrateCommand {
-                    command: orchestrate::OrchestrateSubcommand::Status { track_id, tracks_dir },
-                }).await
+                    command: orchestrate::OrchestrateSubcommand::Status {
+                        track_id,
+                        tracks_dir,
+                    },
+                })
+                .await
             }
             OrchestrateCommands::List { tracks_dir } => {
                 orchestrate::run(orchestrate::OrchestrateCommand {
                     command: orchestrate::OrchestrateSubcommand::List { tracks_dir },
-                }).await
+                })
+                .await
             }
         },
-        Commands::PiStatus { config, verbose, json } => {
-            pi_status::run(config, verbose, json).await
-        }
-        Commands::PiTest { task, agent, timeout, verbose } => {
-            pi_test::run(task, agent, timeout, verbose).await
-        }
-        Commands::PiAgents { config, verbose, json } => {
-            pi_agents::run(config, verbose, json).await
-        }
+        Commands::PiStatus {
+            config,
+            verbose,
+            json,
+        } => pi_status::run(config, verbose, json).await,
+        Commands::PiTest {
+            task,
+            agent,
+            timeout,
+            verbose,
+        } => pi_test::run(task, agent, timeout, verbose).await,
+        Commands::PiAgents {
+            config,
+            verbose,
+            json,
+        } => pi_agents::run(config, verbose, json).await,
     }
 }

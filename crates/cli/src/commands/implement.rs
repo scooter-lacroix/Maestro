@@ -9,10 +9,7 @@ use leindex_core::cli::implement::ImplementSessionTarget;
 /// Re-export the original implement module for fallback
 pub use leindex_core::cli::implement as leindex_implement;
 
-use maestro_pi_mono::{
-    load_config, PiDetection, SubagentRunner,
-    agents::mapping::PiAgentType,
-};
+use maestro_pi_mono::{agents::mapping::PiAgentType, load_config, PiDetection, SubagentRunner};
 use std::path::PathBuf;
 use tracing::{debug, info};
 
@@ -76,11 +73,7 @@ impl PiMode {
 }
 
 /// Run implementation using Pi-Mono subagent system
-async fn run_with_pi_mono(
-    command: String,
-    description: Vec<String>,
-    mode: PiMode,
-) -> Result<()> {
+async fn run_with_pi_mono(command: String, description: Vec<String>, mode: PiMode) -> Result<()> {
     info!("═══════════════════════════════════════════════════════════════");
     info!("  Pi-Mono Subagent Execution");
     info!("═══════════════════════════════════════════════════════════════");
@@ -90,9 +83,7 @@ async fn run_with_pi_mono(
     let config = load_config()?;
 
     if !config.enabled {
-        anyhow::bail!(
-            "Pi-Mono is disabled. Run 'maestro configure --pi-mono' to enable it."
-        );
+        anyhow::bail!("Pi-Mono is disabled. Run 'maestro configure --pi-mono' to enable it.");
     }
 
     if config.providers.is_empty() {
@@ -181,7 +172,9 @@ async fn execute_chain(
         let start = std::time::Instant::now();
 
         // For chain mode, pass previous output as prompt
-        let result = runner.run(agent_type, initial_task, Some(&current_output)).await?;
+        let result = runner
+            .run(agent_type, initial_task, Some(&current_output))
+            .await?;
         let duration = start.elapsed();
         total_duration += duration;
 
@@ -197,11 +190,7 @@ async fn execute_chain(
 }
 
 /// Execute agents in parallel mode
-async fn execute_parallel(
-    runner: &SubagentRunner,
-    agents: &[String],
-    task: &str,
-) -> Result<()> {
+async fn execute_parallel(runner: &SubagentRunner, agents: &[String], task: &str) -> Result<()> {
     use futures::future::join_all;
 
     let start = std::time::Instant::now();
@@ -241,7 +230,8 @@ async fn execute_parallel(
             Ok(output) => {
                 info!("✓ {} ({:?})", agent, duration);
                 if !output.output.is_empty() {
-                    let preview: String = output.output
+                    let preview: String = output
+                        .output
                         .lines()
                         .take(3)
                         .collect::<Vec<_>>()
@@ -265,15 +255,19 @@ async fn execute_parallel(
 }
 
 /// Display execution result
-fn display_result(
-    result: &maestro_pi_mono::SubagentResult,
-    duration: std::time::Duration,
-) {
+fn display_result(result: &maestro_pi_mono::SubagentResult, duration: std::time::Duration) {
     info!("═══════════════════════════════════════════════════════════════");
     info!("  Execution Complete");
     info!("═══════════════════════════════════════════════════════════════");
     println!();
-    info!("Status: {}", if result.success { "✓ Success" } else { "✗ Failed" });
+    info!(
+        "Status: {}",
+        if result.success {
+            "✓ Success"
+        } else {
+            "✗ Failed"
+        }
+    );
     info!("Duration: {:?}", duration);
     println!();
     info!("Output:");

@@ -21,6 +21,7 @@ use tokio::sync::watch;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::services::{ServeDir, ServeFile};
 
 use super::types::{ReviewMode, TrackLensDecision};
 
@@ -156,13 +157,31 @@ impl TrackLensServer {
             .parse::<HeaderValue>()
             .unwrap();
 
+        // Find bundle directory for static assets
+        let bundle_dir = find_bundle_dir();
+
         // Build the router with restrictive CORS and compression
         // Now using the dynamically determined port
-        let app = Router::new()
+        let mut app = Router::new()
             .route("/", get(index))
             .route("/api/decision", post(submit_decision))
             .route("/api/content", get(get_content))
             .route("/api/plan", get(get_plan))
+            .route("/api/status", get(get_status))
+            .route("/api/vaults", get(get_vaults))
+            .route("/api/agents", get(get_agents));
+
+        // Add static asset serving if bundle directory found
+        if let Some(ref dir) = bundle_dir {
+            if dir.join("assets").exists() {
+                app = app.nest_service("/assets", ServeDir::new(dir.join("assets")));
+            }
+            if dir.join("favicon.svg").exists() {
+                app = app.route_service("/favicon.svg", ServeFile::new(dir.join("favicon.svg")));
+            }
+        }
+
+        let app = app
             .layer(
                 // Restrictive CORS: only allow local requests for security
                 // Uses the actual port assigned to the server
@@ -225,26 +244,52 @@ impl TrackLensServer {
 
 // ─── HTTP Handlers ─────────────────────────────────────────────────────────────
 
-async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
-    // Try to load TrackLens editor HTML bundle
-    let html_paths = [
-        // CLI dist location (primary)
-        "crates/cli/dist/tracklens-editor.html",
-        // Development locations
-        "packages/tracklens-editor/dist/index.html",
-        "apps/tracklens-hook/dist/index.html",
+/// Find the directory containing the TrackLens UI bundle
+fn find_bundle_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+
+    let candidate_dirs = vec![
+        // Installed location (primary)
+        format!("{home}/.maestro/tracklens"),
+        // Next to the binary
+        format!("{}", exe_dir.display()),
+        // Project source tree locations (development)
+        "packages/tracklens-editor/dist".to_string(),
+        "apps/tracklens-hook/dist".to_string(),
+        "crates/cli/dist".to_string(),
     ];
 
-    for path in html_paths {
-        if let Ok(mut content) = tokio::fs::read_to_string(path).await {
-            // Inject auth token into HTML
-            let token_script = format!(
-                r#"<script>window.TRACKLENS_AUTH_TOKEN = "{}";</script>"#,
-                state.auth_token
-            );
-            // Inject after <head> tag
-            content = content.replace("<head>", &format!("<head>{}", token_script));
-            return Html(content);
+    for dir in candidate_dirs {
+        let path = std::path::PathBuf::from(&dir);
+        if path.join("index.html").exists()
+            || path.join("editor.html").exists()
+            || path.join("tracklens-editor.html").exists()
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
+    if let Some(bundle_dir) = find_bundle_dir() {
+        let html_names = ["index.html", "editor.html", "tracklens-editor.html"];
+        for name in html_names {
+            let path = bundle_dir.join(name);
+            if let Ok(mut content) = tokio::fs::read_to_string(path).await {
+                // Inject auth token into HTML
+                let token_script = format!(
+                    r#"<script>window.TRACKLENS_AUTH_TOKEN = "{}";</script>"#,
+                    state.auth_token
+                );
+                // Inject after <head> tag
+                content = content.replace("<head>", &format!("<head>{}", token_script));
+                return Html(content);
+            }
         }
     }
 
@@ -309,6 +354,30 @@ async fn submit_decision(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
+}
+
+async fn get_status() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+}
+
+async fn get_vaults() -> Json<serde_json::Value> {
+    // Return empty vaults for now, as this is project-specific
+    // The UI handles empty results gracefully
+    Json(serde_json::json!({ "vaults": [] }))
+}
+
+async fn get_agents() -> Json<serde_json::Value> {
+    // Return standard Maestro agents for the UI settings dropdown
+    Json(serde_json::json!({
+        "agents": [
+            { "id": "build", "name": "Build Agent" },
+            { "id": "implement", "name": "Implementation Agent" },
+            { "id": "qwen-coder", "name": "Qwen Coder" },
+            { "id": "amp-code", "name": "Amp Code" },
+            { "id": "rovo-dev", "name": "Rovo Dev" },
+            { "id": "codex-reviewer", "name": "Codex Reviewer" }
+        ]
+    }))
 }
 
 async fn get_content(

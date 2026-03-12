@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, ListItem, List, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
@@ -28,9 +28,9 @@ pub fn render_tracklens(frame: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Main content
-            Constraint::Length(3),  // Status bar
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Main content
+            Constraint::Length(3), // Status bar
         ])
         .split(area);
 
@@ -55,11 +55,22 @@ fn render_header(frame: &mut Frame, area: Rect, pane: &TrackLensPane, theme: &cr
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(" 🔍 ", Style::default().fg(Color::Yellow)),
-        Span::styled("TrackLens", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "TrackLens",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" - Review & Walkthrough", Style::default().fg(Color::Gray)),
         Span::styled(
-            if pane.active { " ● Active" } else { " ○ Idle" },
-            Style::default().fg(header_color).add_modifier(Modifier::BOLD),
+            if pane.active {
+                " ● Active"
+            } else {
+                " ○ Idle"
+            },
+            Style::default()
+                .fg(header_color)
+                .add_modifier(Modifier::BOLD),
         ),
     ]))
     .block(
@@ -105,7 +116,12 @@ fn render_active_section(
             vec![
                 Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(Color::Gray)),
-                    Span::styled("Active", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Active",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(""),
                 Line::from(vec![
@@ -118,7 +134,10 @@ fn render_active_section(
                 ]),
                 Line::from(vec![
                     Span::styled("Mode: ", Style::default().fg(Color::Gray)),
-                    Span::styled(format!("{:?}", review.mode), Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("{:?}", review.mode),
+                        Style::default().fg(Color::Yellow),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("URL: ", Style::default().fg(Color::Gray)),
@@ -129,10 +148,18 @@ fn render_active_section(
             vec![
                 Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(Color::Gray)),
-                    Span::styled("Active", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Active",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]),
                 Line::from(""),
-                Line::from(Span::styled("Loading review details...", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(
+                    "Loading review details...",
+                    Style::default().fg(Color::DarkGray),
+                )),
             ]
         }
     } else {
@@ -143,9 +170,10 @@ fn render_active_section(
             ]),
             Line::from(""),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("No active review.", Style::default().fg(Color::DarkGray)),
-            ]),
+            Line::from(vec![Span::styled(
+                "No active review.",
+                Style::default().fg(Color::DarkGray),
+            )]),
             Line::from(""),
             Line::from(""),
             Line::from(vec![
@@ -184,13 +212,15 @@ fn render_history_section(
 ) {
     let items = if pane.history.is_empty() {
         vec![
-            Line::from(vec![
-                Span::styled("No review history.", Style::default().fg(Color::DarkGray)),
-            ]),
+            Line::from(vec![Span::styled(
+                "No review history.",
+                Style::default().fg(Color::DarkGray),
+            )]),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Completed reviews will appear here.", Style::default().fg(Color::Gray)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Completed reviews will appear here.",
+                Style::default().fg(Color::Gray),
+            )]),
         ]
     } else {
         pane.history
@@ -252,27 +282,42 @@ fn render_status_bar(
     let total_reviews = pane.history.len();
     let approved_count = pane.history.iter().filter(|e| e.approved).count();
 
-    let status_text = vec![
-        Line::from(vec![
-            Span::styled(" TrackLens ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled("│", Style::default().fg(Color::DarkGray)),
-            Span::styled(" Total: ", Style::default().fg(Color::Gray)),
-            Span::styled(total_reviews.to_string(), Style::default().fg(Color::White)),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled(" Approved: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                approved_count.to_string(),
-                Style::default().fg(if approved_count > 0 { Color::Green } else { Color::DarkGray }),
-            ),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                if pane.active { "● Running" } else { "○ Idle" },
-                Style::default()
-                    .fg(if pane.active { Color::Yellow } else { Color::DarkGray })
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-    ];
+    let status_text = vec![Line::from(vec![
+        Span::styled(
+            " TrackLens ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("│", Style::default().fg(Color::DarkGray)),
+        Span::styled(" Total: ", Style::default().fg(Color::Gray)),
+        Span::styled(total_reviews.to_string(), Style::default().fg(Color::White)),
+        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(" Approved: ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            approved_count.to_string(),
+            Style::default().fg(if approved_count > 0 {
+                Color::Green
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            if pane.active {
+                "● Running"
+            } else {
+                "○ Idle"
+            },
+            Style::default()
+                .fg(if pane.active {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])];
 
     let status_bar = Paragraph::new(status_text)
         .block(

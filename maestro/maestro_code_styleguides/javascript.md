@@ -1,51 +1,43 @@
-# Google JavaScript Style Guide Summary
+# JavaScript Guide
 
-This document summarizes key rules and best practices from the Google JavaScript Style Guide.
+When I write JavaScript, I keep the language sharp edges contained with clear module boundaries, simple data flow, and runtime checks at the edges.
 
-## 1. Source File Basics
-- **File Naming:** All lowercase, with underscores (`_`) or dashes (`-`). Extension must be `.js`.
-- **File Encoding:** UTF-8.
-- **Whitespace:** Use only ASCII horizontal spaces (0x20). Tabs are forbidden for indentation.
+These rules are mandatory defaults for new code. I only break them when a project constraint is real, documented, and local.
 
-## 2. Source File Structure
-- New files should be ES modules (`import`/`export`).
-- **Exports:** Use named exports (`export {MyClass};`). **Do not use default exports.**
-- **Imports:** Do not use line-wrapped imports. The `.js` extension in import paths is mandatory.
+## What I optimize for
 
-## 3. Formatting
-- **Braces:** Required for all control structures (`if`, `for`, `while`, etc.), even single-line blocks. Use K&R style ("Egyptian brackets").
-- **Indentation:** +2 spaces for each new block.
-- **Semicolons:** Every statement must be terminated with a semicolon.
-- **Column Limit:** 80 characters.
-- **Line-wrapping:** Indent continuation lines at least +4 spaces.
-- **Whitespace:** Use single blank lines between methods. No trailing whitespace.
+- Readable code that survives JavaScript's dynamic nature.
+- Modern ESM modules and explicit dependencies.
+- Small functions and predictable async flow.
+- A migration path to stricter typing when the codebase wants it.
 
-## 4. Language Features
-- **Variable Declarations:** Use `const` by default, `let` if reassignment is needed. **`var` is forbidden.**
-- **Array Literals:** Use trailing commas. Do not use the `Array` constructor.
-- **Object Literals:** Use trailing commas and shorthand properties. Do not use the `Object` constructor.
-- **Classes:** Do not use JavaScript getter/setter properties (`get name()`). Provide ordinary methods instead.
-- **Functions:** Prefer arrow functions for nested functions to preserve `this` context.
-- **String Literals:** Use single quotes (`'`). Use template literals (`` ` ``) for multi-line strings or complex interpolation.
-- **Control Structures:** Prefer `for-of` loops. `for-in` loops should only be used on dict-style objects.
-- **`this`:** Only use `this` in class constructors, methods, or in arrow functions defined within them.
-- **Equality Checks:** Always use identity operators (`===` / `!==`).
+## Required defaults
 
-## 5. Disallowed Features
-- `with` keyword.
-- `eval()` or `Function(...string)`.
-- Automatic Semicolon Insertion.
-- Modifying builtin objects (`Array.prototype.foo = ...`).
+- Use `const` by default and `let` only when reassignment is real and local.
+- Prefer ESM, named exports, and small focused modules.
+- Use early returns and explicit guards instead of deeply nested conditionals.
+- Validate external input at the boundary because JavaScript will not save me later.
+- Use JSDoc for public modules in JS-only codebases when it helps readers and tooling.
 
-## 6. Naming
-- **Classes:** `UpperCamelCase`.
-- **Methods & Functions:** `lowerCamelCase`.
-- **Constants:** `CONSTANT_CASE` (all uppercase with underscores).
-- **Non-constant Fields & Variables:** `lowerCamelCase`.
+## Architecture
 
-## 7. JSDoc
-- JSDoc is used on all classes, fields, and methods.
-- Use `@param`, `@return`, `@override`, `@deprecated`.
-- Type annotations are enclosed in braces (e.g., `/** @param {string} userName */`).
+- Favor plain objects and functions over class-heavy design unless long-lived stateful objects are genuinely the right model.
+- Keep domain logic separate from HTTP, DOM, storage, or framework glue.
+- Represent async workflows with `async`/`await` unless a stream or event model is actually the domain.
+- Name modules for the feature or responsibility they own, not for generic reuse aspirations.
 
-*Source: [Google JavaScript Style Guide](https://google.github.io/styleguide/jsguide.html)*
+## Verification
+
+- Test behavior through public functions and module boundaries.
+- Cover failure paths, undefined/null input, and partial external failures because those are where dynamic code breaks.
+- Use linting and formatting so style questions do not dominate review.
+- Watch for accidental event-loop blocking in CPU-heavy or collection-heavy code.
+
+## Explicitly prohibited
+
+The following practices are prohibited in new code unless the guide names a narrow, explicit exception.
+
+- `var`, implicit globals, and mutation shared across distant modules.
+- Promise chains when `async`/`await` makes the story clearer.
+- Monkey-patching built-ins, magical metaprogramming, and clever proxies in business code.
+- Stringly typed protocols with no validation or normalization step.

@@ -1,7 +1,6 @@
 // Final Verification Program
 use maestro_pi_mono::{
-    default_presets, get_preset, preset_names, AgentRole, PiAgentType, WorkflowMode,
-    WorkflowStep,
+    default_presets, get_preset, preset_names, AgentRole, PiAgentType, WorkflowMode, WorkflowStep,
 };
 
 fn main() {

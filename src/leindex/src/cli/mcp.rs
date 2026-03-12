@@ -13,7 +13,45 @@ use tokio::net::UnixStream;
 #[cfg(feature = "rusqlite")]
 use crate::memory::mcp_pool::McpPool;
 #[cfg(feature = "rusqlite")]
+use crate::memory::models::{McpServer, McpStatus, McpTransport};
+#[cfg(feature = "rusqlite")]
 use crate::memory::service::MemoryService;
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct AddServerArgs {
+    /// MCP server name as it should appear in the Maestro pool
+    pub name: String,
+    /// Transport type for this MCP server
+    #[arg(long, value_enum, default_value_t = AddServerTransport::Stdio)]
+    pub transport: AddServerTransport,
+    /// Command to execute for stdio MCP servers
+    #[arg(long)]
+    pub command: Option<String>,
+    /// Repeatable argument for stdio MCP servers
+    #[arg(long = "arg")]
+    pub args: Vec<String>,
+    /// Repeatable KEY=VALUE environment variable for stdio MCP servers
+    #[arg(long = "env")]
+    pub env: Vec<String>,
+    /// Working directory for stdio MCP servers
+    #[arg(long)]
+    pub cwd: Option<String>,
+    /// URL for HTTP MCP servers
+    #[arg(long)]
+    pub url: Option<String>,
+    /// Repeatable KEY=VALUE HTTP header for HTTP MCP servers
+    #[arg(long = "header")]
+    pub headers: Vec<String>,
+    /// Start the pooled stdio server immediately after registering it
+    #[arg(long)]
+    pub start: bool,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddServerTransport {
+    Stdio,
+    Http,
+}
 
 pub async fn serve() -> Result<()> {
     let service = MemoryService::new(None)?;
@@ -32,23 +70,84 @@ pub async fn serve() -> Result<()> {
     }
 }
 
+pub async fn add(args: AddServerArgs) -> Result<()> {
+    let service = MemoryService::new(None)?;
+    service.initialize()?;
+
+    let transport = match args.transport {
+        AddServerTransport::Stdio => McpTransport::Stdio,
+        AddServerTransport::Http => McpTransport::Http,
+    };
+
+    match transport {
+        McpTransport::Stdio => {
+            if args.command.is_none() {
+                anyhow::bail!("--command is required for stdio MCP servers");
+            }
+            if args.url.is_some() {
+                anyhow::bail!("--url cannot be used with stdio MCP servers");
+            }
+            if !args.headers.is_empty() {
+                anyhow::bail!("--header is only supported for HTTP MCP servers");
+            }
+        }
+        McpTransport::Http => {
+            if args.url.is_none() {
+                anyhow::bail!("--url is required for HTTP MCP servers");
+            }
+            if args.command.is_some()
+                || !args.args.is_empty()
+                || !args.env.is_empty()
+                || args.cwd.is_some()
+            {
+                anyhow::bail!(
+                    "--command/--arg/--env/--cwd are only supported for stdio MCP servers"
+                );
+            }
+            if args.start {
+                anyhow::bail!("--start is only supported for stdio MCP servers");
+            }
+        }
+    }
+
+    let env = key_value_json(&args.env, "environment variable")?;
+    let headers = optional_key_value_json(&args.headers, "HTTP header")?;
+
+    // If the user previously removed this server from the pool, unblock it on re-install.
+    let _ = service.unblock_mcp_server(&args.name);
+
+    let server = McpServer {
+        id: 0,
+        name: args.name.clone(),
+        transport,
+        command: args.command.unwrap_or_default(),
+        args: args.args.clone(),
+        env,
+        cwd: args.cwd.clone(),
+        url: args.url.clone(),
+        headers,
+        status: McpStatus::Stopped,
+        socket_path: None,
+        client_count: 0,
+        last_started_at: None,
+    };
+
+    service.update_mcp_server(server.clone())?;
+    println!("Registered MCP server '{}' in the Maestro pool", args.name);
+
+    if args.start {
+        let pool = McpPool::new(service);
+        let socket_path = pool.start_server_record(&server).await?;
+        println!("Started '{}' on {}", args.name, socket_path);
+    }
+
+    Ok(())
+}
+
 pub async fn proxy(server_name: String) -> Result<()> {
-    // Prefer DB socket_path if present; otherwise fallback to deterministic /tmp path.
     let service = MemoryService::new(None)?;
     service.initialize().ok();
-    let socket_path = service
-        .list_mcp_servers()
-        .ok()
-        .and_then(|list| {
-            list.into_iter()
-                .find(|s| s.name == server_name)
-                .and_then(|s| s.socket_path)
-        })
-        .unwrap_or_else(|| {
-            McpPool::socket_path_for(&server_name)
-                .to_string_lossy()
-                .to_string()
-        });
+    let socket_path = ensure_socket_path(&service, &server_name).await?;
 
     let stream = UnixStream::connect(&socket_path)
         .await
@@ -426,6 +525,71 @@ impl ToolSearchServer {
     }
 }
 
+fn key_value_json(entries: &[String], label: &str) -> Result<serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    for entry in entries {
+        let (key, value) = parse_key_value(entry, label)?;
+        map.insert(key, serde_json::Value::String(value));
+    }
+    Ok(serde_json::Value::Object(map))
+}
+
+fn optional_key_value_json(entries: &[String], label: &str) -> Result<Option<serde_json::Value>> {
+    let value = key_value_json(entries, label)?;
+    match value.as_object() {
+        Some(map) if map.is_empty() => Ok(None),
+        _ => Ok(Some(value)),
+    }
+}
+
+fn parse_key_value(entry: &str, label: &str) -> Result<(String, String)> {
+    let Some((key, value)) = entry.split_once('=') else {
+        anyhow::bail!("Invalid {} '{}': expected KEY=VALUE", label, entry);
+    };
+    if key.is_empty() {
+        anyhow::bail!("Invalid {} '{}': key cannot be empty", label, entry);
+    }
+    Ok((key.to_string(), value.to_string()))
+}
+
+async fn ensure_socket_path(service: &MemoryService, server_name: &str) -> Result<String> {
+    if let Ok(servers) = service.list_mcp_servers() {
+        if let Some(server) = servers.into_iter().find(|s| s.name == server_name) {
+            if server.transport != McpTransport::Stdio {
+                anyhow::bail!(
+                    "MCP server '{}' uses '{}' transport and cannot be proxied via Maestro pool",
+                    server_name,
+                    server.transport
+                );
+            }
+
+            if let Some(socket_path) = server.socket_path.clone() {
+                if std::path::Path::new(&socket_path).exists() {
+                    return Ok(socket_path);
+                }
+            }
+
+            let fallback = McpPool::socket_path_for(server_name);
+            if fallback.exists() {
+                return Ok(fallback.to_string_lossy().to_string());
+            }
+
+            let pool = McpPool::new(service.clone());
+            return pool.start_server_record(&server).await;
+        }
+    }
+
+    let fallback = McpPool::socket_path_for(server_name);
+    if fallback.exists() {
+        return Ok(fallback.to_string_lossy().to_string());
+    }
+
+    anyhow::bail!(
+        "MCP server '{}' is not registered in the Maestro pool",
+        server_name
+    )
+}
+
 struct UnixMcpClient {
     reader: tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
     writer: tokio::net::unix::OwnedWriteHalf,
@@ -434,19 +598,7 @@ struct UnixMcpClient {
 
 impl UnixMcpClient {
     async fn connect(server_name: &str, service: &MemoryService) -> Result<Self> {
-        let socket_path = service
-            .list_mcp_servers()
-            .ok()
-            .and_then(|list| {
-                list.into_iter()
-                    .find(|s| s.name == server_name)
-                    .and_then(|s| s.socket_path)
-            })
-            .unwrap_or_else(|| {
-                McpPool::socket_path_for(server_name)
-                    .to_string_lossy()
-                    .to_string()
-            });
+        let socket_path = ensure_socket_path(service, server_name).await?;
 
         let stream = UnixStream::connect(&socket_path).await.with_context(|| {
             format!(
@@ -515,5 +667,23 @@ impl UnixMcpClient {
         }
 
         anyhow::bail!("No response from MCP server for {}", method)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_key_value_accepts_equals_in_value() {
+        let parsed = parse_key_value("API_KEY=foo=bar", "environment variable").unwrap();
+        assert_eq!(parsed.0, "API_KEY");
+        assert_eq!(parsed.1, "foo=bar");
+    }
+
+    #[test]
+    fn key_value_json_rejects_missing_equals() {
+        let error = key_value_json(&["INVALID".to_string()], "environment variable").unwrap_err();
+        assert!(error.to_string().contains("expected KEY=VALUE"));
     }
 }

@@ -77,7 +77,7 @@ Make OpenCode variant **fully functional and independent** by:
 **Files Created** (23 total):
 - 8 command files (setup, newTrack, implement, status, revert, configure, tui, memory)
 - 1 independent workflow.md (OpenCode-specific)
-- 14 code styleguide files
+- 27 code styleguide files
 - 1 OpenCode configuration file
 - 1 installer script
 - 1 migration guide

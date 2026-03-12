@@ -116,6 +116,9 @@ enum Commands {
 enum McpCommands {
     /// Start pooled stdio MCP servers on UNIX sockets
     Serve,
+    /// Register an MCP server directly in the Maestro pool
+    #[command(visible_alias = "install")]
+    Add(mcp::AddServerArgs),
     /// Bridge stdio to a pooled UNIX socket server
     Proxy {
         /// MCP server name
@@ -211,6 +214,7 @@ async fn main() -> Result<()> {
         } => implement::run(command, description, session, tool, path, title).await,
         Commands::Mcp { command } => match command {
             McpCommands::Serve => mcp::serve().await,
+            McpCommands::Add(args) => mcp::add(args).await,
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
         },

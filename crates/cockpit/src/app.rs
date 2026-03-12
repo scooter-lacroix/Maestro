@@ -9,8 +9,8 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{
-        disable_raw_mode, enable_raw_mode, Clear as TerminalClear, ClearType,
-        EnterAlternateScreen, LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode, Clear as TerminalClear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
     },
 };
 use ratatui::{
@@ -2244,7 +2244,8 @@ async fn run_app<B: Backend>(
                                         app.config.editor = app.rename_buffer.clone();
                                         std::env::set_var("EDITOR", &app.config.editor);
                                         if let Err(e) = app.config.save() {
-                                            app.status_message = format!("Failed to save config: {}", e);
+                                            app.status_message =
+                                                format!("Failed to save config: {}", e);
                                         } else {
                                             app.status_message =
                                                 format!("Editor set to '{}'", app.config.editor);
@@ -2254,7 +2255,8 @@ async fn run_app<B: Backend>(
                                     InputMode::SettingsInstallPath => {
                                         app.config.install_path = app.rename_buffer.clone();
                                         if let Err(e) = app.config.save() {
-                                            app.status_message = format!("Failed to save config: {}", e);
+                                            app.status_message =
+                                                format!("Failed to save config: {}", e);
                                         } else {
                                             app.status_message = format!(
                                                 "Install path set to '{}'",
@@ -2286,7 +2288,8 @@ async fn run_app<B: Backend>(
                                                 app.config.editor = id.clone();
                                                 std::env::set_var("EDITOR", &app.config.editor);
                                                 if let Err(e) = app.config.save() {
-                                                    app.status_message = format!("Failed to save config: {}", e);
+                                                    app.status_message =
+                                                        format!("Failed to save config: {}", e);
                                                 } else {
                                                     app.status_message = format!(
                                                         "Editor set to '{}'",
@@ -2297,10 +2300,13 @@ async fn run_app<B: Backend>(
                                             SettingsMenuKind::Theme => {
                                                 app.config.theme = id.clone();
                                                 if let Err(e) = app.config.save() {
-                                                    app.status_message = format!("Failed to save config: {}", e);
-                                                } else {
                                                     app.status_message =
-                                                        format!("Theme set to '{}'", app.config.theme);
+                                                        format!("Failed to save config: {}", e);
+                                                } else {
+                                                    app.status_message = format!(
+                                                        "Theme set to '{}'",
+                                                        app.config.theme
+                                                    );
                                                 }
                                             }
                                         }
@@ -2680,8 +2686,8 @@ async fn run_app<B: Backend>(
                                     InputMode::NewSessionTool => {
                                         // Cycle tools
                                         let tools = [
-                                            "claude", "gemini", "shell", "codex", "opencode", "amp",
-                                            "qwen", "pi", "omp", "iflow",
+                                            "claude", "gemini", "shell", "codex", "opencode",
+                                            "amp", "qwen", "pi", "omp", "iflow",
                                         ];
                                         if let Some(pos) =
                                             tools.iter().position(|&t| t == app.new_session_tool)
@@ -4740,16 +4746,15 @@ async fn run_app<B: Backend>(
                                                 };
                                             }
                                         }
-                                        SettingsOption::Save => {
-                                            match app.config.save() {
-                                                Ok(()) => {
-                                                    app.toast_queue.success("Configuration saved to ~/.config/maestro/config.toml");
-                                                }
-                                                Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to save config: {}", e));
-                                                }
+                                        SettingsOption::Save => match app.config.save() {
+                                            Ok(()) => {
+                                                app.toast_queue.success("Configuration saved to ~/.config/maestro/config.toml");
                                             }
-                                        }
+                                            Err(e) => {
+                                                app.toast_queue
+                                                    .error(format!("Failed to save config: {}", e));
+                                            }
+                                        },
                                     }
                                 } else if app.tab_index == tabs::PROJECTS {
                                     // Projects Tab - Launch Yazi via maestro-tab
@@ -4769,18 +4774,23 @@ async fn run_app<B: Backend>(
 
                                         // Properly handle suspend errors
                                         if let Err(e) = suspend_fullscreen_app(terminal) {
-                                            app.status_message = format!("Failed to suspend TUI: {}", e);
+                                            app.status_message =
+                                                format!("Failed to suspend TUI: {}", e);
                                             continue;
                                         }
 
                                         // Small delay to ensure terminal state is synced
                                         std::thread::sleep(std::time::Duration::from_millis(50));
 
-                                        let res = crate::yazi_launcher::launch_yazi(&project.path, &project.name);
+                                        let res = crate::yazi_launcher::launch_yazi(
+                                            &project.path,
+                                            &project.name,
+                                        );
 
                                         // Resume TUI
                                         if let Err(e) = resume_fullscreen_app(terminal) {
-                                            app.status_message = format!("Failed to resume TUI: {}", e);
+                                            app.status_message =
+                                                format!("Failed to resume TUI: {}", e);
                                             continue;
                                         }
 
@@ -5697,8 +5707,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .mcp_servers
         .iter()
         .map(|s| {
-            let status_color = if s.status == leindex_core::memory::models::McpStatus::Running
-            {
+            let status_color = if s.status == leindex_core::memory::models::McpStatus::Running {
                 Color::Green
             } else {
                 Color::Red

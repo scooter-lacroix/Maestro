@@ -1267,10 +1267,6 @@ configure_claude_cli() {
     mkdir -p "$config_dir" || { print_warning "Failed to create config directory"; return 2; }
     backup_file "$config_file" 2>/dev/null || true
 
-    # Get the correct server command
-    local server_cmd
-    server_cmd=$(get_server_command)
-
     # Claude Code MCP config format with proper merging
     # For ~/.claude.json: MERGE into existing mcpServers object
     # For fallback file: create/update mcpServers structure
@@ -1280,7 +1276,6 @@ import sys
 
 config_file = "$config_file"
 server_name = "leindex"
-server_command = "$server_cmd"
 is_main_config = config_file.endswith(".claude.json")
 
 # Validate existing config
@@ -1319,8 +1314,8 @@ if server_name in config.get('mcpServers', {}):
 # Add/update the LeIndex MCP server with correct args
 print(f"Notice: Writing fresh config for '{server_name}'...", file=sys.stderr)
 config['mcpServers'][server_name] = {
-    'command': server_command,
-    'args': ['mcp']
+    'command': 'maestro',
+    'args': ['mcp', 'proxy', 'leindex']
 }
 
 # Write back to file (preserving all other settings)
@@ -1676,7 +1671,7 @@ configure_jetbrains() {
         print_info "JetBrains IDEs detected"
         print_info "Manual configuration required for JetBrains:"
         print_bullet "Install the 'MCP Support' plugin from JetBrains Marketplace"
-        print_bullet "Configure MCP server: command='leindex', args=['mcp']"
+        print_bullet "Configure MCP server: command='maestro', args=['mcp', 'proxy', 'leindex']"
         print_warning "See documentation for JetBrains-specific setup"
     else
         print_info "No JetBrains IDEs detected"
@@ -1717,6 +1712,28 @@ configure_cli_tools() {
 
     if command -v leindex-search &> /dev/null; then
         print_success "'leindex-search' command available"
+    fi
+}
+
+register_maestro_pool_leindex() {
+    print_section "Registering LeIndex In Maestro MCP Pool"
+
+    if ! command -v maestro &> /dev/null; then
+        print_warning "'maestro' command not found; skipping MCP pool registration"
+        return 0
+    fi
+
+    if ! command -v leindex &> /dev/null; then
+        print_warning "'leindex' command not found; skipping MCP pool registration"
+        return 0
+    fi
+
+    if maestro mcp add leindex --command leindex --arg mcp >/dev/null 2>&1; then
+        print_success "Registered 'leindex' in the Maestro MCP pool"
+        print_bullet "Pool entry: leindex -> leindex mcp"
+    else
+        print_warning "Failed to register 'leindex' in the Maestro MCP pool"
+        print_info "You can retry later with: maestro mcp add leindex --command leindex --arg mcp"
     fi
 }
 
@@ -1773,8 +1790,8 @@ if 'leindex' in config.get(json_key, {}):
 # Add LeIndex server
 print(f"Notice: Writing fresh config for 'leindex' with key '{json_key}'...", file=sys.stderr)
 config[json_key]['leindex'] = {
-    'command': 'leindex',
-    'args': ['mcp']
+    'command': 'maestro',
+    'args': ['mcp', 'proxy', 'leindex']
 }
 
 with open(config_file, 'w') as f:
@@ -1810,8 +1827,8 @@ configure_toml_mcp() {
     cat >> "$config_file" << EOF
 
 [mcp_servers.$tool_name]
-command = "leindex"
-args = ["mcp"]
+command = "maestro"
+args = ["mcp", "proxy", "leindex"]
 EOF
 
     print_success "$display_name configured"
@@ -1841,9 +1858,11 @@ configure_yaml_mcp() {
 extensions:
   $tool_name:
     type: stdio
-    cmd: "leindex"
+    cmd: "maestro"
     args:
       - "mcp"
+      - "proxy"
+      - "leindex"
     description: "LeIndex code search MCP server"
 EOF
 
@@ -1891,8 +1910,8 @@ if 'leindex' in config.get('mcpServers', {}):
     del config['mcpServers']['leindex']
 
 config['mcpServers']['leindex'] = {
-    'command': 'leindex',
-    'args': ['mcp']
+    'command': 'maestro',
+    'args': ['mcp', 'proxy', 'leindex']
 }
 print(f"Notice: Writing fresh config for 'leindex'...", file=sys.stderr)
 
@@ -2001,8 +2020,8 @@ if 'leindex' in config.get('mcpServers', {}):
 print(f"Notice: Writing fresh config for 'leindex' with type='stdio'...", file=sys.stderr)
 config['mcpServers']['leindex'] = {
     'type': 'stdio',
-    'command': 'leindex',
-    'args': ['mcp']
+    'command': 'maestro',
+    'args': ['mcp', 'proxy', 'leindex']
 }
 
 with open(config_file, 'w') as f:
@@ -2057,6 +2076,11 @@ select_tools() {
     ASK_CHOICE_RESULT=""
     ask_choice "Select an option:" "${options[@]}"
     local choice=$ASK_CHOICE_RESULT
+
+    if [[ "$choice" != "19" ]]; then
+        register_maestro_pool_leindex
+        echo ""
+    fi
 
     echo ""
 
