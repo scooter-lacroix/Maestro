@@ -186,8 +186,8 @@ impl CliRunner {
             .with_context(|| format!("Failed to spawn agent process: {}", self.config.tool))?;
 
         // Read stdout/stderr concurrently
-        let stdout_task = if let Some(stdout) = child.stdout.take() {
-            Some(tokio::spawn(async move {
+        let stdout_task = child.stdout.take().map(|stdout| {
+            tokio::spawn(async move {
                 let reader = BufReader::new(stdout);
                 let mut lines = Vec::new();
                 let mut reader_lines = reader.lines();
@@ -195,13 +195,11 @@ impl CliRunner {
                     lines.push(line);
                 }
                 lines.join("\n")
-            }))
-        } else {
-            None
-        };
+            })
+        });
 
-        let stderr_task = if let Some(stderr) = child.stderr.take() {
-            Some(tokio::spawn(async move {
+        let stderr_task = child.stderr.take().map(|stderr| {
+            tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = Vec::new();
                 let mut reader_lines = reader.lines();
@@ -209,10 +207,8 @@ impl CliRunner {
                     lines.push(line);
                 }
                 lines.join("\n")
-            }))
-        } else {
-            None
-        };
+            })
+        });
 
         // Wait for completion with configured timeout (not hardcoded 300s)
         let output = timeout(
