@@ -579,6 +579,7 @@ impl SlicingAnalyzer {
 
         // Extract relevant variables from data edges
         for edge in &pdg.edges {
+            #[allow(clippy::collapsible_if)]
             if edge.dep_type == DependenceType::Data {
                 if result.relevant_lines.contains(&edge.from_line)
                     || result.relevant_lines.contains(&edge.to_line)

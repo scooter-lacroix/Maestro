@@ -191,7 +191,7 @@ impl MultiLangASTAnalyzer {
                 name: None,
                 alias: None,
                 line,
-                is_default: text.contains("import {") == false,
+                is_default: !text.contains("import {"),
             });
         }
         None
