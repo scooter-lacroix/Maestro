@@ -161,7 +161,7 @@ impl TokenFormatter {
     /// Estimate token count for a string (rough estimate)
     pub fn estimate_tokens(&self, s: &str) -> usize {
         // Rough estimate: ~4 characters per token on average
-        (s.len() + 3) / 4
+        s.len().div_ceil(4)
     }
 
     /// Calculate token savings percentage
