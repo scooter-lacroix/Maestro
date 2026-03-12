@@ -652,7 +652,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         let opencode_json = config_dir.join("opencode.json");
 
         if !opencode_json.exists() {
-            self.log(&format!("opencode.json does not exist, creating new"));
+            self.log("opencode.json does not exist, creating new");
             let mut commands = JsonMap::new();
 
             // Add maestro parent command
@@ -948,7 +948,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             message: if exists {
                 format!("Found: {}", commands_dir.unwrap())
             } else {
-                format!("Not required for this tool")
+                "Not required for this tool".to_string()
             },
         }
     }
@@ -1037,7 +1037,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                     if registered {
                                         format!("LeIndex registered as '{}'", server_name)
                                     } else {
-                                        format!("LeIndex not found in mcp_servers")
+                                        "LeIndex not found in mcp_servers".to_string()
                                     },
                                 )
                             }

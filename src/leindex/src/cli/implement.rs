@@ -66,7 +66,7 @@ pub async fn run(
                 anyhow::bail!("Not in tmux; cannot target Current Session");
             }
             let target = tmux_current_pane_target()
-                .or_else(|| tmux_current_session_target())
+                .or_else(tmux_current_session_target)
                 .context("Failed to determine current tmux target")?;
 
             let mux = TmuxMultiplexer::default();
