@@ -342,7 +342,7 @@ impl MultiLangCallGraphAnalyzer {
             ProgrammingLanguage::C | ProgrammingLanguage::Cpp => vec!["call_expression"],
         };
 
-        let call_nodes = find_all_nodes(root, &call_types.iter().map(|s| *s).collect::<Vec<_>>());
+        let call_nodes = find_all_nodes(root, &call_types.iter().copied().collect::<Vec<_>>());
 
         for call_node in call_nodes.iter().take(200) {
             let line = call_node.start_position().row + 1;
