@@ -278,10 +278,10 @@ impl DFGAnalyzer {
             }
 
             // Handle *args and **kwargs
-            let arg_name = if arg.starts_with("**") {
-                &arg[2..]
-            } else if arg.starts_with('*') {
-                &arg[1..]
+            let arg_name = if let Some(rest) = arg.strip_prefix("**") {
+                rest
+            } else if let Some(rest) = arg.strip_prefix("*") {
+                rest
             } else {
                 arg
             };
