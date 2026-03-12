@@ -1307,7 +1307,7 @@ impl LspManager {
                     if let Some(ext) = entry.path().extension().and_then(|s| s.to_str()) {
                         // Check each LSP type against the file extension
                         for lsp_type in [LspType::Rust, LspType::Python, LspType::TypeScript] {
-                            if lsp_type.file_extensions().iter().any(|&e| e == ext) {
+                            if lsp_type.file_extensions().contains(&ext) {
                                 debug!(
                                     "Detected language {:?} from file: {:?}",
                                     lsp_type,
@@ -2302,13 +2302,9 @@ impl LspManager {
 
         // Then, start the MCP bridge (don't fail if LSP failed)
         let bridge_pid = if lsp_result.is_ok() {
-            match self
-                .start_mcp_bridge(session_id, lsp_type, project_path)
+            self.start_mcp_bridge(session_id, lsp_type, project_path)
                 .await
-            {
-                Ok(pid) => pid,
-                Err(_) => 0, // Bridge failed to start, but LSP is running
-            }
+                .unwrap_or_default()
         } else {
             0
         };

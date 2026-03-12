@@ -58,6 +58,8 @@ pub fn discover_system_mcp_servers() -> Vec<DiscoveredMcpServer> {
         ("codex".to_string(), home.join(".codex/config.toml")),
         ("qwen".to_string(), home.join(".qwen/settings.json")),
         ("gemini".to_string(), home.join(".gemini/settings.json")),
+        ("iflow".to_string(), home.join(".iflow/settings.json")),
+        ("droid".to_string(), home.join(".factory/mcp.json")),
     ];
 
     for (label, path) in candidates {
@@ -369,4 +371,85 @@ fn parse_toml_server(
         headers: None,
         source: source_label.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_discover_from_json_file_supports_iflow_and_droid_shapes() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{
+  "mcpServers": {
+    "iflow-local": {
+      "command": "maestro",
+      "args": ["mcp", "proxy", "leindex"]
+    },
+    "droid-local": {
+      "type": "stdio",
+      "command": "maestro",
+      "args": ["mcp", "proxy", "agent-browser"]
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
+        assert_eq!(discovered.len(), 2);
+        assert!(discovered.iter().any(|server| {
+            server.name == "iflow-local"
+                && server.transport == McpTransport::Stdio
+                && server.command == "maestro"
+        }));
+        assert!(discovered.iter().any(|server| {
+            server.name == "droid-local"
+                && server.transport == McpTransport::Stdio
+                && server.args == vec!["mcp", "proxy", "agent-browser"]
+        }));
+    }
+
+    #[test]
+    fn test_discover_from_json_file_supports_amp_and_opencode_shapes() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{
+  "amp.mcpServers": {
+    "amp-local": {
+      "command": "maestro",
+      "args": ["mcp", "tool-search"]
+    }
+  },
+  "mcp": {
+    "opencode-local": {
+      "type": "local",
+      "command": ["maestro", "mcp", "proxy", "leindex"],
+      "environment": {
+        "DEBUG": "1"
+      }
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
+        assert_eq!(discovered.len(), 2);
+        assert!(discovered.iter().any(|server| {
+            server.name == "amp-local"
+                && server.command == "maestro"
+                && server.args == vec!["mcp", "tool-search"]
+        }));
+        assert!(discovered.iter().any(|server| {
+            server.name == "opencode-local"
+                && server.command == "maestro"
+                && server.args == vec!["mcp", "proxy", "leindex"]
+                && server.env == serde_json::json!({"DEBUG": "1"})
+        }));
+    }
 }
