@@ -119,6 +119,7 @@ impl fmt::Display for MigrationState {
 
 impl MigrationState {
     /// Parse a string into a MigrationState
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "APPLIED" => MigrationState::Applied,
