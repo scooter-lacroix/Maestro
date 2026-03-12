@@ -14,9 +14,10 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
-use super::models::{MemoryCategory, Session, SessionStatus};
+use super::models::{McpTransport, MemoryCategory, Session, SessionStatus};
 #[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
 use crate::multiplexer::{TmuxMultiplexer, TmuxSession};
@@ -210,7 +211,7 @@ impl SessionManager {
     /// Sets the following environment variables for all CLI tools:
     /// - MAESTRO_SESSION_ID: Session identifier for memory banking
     /// - MAESTRO_PROJECT_PATH: Project root path for context
-    /// - MAESTRO_MCP_CONFIG: Path to .mcp.json with tool-search and LSP entries
+    /// - MAESTRO_MCP_CONFIG: Path to .mcp.json with pooled MCP and LSP entries
     fn build_tool_command(
         &self,
         tool: &str,
@@ -220,8 +221,8 @@ impl SessionManager {
         let editor = shell_escape(&std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string()));
         let escaped_project = shell_escape(project_path);
         let escaped_session_id = shell_escape(session_id);
-        let mcp_config_path = self.write_tool_search_mcp_config(session_id)?;
-        let mcp_config = shell_escape(&mcp_config_path.to_string_lossy().to_string());
+        let mcp_config_path = self.write_session_mcp_config(session_id)?;
+        let mcp_config = shell_escape(mcp_config_path.to_string_lossy().as_ref());
 
         // Common environment variables for all tools
         let env_vars = format!(
@@ -234,33 +235,349 @@ impl SessionManager {
                 "{}; cd {} && claude --strict-mcp-config --mcp-config {}",
                 env_vars, escaped_project, mcp_config
             )),
-            "gemini" => Ok(format!(
-                "{}; cd {} && gemini",
-                env_vars, escaped_project
-            )),
-            "amp" => Ok(format!(
-                "{}; cd {} && amp",
-                env_vars, escaped_project
-            )),
-            "opencode" => Ok(format!(
-                "{}; cd {} && opencode",
-                env_vars, escaped_project
-            )),
-            "codex" => Ok(format!(
-                "{}; cd {} && codex -c 'mcp_servers={{}}' -c 'mcp_servers.maestro_tool_search.command=\"maestro\"' -c 'mcp_servers.maestro_tool_search.args=[\"mcp\",\"tool-search\"]'",
-                env_vars, escaped_project
-            )),
-            "shell" | _ => {
+            "gemini" => {
+                let settings_path =
+                    self.write_tool_system_settings_file(session_id, "gemini", false)?;
+                Ok(format!(
+                    "{}; export GEMINI_CLI_SYSTEM_SETTINGS_PATH={}; cd {} && gemini",
+                    env_vars,
+                    shell_escape(&settings_path.to_string_lossy()),
+                    escaped_project
+                ))
+            }
+            "qwen" => {
+                let settings_path =
+                    self.write_tool_system_settings_file(session_id, "qwen", false)?;
+                Ok(format!(
+                    "{}; export QWEN_CODE_SYSTEM_SETTINGS_PATH={}; cd {} && qwen",
+                    env_vars,
+                    shell_escape(&settings_path.to_string_lossy()),
+                    escaped_project
+                ))
+            }
+            "iflow" => {
+                let settings_path =
+                    self.write_tool_system_settings_file(session_id, "iflow", false)?;
+                Ok(format!(
+                    "{}; export IFLOW_CLI_SYSTEM_SETTINGS_PATH={}; cd {} && iflow",
+                    env_vars,
+                    shell_escape(&settings_path.to_string_lossy()),
+                    escaped_project
+                ))
+            }
+            "amp" => {
+                let amp_mcp_config_path = self.write_amp_mcp_config_file(session_id)?;
+                Ok(format!(
+                    "{}; cd {} && amp --mcp-config {}",
+                    env_vars,
+                    escaped_project,
+                    shell_escape(&amp_mcp_config_path.to_string_lossy())
+                ))
+            }
+            "opencode" => {
+                let opencode_config_path = self.write_opencode_config_file(session_id)?;
+                Ok(format!(
+                    "{}; export OPENCODE_CONFIG={}; cd {} && opencode",
+                    env_vars,
+                    shell_escape(&opencode_config_path.to_string_lossy()),
+                    escaped_project
+                ))
+            }
+            "codex" => {
+                let mut command = format!(
+                    "{}; cd {} && codex -c {}",
+                    env_vars,
+                    escaped_project,
+                    shell_escape("mcp_servers={}")
+                );
+                for override_arg in self.build_codex_mcp_overrides() {
+                    command.push_str(" -c ");
+                    command.push_str(&shell_escape(&override_arg));
+                }
+                Ok(command)
+            }
+            "droid" => {
+                let home_root = self.write_standard_home_tool_settings(
+                    session_id,
+                    "droid",
+                    ".factory",
+                    "mcp.json",
+                    &[],
+                    true,
+                )?;
+                Ok(format!(
+                    "{}; export HOME={}; cd {} && droid",
+                    env_vars,
+                    shell_escape(&home_root.to_string_lossy()),
+                    escaped_project
+                ))
+            }
+            _ => {
                 // Default to interactive shell with environment variables
                 Ok(format!("{}; cd {}", env_vars, escaped_project))
             }
         }
     }
 
-    fn write_tool_search_mcp_config(&self, session_id: &str) -> Result<std::path::PathBuf> {
+    fn write_session_mcp_config(&self, session_id: &str) -> Result<std::path::PathBuf> {
         // For the synchronous call (during session creation), we use direct stdio mode
         // Proxy-enabled entries require async access to LspManager
         self.write_mcp_config_with_lsps(session_id, &[])
+    }
+
+    fn build_mcp_servers_config(&self) -> BTreeMap<String, serde_json::Value> {
+        self.build_mcp_servers_config_with_stdio_type(true)
+    }
+
+    fn build_settings_mcp_servers_config(&self) -> BTreeMap<String, serde_json::Value> {
+        self.build_mcp_servers_config_with_stdio_type(false)
+    }
+
+    fn build_mcp_servers_config_with_stdio_type(
+        &self,
+        include_stdio_type: bool,
+    ) -> BTreeMap<String, serde_json::Value> {
+        let mut servers = BTreeMap::from([(
+            "maestro-tool-search".to_string(),
+            stdio_mcp_config("maestro", vec!["mcp", "tool-search"], include_stdio_type),
+        )]);
+
+        if let Ok(pool_servers) = self.service.list_mcp_servers() {
+            for server in pool_servers {
+                let name = server.name.clone();
+                if name == "maestro-tool-search" {
+                    continue;
+                }
+
+                let config = match server.transport {
+                    McpTransport::Stdio => stdio_mcp_config(
+                        "maestro",
+                        vec!["mcp".to_string(), "proxy".to_string(), name.clone()],
+                        include_stdio_type,
+                    ),
+                    McpTransport::Http => {
+                        let Some(url) = server.url.clone() else {
+                            continue;
+                        };
+                        let mut value = serde_json::json!({
+                            "type": "http",
+                            "url": url
+                        });
+                        if let Some(headers) = server.headers.clone() {
+                            value["headers"] = headers;
+                        }
+                        value
+                    }
+                };
+
+                servers.insert(name, config);
+            }
+        }
+
+        servers
+    }
+
+    fn build_standard_settings_json(
+        &self,
+        existing: serde_json::Value,
+        include_stdio_type: bool,
+    ) -> Result<serde_json::Value> {
+        let mut settings = ensure_json_object(existing);
+        settings.as_object_mut().unwrap().insert(
+            "mcpServers".to_string(),
+            serde_json::to_value(
+                self.build_mcp_servers_config_with_stdio_type(include_stdio_type),
+            )?,
+        );
+        Ok(settings)
+    }
+
+    fn build_opencode_settings_json(
+        &self,
+        existing: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let mut settings = ensure_json_object(existing);
+        settings.as_object_mut().unwrap().insert(
+            "mcp".to_string(),
+            serde_json::to_value(self.build_opencode_mcp_servers_config())?,
+        );
+        Ok(settings)
+    }
+
+    fn build_opencode_mcp_servers_config(&self) -> BTreeMap<String, serde_json::Value> {
+        let mut servers = BTreeMap::new();
+
+        for (name, config) in self.build_settings_mcp_servers_config() {
+            let opencode_config = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+                let mut value = serde_json::json!({
+                    "type": "http",
+                    "url": url
+                });
+                if let Some(headers) = config.get("headers") {
+                    value["headers"] = headers.clone();
+                }
+                value
+            } else {
+                let command = config
+                    .get("command")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("maestro")
+                    .to_string();
+                let mut command_parts = vec![serde_json::Value::String(command)];
+                if let Some(args) = config.get("args").and_then(|value| value.as_array()) {
+                    command_parts.extend(args.iter().cloned());
+                }
+                serde_json::json!({
+                    "type": "local",
+                    "command": command_parts,
+                    "environment": config
+                        .get("env")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}))
+                })
+            };
+
+            servers.insert(name, opencode_config);
+        }
+
+        servers
+    }
+
+    fn build_codex_mcp_overrides(&self) -> Vec<String> {
+        let mut overrides = Vec::new();
+
+        for (name, config) in self.build_mcp_servers_config() {
+            let key = sanitize_codex_key(&name);
+
+            if let Some(command) = config.get("command").and_then(|v| v.as_str()) {
+                overrides.push(format!(
+                    "mcp_servers.{}.command={}",
+                    key,
+                    toml_string_literal(command)
+                ));
+            }
+
+            if let Some(args) = config.get("args") {
+                if let Some(args_literal) = toml_literal(args) {
+                    overrides.push(format!("mcp_servers.{}.args={}", key, args_literal));
+                }
+            }
+
+            if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+                overrides.push(format!(
+                    "mcp_servers.{}.url={}",
+                    key,
+                    toml_string_literal(url)
+                ));
+            }
+
+            if let Some(headers) = config.get("headers") {
+                if let Some(headers_literal) = toml_literal(headers) {
+                    overrides.push(format!("mcp_servers.{}.headers={}", key, headers_literal));
+                }
+            }
+        }
+
+        overrides
+    }
+
+    fn write_standard_home_tool_settings(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        config_dir_rel: &str,
+        config_file_name: &str,
+        skip_dirs: &[&str],
+        include_stdio_type: bool,
+    ) -> Result<std::path::PathBuf> {
+        let home_root =
+            self.prepare_session_home_overlay(session_id, tool_name, config_dir_rel, skip_dirs)?;
+        let config_path = home_root.join(config_dir_rel).join(config_file_name);
+        let existing = read_json_value_or_empty(&config_path)?;
+        let updated = self.build_standard_settings_json(existing, include_stdio_type)?;
+        write_json_value_atomic(&config_path, &updated)?;
+        Ok(home_root)
+    }
+
+    fn write_tool_system_settings_file(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        include_stdio_type: bool,
+    ) -> Result<std::path::PathBuf> {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "maestro-{}-settings-{}.json",
+            tool_name,
+            sanitize_filename(session_id)
+        ));
+
+        let updated =
+            self.build_standard_settings_json(serde_json::json!({}), include_stdio_type)?;
+        write_json_value_atomic(&path, &updated)?;
+        Ok(path)
+    }
+
+    fn write_amp_mcp_config_file(&self, session_id: &str) -> Result<std::path::PathBuf> {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "maestro-amp-mcp-config-{}.json",
+            sanitize_filename(session_id)
+        ));
+
+        let config = serde_json::to_value(self.build_settings_mcp_servers_config())?;
+        write_json_value_atomic(&path, &config)?;
+        Ok(path)
+    }
+
+    fn write_opencode_config_file(&self, session_id: &str) -> Result<std::path::PathBuf> {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "maestro-opencode-config-{}.json",
+            sanitize_filename(session_id)
+        ));
+
+        let existing_path = dirs::home_dir()
+            .map(|home| home.join(".config").join("opencode").join("opencode.json"));
+        let existing = match existing_path {
+            Some(path) => read_json_value_or_empty(&path)?,
+            None => serde_json::json!({}),
+        };
+        let updated = self.build_opencode_settings_json(existing)?;
+        write_json_value_atomic(&path, &updated)?;
+        Ok(path)
+    }
+
+    fn prepare_session_home_overlay(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        config_dir_rel: &str,
+        skip_dirs: &[&str],
+    ) -> Result<std::path::PathBuf> {
+        let mut home_root = std::env::temp_dir();
+        home_root.push(format!(
+            "maestro-{}-home-{}",
+            tool_name,
+            sanitize_filename(session_id)
+        ));
+
+        if home_root.exists() {
+            std::fs::remove_dir_all(&home_root)
+                .with_context(|| format!("Failed to reset {:?}", home_root))?;
+        }
+        std::fs::create_dir_all(&home_root)
+            .with_context(|| format!("Failed to create {:?}", home_root))?;
+
+        if let Some(real_home) = dirs::home_dir() {
+            let source_dir = real_home.join(config_dir_rel);
+            if source_dir.exists() {
+                let skip = skip_dirs.iter().copied().collect::<BTreeSet<_>>();
+                copy_dir_recursive_filtered(&source_dir, &home_root.join(config_dir_rel), &skip)?;
+            }
+        }
+
+        Ok(home_root)
     }
 
     /// Write MCP configuration with LSP entries including proxy support (async version)
@@ -324,13 +641,7 @@ impl SessionManager {
             });
 
         // Build mcpServers section (existing MCP servers)
-        let mcp_servers = serde_json::json!({
-            "maestro-tool-search": {
-                "command": "maestro",
-                "args": ["mcp", "tool-search"],
-                "type": "stdio"
-            }
-        });
+        let mcp_servers = self.build_mcp_servers_config();
 
         // Build LSP servers section from provided LSP types or detect from project
         let lsp_servers = if lsp_types.is_empty() {
@@ -413,13 +724,7 @@ impl SessionManager {
             });
 
         // Build mcpServers section (existing MCP servers)
-        let mcp_servers = serde_json::json!({
-            "maestro-tool-search": {
-                "command": "maestro",
-                "args": ["mcp", "tool-search"],
-                "type": "stdio"
-            }
-        });
+        let mcp_servers = self.build_mcp_servers_config();
 
         // Build LSP servers section from provided LSP types or detect from project
         let lsp_servers = if lsp_types.is_empty() {
@@ -894,6 +1199,18 @@ fn sanitize_filename(s: &str) -> String {
         .collect()
 }
 
+fn sanitize_codex_key(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
@@ -901,16 +1218,168 @@ fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\"'\"'"))
 }
 
+fn stdio_mcp_config(
+    command: &str,
+    args: Vec<impl Into<String>>,
+    include_stdio_type: bool,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "command": command,
+        "args": args.into_iter().map(Into::into).collect::<Vec<_>>()
+    });
+    if include_stdio_type {
+        value["type"] = serde_json::Value::String("stdio".to_string());
+    }
+    value
+}
+
+fn toml_string_literal(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
+fn toml_literal(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(v) => Some(v.to_string()),
+        serde_json::Value::Number(v) => Some(v.to_string()),
+        serde_json::Value::String(v) => Some(toml_string_literal(v)),
+        serde_json::Value::Array(values) => {
+            let mut rendered = Vec::with_capacity(values.len());
+            for value in values {
+                rendered.push(toml_literal(value)?);
+            }
+            Some(format!("[{}]", rendered.join(", ")))
+        }
+        serde_json::Value::Object(map) => {
+            let mut rendered = Vec::with_capacity(map.len());
+            for (key, value) in map {
+                rendered.push(format!("{}={}", key, toml_literal(value)?));
+            }
+            Some(format!("{{{}}}", rendered.join(", ")))
+        }
+    }
+}
+
+fn ensure_json_object(value: serde_json::Value) -> serde_json::Value {
+    if value.is_object() {
+        value
+    } else {
+        serde_json::json!({})
+    }
+}
+
+fn read_json_value_or_empty(path: &Path) -> Result<serde_json::Value> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let contents =
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read {:?}", path))?;
+    serde_json::from_str(&contents).with_context(|| format!("Invalid JSON in {:?}", path))
+}
+
+fn write_json_value_atomic(path: &Path, value: &serde_json::Value) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("Cannot write JSON config without a parent directory")?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("Failed to create parent directory {:?}", parent))?;
+
+    let temp_file = NamedTempFile::new_in(parent)
+        .with_context(|| format!("Failed to create secure temp file in {:?}", parent))?;
+    std::fs::write(temp_file.path(), serde_json::to_string_pretty(value)?)
+        .with_context(|| format!("Failed to write JSON config to {:?}", temp_file.path()))?;
+    temp_file
+        .persist(path)
+        .with_context(|| format!("Failed to persist JSON config to {:?}", path))?;
+
+    Ok(())
+}
+
+fn copy_dir_recursive_filtered(
+    source: &Path,
+    target: &Path,
+    skip_names: &BTreeSet<&str>,
+) -> Result<()> {
+    std::fs::create_dir_all(target)
+        .with_context(|| format!("Failed to create target directory {:?}", target))?;
+
+    for entry in
+        std::fs::read_dir(source).with_context(|| format!("Failed to read {:?}", source))?
+    {
+        let entry = entry.with_context(|| format!("Failed to read entry in {:?}", source))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if skip_names.contains(name.as_ref()) {
+            continue;
+        }
+
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("Failed to inspect {:?}", source_path))?;
+
+        if file_type.is_dir() {
+            copy_dir_recursive_filtered(&source_path, &target_path, skip_names)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create {:?}", parent))?;
+            }
+            std::fs::copy(&source_path, &target_path).with_context(|| {
+                format!("Failed to copy {:?} to {:?}", source_path, target_path)
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    fn insert_test_session(session_manager: &SessionManager, session_id: &str, project_path: &str) {
+        session_manager
+            .service
+            .import_session(Session {
+                id: 0,
+                session_id: session_id.to_string(),
+                title: "Test Session".to_string(),
+                project_path: project_path.to_string(),
+                group_path: None,
+                sort_order: 0,
+                parent_session_id: None,
+                command: None,
+                tool: None,
+                status: SessionStatus::Running,
+                multiplexer_session: None,
+                started_at: Utc::now(),
+                last_accessed_at: None,
+                ended_at: None,
+                metadata: None,
+            })
+            .unwrap();
+    }
 
     #[test]
     fn test_sanitize_filename() {
         assert_eq!(sanitize_filename("test-session-123"), "test-session-123");
         assert_eq!(sanitize_filename("session@test/123"), "session_test_123");
         assert_eq!(sanitize_filename("session.with.dots"), "session_with_dots");
+    }
+
+    #[test]
+    fn test_sanitize_codex_key() {
+        assert_eq!(
+            sanitize_codex_key("maestro-tool-search"),
+            "maestro_tool_search"
+        );
+        assert_eq!(sanitize_codex_key("agent-browser"), "agent_browser");
+        assert_eq!(sanitize_codex_key("already_ok"), "already_ok");
     }
 
     #[test]
@@ -959,6 +1428,25 @@ mod tests {
             })
             .unwrap();
 
+        session_manager
+            .service
+            .update_mcp_server(super::super::models::McpServer {
+                id: 0,
+                name: "agent-browser".to_string(),
+                transport: super::super::models::McpTransport::Stdio,
+                command: "agent-browser".to_string(),
+                args: vec!["server".to_string()],
+                env: serde_json::json!({}),
+                cwd: None,
+                url: None,
+                headers: None,
+                status: super::super::models::McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            })
+            .unwrap();
+
         // Generate MCP config
         let config_path = session_manager
             .write_mcp_config_with_lsps(session_id, &[])
@@ -971,6 +1459,14 @@ mod tests {
 
         // Verify mcpServers exists
         assert!(json.get("mcpServers").is_some());
+        let mcp_servers = json.get("mcpServers").unwrap();
+        assert!(mcp_servers.get("maestro-tool-search").is_some());
+        let pooled = mcp_servers.get("agent-browser").unwrap();
+        assert_eq!(pooled["command"], "maestro");
+        assert_eq!(
+            pooled["args"],
+            serde_json::json!(["mcp", "proxy", "agent-browser"])
+        );
 
         // Verify lsp section does NOT exist when no LSPs
         assert!(json.get("lsp").is_none());
@@ -1043,6 +1539,159 @@ mod tests {
 
         // Clean up
         std::fs::remove_file(&config_path).ok();
+    }
+
+    #[test]
+    fn test_codex_mcp_overrides_include_pooled_servers() {
+        let service = MemoryService::new(Some(std::path::PathBuf::from(":memory:"))).unwrap();
+        service.initialize().unwrap();
+
+        let session_manager = SessionManager::new(service).unwrap();
+        session_manager
+            .service
+            .update_mcp_server(super::super::models::McpServer {
+                id: 0,
+                name: "agent-browser".to_string(),
+                transport: super::super::models::McpTransport::Stdio,
+                command: "agent-browser".to_string(),
+                args: vec!["server".to_string()],
+                env: serde_json::json!({}),
+                cwd: None,
+                url: None,
+                headers: None,
+                status: super::super::models::McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            })
+            .unwrap();
+
+        let overrides = session_manager.build_codex_mcp_overrides();
+
+        assert!(overrides
+            .iter()
+            .any(|entry| { entry == "mcp_servers.maestro_tool_search.command=\"maestro\"" }));
+        assert!(overrides
+            .iter()
+            .any(|entry| { entry == "mcp_servers.agent_browser.command=\"maestro\"" }));
+        assert!(overrides.iter().any(|entry| {
+            entry == "mcp_servers.agent_browser.args=[\"mcp\", \"proxy\", \"agent-browser\"]"
+        }));
+    }
+
+    #[test]
+    fn test_amp_mcp_config_uses_plain_server_map() {
+        let service = MemoryService::new(Some(std::path::PathBuf::from(":memory:"))).unwrap();
+        service.initialize().unwrap();
+
+        let session_manager = SessionManager::new(service).unwrap();
+        session_manager
+            .service
+            .update_mcp_server(super::super::models::McpServer {
+                id: 0,
+                name: "agent-browser".to_string(),
+                transport: super::super::models::McpTransport::Stdio,
+                command: "agent-browser".to_string(),
+                args: vec!["server".to_string()],
+                env: serde_json::json!({}),
+                cwd: None,
+                url: None,
+                headers: None,
+                status: super::super::models::McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            })
+            .unwrap();
+
+        let config = session_manager
+            .write_amp_mcp_config_file("amp-session")
+            .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+
+        assert!(json.get("mcpServers").is_none());
+        assert_eq!(json["agent-browser"]["command"], "maestro");
+        assert_eq!(
+            json["agent-browser"]["args"],
+            serde_json::json!(["mcp", "proxy", "agent-browser"])
+        );
+    }
+
+    #[test]
+    fn test_opencode_config_preserves_existing_commands() {
+        let service = MemoryService::new(Some(std::path::PathBuf::from(":memory:"))).unwrap();
+        service.initialize().unwrap();
+
+        let session_manager = SessionManager::new(service).unwrap();
+        let updated = session_manager
+            .build_opencode_settings_json(serde_json::json!({
+                "command": {
+                    "custom": {
+                        "template": "do custom work"
+                    }
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(updated["command"]["custom"]["template"], "do custom work");
+        assert_eq!(
+            updated["mcp"]["maestro-tool-search"]["command"],
+            serde_json::json!(["maestro", "mcp", "tool-search"])
+        );
+        assert_eq!(
+            updated["mcp"]["maestro-tool-search"]["type"],
+            serde_json::json!("local")
+        );
+    }
+
+    #[test]
+    fn test_build_tool_command_uses_tool_specific_overrides() {
+        let service = MemoryService::new(Some(std::path::PathBuf::from(":memory:"))).unwrap();
+        service.initialize().unwrap();
+
+        let session_manager = SessionManager::new(service).unwrap();
+        insert_test_session(&session_manager, "session-gemini", "/tmp/project-gemini");
+        insert_test_session(&session_manager, "session-qwen", "/tmp/project-qwen");
+        insert_test_session(&session_manager, "session-iflow", "/tmp/project-iflow");
+        insert_test_session(&session_manager, "session-amp", "/tmp/project-amp");
+        insert_test_session(
+            &session_manager,
+            "session-opencode",
+            "/tmp/project-opencode",
+        );
+        insert_test_session(&session_manager, "session-droid", "/tmp/project-droid");
+
+        let gemini = session_manager
+            .build_tool_command("gemini", "/tmp/project-gemini", "session-gemini")
+            .unwrap();
+        assert!(gemini.contains("GEMINI_CLI_SYSTEM_SETTINGS_PATH="));
+
+        let qwen = session_manager
+            .build_tool_command("qwen", "/tmp/project-qwen", "session-qwen")
+            .unwrap();
+        assert!(qwen.contains("QWEN_CODE_SYSTEM_SETTINGS_PATH="));
+
+        let iflow = session_manager
+            .build_tool_command("iflow", "/tmp/project-iflow", "session-iflow")
+            .unwrap();
+        assert!(iflow.contains("IFLOW_CLI_SYSTEM_SETTINGS_PATH="));
+
+        let amp = session_manager
+            .build_tool_command("amp", "/tmp/project-amp", "session-amp")
+            .unwrap();
+        assert!(amp.contains("amp --mcp-config "));
+
+        let opencode = session_manager
+            .build_tool_command("opencode", "/tmp/project-opencode", "session-opencode")
+            .unwrap();
+        assert!(opencode.contains("OPENCODE_CONFIG="));
+
+        let droid = session_manager
+            .build_tool_command("droid", "/tmp/project-droid", "session-droid")
+            .unwrap();
+        assert!(droid.contains("export HOME="));
+        assert!(droid.contains("&& droid"));
     }
 
     #[test]

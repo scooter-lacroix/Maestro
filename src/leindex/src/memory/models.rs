@@ -7,9 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Memory category for organizing memories
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryCategory {
+    #[default]
     General,
     Knowledge,
     Preference,
@@ -22,11 +23,6 @@ pub enum MemoryCategory {
     Observation,
 }
 
-impl Default for MemoryCategory {
-    fn default() -> Self {
-        Self::Context
-    }
-}
 
 impl std::fmt::Display for MemoryCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -46,20 +42,16 @@ impl std::fmt::Display for MemoryCategory {
 }
 
 /// Memory importance level
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryImportance {
+    #[default]
     Critical,
     High,
     Normal,
     Low,
 }
 
-impl Default for MemoryImportance {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
 
 /// Core memory record
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,7 +166,9 @@ pub struct MaestroTrack {
 /// Track status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TrackStatus {
+    #[default]
     New,
     InProgress,
     Completed,
@@ -182,11 +176,6 @@ pub enum TrackStatus {
     Abandoned,
 }
 
-impl Default for TrackStatus {
-    fn default() -> Self {
-        Self::New
-    }
-}
 
 impl std::fmt::Display for TrackStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -229,18 +218,15 @@ pub struct FileClaim {
 /// Claim status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ClaimStatus {
+    #[default]
     Active,
     Released,
     Expired,
     Revoked,
 }
 
-impl Default for ClaimStatus {
-    fn default() -> Self {
-        Self::Active
-    }
-}
 
 /// Session for tracking agent work
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,9 +249,10 @@ pub struct Session {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionStatus {
+    #[default]
     Running,
     Waiting,
     Idle,
@@ -276,11 +263,6 @@ pub enum SessionStatus {
     Terminated,
 }
 
-impl Default for SessionStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
 
 impl std::fmt::Display for SessionStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -328,18 +310,14 @@ pub struct McpServer {
     pub last_started_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum McpTransport {
+    #[default]
     Stdio,
     Http,
 }
 
-impl Default for McpTransport {
-    fn default() -> Self {
-        Self::Stdio
-    }
-}
 
 impl std::fmt::Display for McpTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

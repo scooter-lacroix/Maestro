@@ -160,18 +160,15 @@ pub struct VariableElement {
 
 /// Visibility/access modifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Visibility {
+    #[default]
     Public,
     Private,
     Protected,
     Package, // Go package-level, Java package-private
 }
 
-impl Default for Visibility {
-    fn default() -> Self {
-        Self::Public
-    }
-}
 
 /// Multi-language parser using tree-sitter
 pub struct MultiLanguageParser {
@@ -198,10 +195,8 @@ impl MultiLanguageParser {
 
     /// Parse source code and return the syntax tree
     pub fn parse(&mut self, source: &str, language: ProgrammingLanguage) -> Option<Tree> {
-        if self.current_language != Some(language) {
-            if self.set_language(language).is_err() {
-                return None;
-            }
+        if self.current_language != Some(language) && self.set_language(language).is_err() {
+            return None;
         }
         self.parser.parse(source, None)
     }
@@ -430,7 +425,7 @@ impl LanguageConfig for GoConfig {
 
     fn is_private_name(&self, name: &str) -> bool {
         // In Go, lowercase first letter means package-private
-        name.chars().next().map_or(false, |c| c.is_lowercase())
+        name.chars().next().is_some_and(|c| c.is_lowercase())
     }
 }
 

@@ -158,15 +158,15 @@ impl McpPool {
         let startup_result = proxy_arc.wait_for_startup(5000).await;
 
         // Check the result and update DB accordingly
-        let status = if startup_result.is_ok() {
-            info!("MCP pool '{}' startup confirmed", server.name);
-            // Server started successfully
-            McpStatus::Running
-        } else {
-            let e = startup_result.unwrap_err();
-            error!("MCP pool '{}' failed to start: {}", server.name, e);
-            // Server failed to start
-            McpStatus::Stopped
+        let status = match startup_result {
+            Ok(_) => {
+                info!("MCP pool '{}' startup confirmed", server.name);
+                McpStatus::Running
+            }
+            Err(e) => {
+                error!("MCP pool '{}' failed to start: {}", server.name, e);
+                McpStatus::Stopped
+            }
         };
 
         // Update DB to reflect socket path and status

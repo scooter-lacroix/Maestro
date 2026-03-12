@@ -1638,4 +1638,115 @@ mod tests {
         let projects = service.list_projects().unwrap();
         assert_eq!(projects.len(), 1);
     }
+
+    #[test]
+    fn test_mcp_server_round_trip_stdio_and_http() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let service = MemoryService::new(Some(db_path)).unwrap();
+        service.initialize().unwrap();
+
+        service
+            .update_mcp_server(McpServer {
+                id: 0,
+                name: "agent-browser".to_string(),
+                transport: McpTransport::Stdio,
+                command: "agent-browser".to_string(),
+                args: vec!["server".to_string()],
+                env: serde_json::json!({"API_KEY": "secret"}),
+                cwd: Some("/tmp/project".to_string()),
+                url: None,
+                headers: None,
+                status: McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            })
+            .unwrap();
+
+        service
+            .update_mcp_server(McpServer {
+                id: 0,
+                name: "remote-http".to_string(),
+                transport: McpTransport::Http,
+                command: String::new(),
+                args: vec![],
+                env: serde_json::json!({}),
+                cwd: None,
+                url: Some("https://example.test/mcp".to_string()),
+                headers: Some(serde_json::json!({"Authorization": "Bearer token"})),
+                status: McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            })
+            .unwrap();
+
+        let servers = service.list_mcp_servers().unwrap();
+
+        let stdio = servers
+            .iter()
+            .find(|server| server.name == "agent-browser")
+            .unwrap();
+        assert_eq!(stdio.transport, McpTransport::Stdio);
+        assert_eq!(stdio.command, "agent-browser");
+        assert_eq!(stdio.args, vec!["server".to_string()]);
+        assert_eq!(stdio.env["API_KEY"], "secret");
+        assert_eq!(stdio.cwd.as_deref(), Some("/tmp/project"));
+
+        let http = servers
+            .iter()
+            .find(|server| server.name == "remote-http")
+            .unwrap();
+        assert_eq!(http.transport, McpTransport::Http);
+        assert_eq!(http.url.as_deref(), Some("https://example.test/mcp"));
+        assert_eq!(
+            http.headers
+                .as_ref()
+                .and_then(|headers| headers.get("Authorization")),
+            Some(&serde_json::json!("Bearer token"))
+        );
+    }
+
+    #[test]
+    fn test_delete_and_unblock_mcp_server() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+
+        let service = MemoryService::new(Some(db_path)).unwrap();
+        service.initialize().unwrap();
+
+        service
+            .update_mcp_server(McpServer {
+                id: 0,
+                name: "agent-browser".to_string(),
+                transport: McpTransport::Stdio,
+                command: "agent-browser".to_string(),
+                args: vec!["server".to_string()],
+                env: serde_json::json!({}),
+                cwd: None,
+                url: None,
+                headers: None,
+                status: McpStatus::Stopped,
+                socket_path: None,
+                client_count: 0,
+                last_started_at: None,
+            })
+            .unwrap();
+
+        service.delete_mcp_server("agent-browser").unwrap();
+        assert!(service
+            .list_mcp_servers()
+            .unwrap()
+            .iter()
+            .all(|server| server.name != "agent-browser"));
+        assert_eq!(
+            service.list_blocked_mcp_servers().unwrap(),
+            vec!["agent-browser".to_string()]
+        );
+
+        service.unblock_mcp_server("agent-browser").unwrap();
+        assert!(service.list_blocked_mcp_servers().unwrap().is_empty());
+    }
 }

@@ -225,8 +225,8 @@ impl DFGAnalyzer {
             }
 
             // Check for global/nonlocal declarations
-            if line.starts_with("global ") {
-                let names = line[7..].split(',');
+            if let Some(rest) = line.strip_prefix("global ") {
+                let names = rest.split(',');
                 for name in names {
                     let name = name.trim();
                     dfg.globals_used.insert(name.to_string());
@@ -237,8 +237,8 @@ impl DFGAnalyzer {
                 continue;
             }
 
-            if line.starts_with("nonlocal ") {
-                let names = line[9..].split(',');
+            if let Some(rest) = line.strip_prefix("nonlocal ") {
+                let names = rest.split(',');
                 for name in names {
                     let name = name.trim();
                     dfg.nonlocals_used.insert(name.to_string());
@@ -250,8 +250,7 @@ impl DFGAnalyzer {
             }
 
             // Check for return statement
-            if line.starts_with("return ") {
-                let return_expr = &line[7..];
+            if let Some(return_expr) = line.strip_prefix("return ") {
                 let return_vars = self.extract_identifiers(return_expr);
                 for var in &return_vars {
                     if !dfg.returns.contains(var) {
@@ -264,7 +263,7 @@ impl DFGAnalyzer {
             self.analyze_assignments(line, line_idx, func_name, &mut dfg, &mut defined_vars);
 
             // Extract variable reads
-            self.analyze_reads(line, line_idx, func_name, &dfg, &mut defined_vars);
+            self.analyze_reads(line, line_idx, func_name, &dfg, &defined_vars);
         }
 
         dfg
