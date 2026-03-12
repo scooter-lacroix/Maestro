@@ -106,7 +106,7 @@ pub fn analyze_embedding(embedding: &[f32]) -> Vec<String> {
     }
 
     // Check dimension constraints
-    if embedding.len() < 1 {
+    if embedding.is_empty() {
         issues.push("Embedding dimension is too small (< 1)".to_string());
     }
     if embedding.len() > 4096 {
@@ -169,7 +169,7 @@ pub fn validate_similarity_score(score: f32) -> Vec<String> {
         issues.push("Similarity score is NaN".to_string());
     }
 
-    if score < -1.0 || score > 1.0 {
+    if !(-1.0..=1.0).contains(&score) {
         issues.push(format!(
             "Similarity score out of valid range [-1.0, 1.0]: {:.4}",
             score

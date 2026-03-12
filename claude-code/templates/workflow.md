@@ -10,6 +10,7 @@
 6. **Non-Interactive & CI-Aware:** Prefer non-interactive commands. Use `CI=true` for watch-mode tools (tests, linters) to ensure single execution.
 7. **Commit Strategy:** Stage changes aggressively. Do not commit after every small task. Accumulate changes into the largest possible logical commits. When the staging area is significantly large or a logical phase is complete, notify the user to review and confirm the commit. Commit messages must be descriptive but concise.
 8. **Task Documentation:** Use git notes for detailed task summaries and keep commit messages concise.
+9. **Project Style Guides Are Mandatory:** Before editing code, read `maestro/code_styleguides/general.md` and every applicable language or framework guide for the files you will touch. If a required guide is missing, stop and add it before implementation.
 
 ## Agent Usage Requirements
 
@@ -99,6 +100,13 @@ All tasks follow a strict lifecycle:
      - Complex tasks (multiple files, >50 lines): Automatically launch codex-reviewer or gemini-analyzer for design + opencode-scaffolder for implementation
    - **Do NOT ask user permission** - this is automatic
 
+3.5. **Resolve Code Style Guides (MANDATORY):**
+   - Read `maestro/code_styleguides/general.md` and every applicable guide for the task before writing tests, code, refactors, or agent prompts.
+   - Determine applicability from `tech-stack.md`, the task description, the track spec, and the file extensions or frameworks you expect to touch.
+   - If a needed guide is missing, STOP and add the missing guide before proceeding.
+   - Every agent prompt and review request MUST include the active guide list and require compliance.
+   - A task is not complete until the resulting code and tests comply with the active guides.
+
 4. **Write Failing Tests (Red Phase):**
    - Create a new test file for the feature or bug fix.
    - Write one or more unit tests that clearly define the expected behavior and acceptance criteria for the task.
@@ -128,6 +136,7 @@ All tasks follow a strict lifecycle:
    - Resume implementation
 
 9. **Agent Review (MANDATORY - AUTOMATIC):**
+   **CRITICAL STYLE REQUIREMENT:** The review MUST explicitly verify compliance with the active code style guides. Style-guide violations block completion just like logic defects.
    **CRITICAL:** Before proceeding to commit, you MUST automatically launch codex-reviewer. Do NOT wait for user instruction.
    - **AUTOMATICALLY Launch Code Review:** Use the codex-reviewer agent to review all changes made during this task. Provide context: task description, files changed, expected outcomes.
    - **Address Review Findings:** If critical issues are found, fix them before proceeding. If suggestions are provided, address or document decision to defer.

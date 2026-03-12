@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "maestro",
+      "args": [
+        "mcp",
+        "proxy",
+        "leindex"
+      ]
+    }
+  }
+}

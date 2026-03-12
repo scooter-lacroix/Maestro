@@ -8,17 +8,16 @@ This directory contains templates used by Maestro for project setup.
 Default development workflow template that includes:
 - Guiding principles
 - Agent usage requirements (proactive automatic selection)
-- Task workflow (TDD: Red → Green → Refactor)
+- Task workflow (TDD: Red -> Green -> Refactor)
 - Fallback mechanisms
 
 ### code_styleguides/
-Language-specific code style guides:
-- `general.md` - General principles applying to all languages
-- `go.md` - Go-specific conventions
-- `html-css.md` - HTML/CSS best practices
-- `javascript.md` - JavaScript conventions
-- `python.md` - Python style guide
-- `typescript.md` - TypeScript conventions
+A first-principles guide library written from Maestro's own coding defaults. The current set includes 27 guides across languages, frameworks, and adjacent technologies:
+
+- Core: `general.md`, `docker.md`, `graphql.md`, `shell.md`, `sql.md`
+- Systems: `c.md`, `cpp.md`, `go.md`, `rust.md`
+- Application languages: `csharp.md`, `dart.md`, `java.md`, `javascript.md`, `kotlin.md`, `php.md`, `python.md`, `ruby.md`, `swift.md`, `typescript.md`
+- Frontend and runtime stacks: `angular.md`, `html-css.md`, `nextjs.md`, `nodejs.md`, `react.md`, `svelte.md`, `threejs.md`, `vue.md`
 
 ## Installation
 

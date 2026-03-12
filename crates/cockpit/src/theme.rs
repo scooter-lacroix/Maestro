@@ -19,7 +19,6 @@ pub struct Theme {
 pub const THEMES: &[(&str, &str)] = &[
     // System theme (respects terminal transparency)
     ("system", "System Terminal (Transparent)"),
-
     // Popular dark themes
     ("dracula", "Dracula"),
     ("tokyo-night", "Tokyo Night"),
@@ -32,7 +31,6 @@ pub const THEMES: &[(&str, &str)] = &[
     ("kanagawa", "Kanagawa"),
     ("oxocarbon", "OxoCarbon"),
     ("monokai", "Monokai"),
-
     // New themes from rat-theme4
     ("embark", "Embark"),
     ("everforest", "Everforest"),
@@ -50,7 +48,6 @@ pub const THEMES: &[(&str, &str)] = &[
     ("vscode", "VSCode"),
     ("base16", "Base16"),
     ("black-white", "Black & White"),
-
     // Legacy
     ("default", "Default"),
 ];

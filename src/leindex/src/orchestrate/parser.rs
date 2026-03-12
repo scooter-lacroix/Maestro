@@ -112,7 +112,7 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     // For the check, use the project root (parent of maestro/ if named maestro).
                     let check_base_owned = if canonical_base
                         .file_name()
-                        .map_or(false, |n| n == "maestro" || n == ".maestro")
+                        .is_some_and(|n| n == "maestro" || n == ".maestro")
                     {
                         canonical_base
                             .parent()
@@ -171,7 +171,7 @@ pub fn parse_metadata<P: AsRef<Path>>(metadata_path: P) -> Result<TrackMetadata>
 /// Parse plan.md into a TrackPlan
 pub fn parse_plan_md<P: AsRef<Path>>(plan_path: P) -> Result<TrackPlan> {
     let content = fs::read_to_string(plan_path.as_ref())?;
-    parse_plan_content(&content, &plan_path.as_ref())
+    parse_plan_content(&content, plan_path.as_ref())
 }
 
 fn parse_plan_content(content: &str, path: &Path) -> Result<TrackPlan> {
@@ -262,13 +262,14 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
     // Extract task ID from the task header format
     // Format: "### [ ] Task 1.1: Title"
     // or: "- [ ] Task 1.1: Title"
-    let title = trimmed
-        .split(']')
-        .last()?
-        .trim()
-        .trim_start_matches("Task ")
-        .trim_start_matches("task ")
-        .to_string();
+    let title = if let Some(idx) = trimmed.find(']') {
+        trimmed[idx + 1..].trim()
+    } else {
+        return None;
+    }
+    .trim_start_matches("Task ")
+    .trim_start_matches("task ")
+    .to_string();
 
     // Generate ID from title using the same normalization as dependencies
     // This ensures task IDs match dependency references
@@ -285,7 +286,7 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
         .replace('.', "-")
         .replace(':', "-")
         .replace('_', "-")
-        .replace('/', "-")
+        .replace('/', "-")  // Allow consecutive replaces
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-')
         .collect::<String>();

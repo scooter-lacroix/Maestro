@@ -1,49 +1,43 @@
-# Google HTML/CSS Style Guide Summary
+# HTML and CSS Guide
 
-This document summarizes key rules and best practices from the Google HTML/CSS Style Guide.
+When I write HTML and CSS, I start with semantics, accessibility, and layout clarity before I worry about visual flourishes.
 
-## 1. General Rules
-- **Protocol:** Use HTTPS for all embedded resources.
-- **Indentation:** Indent by 2 spaces. Do not use tabs.
-- **Capitalization:** Use only lowercase for all code (element names, attributes, selectors, properties).
-- **Trailing Whitespace:** Remove all trailing whitespace.
-- **Encoding:** Use UTF-8 (without a BOM). Specify `<meta charset="utf-8">` in HTML.
+These rules are mandatory defaults for new code. I only break them when a project constraint is real, documented, and local.
 
-## 2. HTML Style Rules
-- **Document Type:** Use `<!doctype html>`.
-- **HTML Validity:** Use valid HTML.
-- **Semantics:** Use HTML elements according to their intended purpose (e.g., use `<p>` for paragraphs, not for spacing).
-- **Multimedia Fallback:** Provide `alt` text for images and transcripts/captions for audio/video.
-- **Separation of Concerns:** Strictly separate structure (HTML), presentation (CSS), and behavior (JavaScript). Link to CSS and JS from external files.
-- **`type` Attributes:** Omit `type` attributes for stylesheets (`<link>`) and scripts (`<script>`).
+## What I optimize for
 
-## 3. HTML Formatting Rules
-- **General:** Use a new line for every block, list, or table element, and indent its children.
-- **Quotation Marks:** Use double quotation marks (`""`) for attribute values.
+- Accessible interfaces that work well with keyboard, screen reader, and touch input.
+- Structure that stays understandable without the styles turned on.
+- Styling systems that scale without selector wars.
+- Responsive layouts that adapt cleanly instead of fighting the viewport.
 
-## 4. CSS Style Rules
-- **CSS Validity:** Use valid CSS.
-- **Class Naming:** Use meaningful, generic names. Separate words with a hyphen (`-`).
-  - **Good:** `.video-player`, `.site-navigation`
-  - **Bad:** `.vid`, `.red-text`
-- **ID Selectors:** Avoid using ID selectors for styling. Prefer class selectors.
-- **Shorthand Properties:** Use shorthand properties where possible (e.g., `padding`, `font`).
-- **`0` and Units:** Omit units for `0` values (e.g., `margin: 0;`).
-- **Leading `0`s:** Always include leading `0`s for decimal values (e.g., `font-size: 0.8em;`).
-- **Hexadecimal Notation:** Use 3-character hex notation where possible (e.g., `#fff`).
-- **`!important`:** Avoid using `!important`.
+## Required defaults
 
-## 5. CSS Formatting Rules
-- **Declaration Order:** Alphabetize declarations within a rule.
-- **Indentation:** Indent all block content.
-- **Semicolons:** Use a semicolon after every declaration.
-- **Spacing:**
-  - Use a space after a property name's colon (`font-weight: bold;`).
-  - Use a space between the last selector and the opening brace (`.foo {`).
-  - Start a new line for each selector and declaration.
-- **Rule Separation:** Separate rules with a new line.
-- **Quotation Marks:** Use single quotes (`''`) for attribute selectors and property values (e.g., `[type='text']`).
+- Use semantic HTML first: buttons for actions, links for navigation, lists for collections, headings in a real hierarchy.
+- Keep forms explicit with labels, validation messaging, and focus states that are easy to see.
+- Use CSS custom properties for tokens such as spacing, color, radius, and typography.
+- Prefer layout systems with intent: flex for one-dimensional flow, grid for two-dimensional structure.
+- Start mobile-first and let complexity grow only where larger screens actually benefit.
 
-**BE CONSISTENT.** When editing code, match the existing style.
+## Architecture
 
-*Source: [Google HTML/CSS Style Guide](https://google.github.io/styleguide/htmlcssguide.html)*
+- Keep class naming consistent and meaningful to the component or pattern, not to one temporary visual quirk.
+- Limit selector depth so styles stay local and easy to override intentionally.
+- Treat animation as part of UX: clear, restrained, and respectful of reduced-motion preferences.
+- Keep visual tokens centralized so a theme change does not require a hunt across dozens of files.
+
+## Verification
+
+- Check empty, loading, error, and dense-content states, not just the perfect screenshot path.
+- Test across viewport sizes and with long or translated content.
+- Audit contrast, focus order, and semantic landmarks as part of normal review.
+- Optimize expensive paints and layout thrash only when measurement shows a real problem.
+
+## Explicitly prohibited
+
+The following practices are prohibited in new code unless the guide names a narrow, explicit exception.
+
+- Div soup when a semantic element already exists.
+- Absolute positioning as a primary layout tool.
+- Selectors that depend on brittle DOM structure or nth-child magic.
+- Color-only communication, missing focus styles, and hover-only interactions.

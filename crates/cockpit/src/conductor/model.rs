@@ -2,14 +2,14 @@
 //!
 //! Based on Ralph TUI's state machine and execution loop.
 
+use crate::maestro_paths::MaestroProject;
+use crate::omp::OmpWorkerStatus;
 use chrono::{DateTime, Utc};
 use leindex_core::{
     memory::models::Memory,
     orchestrate::model::{IterationLog, LoopMode, TaskDependency, TrackStatus},
 };
 use serde::{Deserialize, Serialize};
-use crate::maestro_paths::MaestroProject;
-use crate::omp::OmpWorkerStatus;
 
 /// Ralph: RalphStatus → Maestro: ConductorStatus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -230,42 +230,102 @@ pub struct GitInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConductorEvent {
     // Engine lifecycle
-    Started { session_id: String, total_tasks: usize },
-    Stopped { reason: StopReason, total_iterations: u64 },
+    Started {
+        session_id: String,
+        total_tasks: usize,
+    },
+    Stopped {
+        reason: StopReason,
+        total_iterations: u64,
+    },
     Paused,
     Resumed,
-    Warning { message: String },
-    
+    Warning {
+        message: String,
+    },
+
     // Iteration lifecycle
-    IterationStarted { iteration: u64, task_id: String },
-    IterationCompleted { iteration: u64, task_completed: bool, duration_ms: u64 },
-    IterationFailed { iteration: u64, error: String },
-    IterationRetrying { iteration: u64, attempt: u32, delay_ms: u64 },
-    IterationSkipped { iteration: u64, task_id: String, reason: String },
-    IterationRateLimited { task_id: String, retry_attempt: u32, delay_ms: u64 },
-    
+    IterationStarted {
+        iteration: u64,
+        task_id: String,
+    },
+    IterationCompleted {
+        iteration: u64,
+        task_completed: bool,
+        duration_ms: u64,
+    },
+    IterationFailed {
+        iteration: u64,
+        error: String,
+    },
+    IterationRetrying {
+        iteration: u64,
+        attempt: u32,
+        delay_ms: u64,
+    },
+    IterationSkipped {
+        iteration: u64,
+        task_id: String,
+        reason: String,
+    },
+    IterationRateLimited {
+        task_id: String,
+        retry_attempt: u32,
+        delay_ms: u64,
+    },
+
     // Task lifecycle
-    TaskSelected { task_id: String, iteration: u64 },
-    TaskActivated { task_id: String },
-    TaskCompleted { task_id: String, iteration: u64 },
-    
+    TaskSelected {
+        task_id: String,
+        iteration: u64,
+    },
+    TaskActivated {
+        task_id: String,
+    },
+    TaskCompleted {
+        task_id: String,
+        iteration: u64,
+    },
+
     // Agent events
-    AgentOutput { stream: OutputStream, data: String },
-    AgentSwitched { previous: String, new: String, reason: AgentReason },
-    AllAgentsLimited { tried_agents: Vec<String> },
-    AgentRecoveryAttempted { primary: String, fallback: String, success: bool },
-    
+    AgentOutput {
+        stream: OutputStream,
+        data: String,
+    },
+    AgentSwitched {
+        previous: String,
+        new: String,
+        reason: AgentReason,
+    },
+    AllAgentsLimited {
+        tried_agents: Vec<String>,
+    },
+    AgentRecoveryAttempted {
+        primary: String,
+        fallback: String,
+        success: bool,
+    },
+
     // Progress
-    AllComplete { total_completed: usize, total_iterations: u64 },
-    TasksRefreshed { task_count: usize },
+    AllComplete {
+        total_completed: usize,
+        total_iterations: u64,
+    },
+    TasksRefreshed {
+        task_count: usize,
+    },
     DiagnosticsStarted {},
     DiagnosticsCompleted {
         error_count: usize,
         warning_count: usize,
         diagnostics: Vec<String>,
     },
-    DiagnosticsFailed { error: String },
-    LspStatusUpdated { lsp_servers: Vec<String> },
+    DiagnosticsFailed {
+        error: String,
+    },
+    LspStatusUpdated {
+        lsp_servers: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -326,7 +386,7 @@ pub enum SelectableItem {
         id: String,
         is_master: bool,
         is_external: bool, // Session discovered in ~/.maestro/orchestrate but not in tracks.md
-        is_expanded: bool,  // Track expansion state
+        is_expanded: bool, // Track expansion state
     },
     Task {
         id: String,

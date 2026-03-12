@@ -3,11 +3,13 @@ Maestro Agent Selector
 
 Implements complexity-based agent selection for the Maestro v2 framework.
 Integrates with the agent registry to recommend appropriate agents based on task characteristics.
+Supports built-in-first selection with optional external reviewer fallback.
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+import shutil
 import yaml  # type: ignore
 
 
@@ -24,6 +26,10 @@ class AgentDefinition:
     category: str
     output_path: Optional[str] = None
     supports_checkpointing: bool = False
+    fallback_for: List[str] = field(default_factory=list)
+    requires_visual_evidence: bool = False
+    external_backstops: List[str] = field(default_factory=list)
+    supports_graceful_fallback: bool = False
 
 
 @dataclass
@@ -84,7 +90,11 @@ class AgentRegistry:
                     best_for=agent_data.get("best_for", []),
                     category=category_name,
                     output_path=agent_data.get("output_path"),
-                    supports_checkpointing=agent_data.get("supports_checkpointing", False)
+                    supports_checkpointing=agent_data.get("supports_checkpointing", False),
+                    fallback_for=agent_data.get("fallback_for", []),
+                    requires_visual_evidence=agent_data.get("requires_visual_evidence", False),
+                    external_backstops=agent_data.get("external_backstops", []),
+                    supports_graceful_fallback=agent_data.get("supports_graceful_fallback", False),
                 )
                 self.agents_by_name[agent.name] = agent
                 category_agents.append(agent)
@@ -217,6 +227,60 @@ class AgentSelector:
         # Agent can handle tasks at or below its level
         return agent_level >= required
 
+    def select_with_fallback(
+        self,
+        context: TaskContext,
+        external_cli_check: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Select agents using built-in-first, external-second strategy.
+
+        Returns a dict with the primary built-in agent, and optionally
+        an external final-pass reviewer if its CLI is available.
+
+        Args:
+            context: Task context for selection
+            external_cli_check: Whether to probe for external CLI availability
+
+        Returns:
+            Dict with 'primary' (built-in agent), 'final_reviewer' (optional external),
+            and 'fallback_used' (bool indicating if built-in replaced external)
+        """
+        primary = self.select_agent(context)
+        result: Dict[str, Any] = {
+            "primary": primary,
+            "final_reviewer": None,
+            "fallback_used": False,
+            "message": None,
+        }
+
+        if primary is None:
+            return result
+
+        # Find a built-in final reviewer (warden) for the review stage
+        warden = self.registry.get_agent("warden")
+
+        # Check if any external backstop is available
+        external_available = None
+        if external_cli_check and primary.external_backstops:
+            for cli_name in primary.external_backstops:
+                if is_external_cli_available(cli_name):
+                    external_available = cli_name
+                    break
+
+        if external_available:
+            result["final_reviewer"] = external_available
+            result["message"] = f"External final-pass reviewer available: {external_available}"
+        elif warden and warden.name != primary.name:
+            result["final_reviewer"] = warden
+            result["fallback_used"] = True
+            result["message"] = (
+                "Using built-in final reviewer (warden). "
+                "No external CLI reviewer detected."
+            )
+
+        return result
+
     def recommend_orchestration_pattern(
         self,
         context: TaskContext
@@ -335,3 +399,32 @@ def list_agents(category: Optional[str] = None) -> List[str]:
     else:
         agents = registry.get_all_agents()
     return [agent.name for agent in agents]
+
+
+def is_external_cli_available(cli_name: str) -> bool:
+    """
+    Check whether an external CLI tool is available on the system PATH.
+
+    Args:
+        cli_name: Name of the CLI executable (e.g., 'codex-cli', 'gemini-cli')
+
+    Returns:
+        True if the CLI is found on PATH, False otherwise
+    """
+    return shutil.which(cli_name) is not None
+
+
+def get_available_external_reviewers(backstop_list: Optional[List[str]] = None) -> List[str]:
+    """
+    Return the subset of external CLI reviewers that are currently available.
+
+    Args:
+        backstop_list: List of CLI names to check. If None, checks all known reviewers.
+
+    Returns:
+        List of available CLI names
+    """
+    known_reviewers = backstop_list or [
+        "codex-cli", "gemini-cli", "qwen-cli", "opencode"
+    ]
+    return [cli for cli in known_reviewers if is_external_cli_available(cli)]

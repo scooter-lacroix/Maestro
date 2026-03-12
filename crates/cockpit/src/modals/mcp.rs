@@ -4,12 +4,12 @@
 //! the MCP menu and MCP logs viewer.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
+use crate::app::App;
 use crate::state::McpOption;
 use crate::theme::theme_from_name;
-use crate::app::App;
 
 /// Renders the MCP menu modal.
 ///

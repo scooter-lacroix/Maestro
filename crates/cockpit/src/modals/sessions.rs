@@ -3,12 +3,12 @@
 //! This module provides modals for session management, including the
 //! session hub modal and the quick session switcher.
 
+use leindex_core::memory::models::SessionStatus;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use leindex_core::memory::models::SessionStatus;
 
-use crate::state::HubFocus;
 use crate::app::App;
+use crate::state::HubFocus;
 
 /// Renders the session hub modal.
 ///
@@ -148,12 +148,11 @@ pub fn render_switcher_modal(frame: &mut Frame, app: &mut App) {
             .sessions
             .iter()
             .map(|s| {
-                let status_color =
-                    if s.status == SessionStatus::Running {
-                        Color::Green
-                    } else {
-                        Color::Gray
-                    };
+                let status_color = if s.status == SessionStatus::Running {
+                    Color::Green
+                } else {
+                    Color::Gray
+                };
                 ListItem::new(vec![Line::from(vec![
                     Span::styled(" * ", Style::default().fg(status_color)),
                     Span::styled(&s.title, Style::default().bold().fg(Color::White)),

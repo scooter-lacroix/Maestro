@@ -66,7 +66,13 @@ impl TrackLensPane {
     }
 
     /// Start a new review
-    pub fn start_review(&mut self, track_id: String, document_type: String, mode: ReviewMode, server_url: String) {
+    pub fn start_review(
+        &mut self,
+        track_id: String,
+        document_type: String,
+        mode: ReviewMode,
+        server_url: String,
+    ) {
         self.active = true;
         self.current_review = Some(ReviewStatus {
             track_id,
@@ -104,8 +110,7 @@ impl TrackLensPane {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default()
-                .fg(Color::Gray)
+            Style::default().fg(Color::Gray)
         };
 
         let header = Paragraph::new(Line::from(vec![
@@ -126,8 +131,11 @@ impl TrackLensPane {
                     ListItem::new(format!("URL: {}", review.server_url)),
                 ];
 
-                let list = List::new(content)
-                    .block(Block::default().title("Current Review").borders(Borders::ALL));
+                let list = List::new(content).block(
+                    Block::default()
+                        .title("Current Review")
+                        .borders(Borders::ALL),
+                );
 
                 frame.render_widget(list, chunks[1]);
             }
@@ -141,16 +149,16 @@ impl TrackLensPane {
                     let status = if entry.approved { "✓" } else { "✗" };
                     ListItem::new(format!(
                         "{} {} - {} ({})",
-                        status,
-                        entry.track_id,
-                        entry.document_type,
-                        entry.annotation_count
+                        status, entry.track_id, entry.document_type, entry.annotation_count
                     ))
                 })
                 .collect();
 
-            let list = List::new(items)
-                .block(Block::default().title("Review History").borders(Borders::ALL));
+            let list = List::new(items).block(
+                Block::default()
+                    .title("Review History")
+                    .borders(Borders::ALL),
+            );
 
             frame.render_widget(list, chunks[1]);
         } else {

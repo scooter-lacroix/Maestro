@@ -1,4 +1,4 @@
-use crate::message::pty::{PtyOptions, PtyRequest, PtyResponse, PtyShutdown, PtyOutputBarrier};
+use crate::message::pty::{PtyOptions, PtyOutputBarrier, PtyRequest, PtyResponse, PtyShutdown};
 use crate::prelude::*;
 
 use postage::barrier;
@@ -49,7 +49,13 @@ impl Service for PtyService {
 
         let _run = Self::try_task(
             "run",
-            Self::run(options, rx_request, rx_shutdown, tx_response, tx_barrier_msg),
+            Self::run(
+                options,
+                rx_request,
+                rx_shutdown,
+                tx_response,
+                tx_barrier_msg,
+            ),
         );
 
         Ok(Self { _run })

@@ -35,6 +35,7 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    - `maestro/workflow.md`
    - `maestro/product.md`
    - `maestro/master-track-protocol.md` (required for master tracks)
+   - `maestro/code_styleguides/general.md`
 
 2. **Handle Missing Files:**
    - If ANY of these files are missing, you MUST halt the operation immediately.
@@ -85,14 +86,22 @@ CRITICAL: You must validate the success of every tool call. If any tool call fai
    - `maestro/tracks/<track_id>/plan.md` (for orchestration tasks)
    - `maestro/tracks/<track_id>/spec.md` (for context)
    - `maestro/master-track-protocol.md` (for protocol)
+   - `maestro/tech-stack.md` (for style-guide resolution)
 
-2. **Validate Subtracks:**
+2. **Resolve Orchestration Style Guides (MANDATORY):**
+   - Read `maestro/code_styleguides/general.md` immediately.
+   - Determine the additional guides that apply to the master track from `maestro/tech-stack.md`, the master track spec, and the expected languages/frameworks of the subtracks and orchestration code you may touch.
+   - Read each required guide before launching subtracks, editing plans, writing verification code, or issuing Task prompts.
+   - Maintain an `active_style_guides` list for the orchestration session.
+   - If any required guide is missing, HALT and tell the user which guide must be added before orchestration can continue.
+
+3. **Validate Subtracks:**
    - Extract `subtracks` array from master track metadata
    - For each subtrack ID, verify folder exists: `maestro/tracks/<subtrack_id>/`
    - List any missing subtracks
    - Ask user: "Some subtracks are missing. Create them now? (yes/no)"
 
-3. **Announce Orchestration Start:**
+4. **Announce Orchestration Start:**
    ```
    🎼 Beginning Master Track Orchestration
 
@@ -124,6 +133,7 @@ For each task, follow this protocol:
 **For tasks that delegate to sub-tracks:**
 
 1. **Mark Task In Progress:**
+   - Refresh the task-specific subset of `active_style_guides` before any implementation or delegation for this orchestration task.
    - Update master plan: Change task from `[ ]` to `[~]`
    - Read task details (dependencies, parallel-with, deliverables)
 
@@ -163,7 +173,7 @@ For each task, follow this protocol:
    **Use Task tool with:**
    ```
    subagent_type: "general-purpose" (or "sonnet-specialist" for complex tracks)
-   prompt: "/maestro:implement <subtrack_id>"
+   prompt: "/maestro:implement <subtrack_id>\n\nBefore writing code, you MUST read and enforce these project style guides:\n<active_style_guides with file paths>\n\nThese guides are mandatory. Treat any violation as a blocking defect."
    run_in_background: true
    ```
 
@@ -235,9 +245,12 @@ For each task, follow this protocol:
 **For verification tasks and other non-orchestration tasks:**
 
 1. **Mark Task In Progress:**
+   - Refresh the task-specific subset of `active_style_guides` before any implementation or delegation for this orchestration task.
    - Update master plan: Change task from `[ ]` to `[~]`
 
 2. **Assess Complexity and Select Agent (CRITICAL - USE ALIASES):**
+
+   **STYLE-GUIDE GATE:** Before direct execution or delegation, confirm which entries in `active_style_guides` apply to the task and include them in the implementation or review instructions.
 
    **CRITICAL:** Use agent aliases from workflow.md, NOT direct agent names.
 
@@ -258,6 +271,7 @@ For each task, follow this protocol:
    - For complex tasks: Use Task tool with appropriate Claude Code agent
    - Use Critical Think templates before implementation
    - Follow standard task execution from workflow.md
+   - Require the executing agent or direct implementation path to comply with the active style guides; style violations are blocking defects
    - Await TaskOutput completion before proceeding
 
 4. **Mark Task Complete:**
@@ -308,7 +322,7 @@ Overall Progress: ████████░░░░░░░░░░░ 35% 
    - Use the sonnet-specialist or opus-specialist agent via Task tool
    - Provide the "Tzar of Excellence" directive from workflow.md (lines 208-259)
    - Wait for TaskOutput completion
-   - Address ALL critical findings before proceeding
+   - Address ALL critical findings before proceeding, including any style-guide violations
    - Only create checkpoint commit after Tzar review passes
    - Create checkpoint commit
    - Attach verification report with git notes
@@ -345,7 +359,7 @@ Overall Progress: ████████░░░░░░░░░░░ 35% 
    - Use opus-specialist agent via Task tool for final review
    - Provide the "Tzar of Excellence" directive from workflow.md
    - Wait for TaskOutput completion
-   - Address ALL critical findings before marking complete
+   - Address ALL critical findings before marking complete, including any style-guide violations
    - Confirm 100% feature parity (if applicable)
 
 3. **Update Master Track Status:**

@@ -45,7 +45,11 @@ impl Service for TerminalEchoService {
             }
         });
 
-        Ok(TerminalEchoService { _input, _output, _size })
+        Ok(TerminalEchoService {
+            _input,
+            _output,
+            _size,
+        })
     }
 }
 
