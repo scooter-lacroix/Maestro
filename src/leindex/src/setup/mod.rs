@@ -285,7 +285,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             dst_tpl.display()
                         ));
 
-                        // MCP config (best-effort): route LeIndex through the Maestro MCP pool.
+                        // MCP config (best-effort): route pooled MCP access through Maestro's
+                        // dynamic tool-search broker.
                         let mcp_path = home_dir()?.join(".claude").join(".mcp.json");
                         let mut mcp_logs = upsert_json_server(
                             &mcp_path,
@@ -293,7 +294,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "proxy", "leindex"],
+                                "args": ["mcp", "tool-search"],
                                 "type": "stdio"
                             }),
                         )?;
@@ -344,7 +345,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "proxy", "leindex"]
+                                "args": ["mcp", "tool-search"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -366,7 +367,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "proxy", "leindex"]
+                                "args": ["mcp", "tool-search"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -405,7 +406,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             &cfg_path,
                             "leindex",
                             "maestro",
-                            &["mcp", "proxy", "leindex"],
+                            &["mcp", "tool-search"],
                         )?;
                         logs.append(&mut cfg_logs);
 
@@ -495,7 +496,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "proxy", "leindex"]
+                                "args": ["mcp", "tool-search"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -531,7 +532,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             "leindex",
                             serde_json::json!({
                                 "command": "maestro",
-                                "args": ["mcp", "proxy", "leindex"]
+                                "args": ["mcp", "tool-search"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -553,7 +554,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             serde_json::json!({
                                 "type": "stdio",
                                 "command": "maestro",
-                                "args": ["mcp", "proxy", "leindex"]
+                                "args": ["mcp", "tool-search"]
                             }),
                         )?;
                         logs.append(&mut cfg_logs);
@@ -1489,7 +1490,7 @@ fn upsert_opencode_mcp(root: &mut serde_json::Map<String, serde_json::Value>) ->
     mcp_map.insert(
         "leindex".to_string(),
         serde_json::json!({
-            "command": ["maestro", "mcp", "proxy", "leindex"],
+            "command": ["maestro", "mcp", "tool-search"],
             "environment": {}
         }),
     );
@@ -1527,7 +1528,7 @@ fn register_leindex_pool() -> Result<Vec<String>> {
     service.update_mcp_server(server)?;
     Ok(vec![
         "Registered MCP pool entry 'leindex' -> `leindex mcp`".to_string(),
-        "Integrated CLI tools will connect through `maestro mcp proxy leindex`".to_string(),
+        "Integrated CLI tools will connect through `maestro mcp tool-search`".to_string(),
     ])
 }
 

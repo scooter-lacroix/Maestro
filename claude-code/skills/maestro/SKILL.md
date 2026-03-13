@@ -9,7 +9,7 @@ You are running Maestro inside Claude Code. Keep the experience native and deter
 
 - **Command surface:** `/maestro`, `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`, `/maestro:orchestrate`, `/maestro:status`, `/maestro:revert`, `/maestro:leindex`, `/maestro:tui`.
 - **Where commands live:** `~/.claude/commands/maestro:*.md` (installed by the Maestro wizard).
-- **MCP:** `mcpServers.leindex` points to `maestro mcp proxy leindex` (stdio), which bridges into the Maestro MCP pool. Use this instead of any legacy TLDR routing.
+- **MCP:** `mcpServers.leindex` points to `maestro mcp tool-search` (stdio), which brokers on-demand access across the Maestro MCP pool. Use this instead of any legacy TLDR routing.
 - **Skills location:** `~/.claude/skills/maestro/` (this file). Use it whenever Maestro workflows are requested.
 
 ## Quick workflow
@@ -30,7 +30,7 @@ You are running Maestro inside Claude Code. Keep the experience native and deter
 
 ## Integration checks
 - Commands resolve from `~/.claude/commands`; no cross-tool paths (OpenCode, etc.).
-- LeIndex MCP entry exists in `~/.claude/.mcp.json` under `mcpServers.leindex` with `command: maestro`, `args: ["mcp", "proxy", "leindex"], type: "stdio"`.
+- LeIndex MCP entry exists in `~/.claude/.mcp.json` under `mcpServers.leindex` with `command: maestro`, `args: ["mcp", "tool-search"], type: "stdio"`.
 - Rust TUI is the primary UI; Go or Python TUIs are deprecated.
 
 ## When to activate this skill
