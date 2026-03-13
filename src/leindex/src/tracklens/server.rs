@@ -18,11 +18,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
+use tokio::time::{timeout, Duration};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::compression::CompressionLayer;
+use tower_http::services::{ServeDir, ServeFile};
 
-use super::types::{TrackLensDecision, ReviewMode};
+use super::types::{ReviewMode, TrackLensDecision};
 
 // ─── Server Configuration ─────────────────────────────────────────────────────
 
@@ -58,6 +60,10 @@ pub struct ServerState {
     pub decision_tx: watch::Sender<Option<TrackLensDecision>>,
     /// User decision receiver
     pub decision_rx: watch::Receiver<Option<TrackLensDecision>>,
+    /// Client readiness transmitter
+    pub client_ready_tx: watch::Sender<bool>,
+    /// Client readiness receiver
+    pub client_ready_rx: watch::Receiver<bool>,
     /// Authentication token for decision endpoint
     pub auth_token: String,
 }
@@ -103,6 +109,7 @@ impl TrackLensServer {
 
         // Create watch channel for decision updates
         let (decision_tx, decision_rx) = watch::channel(None);
+        let (client_ready_tx, client_ready_rx) = watch::channel(false);
 
         Self {
             config,
@@ -110,6 +117,8 @@ impl TrackLensServer {
                 content: Arc::new(std::sync::RwLock::new(None)),
                 decision_tx,
                 decision_rx,
+                client_ready_tx,
+                client_ready_rx,
                 auth_token,
             }),
         }
@@ -122,7 +131,10 @@ impl TrackLensServer {
         let mut rng = rand::thread_rng();
         let bytes: [u8; 32] = rng.gen();
         // Encode as hex using format loop (hex crate not in dependencies)
-        bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+        bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>()
     }
 
     /// Get the current auth token (for testing/debugging)
@@ -153,13 +165,31 @@ impl TrackLensServer {
             .parse::<HeaderValue>()
             .unwrap();
 
+        // Find bundle directory for static assets
+        let bundle_dir = find_bundle_dir()
+            .ok_or_else(|| anyhow::anyhow!("TrackLens UI bundle not found"))?;
+
         // Build the router with restrictive CORS and compression
         // Now using the dynamically determined port
-        let app = Router::new()
+        let mut app = Router::new()
             .route("/", get(index))
             .route("/api/decision", post(submit_decision))
+            .route("/api/client-ready", post(mark_client_ready))
             .route("/api/content", get(get_content))
             .route("/api/plan", get(get_plan))
+            .route("/api/status", get(get_status))
+            .route("/api/vaults", get(get_vaults))
+            .route("/api/agents", get(get_agents));
+
+        // Add static asset serving if bundle directory found
+        if bundle_dir.join("assets").exists() {
+            app = app.nest_service("/assets", ServeDir::new(bundle_dir.join("assets")));
+        }
+        if bundle_dir.join("favicon.svg").exists() {
+            app = app.route_service("/favicon.svg", ServeFile::new(bundle_dir.join("favicon.svg")));
+        }
+
+        let app = app
             .layer(
                 // Restrictive CORS: only allow local requests for security
                 // Uses the actual port assigned to the server
@@ -167,7 +197,7 @@ impl TrackLensServer {
                     .allow_origin(origin_localhost)
                     .allow_origin(origin_127)
                     .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-                    .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+                    .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
             )
             .layer(CompressionLayer::new()) // Compress HTML responses
             .layer(RequestBodyLimitLayer::new(1024 * 100)) // Limit request body to 100KB
@@ -175,9 +205,8 @@ impl TrackLensServer {
 
         // Open browser if configured
         if self.config.open_browser {
-            if let Err(e) = open::that(&url) {
-                eprintln!("Failed to open browser: {}", e);
-            }
+            open::that(&url)
+                .map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
         }
 
         // Spawn server in background
@@ -191,9 +220,33 @@ impl TrackLensServer {
         Ok(url)
     }
 
+    /// Wait until the client reports that the UI has loaded.
+    pub async fn wait_for_client_ready(&self, timeout_duration: Duration) -> anyhow::Result<()> {
+        let mut rx = self.state.client_ready_rx.clone();
+        if *rx.borrow() {
+            return Ok(());
+        }
+
+        timeout(timeout_duration, async move {
+            loop {
+                rx.changed()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Client readiness channel closed: {}", e))?;
+                if *rx.borrow() {
+                    return Ok(());
+                }
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("Timed out waiting for TrackLens UI readiness"))?
+    }
+
     /// Set the review content
     pub fn set_content(&self, content: ReviewContent) -> anyhow::Result<()> {
-        let mut state = self.state.content.write()
+        let mut state = self
+            .state
+            .content
+            .write()
             .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
         *state = Some(content);
         Ok(())
@@ -219,57 +272,58 @@ impl TrackLensServer {
 
 // ─── HTTP Handlers ─────────────────────────────────────────────────────────────
 
-async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
-    // Try to load TrackLens editor HTML bundle
-    let html_paths = [
-        // CLI dist location (primary)
-        "crates/cli/dist/tracklens-editor.html",
-        // Development locations
-        "packages/tracklens-editor/dist/index.html",
-        "apps/tracklens-hook/dist/index.html",
+/// Find the directory containing the TrackLens UI bundle
+fn find_bundle_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+
+    let candidate_dirs = vec![
+        // Installed location (primary)
+        format!("{home}/.maestro/tracklens"),
+        // Next to the binary
+        format!("{}", exe_dir.display()),
+        // Project source tree locations (development)
+        "packages/tracklens-editor/dist".to_string(),
+        "apps/tracklens-hook/dist".to_string(),
+        "crates/cli/dist".to_string(),
     ];
 
-    for path in html_paths {
-        if let Ok(mut content) = tokio::fs::read_to_string(path).await {
-            // Inject auth token into HTML
-            let token_script = format!(
-                r#"<script>window.TRACKLENS_AUTH_TOKEN = "{}";</script>"#,
-                state.auth_token
-            );
-            // Inject after <head> tag
-            content = content.replace("<head>", &format!("<head>{}", token_script));
-            return Html(content);
+    for dir in candidate_dirs {
+        let path = std::path::PathBuf::from(&dir);
+        if path.join("index.html").exists()
+            || path.join("editor.html").exists()
+            || path.join("tracklens-editor.html").exists()
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
+    if let Some(bundle_dir) = find_bundle_dir() {
+        let html_names = ["index.html", "editor.html", "tracklens-editor.html"];
+        for name in html_names {
+            let path = bundle_dir.join(name);
+            if let Ok(mut content) = tokio::fs::read_to_string(path).await {
+                let token_script = format!(
+                    r#"<script>window.TRACKLENS_AUTH_TOKEN="{}";window.addEventListener("load",()=>{{fetch("/api/client-ready",{{method:"POST",headers:{{Authorization:"Bearer {}"}}}}).catch(()=>{{}});}},{{once:true}});</script>"#,
+                    state.auth_token, state.auth_token
+                );
+                // Inject after <head> tag
+                content = content.replace("<head>", &format!("<head>{}", token_script));
+                return Html(content);
+            }
         }
     }
 
-    // Fallback placeholder if no HTML bundle found
-    let token = &state.auth_token;
-    Html(format!(r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>TrackLens Review</title>
-    <style>
-        body {{ font-family: system-ui; max-width: 800px; margin: 50px auto; padding: 20px; }}
-        .warning {{ background: #fff3cd; border: 1px solid #ffc107; padding: 20px; border-radius: 4px; }}
-        h1 {{ color: #333; }}
-    </style>
-    <script>window.TRACKLENS_AUTH_TOKEN = "{}";</script>
-</head>
-<body>
-    <h1>TrackLens Review</h1>
-    <div class="warning">
-        <p><strong>Review UI bundle not found.</strong></p>
-        <p>Build the TrackLens editor bundle:</p>
-        <pre>cargo build --package maestro-cli --bins</pre>
-        <p>Or run: <code>bun run build</code> in packages/tracklens-editor</p>
-    </div>
-    <p>Server is running. API endpoints available:</p>
-    <ul>
-        <li><code>GET /api/content</code> - Get review content</li>
-        <li><code>POST /api/decision</code> - Submit decision (requires auth token)</li>
-    </ul>
-</body>
-</html>"#, token))
+    Html(
+        "<html><body><h1>TrackLens bundle missing</h1><p>The server should have failed before rendering this page.</p></body></html>"
+            .to_string(),
+    )
 }
 
 async fn submit_decision(
@@ -294,16 +348,70 @@ async fn submit_decision(
     }
 
     // Send decision via watch channel
-    state.decision_tx.send(Some(decision))
+    state
+        .decision_tx
+        .send(Some(decision))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
 }
 
+async fn mark_client_ready(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, StatusCode> {
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+
+    let provided_token = match auth_header {
+        Some(h) if h.starts_with("Bearer ") => &h[7..],
+        Some(h) => h,
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+
+    if provided_token != state.auth_token {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    state
+        .client_ready_tx
+        .send(true)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
+async fn get_status() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+}
+
+async fn get_vaults() -> Json<serde_json::Value> {
+    // Return empty vaults for now, as this is project-specific
+    // The UI handles empty results gracefully
+    Json(serde_json::json!({ "vaults": [] }))
+}
+
+async fn get_agents() -> Json<serde_json::Value> {
+    // Return standard Maestro agents for the UI settings dropdown
+    Json(serde_json::json!({
+        "agents": [
+            { "id": "build", "name": "Build Agent" },
+            { "id": "implement", "name": "Implementation Agent" },
+            { "id": "qwen-coder", "name": "Qwen Coder" },
+            { "id": "amp-code", "name": "Amp Code" },
+            { "id": "rovo-dev", "name": "Rovo Dev" },
+            { "id": "codex-reviewer", "name": "Codex Reviewer" }
+        ]
+    }))
+}
+
 async fn get_content(
     State(state): State<Arc<ServerState>>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let content = state.content.read()
+    let content = state
+        .content
+        .read()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(c) = content.as_ref() {
         Ok(Json(c.clone()))
@@ -313,10 +421,10 @@ async fn get_content(
 }
 
 /// Get plan content - returns { "plan": string } format for JS editor compatibility
-async fn get_plan(
-    State(state): State<Arc<ServerState>>,
-) -> Json<serde_json::Value> {
-    let content = state.content.read()
+async fn get_plan(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
+    let content = state
+        .content
+        .read()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
 
     match content {
@@ -342,6 +450,7 @@ mod tests {
     async fn test_server_creation() {
         let config = ServerConfig {
             port: 0,
+            open_browser: false,
             ..Default::default()
         };
         let server = TrackLensServer::new(config);
@@ -369,9 +478,9 @@ mod tests {
 
         // Extract token from the injected script tag
         let token = html
-            .find("window.TRACKLENS_AUTH_TOKEN = \"")
+            .find("window.TRACKLENS_AUTH_TOKEN=\"")
             .and_then(|pos| {
-                let start = pos + "window.TRACKLENS_AUTH_TOKEN = \"".len();
+                let start = pos + "window.TRACKLENS_AUTH_TOKEN=\"".len();
                 html[start..].find('"').map(|end| &html[start..start + end])
             });
 
@@ -380,13 +489,16 @@ mod tests {
         let token = token.unwrap();
 
         // Verify token is not a short timestamp-based value
-        assert!(token.len() >= 32, "Token should be at least 32 chars (cryptographically secure)");
+        assert!(
+            token.len() >= 32,
+            "Token should be at least 32 chars (cryptographically secure)"
+        );
 
         // Test 1: Submit decision with valid token (simulating JS editor behavior)
         let decision_payload = serde_json::json!({
-            "approved": true,
-            "feedback": "Test approval",
-            "annotations": "[]"
+            "behavior": "allow",
+            "annotations": null,
+            "autonomy_mode": null
         });
 
         let response = client

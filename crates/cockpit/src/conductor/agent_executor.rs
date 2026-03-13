@@ -617,6 +617,11 @@ pub mod role_utils {
             Some(AgentRole::Architect) => AgentRole::Critic,
             Some(AgentRole::Critic) => AgentRole::Kraken,
             Some(AgentRole::Kraken) => AgentRole::Scout,
+            Some(AgentRole::Sentinel) => AgentRole::Scout,
+            Some(AgentRole::Warden) => AgentRole::Scout,
+            Some(AgentRole::Mender) => AgentRole::Scout,
+            Some(AgentRole::Cartographer) => AgentRole::Scout,
+            Some(AgentRole::Prism) => AgentRole::Scout,
         }
     }
 
@@ -627,6 +632,11 @@ pub mod role_utils {
             AgentRole::Architect => "Architect",
             AgentRole::Critic => "Critic",
             AgentRole::Kraken => "Kraken",
+            AgentRole::Sentinel => "Sentinel",
+            AgentRole::Warden => "Warden",
+            AgentRole::Mender => "Mender",
+            AgentRole::Cartographer => "Cartographer",
+            AgentRole::Prism => "Prism",
         }
     }
 
@@ -637,6 +647,11 @@ pub mod role_utils {
             AgentRole::Architect => "Architecture design and planning",
             AgentRole::Critic => "Code review and quality analysis",
             AgentRole::Kraken => "Implementation and execution",
+            AgentRole::Sentinel => "Security and validation",
+            AgentRole::Warden => "Guardian and oversight",
+            AgentRole::Mender => "Bug fixing and remediation",
+            AgentRole::Cartographer => "Mapping and documentation",
+            AgentRole::Prism => "Light and refraction",
         }
     }
 }

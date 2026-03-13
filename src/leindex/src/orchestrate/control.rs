@@ -250,11 +250,7 @@ impl ControlManager {
         self.ensure_dir()?;
 
         let path = self.events_file_path();
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
 
         let line = serde_json::to_string(event)?;
         writeln!(file, "{}", line)?;

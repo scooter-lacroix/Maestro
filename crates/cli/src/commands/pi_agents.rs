@@ -180,6 +180,11 @@ fn role_to_config_key(role: &maestro_pi_mono::AgentRole) -> String {
         maestro_pi_mono::AgentRole::Architect => "architect".to_string(),
         maestro_pi_mono::AgentRole::Critic => "critic".to_string(),
         maestro_pi_mono::AgentRole::Kraken => "kraken".to_string(),
+        maestro_pi_mono::AgentRole::Sentinel => "sentinel".to_string(),
+        maestro_pi_mono::AgentRole::Warden => "warden".to_string(),
+        maestro_pi_mono::AgentRole::Mender => "mender".to_string(),
+        maestro_pi_mono::AgentRole::Cartographer => "cartographer".to_string(),
+        maestro_pi_mono::AgentRole::Prism => "prism".to_string(),
     }
 }
 

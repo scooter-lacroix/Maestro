@@ -70,12 +70,22 @@ fn test_public_api_from_config() {
         AgentRole::Architect,
         AgentRole::Critic,
         AgentRole::Kraken,
+        AgentRole::Sentinel,
+        AgentRole::Warden,
+        AgentRole::Mender,
+        AgentRole::Cartographer,
+        AgentRole::Prism,
     ] {
         let role_key = match role {
             AgentRole::Scout => "scout",
             AgentRole::Architect => "architect",
             AgentRole::Critic => "critic",
             AgentRole::Kraken => "kraken",
+            AgentRole::Sentinel => "sentinel",
+            AgentRole::Warden => "warden",
+            AgentRole::Mender => "mender",
+            AgentRole::Cartographer => "cartographer",
+            AgentRole::Prism => "prism",
         };
 
         role_assignments.insert(
@@ -98,14 +108,19 @@ fn test_public_api_from_config() {
 
     // Verify all roles are registered
     let roles = registry.registered_roles();
-    assert_eq!(roles.len(), 4);
+    assert_eq!(roles.len(), 9);
 
-    // Verify we can get model assignments
+    // Verify we can get model assignments for all roles with config
     for role in &[
         AgentRole::Scout,
         AgentRole::Architect,
         AgentRole::Critic,
         AgentRole::Kraken,
+        AgentRole::Sentinel,
+        AgentRole::Warden,
+        AgentRole::Mender,
+        AgentRole::Cartographer,
+        AgentRole::Prism,
     ] {
         let model = registry.get_model_for_role(role.clone()).unwrap();
         assert_eq!(model, "claude-sonnet-4-5");

@@ -14,6 +14,10 @@ import { getRepoInfo } from "./repo";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR, sanitizeFileName, getSafeUploadPath } from "./image";
 import type { GitContext, DiffType, DiffResult } from "./git";
 import { runGitDiff } from "./git";
+import {
+  createClientReadyMonitor,
+  injectTrackLensBootstrap,
+} from "./ui-readiness";
 
 export interface ReviewServerOptions {
   /** Raw git diff patch string */
@@ -91,6 +95,7 @@ export async function startReviewServer(
   }>((resolve) => {
     resolveDecision = resolve;
   });
+  const clientReady = createClientReadyMonitor();
 
   // Start server
   const server = Bun.serve({
@@ -109,6 +114,16 @@ export async function startReviewServer(
           repoInfo,
           ...(currentError && { error: currentError }),
         });
+      }
+
+      if (url.pathname === "/api/client-ready" && req.method === "POST") {
+        const authHeader = req.headers.get("authorization");
+        if (authHeader !== `Bearer ${authToken}`) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        clientReady.markClientReady();
+        return Response.json({ ready: true });
       }
 
       // API: Switch diff type
@@ -274,9 +289,7 @@ export async function startReviewServer(
       }
 
       // Serve HTML
-      // Inject authentication token into HTML for client-side access
-      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
-      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
+      const htmlWithToken = injectTrackLensBootstrap(htmlContent, authToken);
       return new Response(htmlWithToken, {
         headers: { "Content-Type": "text/html" },
       });
@@ -293,11 +306,21 @@ export async function startReviewServer(
     port: number
   ): Promise<void> {
     if (!isRemote) {
-      await openBrowser(url);
+      const opened = await openBrowser(url);
+      if (!opened) {
+        throw new Error(`TrackLens review browser open failed for ${url}`);
+      }
     }
   }
 
   await handleReviewServerReady(url, isRemote, port);
+  const ready = await clientReady.waitForClientReady();
+  if (!ready) {
+    server.stop();
+    throw new Error(
+      "TrackLens review UI never became ready. Aborting instead of waiting indefinitely."
+    );
+  }
 
   return {
     port,

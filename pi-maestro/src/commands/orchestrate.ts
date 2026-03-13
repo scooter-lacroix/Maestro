@@ -21,6 +21,7 @@ import {
 import { isTrackLensEnabled } from "../tracklens/extension/command";
 import * as fs from "fs";
 import * as path from "path";
+import { spawnSync } from "child_process";
 
 /**
  * Register /maestro:orchestrate command
@@ -89,14 +90,37 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
 
       // Update master track status
       if (failedCount === 0) {
-        updateTrackStatus(root, trackId, "completed");
-        updateTrackMetadata(root, trackId, { status: "completed" });
-
-        // TrackLens final walkthrough for master track
         if (isTrackLensEnabled()) {
-          ctx.ui.notify("All sub-tracks complete. TrackLens walkthrough available.", "info");
+          ctx.ui.notify(
+            `Launching TrackLens walkthrough for completed master track ${trackId}...`,
+            "info"
+          );
+
+          const walkthroughResult = spawnSync(
+            "maestro",
+            ["tracklens", "walkthrough", trackId, "--full-diffs"],
+            {
+              cwd: root,
+              stdio: "inherit",
+              env: {
+                ...process.env,
+                TRACKLENS_CLIENT_READY_TIMEOUT_MS:
+                  process.env.TRACKLENS_CLIENT_READY_TIMEOUT_MS || "20000",
+              },
+            }
+          );
+
+          if (walkthroughResult.status !== 0) {
+            ctx.ui.notify(
+              `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
+              "warning"
+            );
+            return;
+          }
         }
 
+        updateTrackStatus(root, trackId, "completed");
+        updateTrackMetadata(root, trackId, { status: "completed" });
         ctx.ui.notify(`Master track completed: ${trackId}`, "info");
       } else {
         ctx.ui.notify(

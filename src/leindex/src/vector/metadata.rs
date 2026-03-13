@@ -74,7 +74,9 @@ impl VectorMetadata {
 /// Never change the numeric values - they're persisted in Turso database
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ChunkType {
+    #[default]
     Function = 0,
     Class = 1,
     Module = 2,
@@ -101,12 +103,6 @@ impl ChunkType {
             5 => Self::Text,
             _ => Self::Other, // 6 or unknown -> Other
         }
-    }
-}
-
-impl Default for ChunkType {
-    fn default() -> Self {
-        Self::Text
     }
 }
 
@@ -232,7 +228,7 @@ pub const MAX_FILE_PATH_LENGTH: usize = 4096;
 /// Validate embedding dimensions (Task 7.6.31)
 pub fn validate_embedding_dim(embedding: &[f32]) -> Result<()> {
     let dim = embedding.len();
-    if dim < MIN_EMBEDDING_DIM || dim > MAX_EMBEDDING_DIM {
+    if !(MIN_EMBEDDING_DIM..=MAX_EMBEDDING_DIM).contains(&dim) {
         return Err(anyhow::anyhow!(
             "Invalid embedding dimension: {} (must be between {} and {})",
             dim,
@@ -263,7 +259,7 @@ pub fn validate_vector_id(vector_id: &str) -> Result<()> {
 
 /// Validate chunk_index bounds (Task 7.6.33)
 pub fn validate_chunk_index(chunk_index: i32) -> Result<()> {
-    if chunk_index < 0 || chunk_index > MAX_CHUNK_INDEX {
+    if !(0..=MAX_CHUNK_INDEX).contains(&chunk_index) {
         return Err(anyhow::anyhow!(
             "Invalid chunk_index: {} (must be between 0 and {})",
             chunk_index,
