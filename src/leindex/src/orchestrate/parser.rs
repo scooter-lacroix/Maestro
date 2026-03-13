@@ -28,6 +28,34 @@ fn parse_tracks_content(content: &str, base_path: &Path) -> Result<Vec<Track>> {
     Ok(tracks)
 }
 
+/// Try to load metadata.json from a track directory
+/// Returns None if the file doesn't exist or is invalid
+fn try_load_metadata(track_path: &Path) -> Option<TrackMetadata> {
+    let metadata_path = track_path.join("metadata.json");
+
+    // Check if metadata.json exists
+    if !metadata_path.exists() {
+        tracing::debug!("No metadata.json found at {:?}", metadata_path);
+        return None;
+    }
+
+    // Try to parse the metadata
+    match parse_metadata(&metadata_path) {
+        Ok(metadata) => {
+            tracing::debug!("Successfully loaded metadata from {:?}", metadata_path);
+            Some(metadata)
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to parse metadata.json at {:?}: {}",
+                metadata_path,
+                e
+            );
+            None
+        }
+    }
+}
+
 fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>> {
     let lines: Vec<&str> = section.lines().collect();
     if lines.is_empty() {
@@ -151,12 +179,16 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
         return Ok(None);
     }
 
+    // Try to load metadata.json if it exists
+    let link_path_unwrapped = link_path.as_ref().unwrap();
+    let metadata = try_load_metadata(link_path_unwrapped);
+
     Ok(Some(Track {
         id: track_id,
         description,
         status,
         link_path: link_path.unwrap(),
-        metadata: None,
+        metadata,
         plan: None,
     }))
 }
@@ -440,6 +472,8 @@ fn update_task_status_in_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_parse_status_marker() {
@@ -460,5 +494,118 @@ mod tests {
         assert_eq!(TrackStatus::Pending.to_marker(), "[ ]");
         assert_eq!(TrackStatus::InProgress.to_marker(), "[~]");
         assert_eq!(TrackStatus::Completed.to_marker(), "[x]");
+    }
+
+    #[test]
+    fn test_try_load_metadata_with_valid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("metadata.json");
+
+        let metadata_content = r#"{
+            "track_id": "test-track",
+            "type": "feature",
+            "status": "pending",
+            "created_at": "2026-03-12T00:00:00Z",
+            "updated_at": "2026-03-12T00:00:00Z",
+            "description": "Test track"
+        }"#;
+
+        fs::write(&metadata_path, metadata_content).unwrap();
+
+        let result = try_load_metadata(temp_dir.path());
+        assert!(result.is_some());
+
+        let metadata = result.unwrap();
+        assert_eq!(metadata.track_id, "test-track");
+        assert_eq!(metadata.track_type, TrackType::Feature);
+        assert_eq!(metadata.status, TrackStatus::Pending);
+        assert_eq!(metadata.description, "Test track");
+    }
+
+    #[test]
+    fn test_try_load_metadata_with_missing_file() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let result = try_load_metadata(temp_dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_load_metadata_with_invalid_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("metadata.json");
+
+        fs::write(&metadata_path, "invalid json {{{").unwrap();
+
+        let result = try_load_metadata(temp_dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_track_section_with_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let track_dir = temp_dir.path().join("test-track");
+        fs::create_dir(&track_dir).unwrap();
+
+        let metadata_content = r#"{
+            "track_id": "test-track",
+            "type": "feature",
+            "status": "inprogress",
+            "created_at": "2026-03-12T00:00:00Z",
+            "updated_at": "2026-03-12T00:00:00Z",
+            "description": "Test track from metadata"
+        }"#;
+
+        fs::write(track_dir.join("metadata.json"), metadata_content).unwrap();
+
+        // Use absolute path to avoid canonicalize issues in tests
+        let absolute_path = track_dir.canonicalize().unwrap();
+        let tracks_md = format!(
+            r#"## [ ] Test Track
+*Link: [{}]({})
+
+**Description**: Basic description
+"#,
+            absolute_path.display(),
+            absolute_path.display()
+        );
+
+        let result = parse_track_section(&tracks_md, temp_dir.path());
+        assert!(result.is_ok());
+
+        let track = result.unwrap().unwrap();
+        assert_eq!(track.id, "test-track");
+        assert!(track.metadata.is_some());
+
+        let metadata = track.metadata.unwrap();
+        assert_eq!(metadata.track_id, "test-track");
+        assert_eq!(metadata.status, TrackStatus::InProgress);
+        assert_eq!(metadata.description, "Test track from metadata");
+    }
+
+    #[test]
+    fn test_parse_track_section_without_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let track_dir = temp_dir.path().join("test-track");
+        fs::create_dir(&track_dir).unwrap();
+
+        // Use absolute path to avoid canonicalize issues in tests
+        let absolute_path = track_dir.canonicalize().unwrap();
+        let tracks_md = format!(
+            r#"## [ ] Test Track
+*Link: [{}]({})
+
+**Description**: Basic description
+"#,
+            absolute_path.display(),
+            absolute_path.display()
+        );
+
+        let result = parse_track_section(&tracks_md, temp_dir.path());
+        assert!(result.is_ok());
+
+        let track = result.unwrap().unwrap();
+        assert_eq!(track.id, "test-track");
+        assert!(track.metadata.is_none());
     }
 }
