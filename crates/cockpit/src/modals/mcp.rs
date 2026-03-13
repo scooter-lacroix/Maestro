@@ -4,12 +4,12 @@
 //! the MCP menu and MCP logs viewer.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
+use crate::app::App;
 use crate::state::McpOption;
 use crate::theme::theme_from_name;
-use crate::app::App;
 
 /// Renders the MCP menu modal.
 ///
@@ -43,7 +43,10 @@ pub fn render_mcp_menu(frame: &mut Frame, app: &App) {
         (McpOption::Pause, "⏸ Pause Connection"),
         (McpOption::Logs, "📋 View Server Logs"),
         (McpOption::Add, "➕ Add New Server"),
+        (McpOption::Install, "🛠 Install Managed Server"),
+        (McpOption::Reinstall, "♻ Reinstall Managed Server"),
         (McpOption::Remove, "❌ Remove from Pool"),
+        (McpOption::Uninstall, "🗑 Uninstall Managed Server"),
     ];
 
     let mut list_items = Vec::new();

@@ -188,18 +188,18 @@ impl AdaptiveVectorStore {
             StoreMode::Linear => {
                 let linear_guard = self.linear.read().await;
                 if let Some(ref linear) = *linear_guard {
-                    return Ok(linear.vector_count()?);
+                    return linear.vector_count();
                 }
             }
             StoreMode::Hnsw => {
                 let hnsw_guard = self.hnsw.read().await;
                 if let Some(ref hnsw) = *hnsw_guard {
-                    return Ok(hnsw.vector_count()?);
+                    return hnsw.vector_count();
                 }
             }
             StoreMode::Turso => {
                 if let Some(ref turso) = self.turso {
-                    return Ok(turso.vector_count().await?);
+                    return turso.vector_count().await;
                 }
             }
         }

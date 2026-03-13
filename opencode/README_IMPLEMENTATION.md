@@ -60,7 +60,7 @@ I have created a comprehensive implementation plan for making the OpenCode varia
 Create independent file structure
 - 8 command files (copied from Claude Code variant)
 - 1 independent workflow.md (OpenCode-specific agent mappings)
-- 14 code styleguide files (copied from templates)
+- 27 code styleguide files (copied from templates)
 
 #### Phase 2: Configuration (2-3 hours)
 Integrate with OpenCode system
@@ -163,7 +163,7 @@ UI/UX Implementation         | frontend-ui-ux-engineer| opencode-scaffolder
 
 /opencode/skill/maestro/templates/
   ├── workflow.md
-  └── code_styleguides/ (14 files)
+  └── code_styleguides/ (27 files)
 
 /opencode/
   ├── opencode.jsonc.example
@@ -251,7 +251,7 @@ UI/UX Implementation         | frontend-ui-ux-engineer| opencode-scaffolder
 ### Phase 1 Complete
 - [ ] All 8 command files exist
 - [ ] Independent workflow.md created
-- [ ] All 14 code styleguides copied
+- [ ] All 27 code styleguides copied
 - [ ] All files pass syntax checks
 
 ### Phase 2 Complete

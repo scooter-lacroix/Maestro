@@ -130,10 +130,19 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     status TEXT NOT NULL DEFAULT 'stopped',
     socket_path TEXT,
     client_count INTEGER DEFAULT 0,
-    last_started_at TEXT
+    last_started_at TEXT,
+    managed INTEGER NOT NULL DEFAULT 0,
+    install_type TEXT NOT NULL DEFAULT 'unmanaged',
+    install_state TEXT NOT NULL DEFAULT 'unmanaged',
+    install_root TEXT,
+    install_recipe TEXT,
+    install_message TEXT,
+    install_log_path TEXT,
+    last_install_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_status ON mcp_servers(status);
 CREATE INDEX IF NOT EXISTS idx_mcp_transport ON mcp_servers(transport);
+CREATE INDEX IF NOT EXISTS idx_mcp_managed ON mcp_servers(managed, install_state);
 
 -- MCP Servers Blocklist (explicitly removed by user)
 CREATE TABLE IF NOT EXISTS mcp_servers_blocklist (
@@ -273,6 +282,20 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
             removed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
         CREATE INDEX IF NOT EXISTS idx_mcp_blocklist_name ON mcp_servers_blocklist(name);
+    "#,
+    ),
+    (
+        "010_managed_mcp_installs",
+        r#"
+        ALTER TABLE mcp_servers ADD COLUMN managed INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE mcp_servers ADD COLUMN install_type TEXT NOT NULL DEFAULT 'unmanaged';
+        ALTER TABLE mcp_servers ADD COLUMN install_state TEXT NOT NULL DEFAULT 'unmanaged';
+        ALTER TABLE mcp_servers ADD COLUMN install_root TEXT;
+        ALTER TABLE mcp_servers ADD COLUMN install_recipe TEXT;
+        ALTER TABLE mcp_servers ADD COLUMN install_message TEXT;
+        ALTER TABLE mcp_servers ADD COLUMN install_log_path TEXT;
+        ALTER TABLE mcp_servers ADD COLUMN last_install_at TEXT;
+        CREATE INDEX IF NOT EXISTS idx_mcp_managed ON mcp_servers(managed, install_state);
     "#,
     ),
 ];

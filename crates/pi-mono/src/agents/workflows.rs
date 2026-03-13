@@ -78,6 +78,33 @@ impl WorkflowStep {
     }
 }
 
+/// Retry and escalation policy for workflow presets
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryPolicy {
+    /// Maximum number of retry attempts before escalation
+    pub max_attempts: u32,
+    /// What happens when max_attempts is exceeded
+    pub escalation_behavior: EscalationBehavior,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            escalation_behavior: EscalationBehavior::PreserveContextAndReport,
+        }
+    }
+}
+
+/// Escalation behavior when retry limit is reached
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum EscalationBehavior {
+    /// Preserve all context and produce an escalation report
+    PreserveContextAndReport,
+    /// Abort the workflow with a failure status
+    Abort,
+}
+
 /// Workflow preset definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowPreset {
@@ -89,6 +116,8 @@ pub struct WorkflowPreset {
     pub mode: WorkflowMode,
     /// Steps in the workflow
     pub steps: Vec<WorkflowStep>,
+    /// Optional retry policy for review/remediation loops
+    pub retry_policy: Option<RetryPolicy>,
 }
 
 impl WorkflowPreset {
@@ -104,7 +133,14 @@ impl WorkflowPreset {
             description,
             mode,
             steps,
+            retry_policy: None,
         }
+    }
+
+    /// Create a new workflow preset with a retry policy
+    pub fn with_retry_policy(mut self, policy: RetryPolicy) -> Self {
+        self.retry_policy = Some(policy);
+        self
     }
 
     /// Get the number of steps in this workflow
@@ -141,6 +177,7 @@ pub fn default_presets() -> Vec<WorkflowPreset> {
                 WorkflowStep::chained(AgentRole::Architect, PiAgentType::Planner),
                 WorkflowStep::chained(AgentRole::Kraken, PiAgentType::Worker),
             ],
+            retry_policy: None,
         },
         // /implement-and-review: kraken -> critic -> kraken (chain mode)
         WorkflowPreset {
@@ -152,6 +189,7 @@ pub fn default_presets() -> Vec<WorkflowPreset> {
                 WorkflowStep::chained(AgentRole::Critic, PiAgentType::Reviewer),
                 WorkflowStep::chained(AgentRole::Kraken, PiAgentType::Worker),
             ],
+            retry_policy: None,
         },
         // /parallel-review: parallel critic execution
         WorkflowPreset {
@@ -163,6 +201,57 @@ pub fn default_presets() -> Vec<WorkflowPreset> {
                 WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer),
                 WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer),
             ],
+            retry_policy: None,
+        },
+        // /implement-review-remediate: kraken -> critic -> mender -> kraken (with retry)
+        WorkflowPreset {
+            name: "implement-review-remediate".to_string(),
+            description: "Implementation with review and remediation: kraken -> critic -> mender -> kraken".to_string(),
+            mode: WorkflowMode::Chain,
+            steps: vec![
+                WorkflowStep::chained(AgentRole::Kraken, PiAgentType::Worker),
+                WorkflowStep::chained(AgentRole::Critic, PiAgentType::Reviewer),
+                WorkflowStep::chained(AgentRole::Mender, PiAgentType::Remediator),
+                WorkflowStep::chained(AgentRole::Kraken, PiAgentType::Worker),
+            ],
+            retry_policy: Some(RetryPolicy::default()),
+        },
+        // /implement-evidence-review: kraken -> sentinel -> critic
+        WorkflowPreset {
+            name: "implement-evidence-review".to_string(),
+            description: "Implementation with evidence QA: kraken -> sentinel -> critic".to_string(),
+            mode: WorkflowMode::Chain,
+            steps: vec![
+                WorkflowStep::chained(AgentRole::Kraken, PiAgentType::Worker),
+                WorkflowStep::chained(AgentRole::Sentinel, PiAgentType::EvidenceValidator),
+                WorkflowStep::chained(AgentRole::Critic, PiAgentType::Reviewer),
+            ],
+            retry_policy: None,
+        },
+        // /ui-review-evidence-final: kraken -> prism -> sentinel -> warden
+        WorkflowPreset {
+            name: "ui-review-evidence-final".to_string(),
+            description: "UI work with architecture review, evidence QA, and final gate: kraken -> prism -> sentinel -> warden".to_string(),
+            mode: WorkflowMode::Chain,
+            steps: vec![
+                WorkflowStep::chained(AgentRole::Kraken, PiAgentType::Worker),
+                WorkflowStep::chained(AgentRole::Prism, PiAgentType::UxReviewer),
+                WorkflowStep::chained(AgentRole::Sentinel, PiAgentType::EvidenceValidator),
+                WorkflowStep::chained(AgentRole::Warden, PiAgentType::FinalReviewer),
+            ],
+            retry_policy: Some(RetryPolicy::default()),
+        },
+        // /parallel-review-with-final-gate: parallel critics -> warden
+        WorkflowPreset {
+            name: "parallel-review-with-final-gate".to_string(),
+            description: "Parallel review with skeptical final gate: parallel critics -> warden".to_string(),
+            mode: WorkflowMode::Chain,
+            steps: vec![
+                WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer),
+                WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer),
+                WorkflowStep::chained(AgentRole::Warden, PiAgentType::FinalReviewer),
+            ],
+            retry_policy: None,
         },
     ]
 }
@@ -174,7 +263,15 @@ pub fn get_preset(name: &str) -> Option<WorkflowPreset> {
 
 /// Available preset names
 pub fn preset_names() -> &'static [&'static str] {
-    &["implement", "implement-and-review", "parallel-review"]
+    &[
+        "implement",
+        "implement-and-review",
+        "parallel-review",
+        "implement-review-remediate",
+        "implement-evidence-review",
+        "ui-review-evidence-final",
+        "parallel-review-with-final-gate",
+    ]
 }
 
 #[cfg(test)]
@@ -514,10 +611,14 @@ mod tests {
     #[test]
     fn test_preset_names() {
         let names = preset_names();
-        assert_eq!(names.len(), 3);
+        assert_eq!(names.len(), 7);
         assert!(names.contains(&"implement"));
         assert!(names.contains(&"implement-and-review"));
         assert!(names.contains(&"parallel-review"));
+        assert!(names.contains(&"implement-review-remediate"));
+        assert!(names.contains(&"implement-evidence-review"));
+        assert!(names.contains(&"ui-review-evidence-final"));
+        assert!(names.contains(&"parallel-review-with-final-gate"));
     }
 
     #[test]
@@ -603,6 +704,11 @@ mod tests {
                     AgentRole::Architect => PiAgentType::Planner,
                     AgentRole::Critic => PiAgentType::Reviewer,
                     AgentRole::Kraken => PiAgentType::Worker,
+                    AgentRole::Sentinel => PiAgentType::EvidenceValidator,
+                    AgentRole::Warden => PiAgentType::FinalReviewer,
+                    AgentRole::Mender => PiAgentType::Remediator,
+                    AgentRole::Cartographer => PiAgentType::Researcher,
+                    AgentRole::Prism => PiAgentType::UxReviewer,
                 };
 
                 assert_eq!(

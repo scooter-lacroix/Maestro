@@ -1,48 +1,43 @@
-# Effective Go Style Guide Summary
+# Go Guide
 
-This document summarizes key rules and best practices from the official "Effective Go" guide for writing idiomatic Go code.
+When I write Go, I favor small packages, straightforward control flow, and APIs that are easy to use correctly.
 
-## 1. Formatting
-- **`gofmt`:** All Go code **must** be formatted with `gofmt` (or `go fmt`). This is a non-negotiable, automated standard.
-- **Indentation:** Use tabs for indentation (`gofmt` handles this).
-- **Line Length:** Go has no strict line length limit. Let `gofmt` handle line wrapping.
+These rules are mandatory defaults for new code. I only break them when a project constraint is real, documented, and local.
 
-## 2. Naming
-- **`MixedCaps`:** Use `MixedCaps` or `mixedCaps` for multi-word names. Do not use underscores.
-- **Exported vs. Unexported:** Names starting with an uppercase letter are exported (public). Names starting with a lowercase letter are not exported (private).
-- **Package Names:** Short, concise, single-word, lowercase names.
-- **Getters:** Do not name getters with a `Get` prefix. A getter for a field named `owner` should be named `Owner()`.
-- **Interface Names:** One-method interfaces are named by the method name plus an `-er` suffix (e.g., `Reader`, `Writer`).
+## What I optimize for
 
-## 3. Control Structures
-- **`if`:** No parentheses around the condition. Braces are mandatory. Can include an initialization statement (e.g., `if err := file.Chmod(0664); err != nil`).
-- **`for`:** Go's only looping construct. Unifies `for` and `while`. Use `for...range` to iterate over slices, maps, strings, and channels.
-- **`switch`:** More general than in C. Cases do not fall through by default (use `fallthrough` explicitly). Can be used without an expression to function as a cleaner `if-else-if` chain.
+- Code that feels idiomatic to Go engineers, not code transplanted from other languages.
+- Simple data flow and explicit error handling.
+- Low ceremony around concurrency and package boundaries.
+- Tool-enforced consistency through `gofmt`, `go test`, and linters.
 
-## 4. Functions
-- **Multiple Returns:** Functions can return multiple values. This is the standard way to return a result and an error (e.g., `value, err`).
-- **Named Result Parameters:** Return parameters can be named. This can make code clearer and more concise.
-- **`defer`:** Schedules a function call to be run immediately before the function executing `defer` returns. Use it for cleanup tasks like closing files.
+## Required defaults
 
-## 5. Data
-- **`new` vs. `make`:**
-  - `new(T)`: Allocates memory for a new item of type `T`, zeroes it, and returns a pointer (`*T`).
-  - `make(T, ...)`: Creates and initializes slices, maps, and channels only. Returns an initialized value of type `T` (not a pointer).
-- **Slices:** The preferred way to work with sequences. They are more flexible than arrays.
-- **Maps:** Use the "comma ok" idiom to check for the existence of a key: `value, ok := myMap[key]`.
+- Let `gofmt` and `goimports` decide formatting and import order.
+- Keep package names short, lowercase, and unsurprising.
+- Return early on errors and wrap them with context when the caller needs more than the raw failure.
+- Define interfaces where they are consumed, not where implementations live.
+- Use structs and functions first; add methods when there is real behavior tied to state.
 
-## 6. Interfaces
-- **Implicit Implementation:** A type implements an interface by implementing its methods. No `implements` keyword is needed.
-- **Small Interfaces:** Prefer many small interfaces over one large one. The standard library is full of single-method interfaces (e.g., `io.Reader`).
+## Architecture
 
-## 7. Concurrency
-- **Share Memory By Communicating:** This is the core philosophy. Do not communicate by sharing memory; instead, share memory by communicating.
-- **Goroutines:** Lightweight, concurrently executing functions. Start one with the `go` keyword.
-- **Channels:** Typed conduits for communication between goroutines. Use `make` to create them.
+- Keep packages small and cohesive. If two packages always change together, they probably want to be one package.
+- Use constructors when a type has invariants or collaborators that must be present.
+- Make zero values useful when practical, but do not contort the design to force it.
+- Treat goroutines as owned resources: know who starts them, how they stop, and how errors surface.
 
-## 8. Errors
-- **`error` type:** The built-in `error` interface is the standard way to handle errors.
-- **Explicit Error Handling:** Do not discard errors with the blank identifier (`_`). Check for errors explicitly.
-- **`panic`:** Reserved for truly exceptional, unrecoverable situations. Generally, libraries should not panic.
+## Verification
 
-*Source: [Effective Go](https://go.dev/doc/effective_go)*
+- Table-driven tests are great when they stay readable; I stop using them once the table hides the story.
+- Use integration tests for database, network, or concurrency boundaries and keep pure logic easy to test without a harness.
+- Profile before tuning allocations or concurrency behavior.
+- Plumb `context.Context` through request-scoped work and honor cancellation.
+
+## Explicitly prohibited
+
+The following practices are prohibited in new code unless the guide names a narrow, explicit exception.
+
+- Java-style package layering, giant interfaces, and dependency inversion for its own sake.
+- Hiding errors, panicking in library code, or inventing exception-like control flow.
+- Concurrency without ownership, shutdown rules, or measured benefit.
+- Utility packages that become a junk drawer for unrelated code.

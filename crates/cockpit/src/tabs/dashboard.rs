@@ -2,16 +2,19 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    prelude::*,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
-    prelude::*,
 };
 
 use crate::app::App;
 use crate::state::{DashFocus, DashSessionEntry};
-use leindex_core::memory::{models::{McpStatus, SessionStatus}, turso_backend::LspStatus};
+use leindex_core::memory::{
+    models::{McpStatus, SessionStatus},
+    turso_backend::LspStatus,
+};
 
 pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
@@ -365,11 +368,20 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
             } else {
                 Color::Red
             };
+            let managed_badge = if s.managed {
+                format!(" managed:{}:{} ", s.install_type, s.install_state)
+            } else {
+                String::new()
+            };
             ListItem::new(vec![Line::from(vec![
                 Span::styled(format!("  {} ", s.name), Style::default().bold()),
                 Span::styled(
                     format!(" [{}] ", s.status.to_string()),
                     Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    managed_badge,
+                    Style::default().fg(theme.warning),
                 ),
                 Span::styled(
                     format!(" {} active", s.client_count),

@@ -7,7 +7,6 @@ allowed-tools:
   - Edit
   - Bash
   - AskUserQuestion
-  - ExitPlanMode
 model: sonnet
 ---
 
@@ -186,8 +185,8 @@ AskUserQuestion:
        - **Step 5:** What risks or issues were found?
        - **Step 6:** Is the spec ready for user review? Any revisions needed?
 
-7.  **TrackLens Spec Review:**
-    -   **CRITICAL:** After drafting `spec.md`, you MUST present it for TrackLens review before proceeding.
+7.  **User Confirmation with TrackLens Visual Review:**
+    -   **CRITICAL:** After drafting `spec.md`, you MUST present it for TrackLens visual review and obtain approval before proceeding to plan generation.
     -   **Create Temp Spec File:** Write the drafted spec content to a temporary file:
         ```bash
         # Write spec content to a portable temp file
@@ -199,15 +198,14 @@ AskUserQuestion:
         ```
     -   **Run TrackLens Review:** Use the Bash tool to start the review:
         ```bash
-        maestro tracklens review "$SPEC_REVIEW_FILE" --mode review
+        maestro tracklens review --file "$SPEC_REVIEW_FILE" --mode review
         ```
     -   This will:
-        - Start a TrackLens review server and open it in your browser
-        - Wait for your approval/denial decision
+        - Start a TrackLens review server and open it in your browser.
+        - **Wait** for your approval/denial decision in the browser UI.
     -   **Handle Feedback:**
-        - If approved: Proceed to plan generation
-        - If denied with feedback: Revise the spec based on feedback and re-run TrackLens review
-        - Repeat until approved
+        - If approved: Proceed to plan generation.
+        - If denied with feedback: Revise the `spec.md` based on feedback and re-run TrackLens review. Repeat until approved.
 
 ### 2.3 Interactive Plan Generation (`plan.md`)
 
@@ -247,24 +245,28 @@ AskUserQuestion:
        - **Step 6:** Is the plan ready for user review? Any refinements needed?
 
 6.  **User Confirmation with TrackLens Visual Review:**
+    -   **CRITICAL:** After drafting `plan.md`, you MUST present it for TrackLens visual review and obtain approval before finalizing the track.
+    -   **Create Temp Plan File:** Write the drafted plan content to a temporary file:
+        ```bash
+        # Write plan content to a portable temp file
+        mkdir -p "${TMPDIR:-$PWD/.maestro/tmp}"
+        PLAN_REVIEW_FILE="$(mktemp "${TMPDIR:-$PWD/.maestro/tmp}/tracklens-plan-review.XXXXXX.md")"
+        cat > "$PLAN_REVIEW_FILE" << 'PLAN_EOF'
+        <paste plan content here>
+        PLAN_EOF
+        ```
+    -   **Run TrackLens Review:** Use the Bash tool to start the review:
+        ```bash
+        maestro tracklens review --file "$PLAN_REVIEW_FILE" --mode review
+        ```
+    -   This will:
+        - Start a TrackLens review server and open it in your browser.
+        - **Wait** for your approval/denial decision in the browser UI.
+    -   **Handle Feedback:**
+        - If approved: Proceed to finalize track artifacts.
+        - If denied with feedback: Revise the `plan.md` based on feedback and re-run TrackLens review. Repeat until approved.
 
-    a. **Present to TrackLens for Visual Review:** After drafting `plan.md`, invoke the ExitPlanMode tool to launch TrackLens visual review:
-       ```
-       ExitPlanMode:
-         plan: <content of drafted plan.md>
-       ```
-       This will trigger the TrackLens hook which opens a browser-based visual editor for the plan.
-
-    b. **Await TrackLens Decision:** The TrackLens server will:
-       - Open a browser with the plan loaded in a visual editor
-       - Allow the user to review, annotate, and approve/deny
-       - Return a decision with optional feedback
-
-    c. **Handle TrackLens Decision:**
-       - **If APPROVED:** Proceed to step 7 (Create Track Artifacts)
-       - **If DENIED with feedback:** The hook will provide feedback. Revise the `plan.md` based on the feedback and re-invoke ExitPlanMode. Repeat until approved.
-
-    d. **Fallback (if TrackLens unavailable):** If ExitPlanMode fails or TrackLens is not available, fall back to manual review using `AskUserQuestion`:
+    -   **Fallback (if TrackLens unavailable):** If the command fails or TrackLens is not available, fall back to manual review using `AskUserQuestion`:
        ```
        AskUserQuestion:
          question: "I've drafted the implementation plan. Please review and decide:"

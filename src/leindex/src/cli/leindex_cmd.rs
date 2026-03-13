@@ -296,7 +296,7 @@ async fn run_analyze(
 
     if let Some(p) = phase {
         let phase_num = p.parse::<usize>().unwrap_or(0);
-        if phase_num < 1 || phase_num > 5 {
+        if !(1..=5).contains(&phase_num) {
             eprintln!("Invalid phase: {}. Use 1-5 or 'all'", p);
             return Ok(());
         }

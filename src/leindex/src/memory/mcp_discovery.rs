@@ -58,6 +58,8 @@ pub fn discover_system_mcp_servers() -> Vec<DiscoveredMcpServer> {
         ("codex".to_string(), home.join(".codex/config.toml")),
         ("qwen".to_string(), home.join(".qwen/settings.json")),
         ("gemini".to_string(), home.join(".gemini/settings.json")),
+        ("iflow".to_string(), home.join(".iflow/settings.json")),
+        ("droid".to_string(), home.join(".factory/mcp.json")),
     ];
 
     for (label, path) in candidates {
@@ -79,6 +81,17 @@ pub fn discover_system_mcp_servers() -> Vec<DiscoveredMcpServer> {
     // Built-in fallbacks: add well-known local servers when installed even if no config exists.
     // This keeps the pool portable across fresh installs and avoids relying on user-specific
     // config files for common utilities.
+    add_if_missing(
+        &mut out,
+        detect_stdio_server(
+            "leindex",
+            "leindex",
+            vec!["mcp".to_string()],
+            None,
+            "builtin",
+        ),
+    );
+
     add_if_missing(
         &mut out,
         detect_stdio_server(
@@ -238,7 +251,7 @@ fn parse_json_server(
             .or_else(|| cfg.get("env").cloned())
             .unwrap_or_else(|| serde_json::json!({}));
 
-        return Some(DiscoveredMcpServer {
+        let server = DiscoveredMcpServer {
             name: name.to_string(),
             transport: McpTransport::Stdio,
             command,
@@ -251,7 +264,10 @@ fn parse_json_server(
             url: None,
             headers: None,
             source: source_label.to_string(),
-        });
+        };
+
+        return (!is_maestro_pool_proxy(&server) && !is_maestro_internal_tooling(&server))
+            .then_some(server);
     }
 
     // Standard: command is a string
@@ -275,7 +291,7 @@ fn parse_json_server(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Some(DiscoveredMcpServer {
+    let server = DiscoveredMcpServer {
         name: name.to_string(),
         transport: McpTransport::Stdio,
         command,
@@ -285,7 +301,9 @@ fn parse_json_server(
         url: None,
         headers: None,
         source: source_label.to_string(),
-    })
+    };
+
+    (!is_maestro_pool_proxy(&server) && !is_maestro_internal_tooling(&server)).then_some(server)
 }
 
 pub fn discover_from_toml_file(label: &str, path: &Path) -> Result<Vec<DiscoveredMcpServer>> {
@@ -355,7 +373,7 @@ fn parse_toml_server(
         })
         .unwrap_or_default();
 
-    Some(DiscoveredMcpServer {
+    let server = DiscoveredMcpServer {
         name: name.to_string(),
         transport: McpTransport::Stdio,
         command,
@@ -368,5 +386,112 @@ fn parse_toml_server(
         url: None,
         headers: None,
         source: source_label.to_string(),
-    })
+    };
+
+    (!is_maestro_pool_proxy(&server) && !is_maestro_internal_tooling(&server)).then_some(server)
+}
+
+fn is_maestro_pool_proxy(server: &DiscoveredMcpServer) -> bool {
+    let executable = Path::new(&server.command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&server.command);
+
+    matches!(executable, "maestro" | "maestro.exe")
+        && server.args.len() >= 2
+        && server.args[0] == "mcp"
+        && server.args[1] == "proxy"
+}
+
+fn is_maestro_internal_tooling(server: &DiscoveredMcpServer) -> bool {
+    let executable = Path::new(&server.command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&server.command);
+
+    matches!(executable, "maestro" | "maestro.exe")
+        && server.args == ["mcp".to_string(), "tool-search".to_string()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_discover_from_json_file_ignores_proxy_configs_from_json_shapes() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{
+  "mcpServers": {
+    "iflow-local": {
+      "command": "maestro",
+      "args": ["mcp", "proxy", "leindex"]
+    },
+    "droid-local": {
+      "type": "stdio",
+      "command": "maestro",
+      "args": ["mcp", "proxy", "agent-browser"]
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
+        assert!(discovered.is_empty());
+    }
+
+    #[test]
+    fn test_discover_from_json_file_supports_amp_and_opencode_shapes() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{
+  "amp.mcpServers": {
+    "amp-local": {
+      "command": "maestro",
+      "args": ["mcp", "tool-search"]
+    }
+  },
+  "mcp": {
+    "opencode-local": {
+      "type": "local",
+      "command": ["maestro", "mcp", "proxy", "leindex"],
+      "environment": {
+        "DEBUG": "1"
+      }
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
+        assert!(discovered.is_empty());
+    }
+
+    #[test]
+    fn test_discover_from_json_file_keeps_real_leindex_server() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{
+  "mcpServers": {
+    "leindex": {
+      "command": "leindex",
+      "args": ["mcp"]
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].name, "leindex");
+        assert_eq!(discovered[0].command, "leindex");
+        assert_eq!(discovered[0].args, vec!["mcp"]);
+    }
 }

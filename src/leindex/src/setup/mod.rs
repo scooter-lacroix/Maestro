@@ -5,6 +5,11 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use walkdir::WalkDir;
 
+use crate::memory::models::{
+    McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport,
+};
+use crate::memory::service::MemoryService;
+
 pub mod distro;
 pub mod package_manager;
 pub mod password;
@@ -65,6 +70,57 @@ pub struct Config {
 pub enum StepAction {
     Shell(String),
     Internal(Box<dyn Fn() -> Result<Vec<String>> + Send + Sync>),
+}
+
+fn tool_search_json_payload(include_stdio_type: bool) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "command": "maestro",
+        "args": ["mcp", "tool-search"]
+    });
+    if include_stdio_type {
+        payload["type"] = serde_json::Value::String("stdio".to_string());
+    }
+    payload
+}
+
+fn upsert_tool_search_json_server(
+    path: &Path,
+    root_key: &str,
+    include_stdio_type: bool,
+) -> Result<Vec<String>> {
+    upsert_json_server(
+        path,
+        root_key,
+        "leindex",
+        tool_search_json_payload(include_stdio_type),
+    )
+}
+
+fn home_join(parts: &[String]) -> Result<PathBuf> {
+    let mut path = home_dir()?;
+    for part in parts {
+        path.push(part);
+    }
+    Ok(path)
+}
+
+fn create_json_mcp_step(
+    name: &str,
+    description: &str,
+    path_components: &[&str],
+    root_key: &str,
+    include_stdio_type: bool,
+) -> Step {
+    let owned_components: Vec<String> = path_components.iter().map(|part| (*part).to_string()).collect();
+    let owned_root_key = root_key.to_string();
+    Step {
+        name: name.to_string(),
+        description: description.to_string(),
+        action: StepAction::Internal(Box::new(move || {
+            let cfg_path = home_join(&owned_components)?;
+            upsert_tool_search_json_server(&cfg_path, &owned_root_key, include_stdio_type)
+        })),
+    }
 }
 
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
@@ -145,6 +201,12 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             })),
         });
     }
+
+    steps.push(Step {
+        name: "MCP Pool".to_string(),
+        description: "Registering LeIndex in the Maestro MCP pool...".to_string(),
+        action: StepAction::Internal(Box::new(register_leindex_pool)),
+    });
 
     // Handle Tooling Granularly
     for tool in &config.selected_tools {
@@ -274,18 +336,11 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             dst_tpl.display()
                         ));
 
-                        // MCP config (best-effort): ensure LeIndex is reachable via `maestro mcp tool-search`.
+                        // MCP config (best-effort): route pooled MCP access through Maestro's
+                        // dynamic tool-search broker.
                         let mcp_path = home_dir()?.join(".claude").join(".mcp.json");
-                        let mut mcp_logs = upsert_json_server(
-                            &mcp_path,
-                            "mcpServers",
-                            "leindex",
-                            serde_json::json!({
-                                "command": "maestro",
-                                "args": ["mcp", "tool-search"],
-                                "type": "stdio"
-                            }),
-                        )?;
+                        let mut mcp_logs =
+                            upsert_tool_search_json_server(&mcp_path, "mcpServers", true)?;
                         logs.append(&mut mcp_logs);
 
                         Ok(logs)
@@ -327,20 +382,22 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                         // MCP server config in ~/.gemini/settings.json under mcpServers.leindex
                         let cfg_path = home_dir()?.join(".gemini").join("settings.json");
-                        let mut cfg_logs = upsert_json_server(
-                            &cfg_path,
-                            "mcpServers",
-                            "leindex",
-                            serde_json::json!({
-                                "command": "maestro",
-                                "args": ["mcp", "tool-search"]
-                            }),
-                        )?;
+                        let mut cfg_logs =
+                            upsert_tool_search_json_server(&cfg_path, "mcpServers", false)?;
                         logs.append(&mut cfg_logs);
 
                         Ok(logs)
                     })),
                 });
+            }
+            "iFlow CLI (by iFlow)" => {
+                steps.push(create_json_mcp_step(
+                    "Strings - iFlow",
+                    "Integrating Maestro into iFlow CLI...",
+                    &[".iflow", "settings.json"],
+                    "mcpServers",
+                    false,
+                ));
             }
             "Codex CLI (OpenAI)" => {
                 let install_path = config.install_path.clone();
@@ -457,15 +514,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                         // MCP server config in ~/.qwen/settings.json under mcpServers.leindex
                         let cfg_path = home_dir()?.join(".qwen").join("settings.json");
-                        let mut cfg_logs = upsert_json_server(
-                            &cfg_path,
-                            "mcpServers",
-                            "leindex",
-                            serde_json::json!({
-                                "command": "maestro",
-                                "args": ["mcp", "tool-search"]
-                            }),
-                        )?;
+                        let mut cfg_logs =
+                            upsert_tool_search_json_server(&cfg_path, "mcpServers", false)?;
                         logs.append(&mut cfg_logs);
 
                         Ok(logs)
@@ -493,41 +543,21 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             .join(".config")
                             .join("amp")
                             .join("settings.json");
-                        let mut cfg_logs = upsert_json_server(
-                            &cfg_path,
-                            "amp.mcpServers",
-                            "leindex",
-                            serde_json::json!({
-                                "command": "maestro",
-                                "args": ["mcp", "tool-search"]
-                            }),
-                        )?;
+                        let mut cfg_logs =
+                            upsert_tool_search_json_server(&cfg_path, "amp.mcpServers", false)?;
                         logs.append(&mut cfg_logs);
                         Ok(logs)
                     })),
                 });
             }
             "Droid CLI (by Factory)" => {
-                steps.push(Step {
-                    name: "Synthesizer - Droid".to_string(),
-                    description: "Integrating Maestro into Droid CLI (Factory)...".to_string(),
-                    action: StepAction::Internal(Box::new(|| {
-                        let mut logs = Vec::new();
-                        let cfg_path = home_dir()?.join(".factory").join("mcp.json");
-                        let mut cfg_logs = upsert_json_server(
-                            &cfg_path,
-                            "mcpServers",
-                            "leindex",
-                            serde_json::json!({
-                                "type": "stdio",
-                                "command": "maestro",
-                                "args": ["mcp", "tool-search"]
-                            }),
-                        )?;
-                        logs.append(&mut cfg_logs);
-                        Ok(logs)
-                    })),
-                });
+                steps.push(create_json_mcp_step(
+                    "Synthesizer - Droid",
+                    "Integrating Maestro into Droid CLI (Factory)...",
+                    &[".factory", "mcp.json"],
+                    "mcpServers",
+                    true,
+                ));
             }
             "pi-mono (Multi-Model CLI)" => {
                 let _install_path = config.install_path.clone();
@@ -902,7 +932,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     config
                         .password_cache
                         .sudo_with_password(&clean_command)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                        .map_err(std::io::Error::other)
                 } else {
                     Command::new("bash")
                         .arg("-c")
@@ -926,7 +956,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // Send stderr to TUI logs (but filter password prompts)
                         if !out.stderr.is_empty() {
                             let s = String::from_utf8_lossy(&out.stderr);
-                            let max_lines = if is_long_running { 10 } else { 10 };
+                            let max_lines: usize = 10;
                             for line in s.lines().take(max_lines) {
                                 // Don't send password prompts to logs - they'll be handled separately
                                 if !line.contains("[sudo]") || !line.contains("password") {
@@ -1462,6 +1492,99 @@ fn upsert_opencode_mcp(root: &mut serde_json::Map<String, serde_json::Value>) ->
         }),
     );
     Ok(())
+}
+
+fn register_leindex_pool() -> Result<Vec<String>> {
+    let mut logs = Vec::new();
+    if !command_exists_on_path("leindex") {
+        logs.push(
+            "Skipped MCP pool registration for 'leindex' because the `leindex` command was not found in PATH"
+                .to_string(),
+        );
+        return Ok(logs);
+    }
+
+    let service = match MemoryService::new(None) {
+        Ok(service) => service,
+        Err(error) => {
+            logs.push(format!(
+                "Skipped MCP pool registration for 'leindex': failed to open Maestro memory service ({})",
+                error
+            ));
+            return Ok(logs);
+        }
+    };
+    if let Err(error) = service.initialize() {
+        logs.push(format!(
+            "Skipped MCP pool registration for 'leindex': failed to initialize Maestro memory service ({})",
+            error
+        ));
+        return Ok(logs);
+    }
+
+    let server = McpServer {
+        id: 0,
+        name: "leindex".to_string(),
+        transport: McpTransport::Stdio,
+        command: "leindex".to_string(),
+        args: vec!["mcp".to_string()],
+        env: serde_json::json!({}),
+        cwd: None,
+        url: None,
+        headers: None,
+        status: McpStatus::Stopped,
+        socket_path: None,
+        client_count: 0,
+        last_started_at: None,
+        managed: false,
+        install_type: McpInstallKind::Unmanaged,
+        install_state: McpInstallState::Unmanaged,
+        install_root: None,
+        install_recipe: None,
+        install_message: None,
+        install_log_path: None,
+        last_install_at: None,
+    };
+
+    match service.update_mcp_server(server) {
+        Ok(()) => {
+            logs.push("Registered MCP pool entry 'leindex' -> `leindex mcp`".to_string());
+            logs.push(
+                "Integrated CLI tools will connect through `maestro mcp tool-search`"
+                    .to_string(),
+            );
+        }
+        Err(error) => {
+            logs.push(format!(
+                "Skipped MCP pool registration for 'leindex': failed to persist MCP server record ({})",
+                error
+            ));
+        }
+    }
+    Ok(logs)
+}
+
+fn command_exists_on_path(command: &str) -> bool {
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(command);
+        if candidate.is_file() {
+            return true;
+        }
+
+        #[cfg(windows)]
+        {
+            let candidate = dir.join(format!("{}.exe", command));
+            if candidate.is_file() {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 fn ensure_json_object(

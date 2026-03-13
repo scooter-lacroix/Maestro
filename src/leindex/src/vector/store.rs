@@ -315,9 +315,9 @@ impl VectorStore {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         for &val in query_embedding {
-            hasher.update(&val.to_le_bytes());
+            hasher.update(val.to_le_bytes());
         }
-        hasher.update(&(top_k as u64).to_le_bytes());
+        hasher.update((top_k as u64).to_le_bytes());
         let cache_key = format!("{:x}", hasher.finalize());
 
         if let Some(cached) = self.cache.get(&cache_key)? {

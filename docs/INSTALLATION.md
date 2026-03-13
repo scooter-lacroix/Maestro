@@ -66,7 +66,7 @@ The wizard configures the following components (depending on which toggles you e
 |-----------|-------------|
 | **Maestro protocols** | Canonical command protocols installed under `~/.maestro/integrations/commands/` (or your chosen install path) |
 | **Tool command packs** | Installs the tool-specific command/prompt pack (Claude Code commands, OpenCode skill, Codex prompts, Gemini/Qwen commands) |
-| **LeIndex MCP wiring** | Adds a `leindex` MCP server entry pointing at `maestro mcp tool-search` in each tool's config format |
+| **LeIndex MCP wiring** | Registers `leindex` in the Maestro MCP pool and points integrated CLI tools at `maestro mcp tool-search` |
 | **Pi-Mono integration** | Subagent workflow orchestration via `crates/pi-mono/` |
 | **LSP servers** | Auto-installs lsp-bridge and language servers for supported languages |
 | **Optional search stack** | Go + Zoekt (if enabled) |
@@ -127,9 +127,12 @@ The TUI will display your detected distribution and package manager at startup.
 - **OpenCode**: installs the skill to `~/.config/opencode/skill/maestro/`, copies command protocols to `~/.config/opencode/commands/`, and updates `~/.config/opencode/opencode.json` (commands + MCP)
 - **Codex**: installs custom prompts under `${CODEX_HOME:-~/.codex}/prompts/` and upserts `[mcp_servers.leindex]` in `${CODEX_HOME:-~/.codex}/config.toml`
 - **Gemini**: installs TOML commands under `~/.gemini/commands/maestro/` and upserts `mcpServers.leindex` in `~/.gemini/settings.json`
+- **iFlow CLI**: registers `mcpServers.leindex` inside `~/.iflow/settings.json` so the CLI routes pooled MCP access through `maestro mcp tool-search`.
 - **Qwen**: installs TOML commands under `~/.qwen/commands/maestro/` and upserts `mcpServers.leindex` in `~/.qwen/settings.json`
 - **Amp**: upserts `amp.mcpServers.leindex` in `~/.config/amp/settings.json`
 - **Droid**: upserts `mcpServers.leindex` in `~/.factory/mcp.json` (with `type: "stdio"`)
+
+The installer also registers the external `leindex mcp` server in the Maestro MCP pool, so Cockpit-launched CLI tools can all reach pooled MCP servers through the dynamic broker at `maestro mcp tool-search`.
 
 ---
 
@@ -178,6 +181,10 @@ ls ~/.gemini/commands/maestro/
 cat ~/.gemini/settings.json
 ls ~/.qwen/commands/maestro/
 cat ~/.qwen/settings.json
+
+# iFlow CLI (if enabled)
+ls ~/.iflow
+cat ~/.iflow/settings.json
 ```
 
 ### Optional: Configure Enhanced Agents

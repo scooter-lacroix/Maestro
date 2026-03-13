@@ -9,6 +9,7 @@
 5. **User Experience First:** Every decision should prioritize user experience
 6. **Non-Interactive & CI-Aware:** Prefer non-interactive commands. Use `CI=true` for watch-mode tools (tests, linters) to ensure single execution.
 7. **Critical Think First:** Apply systematic metacognitive analysis before and after key actions to ensure quality and prevent common pitfalls.
+8. **Project Style Guides Are Mandatory:** Before editing code, read `maestro/code_styleguides/general.md` and every applicable language or framework guide for the files you will touch. If a required guide is missing, stop and add it before implementation.
 
 ## OpenCode Agent Integration
 
@@ -110,6 +111,13 @@ All tasks follow a strict lifecycle:
      - ETL/Data tasks: Automatically launch amp-code
    - **Do NOT ask user permission** - this is automatic
 
+3.5. **Resolve Code Style Guides (MANDATORY):**
+   - Read `maestro/code_styleguides/general.md` and every applicable guide for the task before writing tests, code, refactors, or agent prompts.
+   - Determine applicability from `tech-stack.md`, the task description, the track spec, and the file extensions or frameworks you expect to touch.
+   - If a needed guide is missing, STOP and add the missing guide before proceeding.
+   - Every agent prompt and review request MUST include the active guide list and require compliance.
+   - A task is not complete until the resulting code and tests comply with the active guides.
+
 4. **Write Failing Tests (Red Phase):**
    - Create a new test file for the feature or bug fix
    - Write one or more unit tests that clearly define the expected behavior
@@ -135,6 +143,7 @@ All tasks follow a strict lifecycle:
    - Resume implementation
 
 9. **Agent Review (MANDATORY - AUTOMATIC):**
+   - **CRITICAL STYLE REQUIREMENT:** The review MUST explicitly verify compliance with the active code style guides. Style-guide violations block completion just like logic defects.
    - **CRITICAL:** Before proceeding to commit, you MUST automatically launch codex-reviewer
    - **AUTOMATICALLY Launch Code Review:** Use codex-reviewer to review all changes
    - **Address Review Findings:** Fix critical issues before proceeding

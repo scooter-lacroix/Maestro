@@ -1,37 +1,43 @@
-# Google Python Style Guide Summary
+# Python Guide
 
-This document summarizes key rules and best practices from the Google Python Style Guide.
+When I write Python, I aim for explicit data shapes, small modules, and code that stays readable even after the third feature lands.
 
-## 1. Python Language Rules
-- **Linting:** Run `pylint` on your code to catch bugs and style issues.
-- **Imports:** Use `import x` for packages/modules. Use `from x import y` only when `y` is a submodule.
-- **Exceptions:** Use built-in exception classes. Do not use bare `except:` clauses.
-- **Global State:** Avoid mutable global state. Module-level constants are okay and should be `ALL_CAPS_WITH_UNDERSCORES`.
-- **Comprehensions:** Use for simple cases. Avoid for complex logic where a full loop is more readable.
-- **Default Argument Values:** Do not use mutable objects (like `[]` or `{}`) as default values.
-- **True/False Evaluations:** Use implicit false (e.g., `if not my_list:`). Use `if foo is None:` to check for `None`.
-- **Type Annotations:** Strongly encouraged for all public APIs.
+These rules are mandatory defaults for new code. I only break them when a project constraint is real, documented, and local.
 
-## 2. Python Style Rules
-- **Line Length:** Maximum 80 characters.
-- **Indentation:** 4 spaces per indentation level. Never use tabs.
-- **Blank Lines:** Two blank lines between top-level definitions (classes, functions). One blank line between method definitions.
-- **Whitespace:** Avoid extraneous whitespace. Surround binary operators with single spaces.
-- **Docstrings:** Use `"""triple double quotes"""`. Every public module, function, class, and method must have a docstring.
-  - **Format:** Start with a one-line summary. Include `Args:`, `Returns:`, and `Raises:` sections.
-- **Strings:** Use f-strings for formatting. Be consistent with single (`'`) or double (`"`) quotes.
-- **`TODO` Comments:** Use `TODO(username): Fix this.` format.
-- **Imports Formatting:** Imports should be on separate lines and grouped: standard library, third-party, and your own application's imports.
+## What I optimize for
 
-## 3. Naming
-- **General:** `snake_case` for modules, functions, methods, and variables.
-- **Classes:** `PascalCase`.
-- **Constants:** `ALL_CAPS_WITH_UNDERSCORES`.
-- **Internal Use:** Use a single leading underscore (`_internal_variable`) for internal module/class members.
+- Readability, predictable behavior, and simple composition.
+- Type hints where they clarify contracts and keep refactors safe.
+- Clear boundary handling around files, networks, databases, and CLIs.
+- A codebase that still feels simple once scripts grow into systems.
 
-## 4. Main
-- All executable files should have a `main()` function that contains the main logic, called from a `if __name__ == '__main__':` block.
+## Required defaults
 
-**BE CONSISTENT.** When editing code, match the existing style.
+- Use a formatter and linter (`ruff`/`black` or project equivalents) so style stays automatic.
+- Annotate public functions, core domain models, and boundary objects with type hints.
+- Prefer `pathlib`, context managers, and standard-library tools before adding dependencies.
+- Use dataclasses or typed models for structured data instead of passing loose dicts everywhere.
+- Write functions that do one thing and return one clear shape.
 
-*Source: [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)*
+## Architecture
+
+- Keep scripts with a clean `main()` and move reusable logic into modules that do not depend on CLI globals.
+- Validate and normalize external input early, then keep downstream code working with trusted objects.
+- Use exceptions intentionally: raise specific errors with context and catch them near boundaries that can respond.
+- Split orchestration from business rules so tests can exercise behavior without filesystem or network setup.
+
+## Verification
+
+- Prefer fast unit tests for logic and targeted integration tests for real IO.
+- Test unhappy paths: malformed input, timeouts, partial writes, and absent files are common Python failure modes.
+- Watch import-time side effects, startup cost, and hidden global state in larger apps.
+- Keep dependency lists lean and pinned deliberately when shipping production systems.
+
+## Explicitly prohibited
+
+The following practices are prohibited in new code unless the guide names a narrow, explicit exception.
+
+- Mutable default arguments, bare `except`, and hidden module-level state.
+- Classes that exist only to hold one function's worth of behavior.
+- Passing around untyped nested dicts as if they were domain models.
+- Metaprogramming or dynamic tricks when plain Python would be clearer.

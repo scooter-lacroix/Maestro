@@ -37,14 +37,14 @@ cp claude-code/templates/workflow.md opencode/skill/maestro/templates/workflow.m
 # 1.3 Create code styleguides
 mkdir -p opencode/skill/maestro/templates/code_styleguides
 cp claude-code/templates/code_styleguides/*.md opencode/skill/maestro/templates/code_styleguides/
-# Result: 14 styleguide files
+# Result: 27 styleguide files
 ```
 
 **Verification**:
 ```bash
 ls -1 opencode/skill/maestro/commands/*.md | wc -l  # Should be 8
 test -f opencode/skill/maestro/templates/workflow.md
-ls -1 opencode/skill/maestro/templates/code_styleguides/*.md | wc -l  # Should be 14
+ls -1 opencode/skill/maestro/templates/code_styleguides/*.md | wc -l  # Should be 27
 ```
 
 ### Phase 2: Configuration (2-3 hours)
@@ -449,7 +449,7 @@ Solution:
 ### Files Created (23 total)
 - [ ] 8 command files in `/opencode/skill/maestro/commands/`
 - [ ] 1 workflow.md in `/opencode/skill/maestro/templates/`
-- [ ] 14 code styleguides in `/opencode/skill/maestro/templates/code_styleguides/`
+- [ ] 27 code styleguides in `/opencode/skill/maestro/templates/code_styleguides/`
 - [ ] 1 opencode.jsonc.example in `/opencode/`
 - [ ] 1 install-opencode.sh in repository root
 - [ ] 1 MIGRATION_CLAUDE_TO_OPENCODE.md in `/docs/`

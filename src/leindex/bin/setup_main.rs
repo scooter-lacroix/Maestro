@@ -189,6 +189,7 @@ fn main() -> Result<(), io::Error> {
             ("Yazi (Terminal File Manager)".to_string(), true),
             ("Claude Code (by Anthropic)".to_string(), true),
             ("Gemini CLI (by Google)".to_string(), true),
+            ("iFlow CLI (by iFlow)".to_string(), true),
             ("Qwen Code (QwenLM)".to_string(), true),
             ("Codex CLI (OpenAI)".to_string(), true),
             ("OpenCode (Independent)".to_string(), true),

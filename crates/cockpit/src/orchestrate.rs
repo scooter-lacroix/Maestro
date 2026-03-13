@@ -112,7 +112,9 @@ impl OrchestratePane {
     }
 
     /// Load plan for the selected track (with caching)
-    pub fn load_selected_track_plan(&mut self) -> Result<Option<TrackPlan>, Box<dyn std::error::Error>> {
+    pub fn load_selected_track_plan(
+        &mut self,
+    ) -> Result<Option<TrackPlan>, Box<dyn std::error::Error>> {
         if self.tracks.is_empty() {
             return Ok(None);
         }
@@ -190,7 +192,8 @@ impl OrchestratePane {
         self.iteration_output.push(line);
         // Keep only last 1000 lines
         if self.iteration_output.len() > 1000 {
-            self.iteration_output = self.iteration_output
+            self.iteration_output = self
+                .iteration_output
                 .iter()
                 .skip(self.iteration_output.len() - 1000)
                 .cloned()
@@ -266,7 +269,10 @@ impl OrchestratePane {
             LoopMode::Building => "building",
         };
 
-        let mut cmd = format!("maestro orchestrate start {} --mode {} --tool {}", track_id, mode_str, tool);
+        let mut cmd = format!(
+            "maestro orchestrate start {} --mode {} --tool {}",
+            track_id, mode_str, tool
+        );
 
         if dangerous {
             cmd.push_str(" --dangerous");
@@ -316,7 +322,12 @@ impl OrchestratePane {
 }
 
 /// Render the Orchestrate pane
-pub fn render_orchestrate(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane, theme: &crate::theme::Theme) {
+pub fn render_orchestrate(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &mut OrchestratePane,
+    theme: &crate::theme::Theme,
+) {
     // Split into left (track/task tree) and right (details/output)
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -331,7 +342,12 @@ pub fn render_orchestrate(frame: &mut Frame, area: Rect, pane: &mut OrchestrateP
 }
 
 /// Render the track/task tree (left panel)
-fn render_track_tree(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane, theme: &crate::theme::Theme) {
+fn render_track_tree(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &mut OrchestratePane,
+    theme: &crate::theme::Theme,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
@@ -364,7 +380,10 @@ fn render_track_tree(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane, 
     let mut items: Vec<ListItem<'static>> = Vec::new();
 
     // Collect track data first to avoid borrow issues
-    let track_data: Vec<(usize, TrackStatus, String)> = pane.tracks.iter().enumerate()
+    let track_data: Vec<(usize, TrackStatus, String)> = pane
+        .tracks
+        .iter()
+        .enumerate()
         .map(|(idx, track)| (idx, track.status, track.id.clone()))
         .collect();
 
@@ -400,7 +419,11 @@ fn render_track_tree(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane, 
     }
 
     let list = List::new(items)
-        .highlight_style(Style::default().bg(theme.highlight_bg).fg(theme.highlight_fg))
+        .highlight_style(
+            Style::default()
+                .bg(theme.highlight_bg)
+                .fg(theme.highlight_fg),
+        )
         .highlight_symbol(">> ");
 
     frame.render_widget(list, inner_area);
@@ -424,14 +447,28 @@ fn render_task_tree_recursive(
     let is_expanded = pane.is_task_expanded(&task.id);
     let has_children = !task.subtasks.is_empty();
     let expand_symbol = if has_children {
-        if is_expanded { "[-]" } else { "[+]" }
+        if is_expanded {
+            "[-]"
+        } else {
+            "[+]"
+        }
     } else {
-        if task.status == TrackStatus::Completed { "[✓]" } else { "   " }
+        if task.status == TrackStatus::Completed {
+            "[✓]"
+        } else {
+            "   "
+        }
     };
 
     // Build owned strings to avoid lifetime issues
-    let line_text = format!("{}{}{} {}{}", indent, expand_symbol, status_symbol, " ", task.title);
-    items.push(ListItem::new(Span::styled(line_text, Style::default().fg(theme.fg))));
+    let line_text = format!(
+        "{}{}{} {}{}",
+        indent, expand_symbol, status_symbol, " ", task.title
+    );
+    items.push(ListItem::new(Span::styled(
+        line_text,
+        Style::default().fg(theme.fg),
+    )));
 
     // Show subtasks if expanded
     if is_expanded {
@@ -442,7 +479,12 @@ fn render_task_tree_recursive(
 }
 
 /// Render task details and output (right panel)
-fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane, theme: &crate::theme::Theme) {
+fn render_task_details(
+    frame: &mut Frame,
+    area: Rect,
+    pane: &mut OrchestratePane,
+    theme: &crate::theme::Theme,
+) {
     // Split into details (top) and output (bottom)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -491,7 +533,7 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
                         SessionStatus::Completed => Color::Blue,
                         SessionStatus::Failed | SessionStatus::Interrupted => Color::Red,
                         _ => Color::Gray,
-                    })
+                    }),
                 ),
             ]),
             Line::from(vec![
@@ -538,7 +580,8 @@ fn render_task_details(frame: &mut Frame, area: Rect, pane: &mut OrchestratePane
             Style::default().fg(theme.muted)
         });
 
-    let output_text: Vec<Line> = pane.iteration_output
+    let output_text: Vec<Line> = pane
+        .iteration_output
         .iter()
         .map(|line| Line::from(line.as_str()))
         .collect();

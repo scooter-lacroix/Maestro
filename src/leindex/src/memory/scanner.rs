@@ -156,14 +156,13 @@ impl Scanner {
         }
 
         // maestro/ with project files
-        if maestro_dir.is_dir() {
-            if maestro_dir.join("product.md").exists()
+        if maestro_dir.is_dir()
+            && (maestro_dir.join("product.md").exists()
                 || maestro_dir.join("tracks.md").exists()
                 || maestro_dir.join("workflow.md").exists()
-                || maestro_dir.join("tracks").is_dir()
-            {
-                return true;
-            }
+                || maestro_dir.join("tracks").is_dir())
+        {
+            return true;
         }
 
         // Alternative: product.md + tracks.md at root

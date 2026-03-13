@@ -332,8 +332,8 @@ impl LspClient {
 /// Parse Content-Length from LSP headers
 fn parse_content_length(header: &str) -> Result<usize> {
     for line in header.lines() {
-        if line.starts_with("Content-Length:") {
-            let len_str = line["Content-Length:".len()..].trim();
+        if let Some(rest) = line.strip_prefix("Content-Length:") {
+            let len_str = rest.trim();
             return len_str
                 .parse::<usize>()
                 .with_context(|| format!("Invalid Content-Length: {}", len_str));

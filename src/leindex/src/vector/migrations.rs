@@ -187,10 +187,10 @@ pub async fn migrate_chunk_type_to_integer(database: &Database) -> Result<bool> 
                     libsql::Value::Text(file_path),
                     libsql::Value::Integer(chunk_index),
                     start_line
-                        .map(|v| libsql::Value::Integer(v))
+                        .map(libsql::Value::Integer)
                         .unwrap_or(libsql::Value::Null),
                     end_line
-                        .map(|v| libsql::Value::Integer(v))
+                        .map(libsql::Value::Integer)
                         .unwrap_or(libsql::Value::Null),
                     libsql::Value::Integer(chunk_type_int),
                     libsql::Value::Text(parent_context.unwrap_or_default()),
@@ -199,7 +199,7 @@ pub async fn migrate_chunk_type_to_integer(database: &Database) -> Result<bool> 
                     libsql::Value::Text(embedding_model),
                     libsql::Value::Text(created_at),
                     updated_at
-                        .map(|v| libsql::Value::Text(v))
+                        .map(libsql::Value::Text)
                         .unwrap_or(libsql::Value::Null),
                 ]
                 .into_iter(),

@@ -88,7 +88,11 @@ mod cockpit_integration_tests {
     #[test]
     fn test_tool_call_in_turn_display() {
         let mut turn = Turn::new(TurnRole::Assistant, "Let me check that.".to_string());
-        turn.add_tool_call("call-1".to_string(), "bash".to_string(), serde_json::json!({"cmd": "ls"}));
+        turn.add_tool_call(
+            "call-1".to_string(),
+            "bash".to_string(),
+            serde_json::json!({"cmd": "ls"}),
+        );
 
         let display = TurnDisplay::from_turn(&turn);
         assert!(display.has_tool_calls);
@@ -117,9 +121,14 @@ mod cockpit_integration_tests {
     #[derive(Debug, Clone, PartialEq)]
     enum AgentStatus {
         Ready,
-        Running { session_id: String, turn_count: usize },
+        Running {
+            session_id: String,
+            turn_count: usize,
+        },
         Idle,
-        Error { message: String },
+        Error {
+            message: String,
+        },
     }
 
     impl AgentStatus {
@@ -160,10 +169,7 @@ mod cockpit_integration_tests {
     impl TurnHistory {
         fn from_thread(thread: &Thread) -> Self {
             Self {
-                turns: thread
-                    .turns()
-                    .map(|t| TurnDisplay::from_turn(t))
-                    .collect(),
+                turns: thread.turns().map(|t| TurnDisplay::from_turn(t)).collect(),
             }
         }
     }

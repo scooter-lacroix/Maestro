@@ -2,10 +2,7 @@
 //!
 //! Handles RequestTabClose messages by forwarding them to the websocket as CloseTab requests.
 
-use crate::{
-    message::tabs::RequestTabClose,
-    prelude::*,
-};
+use crate::{message::tabs::RequestTabClose, prelude::*};
 use tab_api::client::Request;
 
 pub struct CloseTabService {
