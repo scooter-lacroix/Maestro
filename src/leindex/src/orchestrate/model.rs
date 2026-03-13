@@ -37,6 +37,34 @@ impl TrackStatus {
     pub fn is_actionable(&self) -> bool {
         matches!(self, TrackStatus::Pending | TrackStatus::InProgress)
     }
+
+    /// Get the precedence value for status (higher = more important)
+    /// Used for status resolution: runtime > session > metadata > parsed > derived
+    pub fn precedence(&self) -> u8 {
+        match self {
+            TrackStatus::Completed => 3,
+            TrackStatus::InProgress => 2,
+            TrackStatus::Pending => 1,
+        }
+    }
+
+    /// Resolve the highest precedence status from multiple sources
+    /// Precedence: 1) live runtime state, 2) persisted session state,
+    ///             3) metadata.json status, 4) parsed track status, 5) derived aggregate
+    pub fn resolve_with_precedence(
+        runtime_status: Option<Self>,
+        session_status: Option<Self>,
+        metadata_status: Option<Self>,
+        parsed_status: Option<Self>,
+        derived_status: Option<Self>,
+    ) -> Option<Self> {
+        // Evaluate in order of precedence and return the first Some value
+        runtime_status
+            .or(session_status)
+            .or(metadata_status)
+            .or(parsed_status)
+            .or(derived_status)
+    }
 }
 
 /// Task dependency relationship
@@ -325,7 +353,6 @@ pub enum ErrorStrategy {
     Skip,
     Abort,
 }
-
 
 /// Pi-Mono subagent configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -725,5 +752,90 @@ mod tests {
 
         // Task should NOT be actionable because it's already completed
         assert!(!task.is_actionable(&completed_tasks));
+    }
+
+    #[test]
+    fn test_status_precedence_values() {
+        assert_eq!(TrackStatus::Completed.precedence(), 3);
+        assert_eq!(TrackStatus::InProgress.precedence(), 2);
+        assert_eq!(TrackStatus::Pending.precedence(), 1);
+    }
+
+    #[test]
+    fn test_resolve_with_precedence_runtime_highest() {
+        let result = TrackStatus::resolve_with_precedence(
+            Some(TrackStatus::InProgress), // runtime
+            Some(TrackStatus::Completed),  // session
+            Some(TrackStatus::Pending),    // metadata
+            Some(TrackStatus::Pending),    // parsed
+            Some(TrackStatus::Pending),    // derived
+        );
+
+        // Runtime status should win
+        assert_eq!(result, Some(TrackStatus::InProgress));
+    }
+
+    #[test]
+    fn test_resolve_with_precedence_session_second() {
+        let result = TrackStatus::resolve_with_precedence(
+            None,                         // runtime
+            Some(TrackStatus::Completed), // session
+            Some(TrackStatus::Pending),   // metadata
+            Some(TrackStatus::Pending),   // parsed
+            Some(TrackStatus::Pending),   // derived
+        );
+
+        // Session status should win
+        assert_eq!(result, Some(TrackStatus::Completed));
+    }
+
+    #[test]
+    fn test_resolve_with_precedence_metadata_third() {
+        let result = TrackStatus::resolve_with_precedence(
+            None,                          // runtime
+            None,                          // session
+            Some(TrackStatus::InProgress), // metadata
+            Some(TrackStatus::Pending),    // parsed
+            Some(TrackStatus::Pending),    // derived
+        );
+
+        // Metadata status should win
+        assert_eq!(result, Some(TrackStatus::InProgress));
+    }
+
+    #[test]
+    fn test_resolve_with_precedence_parsed_fourth() {
+        let result = TrackStatus::resolve_with_precedence(
+            None,                         // runtime
+            None,                         // session
+            None,                         // metadata
+            Some(TrackStatus::Completed), // parsed
+            Some(TrackStatus::Pending),   // derived
+        );
+
+        // Parsed status should win
+        assert_eq!(result, Some(TrackStatus::Completed));
+    }
+
+    #[test]
+    fn test_resolve_with_precedence_derived_last() {
+        let result = TrackStatus::resolve_with_precedence(
+            None,                          // runtime
+            None,                          // session
+            None,                          // metadata
+            None,                          // parsed
+            Some(TrackStatus::InProgress), // derived
+        );
+
+        // Derived status should win
+        assert_eq!(result, Some(TrackStatus::InProgress));
+    }
+
+    #[test]
+    fn test_resolve_with_precedence_all_none() {
+        let result = TrackStatus::resolve_with_precedence(None, None, None, None, None);
+
+        // Should return None when all are None
+        assert_eq!(result, None);
     }
 }
