@@ -22,6 +22,8 @@ use tracing::{info, warn};
 #[cfg(feature = "rusqlite")]
 use super::db::DatabaseManager;
 #[cfg(feature = "rusqlite")]
+use super::mcp_installer::ManagedMcpInstaller;
+#[cfg(feature = "rusqlite")]
 use super::mcp_discovery;
 #[cfg(feature = "rusqlite")]
 use super::models::*;
@@ -34,6 +36,8 @@ pub struct MemoryService {
     db: DatabaseManager,
     scanner: Scanner,
     search_index: Option<Arc<super::search::MemorySearchIndex>>,
+    /// Cache for MCP server list with timestamp
+    mcp_cache: Arc<std::sync::Mutex<Option<(Vec<McpServer>, std::time::Instant)>>>,
 }
 
 #[cfg(feature = "rusqlite")]
@@ -57,6 +61,7 @@ impl MemoryService {
             db,
             scanner: Scanner::new(),
             search_index,
+            mcp_cache: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -901,6 +906,13 @@ impl MemoryService {
     /// Discover MCP servers across common tool configs and upsert them into the Maestro pool.
     pub fn sync_mcp_servers_from_system(&self) -> Result<usize> {
         let mut discovered = mcp_discovery::discover_system_mcp_servers();
+        let managed_names: std::collections::HashSet<String> = self
+            .list_mcp_servers()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|server| server.managed)
+            .map(|server| server.name)
+            .collect();
 
         // Also pick up project-scoped `.mcp.json` files for projects already registered in Maestro.
         if let Ok(projects) = self.list_projects() {
@@ -933,10 +945,28 @@ impl MemoryService {
 
         // De-dupe by server name (first win) and filter out blocklisted servers.
         let mut seen = std::collections::HashSet::<String>::new();
-        discovered.retain(|s| !blocklist.contains(&s.name) && seen.insert(s.name.clone()));
+        discovered.retain(|s| {
+            !blocklist.contains(&s.name)
+                && !managed_names.contains(&s.name)
+                && seen.insert(s.name.clone())
+        });
         let mut upserted = 0usize;
+        let existing_servers = self
+            .list_mcp_servers()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|server| (server.name.clone(), server))
+            .collect::<std::collections::HashMap<_, _>>();
 
         for s in discovered {
+            if existing_servers
+                .get(&s.name)
+                .map(|server| server.managed)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
             let server = McpServer {
                 id: 0,
                 name: s.name,
@@ -951,6 +981,14 @@ impl MemoryService {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: McpInstallKind::Unmanaged,
+                install_state: McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             };
             if self.update_mcp_server(server).is_ok() {
                 upserted += 1;
@@ -1383,12 +1421,16 @@ impl MemoryService {
 
     /// Update or create MCP server state
     pub fn update_mcp_server(&self, server: McpServer) -> Result<()> {
+        // Invalidate cache before modification
+        self.invalidate_mcp_cache();
+
         self.db.with_connection(|conn| {
             conn.execute(
                 "INSERT OR REPLACE INTO mcp_servers (
                     name, transport, command, args, env, cwd, url, headers, status, socket_path,
-                    client_count, last_started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    client_count, last_started_at, managed, install_type, install_state,
+                    install_root, install_recipe, install_message, install_log_path, last_install_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     server.name,
                     server.transport.to_string(),
@@ -1402,6 +1444,14 @@ impl MemoryService {
                     server.socket_path,
                     server.client_count,
                     server.last_started_at.map(|dt| dt.to_rfc3339()),
+                    if server.managed { 1 } else { 0 },
+                    server.install_type.to_string(),
+                    server.install_state.to_string(),
+                    server.install_root,
+                    server.install_recipe.map(|recipe| serde_json::to_string(&recipe).unwrap()),
+                    server.install_message,
+                    server.install_log_path,
+                    server.last_install_at.map(|dt| dt.to_rfc3339()),
                 ],
             )?;
             Ok(())
@@ -1409,11 +1459,26 @@ impl MemoryService {
     }
 
     /// List all pooled MCP servers
+    /// Uses a 1-second cache to prevent repeated database queries during rapid successive calls.
     pub fn list_mcp_servers(&self) -> Result<Vec<McpServer>> {
-        self.db.with_connection(|conn| {
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+        // Check cache first
+        {
+            let cache = self.mcp_cache.lock().unwrap();
+            if let Some((servers, timestamp)) = cache.as_ref() {
+                if timestamp.elapsed() < CACHE_TTL {
+                    return Ok(servers.clone());
+                }
+            }
+        } // Release lock
+
+        // Cache miss or expired, fetch from DB
+        let servers = self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, name, transport, command, args, env, cwd, url, headers, status, socket_path,
-                        client_count, last_started_at 
+                        client_count, last_started_at, managed, install_type, install_state,
+                        install_root, install_recipe, install_message, install_log_path, last_install_at
                  FROM mcp_servers ORDER BY name",
             )?;
 
@@ -1436,18 +1501,100 @@ impl MemoryService {
                         socket_path: row.get(10)?,
                         client_count: row.get(11)?,
                         last_started_at: row.get::<_, Option<String>>(12)?.map(parse_datetime),
+                        managed: row.get::<_, i32>(13)? == 1,
+                        install_type: parse_mcp_install_kind(row.get(14)?),
+                        install_state: parse_mcp_install_state(row.get(15)?),
+                        install_root: row.get(16)?,
+                        install_recipe: row
+                            .get::<_, Option<String>>(17)?
+                            .and_then(|s| serde_json::from_str(&s).ok()),
+                        install_message: row.get(18)?,
+                        install_log_path: row.get(19)?,
+                        last_install_at: row.get::<_, Option<String>>(20)?.map(parse_datetime),
                     })
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .context("Failed to collect MCP servers")?;
 
-            Ok(servers)
+            Ok::<_, anyhow::Error>(servers)
+        })?;
+
+        // Update cache
+        {
+            let mut cache = self.mcp_cache.lock().unwrap();
+            *cache = Some((servers.clone(), std::time::Instant::now()));
+        }
+
+        Ok(servers)
+    }
+
+    /// Invalidate the MCP server list cache
+    /// Call this after any operation that modifies MCP server state.
+    pub fn invalidate_mcp_cache(&self) {
+        let mut cache = self.mcp_cache.lock().unwrap();
+        *cache = None;
+    }
+
+    /// Install a managed MCP server into Maestro-owned storage.
+    pub fn install_managed_mcp_server(
+        &self,
+        server_name: &str,
+        recipe: McpManagedInstallRecipe,
+    ) -> Result<McpServer> {
+        self.invalidate_mcp_cache();
+        let _ = self.unblock_mcp_server(server_name);
+        let installer = ManagedMcpInstaller::new(self.clone(), None)?;
+        let manifest = toml::to_string_pretty(&McpManagedInstallManifest {
+            name: server_name.to_string(),
+            transport: McpTransport::Stdio,
+            auto_start: true,
+            env: recipe.env.clone(),
+            recipe,
+        })?;
+        block_on_async(installer.install_from_manifest_str(&manifest))
+    }
+
+    /// Remove a managed MCP server and all Maestro-owned install artifacts.
+    pub fn uninstall_managed_mcp_server(&self, name: &str) -> Result<()> {
+        self.invalidate_mcp_cache();
+        let installer = ManagedMcpInstaller::new(self.clone(), None)?;
+        block_on_async(installer.uninstall(name))
+    }
+
+    /// Returns the managed install root for a server name.
+    pub fn managed_mcp_root(&self, name: &str) -> Result<PathBuf> {
+        let installer = ManagedMcpInstaller::new(self.clone(), None)?;
+        Ok(installer.managed_root_for(name))
+    }
+
+    pub(crate) fn purge_mcp_server_record(&self, name: &str) -> Result<()> {
+        self.invalidate_mcp_cache();
+        self.db.with_connection(|conn| {
+            conn.execute("DELETE FROM mcp_servers WHERE name = ?", [name])?;
+            Ok(())
         })
     }
 
     /// Delete an MCP server from pool and add to blocklist
     pub fn delete_mcp_server(&self, name: &str) -> Result<()> {
+        // Invalidate cache before modification
+        self.invalidate_mcp_cache();
+
         self.db.with_connection(|conn| {
+            let is_managed: Option<i32> = conn
+                .query_row(
+                    "SELECT managed FROM mcp_servers WHERE name = ?",
+                    [name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if is_managed == Some(1) {
+                anyhow::bail!(
+                    "MCP server '{}' is managed by Maestro; use uninstall_managed_mcp_server instead",
+                    name
+                );
+            }
+
             // First, get the server info before deleting (for blocklist source tracking)
             let source: Option<String> = conn
                 .query_row(
@@ -1501,6 +1648,28 @@ fn parse_mcp_status(s: String) -> McpStatus {
     }
 }
 
+fn parse_mcp_install_kind(s: String) -> McpInstallKind {
+    match s.as_str() {
+        "npm_package" => McpInstallKind::NpmPackage,
+        "uvx_package" => McpInstallKind::UvxPackage,
+        "pipx_package" => McpInstallKind::PipxPackage,
+        "git_repository" => McpInstallKind::GitRepository,
+        "custom" => McpInstallKind::Custom,
+        _ => McpInstallKind::Unmanaged,
+    }
+}
+
+fn parse_mcp_install_state(s: String) -> McpInstallState {
+    match s.as_str() {
+        "pending" => McpInstallState::Pending,
+        "installing" => McpInstallState::Installing,
+        "installed" => McpInstallState::Installed,
+        "failed" => McpInstallState::Failed,
+        "removing" => McpInstallState::Removing,
+        _ => McpInstallState::Unmanaged,
+    }
+}
+
 fn parse_mcp_transport(s: String) -> McpTransport {
     match s.as_str() {
         "http" => McpTransport::Http,
@@ -1515,6 +1684,18 @@ impl std::fmt::Display for McpStatus {
             Self::Stopped => write!(f, "stopped"),
             Self::Error => write!(f, "error"),
         }
+    }
+}
+
+fn block_on_async<F, T>(future: F) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(future))
+    } else {
+        let runtime = tokio::runtime::Runtime::new()?;
+        runtime.block_on(future)
     }
 }
 
@@ -1662,6 +1843,14 @@ mod tests {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: McpInstallKind::Unmanaged,
+                install_state: McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             })
             .unwrap();
 
@@ -1680,6 +1869,14 @@ mod tests {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: McpInstallKind::Unmanaged,
+                install_state: McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             })
             .unwrap();
 
@@ -1732,6 +1929,14 @@ mod tests {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: McpInstallKind::Unmanaged,
+                install_state: McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             })
             .unwrap();
 

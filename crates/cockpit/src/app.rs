@@ -3,7 +3,7 @@
 //! Beautiful Terminal User Interface using ratatui.
 //! Shows projects, memories, and analysis status.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::{
     cursor::MoveTo,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -21,8 +21,10 @@ use std::hash::{Hash, Hasher};
 use std::{
     collections::hash_map::DefaultHasher,
     collections::{HashMap, HashSet},
+    fs,
     io,
     io::Write,
+    path::PathBuf,
     sync::Arc,
     time::Instant,
 };
@@ -30,6 +32,8 @@ use tracing::debug;
 
 use leindex_core::config::Config;
 use leindex_core::memory::lsp_manager::LspType;
+use leindex_core::memory::mcp_installer::ManagedMcpInstaller;
+use leindex_core::memory::models::McpManagedInstallManifest;
 use leindex_core::memory::turso_backend::LspStatus;
 use leindex_core::memory::turso_backend::TursoStorageBackend;
 use leindex_core::memory::McpPool;
@@ -54,10 +58,10 @@ pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
 /// Tab identifiers with explicit indices for maintainability
-/// Order: Welcome(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9) → TrackLens(10)
+/// Order: Welcome(0) → MaestroClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9) → TrackLens(10)
 pub mod tabs {
     pub const DASHBOARD: usize = 0;
-    pub const MAESTERCLAW: usize = 1;
+    pub const MAESTROCLAW: usize = 1;
     pub const SESSIONS: usize = 2;
     pub const PROJECTS: usize = 3;
     pub const CONDUCTOR: usize = 4;
@@ -72,7 +76,7 @@ pub mod tabs {
     pub fn all_titles() -> Vec<&'static str> {
         vec![
             "Welcome",
-            "MaesterClaw",
+            "MaestroClaw",
             "Sessions",
             "Projects",
             "Conductor",
@@ -266,7 +270,9 @@ pub struct App {
     // OMP agent manager for tool execution
     pub omp_manager: Option<OmpAgentManager>,
     // Phase 7.7: Hot cache for memory suggestions
-    pub hot_cache: crate::maesterclaw::HotCache,
+    pub hot_cache: crate::maestroclaw::HotCache,
+    // MaestroClaw pane state
+    pub maestroclaw_pane: crate::maestroclaw::MaestroClawPane,
     // TrackLens review state
     pub tracklens_pane: TrackLensPane,
 }
@@ -386,7 +392,8 @@ impl App {
             } else {
                 None
             },
-            hot_cache: crate::maesterclaw::HotCache::new(),
+            hot_cache: crate::maestroclaw::HotCache::new(),
+            maestroclaw_pane: crate::maestroclaw::MaestroClawPane::new(),
             tracklens_pane: TrackLensPane::new(),
         };
 
@@ -1376,6 +1383,62 @@ fn cycle_theme(app: &mut App) {
     }
 }
 
+fn handle_maestroclaw_action(app: &mut App, action: crate::maestroclaw::MaestroClawAction) -> bool {
+    use crate::maestroclaw::MaestroClawAction;
+
+    match action {
+        MaestroClawAction::None => false,
+        MaestroClawAction::FocusChanged | MaestroClawAction::Navigate => {
+            app.maestroclaw_pane.sync_sessions(app.sessions.len());
+            true
+        }
+        MaestroClawAction::NewSession => {
+            app.input_mode = InputMode::NewSessionTitle;
+            app.new_session_title = "MaestroClaw Session".to_string();
+            app.status_message = "Creating a new MaestroClaw session".to_string();
+            true
+        }
+        MaestroClawAction::OpenSelected => {
+            app.maestroclaw_pane.sync_sessions(app.sessions.len());
+            if let Some(session) = app
+                .maestroclaw_pane
+                .selected_session
+                .and_then(|idx| app.sessions.get(idx))
+                .cloned()
+            {
+                app.refresh_session_entries();
+                if let Some(entry_idx) = app.session_entries.iter().position(|entry| match entry {
+                    SessionEntry::Session(s) => s.session_id == session.session_id,
+                    _ => false,
+                }) {
+                    app.session_state.select(Some(entry_idx));
+                    app.tab_index = tabs::SESSIONS;
+                }
+                app.status_message = format!("Focused MaestroClaw session '{}'", session.title);
+            } else {
+                app.status_message = "No MaestroClaw session selected".to_string();
+            }
+            true
+        }
+        MaestroClawAction::StartSetup | MaestroClawAction::RepairBootstrap => {
+            app.maestroclaw_pane.activate_wizard();
+            app.status_message = "Opening MaestroClaw setup walkthrough".to_string();
+            true
+        }
+        MaestroClawAction::WizardAdvanced
+        | MaestroClawAction::WizardBack
+        | MaestroClawAction::WizardSelection => true,
+        MaestroClawAction::WizardComplete => {
+            app.status_message = "MaestroClaw setup complete".to_string();
+            true
+        }
+        MaestroClawAction::WizardDismissed => {
+            app.status_message = "MaestroClaw setup dismissed".to_string();
+            true
+        }
+    }
+}
+
 fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
     // If we're already inside a Zellij pane, switching the terminal's alternate
     // screen can cause rendering glitches. In that case, let the spawned app
@@ -1415,6 +1478,32 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
     }
     execute!(io::stdout(), EnterAlternateScreen)?;
     enable_raw_mode()?;
+    Ok(())
+}
+
+fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!("maestro-managed-mcp-{}.toml", server_name.replace('/', "-")));
+    path
+}
+
+fn edit_managed_manifest<B: Backend>(
+    terminal: &mut Terminal<B>,
+    editor: &str,
+    manifest_path: &PathBuf,
+    template: &str,
+) -> Result<()> {
+    fs::write(manifest_path, template)
+        .with_context(|| format!("Failed to write manifest {}", manifest_path.display()))?;
+    suspend_fullscreen_app(terminal)?;
+    let status = std::process::Command::new(editor)
+        .arg(manifest_path)
+        .status()
+        .with_context(|| format!("Failed to launch editor '{}'", editor))?;
+    resume_fullscreen_app(terminal)?;
+    if !status.success() {
+        anyhow::bail!("Editor exited with status {}", status);
+    }
     Ok(())
 }
 
@@ -2220,13 +2309,253 @@ async fn run_app<B: Backend>(
                                                     }
                                                 }
                                             }
+                                            McpOption::Install => {
+                                                let installer =
+                                                    match ManagedMcpInstaller::new(svc.clone(), None)
+                                                    {
+                                                        Ok(installer) => installer,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Installer init failed: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                let template = match installer
+                                                    .template(server.as_ref(), Some(&name))
+                                                {
+                                                    Ok(template) => template,
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Template generation failed: {}",
+                                                            e
+                                                        );
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_mcp_name = None;
+                                                        continue;
+                                                    }
+                                                };
+                                                let manifest_path =
+                                                    managed_manifest_temp_path(&name);
+                                                if let Err(e) = edit_managed_manifest(
+                                                    terminal,
+                                                    &app.config.editor,
+                                                    &manifest_path,
+                                                    &template,
+                                                ) {
+                                                    app.status_message =
+                                                        format!("Managed install cancelled: {}", e);
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                }
+
+                                                let manifest_toml =
+                                                    match fs::read_to_string(&manifest_path) {
+                                                        Ok(text) => text,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Failed to read manifest: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                let manifest: McpManagedInstallManifest =
+                                                    match toml::from_str(&manifest_toml) {
+                                                        Ok(manifest) => manifest,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Invalid manifest: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+
+                                                match installer
+                                                    .install_from_manifest_str(&manifest_toml)
+                                                    .await
+                                                {
+                                                    Ok(installed) => {
+                                                        if manifest.auto_start {
+                                                            if let Some(pool) =
+                                                                app.mcp_pool.clone()
+                                                            {
+                                                                if let Err(error) = pool
+                                                                    .start_server_record(&installed)
+                                                                    .await
+                                                                {
+                                                                    app.status_message = format!(
+                                                                        "Installed '{}', but start failed: {}",
+                                                                        installed.name, error
+                                                                    );
+                                                                } else {
+                                                                    app.status_message = format!(
+                                                                        "Installed and started managed MCP '{}'",
+                                                                        installed.name
+                                                                    );
+                                                                }
+                                                            } else {
+                                                                app.status_message = format!(
+                                                                    "Installed managed MCP '{}'",
+                                                                    installed.name
+                                                                );
+                                                            }
+                                                        } else {
+                                                            app.status_message = format!(
+                                                                "Installed managed MCP '{}'",
+                                                                installed.name
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Managed install failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                                let _ = fs::remove_file(&manifest_path);
+                                            }
+                                            McpOption::Reinstall => {
+                                                let Some(server) = server.as_ref() else {
+                                                    app.status_message =
+                                                        "MCP server not found".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+                                                if !server.managed {
+                                                    app.status_message = format!(
+                                                        "MCP '{}' is not managed by Maestro",
+                                                        name
+                                                    );
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                }
+                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                    let _ = pool.stop_server(&name).await;
+                                                }
+                                                let installer =
+                                                    match ManagedMcpInstaller::new(svc.clone(), None)
+                                                    {
+                                                        Ok(installer) => installer,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Installer init failed: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                match installer.reinstall(&name).await {
+                                                    Ok(installed) => {
+                                                        if let Some(pool) = app.mcp_pool.clone() {
+                                                            if let Err(error) = pool
+                                                                .start_server_record(&installed)
+                                                                .await
+                                                            {
+                                                                app.status_message = format!(
+                                                                    "Reinstalled '{}', but start failed: {}",
+                                                                    installed.name, error
+                                                                );
+                                                            } else {
+                                                                app.status_message = format!(
+                                                                    "Reinstalled managed MCP '{}'",
+                                                                    installed.name
+                                                                );
+                                                            }
+                                                        } else {
+                                                            app.status_message = format!(
+                                                                "Reinstalled managed MCP '{}'",
+                                                                installed.name
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Managed reinstall failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                            }
                                             McpOption::Remove => {
                                                 if let Some(pool) = app.mcp_pool.clone() {
                                                     let _ = pool.stop_server(&name).await;
                                                 }
-                                                let _ = svc.delete_mcp_server(&name);
-                                                app.status_message =
-                                                    format!("Removed MCP '{}' from pool", name);
+                                                match svc.delete_mcp_server(&name) {
+                                                    Ok(_) => {
+                                                        app.status_message = format!(
+                                                            "Removed MCP '{}' from pool",
+                                                            name
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Remove failed: {}", e);
+                                                    }
+                                                }
+                                            }
+                                            McpOption::Uninstall => {
+                                                let Some(server) = server.as_ref() else {
+                                                    app.status_message =
+                                                        "MCP server not found".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+                                                if !server.managed {
+                                                    app.status_message = format!(
+                                                        "MCP '{}' is not managed by Maestro",
+                                                        name
+                                                    );
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                }
+                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                    let _ = pool.stop_server(&name).await;
+                                                }
+                                                let installer =
+                                                    match ManagedMcpInstaller::new(svc.clone(), None)
+                                                    {
+                                                        Ok(installer) => installer,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Installer init failed: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                match installer.uninstall(&name).await {
+                                                    Ok(_) => {
+                                                        app.status_message = format!(
+                                                            "Uninstalled managed MCP '{}'",
+                                                            name
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Managed uninstall failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -2890,14 +3219,7 @@ async fn run_app<B: Backend>(
                                     };
                                     app.settings_menu_state.select(Some(i));
                                 } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Stop,
-                                        McpOption::Stop => McpOption::Pause,
-                                        McpOption::Pause => McpOption::Logs,
-                                        McpOption::Logs => McpOption::Add,
-                                        McpOption::Add => McpOption::Remove,
-                                        McpOption::Remove => McpOption::Start,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.next();
                                 } else if app.input_mode == InputMode::LspInstaller {
                                     let count =
                                         crate::tabs::lsp_registry::get_available_lsps().len();
@@ -2987,20 +3309,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == tabs::MAESTERCLAW {
-                                    // MaesterClaw - cycle through sections
-                                    app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
-                                            Some(crate::tabs::CapabilitiesSection::McpServers)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
-                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
-                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
-                                        }
-                                        None => Some(crate::tabs::CapabilitiesSection::CronJobs),
-                                    };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Down, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -3015,14 +3328,7 @@ async fn run_app<B: Backend>(
                             }
                             KeyCode::Up if app.tab_index != tabs::CONDUCTOR => {
                                 if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Remove,
-                                        McpOption::Stop => McpOption::Start,
-                                        McpOption::Pause => McpOption::Stop,
-                                        McpOption::Logs => McpOption::Pause,
-                                        McpOption::Add => McpOption::Logs,
-                                        McpOption::Remove => McpOption::Add,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.previous();
                                 } else if app.input_mode == InputMode::McpLogs {
                                     if app.lsp_log_source.is_some() {
                                         app.lsp_log_scroll = app.lsp_log_scroll.saturating_sub(1);
@@ -3131,20 +3437,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == tabs::MAESTERCLAW {
-                                    // MaesterClaw - cycle through sections (reverse)
-                                    app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
-                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
-                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
-                                            Some(crate::tabs::CapabilitiesSection::McpServers)
-                                        }
-                                        None => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                    };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Up, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -3188,10 +3485,15 @@ async fn run_app<B: Backend>(
                                         DashFocus::Sessions => app.dash_focus = DashFocus::Mcp,
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Tabs,
                                         DashFocus::Tabs => {
-                                            app.tab_index = tabs::MAESTERCLAW;
+                                            app.tab_index = tabs::MAESTROCLAW;
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                     };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Tab, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else {
                                     let tab_count = tabs::all_titles().len();
                                     app.tab_index = (app.tab_index + 1) % tab_count;
@@ -3210,6 +3512,11 @@ async fn run_app<B: Backend>(
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
                                         DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
                                     };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::BackTab, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else {
                                     app.tab_index = if app.tab_index == tabs::DASHBOARD {
                                         tabs::SETTINGS
@@ -3256,7 +3563,7 @@ async fn run_app<B: Backend>(
                                 app.tab_index = tabs::DASHBOARD
                             }
                             (KeyModifiers::ALT, KeyCode::Char('2')) => {
-                                app.tab_index = tabs::MAESTERCLAW
+                                app.tab_index = tabs::MAESTROCLAW
                             }
                             (KeyModifiers::ALT, KeyCode::Char('3')) => {
                                 app.tab_index = tabs::SESSIONS
@@ -3709,6 +4016,22 @@ async fn run_app<B: Backend>(
                                     app.input_mode = InputMode::NewMemoryContent;
                                     app.status_message =
                                         "Creating new memory - enter content".to_string();
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Char('n'), app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
+                                    app.new_session_path = app
+                                        .sessions
+                                        .get(app.maestroclaw_pane.selected_session.unwrap_or(0))
+                                        .map(|session| session.project_path.clone())
+                                        .filter(|path| !path.trim().is_empty())
+                                        .or_else(|| {
+                                            app.projects
+                                                .get(app.project_state.selected().unwrap_or(0))
+                                                .map(|project| project.path.clone())
+                                        })
+                                        .unwrap_or_default();
                                 } else {
                                     // New session wizard for other tabs
                                     app.input_mode = InputMode::NewSessionTitle;
@@ -4288,14 +4611,7 @@ async fn run_app<B: Backend>(
                                         app.diagnostic_view.selected_index = 0;
                                     }
                                 } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Stop,
-                                        McpOption::Stop => McpOption::Pause,
-                                        McpOption::Pause => McpOption::Logs,
-                                        McpOption::Logs => McpOption::Add,
-                                        McpOption::Add => McpOption::Remove,
-                                        McpOption::Remove => McpOption::Start,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.next();
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
                                 } else if app.tab_index == tabs::DASHBOARD {
@@ -4386,6 +4702,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Enter, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -4416,14 +4737,7 @@ async fn run_app<B: Backend>(
                                             count.saturating_sub(1);
                                     }
                                 } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Remove,
-                                        McpOption::Stop => McpOption::Start,
-                                        McpOption::Pause => McpOption::Stop,
-                                        McpOption::Logs => McpOption::Pause,
-                                        McpOption::Add => McpOption::Logs,
-                                        McpOption::Remove => McpOption::Add,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.previous();
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
                                 } else if app.tab_index == tabs::DASHBOARD {
@@ -4515,20 +4829,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == tabs::MAESTERCLAW {
-                                    // MaesterClaw - cycle through sections (reverse)
-                                    app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
-                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
-                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
-                                            Some(crate::tabs::CapabilitiesSection::McpServers)
-                                        }
-                                        None => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                    };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Up, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -5164,7 +5469,16 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     match app.tab_index {
         tabs::DASHBOARD => render_dashboard(frame, chunks[1], app),
-        tabs::MAESTERCLAW => crate::tabs::capabilities::render_capabilities(frame, app),
+        tabs::MAESTROCLAW => {
+            app.maestroclaw_pane.sync_sessions(app.sessions.len());
+            if app.maestroclaw_pane.wizard.available_tools.is_empty() {
+                app.maestroclaw_pane.wizard.detect_tools();
+            }
+            if app.sessions.is_empty() && app.maestroclaw_pane.should_show_wizard(false) {
+                app.maestroclaw_pane.activate_wizard();
+            }
+            app.maestroclaw_pane.render(frame, chunks[1], app)
+        }
         tabs::SESSIONS => render_sessions(frame, chunks[1], app),
         tabs::PROJECTS => render_projects(frame, chunks[1], app),
         tabs::CONDUCTOR => {

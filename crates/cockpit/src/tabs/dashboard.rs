@@ -368,11 +368,20 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
             } else {
                 Color::Red
             };
+            let managed_badge = if s.managed {
+                format!(" managed:{}:{} ", s.install_type, s.install_state)
+            } else {
+                String::new()
+            };
             ListItem::new(vec![Line::from(vec![
                 Span::styled(format!("  {} ", s.name), Style::default().bold()),
                 Span::styled(
                     format!(" [{}] ", s.status.to_string()),
                     Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    managed_badge,
+                    Style::default().fg(theme.warning),
                 ),
                 Span::styled(
                     format!(" {} active", s.client_count),

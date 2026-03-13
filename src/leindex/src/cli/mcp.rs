@@ -6,14 +6,19 @@
 //! - `maestro mcp tool-search`: meta MCP server exposing tool search + proxy calls
 
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 // Import types from the library crate
 #[cfg(feature = "rusqlite")]
+use crate::memory::mcp_installer::ManagedMcpInstaller;
+#[cfg(feature = "rusqlite")]
 use crate::memory::mcp_pool::McpPool;
 #[cfg(feature = "rusqlite")]
-use crate::memory::models::{McpServer, McpStatus, McpTransport};
+use crate::memory::models::{
+    McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport,
+};
 #[cfg(feature = "rusqlite")]
 use crate::memory::service::MemoryService;
 
@@ -45,6 +50,18 @@ pub struct AddServerArgs {
     /// Start the pooled stdio server immediately after registering it
     #[arg(long)]
     pub start: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct InstallServerArgs {
+    /// Path to a managed MCP manifest TOML file
+    pub manifest: PathBuf,
+    /// Start the server after a successful install
+    #[arg(long)]
+    pub start: bool,
+    /// Prevent starting the server after a successful install
+    #[arg(long = "no-start", conflicts_with = "start")]
+    pub no_start: bool,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +147,14 @@ pub async fn add(args: AddServerArgs) -> Result<()> {
         socket_path: None,
         client_count: 0,
         last_started_at: None,
+        managed: false,
+        install_type: McpInstallKind::Unmanaged,
+        install_state: McpInstallState::Unmanaged,
+        install_root: None,
+        install_recipe: None,
+        install_message: None,
+        install_log_path: None,
+        last_install_at: None,
     };
 
     service.update_mcp_server(server.clone())?;
@@ -141,6 +166,49 @@ pub async fn add(args: AddServerArgs) -> Result<()> {
         println!("Started '{}' on {}", args.name, socket_path);
     }
 
+    Ok(())
+}
+
+pub async fn install(args: InstallServerArgs) -> Result<()> {
+    let service = MemoryService::new(None)?;
+    service.initialize()?;
+    let installer = ManagedMcpInstaller::new(service.clone(), None)?;
+    let manifest_toml = std::fs::read_to_string(&args.manifest)
+        .with_context(|| format!("Failed to read manifest {}", args.manifest.display()))?;
+    let manifest: crate::memory::models::McpManagedInstallManifest = toml::from_str(&manifest_toml)
+        .context("Invalid managed MCP manifest TOML")?;
+    let server = installer.install_from_manifest_str(&manifest_toml).await?;
+    println!(
+        "Installed managed MCP server '{}' into {}",
+        server.name,
+        server
+            .install_root
+            .clone()
+            .unwrap_or_else(|| "<unknown>".to_string())
+    );
+
+    let should_start = if args.no_start {
+        false
+    } else if args.start {
+        true
+    } else {
+        manifest.auto_start
+    };
+    if should_start {
+        let pool = McpPool::new(service);
+        let socket = pool.start_server_record(&server).await?;
+        println!("Started '{}' on {}", server.name, socket);
+    }
+
+    Ok(())
+}
+
+pub async fn uninstall(server_name: String) -> Result<()> {
+    let service = MemoryService::new(None)?;
+    service.initialize()?;
+    let installer = ManagedMcpInstaller::new(service, None)?;
+    installer.uninstall(&server_name).await?;
+    println!("Uninstalled MCP server '{}'", server_name);
     Ok(())
 }
 
@@ -193,6 +261,8 @@ pub async fn tool_search() -> Result<()> {
 struct ToolSearchServer {
     service: MemoryService,
     cache: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, Vec<McpTool>>>>,
+    /// Cache for server_list results with timestamp
+    server_list_cache: std::sync::Arc<tokio::sync::Mutex<Option<(Vec<serde_json::Value>, std::time::Instant)>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -209,6 +279,7 @@ impl ToolSearchServer {
         Ok(Self {
             service,
             cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            server_list_cache: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -355,8 +426,21 @@ impl ToolSearchServer {
     }
 
     async fn tool_server_list(&self) -> Result<Vec<serde_json::Value>> {
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+        // Check cache first
+        {
+            let cache = self.server_list_cache.lock().await;
+            if let Some((servers, timestamp)) = cache.as_ref() {
+                if timestamp.elapsed() < CACHE_TTL {
+                    return Ok(servers.clone());
+                }
+            }
+        } // Release lock
+
+        // Cache miss or expired, fetch from service
         let servers = self.service.list_mcp_servers().unwrap_or_default();
-        Ok(servers
+        let result: Vec<serde_json::Value> = servers
             .into_iter()
             .map(|s| {
                 serde_json::json!({
@@ -367,7 +451,15 @@ impl ToolSearchServer {
                     "url": s.url,
                 })
             })
-            .collect())
+            .collect();
+
+        // Update cache
+        {
+            let mut cache = self.server_list_cache.lock().await;
+            *cache = Some((result.clone(), std::time::Instant::now()));
+        }
+
+        Ok(result)
     }
 
     async fn tool_search(&self, args: serde_json::Value) -> Result<serde_json::Value> {

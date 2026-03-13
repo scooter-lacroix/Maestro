@@ -5,7 +5,9 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use walkdir::WalkDir;
 
-use crate::memory::models::{McpServer, McpStatus, McpTransport};
+use crate::memory::models::{
+    McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport,
+};
 use crate::memory::service::MemoryService;
 
 pub mod distro;
@@ -1512,6 +1514,14 @@ fn register_leindex_pool() -> Result<Vec<String>> {
         socket_path: None,
         client_count: 0,
         last_started_at: None,
+        managed: false,
+        install_type: McpInstallKind::Unmanaged,
+        install_state: McpInstallState::Unmanaged,
+        install_root: None,
+        install_recipe: None,
+        install_message: None,
+        install_log_path: None,
+        last_install_at: None,
     };
 
     service.update_mcp_server(server)?;

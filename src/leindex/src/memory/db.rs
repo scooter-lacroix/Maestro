@@ -162,7 +162,8 @@ impl DatabaseManager {
                     | "004_group_categorization"
                     | "005_mcp_transport"
                     | "006_mcp_cwd"
-                    | "007_sessions_sort_order" => Self::execute_batch_lenient(conn, sql)
+                    | "007_sessions_sort_order"
+                    | "010_managed_mcp_installs" => Self::execute_batch_lenient(conn, sql)
                         .context(format!("Failed to run migration {}", version))?,
                     _ => conn
                         .execute_batch(sql)

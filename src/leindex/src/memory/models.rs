@@ -23,7 +23,6 @@ pub enum MemoryCategory {
     Observation,
 }
 
-
 impl std::fmt::Display for MemoryCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -51,7 +50,6 @@ pub enum MemoryImportance {
     Normal,
     Low,
 }
-
 
 /// Core memory record
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,7 +174,6 @@ pub enum TrackStatus {
     Abandoned,
 }
 
-
 impl std::fmt::Display for TrackStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -227,7 +224,6 @@ pub enum ClaimStatus {
     Revoked,
 }
 
-
 /// Session for tracking agent work
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -262,7 +258,6 @@ pub enum SessionStatus {
     Completed,
     Terminated,
 }
-
 
 impl std::fmt::Display for SessionStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -308,6 +303,23 @@ pub struct McpServer {
     pub socket_path: Option<String>,
     pub client_count: i32,
     pub last_started_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub managed: bool,
+    #[serde(default)]
+    pub install_type: McpInstallKind,
+    #[serde(default)]
+    pub install_state: McpInstallState,
+    pub install_root: Option<String>,
+    pub install_recipe: Option<serde_json::Value>,
+    pub install_message: Option<String>,
+    pub install_log_path: Option<String>,
+    pub last_install_at: Option<DateTime<Utc>>,
+}
+
+impl McpServer {
+    pub fn is_ready_to_start(&self) -> bool {
+        self.transport == McpTransport::Http || self.install_state.is_runnable()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -317,7 +329,6 @@ pub enum McpTransport {
     Stdio,
     Http,
 }
-
 
 impl std::fmt::Display for McpTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -334,6 +345,168 @@ pub enum McpStatus {
     Running,
     Stopped,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInstallKind {
+    #[default]
+    Unmanaged,
+    NpmPackage,
+    UvxPackage,
+    PipxPackage,
+    GitRepository,
+    Custom,
+}
+
+impl std::fmt::Display for McpInstallKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unmanaged => write!(f, "unmanaged"),
+            Self::NpmPackage => write!(f, "npm_package"),
+            Self::UvxPackage => write!(f, "uvx_package"),
+            Self::PipxPackage => write!(f, "pipx_package"),
+            Self::GitRepository => write!(f, "git_repository"),
+            Self::Custom => write!(f, "custom"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum McpInstallState {
+    #[default]
+    Unmanaged,
+    Pending,
+    Installing,
+    Installed,
+    Failed,
+    Removing,
+}
+
+impl McpInstallState {
+    pub fn is_runnable(self) -> bool {
+        matches!(self, Self::Unmanaged | Self::Installed)
+    }
+}
+
+impl std::fmt::Display for McpInstallState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unmanaged => write!(f, "unmanaged"),
+            Self::Pending => write!(f, "pending"),
+            Self::Installing => write!(f, "installing"),
+            Self::Installed => write!(f, "installed"),
+            Self::Failed => write!(f, "failed"),
+            Self::Removing => write!(f, "removing"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct McpManagedInstallRecipe {
+    pub kind: McpInstallKind,
+    pub package: Option<String>,
+    pub version: Option<String>,
+    pub binary: Option<String>,
+    pub python: Option<String>,
+    pub repository: Option<String>,
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub setup_commands: Vec<String>,
+    #[serde(default)]
+    pub install_commands: Vec<String>,
+    #[serde(default)]
+    pub build_commands: Vec<String>,
+    #[serde(default)]
+    pub uninstall_commands: Vec<String>,
+    pub start_command: Option<String>,
+    #[serde(default)]
+    pub start_args: Vec<String>,
+    #[serde(default)]
+    pub env: serde_json::Value,
+    pub cwd: Option<String>,
+    pub source_subdir: Option<String>,
+    pub post_install_command: Option<String>,
+    pub description: Option<String>,
+}
+
+impl McpManagedInstallRecipe {
+    pub fn kind(&self) -> McpInstallKind {
+        self.kind
+    }
+
+    pub fn validate(&self, server_name: &str) -> anyhow::Result<()> {
+        if server_name.trim().is_empty() {
+            anyhow::bail!("Server name cannot be empty");
+        }
+
+        match self.kind {
+            McpInstallKind::Unmanaged => {
+                anyhow::bail!("Managed install recipe cannot use unmanaged kind")
+            }
+            McpInstallKind::NpmPackage => {
+                if self.package.as_deref().unwrap_or("").trim().is_empty() {
+                    anyhow::bail!("NPM package installs require a package name");
+                }
+            }
+            McpInstallKind::UvxPackage | McpInstallKind::PipxPackage => {
+                if self.package.as_deref().unwrap_or("").trim().is_empty() {
+                    anyhow::bail!("Python package installs require a package name");
+                }
+            }
+            McpInstallKind::GitRepository => {
+                if self.repository.as_deref().unwrap_or("").trim().is_empty() {
+                    anyhow::bail!("Git repository installs require a repository URL");
+                }
+                if self
+                    .start_command
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+                {
+                    anyhow::bail!("Git repository installs require a start command");
+                }
+            }
+            McpInstallKind::Custom => {
+                if self.install_commands.is_empty() {
+                    anyhow::bail!("Custom installs require at least one install command");
+                }
+                if self
+                    .start_command
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+                {
+                    anyhow::bail!("Custom installs require a start command");
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpManagedInstallManifest {
+    pub name: String,
+    #[serde(default = "default_managed_transport")]
+    pub transport: McpTransport,
+    #[serde(default = "default_managed_auto_start")]
+    pub auto_start: bool,
+    #[serde(default)]
+    pub env: serde_json::Value,
+    pub recipe: McpManagedInstallRecipe,
+}
+
+fn default_managed_transport() -> McpTransport {
+    McpTransport::Stdio
+}
+
+fn default_managed_auto_start() -> bool {
+    true
 }
 
 /// Scan result from filesystem scanning

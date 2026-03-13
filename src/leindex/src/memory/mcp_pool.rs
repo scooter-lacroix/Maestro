@@ -27,6 +27,7 @@ use super::models::{McpServer, McpStatus, McpTransport};
 use super::service::MemoryService;
 
 #[cfg(feature = "rusqlite")]
+#[derive(Clone)]
 pub struct McpPool {
     proxies: Arc<RwLock<HashMap<String, Arc<SocketProxy>>>>,
     service: MemoryService,
@@ -74,39 +75,80 @@ impl McpPool {
     }
 
     /// Start all stdio MCP servers currently registered in the DB.
+    /// Uses parallel startup to minimize total startup time.
     pub async fn start_all_from_db(&self) -> Result<usize> {
         // First reconcile DB state with reality (sockets/processes may have disappeared
         // between runs). This keeps the UI from showing stale "running" rows.
         let _ = self.refresh_all_statuses().await;
 
         let servers = self.service.list_mcp_servers().unwrap_or_default();
-        let mut started = 0usize;
+        let stdio_servers: Vec<_> = servers
+            .into_iter()
+            .filter(|s| s.transport == McpTransport::Stdio)
+            .collect();
 
-        for s in servers {
-            if s.transport != McpTransport::Stdio {
-                continue;
+        if stdio_servers.is_empty() {
+            return Ok(0);
+        }
+
+        // Check which servers are already running.
+        let mut to_start = Vec::new();
+        for s in &stdio_servers {
+            let proxies = self.proxies.read().await;
+            if let Some(proxy) = proxies.get(&s.name) {
+                if proxy.is_running().await {
+                    info!("MCP server '{}' is already running", s.name);
+                    continue;
+                }
             }
+            to_start.push(s.clone());
+        }
 
-            // Check if already running
-            {
-                let proxies = self.proxies.read().await;
-                if let Some(proxy) = proxies.get(&s.name) {
-                    if proxy.is_running().await {
-                        info!("MCP server '{}' is already running", s.name);
-                        continue;
+        if to_start.is_empty() {
+            return Ok(0);
+        }
+
+        // Start all servers in parallel for faster startup
+        let mut join_set = tokio::task::JoinSet::new();
+
+        for server in to_start {
+            let pool = self.clone();
+            join_set.spawn(async move {
+                match pool.start_server_record(&server).await {
+                    Ok(socket_path) => {
+                        info!("Started MCP server '{}' at {}", server.name, socket_path);
+                        Ok(server.name)
+                    }
+                    Err(e) => {
+                        error!("Failed to start MCP server '{}': {}", server.name, e);
+                        Err(server.name)
                     }
                 }
-            }
+            });
+        }
 
-            match self.start_server_record(&s).await {
-                Ok(_) => {
+        // Collect results as they complete
+        let mut started = 0usize;
+        let mut failed = Vec::new();
+
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok(_name)) => {
                     started += 1;
                 }
+                Ok(Err(name)) => {
+                    failed.push(name);
+                }
                 Err(e) => {
-                    error!("Failed to start MCP server '{}': {}", s.name, e);
+                    warn!("MCP server task panicked: {}", e);
                 }
             }
         }
+
+        if !failed.is_empty() {
+            warn!("Failed to start {} MCP server(s): {:?}", failed.len(), failed);
+        }
+
         // One more reconciliation after attempting starts to persist any failures.
         let _ = self.refresh_all_statuses().await;
         Ok(started)
@@ -119,46 +161,58 @@ impl McpPool {
                 server.name
             );
         }
-
-        let mut proxies = self.proxies.write().await;
-        if let Some(proxy) = proxies.get(&server.name) {
-            if proxy.is_running().await {
-                return Ok(proxy.socket_path.to_string_lossy().to_string());
-            }
+        if !server.is_ready_to_start() {
+            anyhow::bail!(
+                "MCP server '{}' is not ready to start (install state: {})",
+                server.name,
+                server.install_state
+            );
         }
 
-        let socket_path = Self::socket_path_for(&server.name);
-        let env = json_env_to_hashmap(&server.env);
-        let proxy = SocketProxy::new(
-            &server.name,
-            &server.command,
-            server.args.clone(),
-            env,
-            server.cwd.clone(),
-            socket_path.clone(),
-        )?;
-        let proxy_arc = Arc::new(proxy);
-
-        let proxy_clone = proxy_arc.clone();
-        let name = server.name.clone();
-        tokio::spawn(async move {
-            if let Err(e) = proxy_clone.run().await {
-                error!("MCP pool server '{}' crashed: {}", name, e);
+        let proxy_arc = {
+            let mut proxies = self.proxies.write().await;
+            if let Some(proxy) = proxies.get(&server.name) {
+                if proxy.is_running().await {
+                    return Ok(proxy.socket_path.to_string_lossy().to_string());
+                }
             }
-        });
 
-        proxies.insert(server.name.clone(), proxy_arc.clone());
+            let socket_path = Self::socket_path_for(&server.name);
+            let env = json_env_to_hashmap(&server.env);
+            let proxy = SocketProxy::new(
+                &server.name,
+                &server.command,
+                server.args.clone(),
+                env,
+                server.cwd.clone(),
+                socket_path,
+            )?;
+            let proxy_arc = Arc::new(proxy);
+
+            let proxy_clone = proxy_arc.clone();
+            let name = server.name.clone();
+            tokio::spawn(async move {
+                if let Err(e) = proxy_clone.run().await {
+                    error!("MCP pool server '{}' crashed: {}", name, e);
+                }
+            });
+
+            proxies.insert(server.name.clone(), proxy_arc.clone());
+            proxy_arc
+        };
+
+        let socket_path = proxy_arc.socket_path.to_string_lossy().to_string();
 
         // Wait for successful startup before updating DB
-        // Give servers up to 5 seconds to start (some MCP servers take time to initialize)
+        // Give servers a short grace period so pool startup stays responsive.
         info!(
             "MCP pool '{}' starting up, waiting for confirmation...",
             server.name
         );
-        let startup_result = proxy_arc.wait_for_startup(5000).await;
+        let startup_result = proxy_arc.wait_for_startup(2000).await;
 
-        // Check the result and update DB accordingly
-        let status = match startup_result {
+        // Check the result and update DB accordingly.
+        let status = match &startup_result {
             Ok(_) => {
                 info!("MCP pool '{}' startup confirmed", server.name);
                 McpStatus::Running
@@ -172,7 +226,7 @@ impl McpPool {
         // Update DB to reflect socket path and status
         let mut updated = server.clone();
         updated.socket_path = if status == McpStatus::Running {
-            Some(socket_path.to_string_lossy().to_string())
+            Some(socket_path.clone())
         } else {
             None
         };
@@ -180,7 +234,13 @@ impl McpPool {
         updated.last_started_at = Some(chrono::Utc::now());
         let _ = self.service.update_mcp_server(updated);
 
-        Ok(socket_path.to_string_lossy().to_string())
+        match startup_result {
+            Ok(_) => Ok(socket_path),
+            Err(e) => {
+                self.proxies.write().await.remove(&server.name);
+                Err(e)
+            }
+        }
     }
 
     pub async fn stop_server(&self, name: &str) -> Result<()> {
@@ -205,45 +265,61 @@ impl McpPool {
     }
 
     /// Refresh all server statuses from the pool (check real status, not just DB state)
+    /// Optimized to minimize DB and filesystem calls.
     pub async fn refresh_all_statuses(&self) -> Result<()> {
-        let proxies = self.proxies.read().await;
-        for (name, proxy) in proxies.iter() {
-            let status = proxy.check_real_status().await;
-            // Only update if status changed
-            if let Ok(servers) = self.service.list_mcp_servers() {
-                if let Some(server) = servers.iter().find(|s| s.name == *name) {
-                    if server.status != status {
-                        let mut updated = server.clone();
-                        updated.status = status;
-                        let _ = self.service.update_mcp_server(updated);
-                    }
-                }
-            }
-        }
+        // Get all servers from DB once
+        let servers = self.service.list_mcp_servers().unwrap_or_default();
+        let servers_by_name: HashMap<_, _> = servers
+            .iter()
+            .cloned()
+            .map(|server| (server.name.clone(), server))
+            .collect();
+        let running_servers: Vec<_> = servers
+            .iter()
+            .filter(|s| s.status == McpStatus::Running)
+            .cloned()
+            .collect();
 
-        // Also reconcile DB rows that are marked running but have no active proxy (e.g., after crash).
-        if let Ok(servers) = self.service.list_mcp_servers() {
-            for server in servers
-                .into_iter()
-                .filter(|s| s.status == McpStatus::Running)
-            {
-                if proxies.contains_key(&server.name) {
-                    continue;
-                }
-                let socket_missing = server
-                    .socket_path
-                    .as_deref()
-                    .map(|p| !std::path::Path::new(p).exists())
-                    .unwrap_or(true);
-                if socket_missing {
+        let proxies = self.proxies.read().await;
+
+        // Check active proxies and update DB if status changed
+        for (name, proxy) in proxies.iter() {
+            let current_status = proxy.check_real_status().await;
+
+            // Find the corresponding server in our list
+            if let Some(server) = servers_by_name.get(name) {
+                if server.status != current_status {
                     let mut updated = server.clone();
-                    updated.status = McpStatus::Stopped;
-                    updated.socket_path = None;
-                    updated.client_count = 0;
+                    updated.status = current_status;
+                    updated.socket_path = if current_status == McpStatus::Running {
+                        Some(proxy.socket_path.to_string_lossy().to_string())
+                    } else {
+                        None
+                    };
                     let _ = self.service.update_mcp_server(updated);
                 }
             }
         }
+
+        // Reconcile DB rows that are marked running but have no active proxy (e.g., after crash)
+        for server in running_servers {
+            if proxies.contains_key(&server.name) {
+                continue;
+            }
+            let socket_missing = server
+                .socket_path
+                .as_deref()
+                .map(|p| !std::path::Path::new(p).exists())
+                .unwrap_or(true);
+            if socket_missing {
+                let mut updated = server.clone();
+                updated.status = McpStatus::Stopped;
+                updated.socket_path = None;
+                updated.client_count = 0;
+                let _ = self.service.update_mcp_server(updated);
+            }
+        }
+
         Ok(())
     }
 }
