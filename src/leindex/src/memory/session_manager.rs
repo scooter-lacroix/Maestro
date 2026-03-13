@@ -1444,6 +1444,14 @@ mod tests {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: super::super::models::McpInstallKind::Unmanaged,
+                install_state: super::super::models::McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             })
             .unwrap();
 
@@ -1563,6 +1571,14 @@ mod tests {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: super::super::models::McpInstallKind::Unmanaged,
+                install_state: super::super::models::McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             })
             .unwrap();
 
@@ -1601,6 +1617,14 @@ mod tests {
                 socket_path: None,
                 client_count: 0,
                 last_started_at: None,
+                managed: false,
+                install_type: super::super::models::McpInstallKind::Unmanaged,
+                install_state: super::super::models::McpInstallState::Unmanaged,
+                install_root: None,
+                install_recipe: None,
+                install_message: None,
+                install_log_path: None,
+                last_install_at: None,
             })
             .unwrap();
 

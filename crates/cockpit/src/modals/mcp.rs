@@ -43,7 +43,10 @@ pub fn render_mcp_menu(frame: &mut Frame, app: &App) {
         (McpOption::Pause, "⏸ Pause Connection"),
         (McpOption::Logs, "📋 View Server Logs"),
         (McpOption::Add, "➕ Add New Server"),
+        (McpOption::Install, "🛠 Install Managed Server"),
+        (McpOption::Reinstall, "♻ Reinstall Managed Server"),
         (McpOption::Remove, "❌ Remove from Pool"),
+        (McpOption::Uninstall, "🗑 Uninstall Managed Server"),
     ];
 
     let mut list_items = Vec::new();

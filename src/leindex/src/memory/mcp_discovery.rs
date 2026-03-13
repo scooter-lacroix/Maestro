@@ -84,6 +84,17 @@ pub fn discover_system_mcp_servers() -> Vec<DiscoveredMcpServer> {
     add_if_missing(
         &mut out,
         detect_stdio_server(
+            "leindex",
+            "leindex",
+            vec!["mcp".to_string()],
+            None,
+            "builtin",
+        ),
+    );
+
+    add_if_missing(
+        &mut out,
+        detect_stdio_server(
             "agent-browser",
             "agent-browser",
             vec!["server".to_string()],
@@ -240,7 +251,7 @@ fn parse_json_server(
             .or_else(|| cfg.get("env").cloned())
             .unwrap_or_else(|| serde_json::json!({}));
 
-        return Some(DiscoveredMcpServer {
+        let server = DiscoveredMcpServer {
             name: name.to_string(),
             transport: McpTransport::Stdio,
             command,
@@ -253,7 +264,10 @@ fn parse_json_server(
             url: None,
             headers: None,
             source: source_label.to_string(),
-        });
+        };
+
+        return (!is_maestro_pool_proxy(&server) && !is_maestro_internal_tooling(&server))
+            .then_some(server);
     }
 
     // Standard: command is a string
@@ -277,7 +291,7 @@ fn parse_json_server(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    Some(DiscoveredMcpServer {
+    let server = DiscoveredMcpServer {
         name: name.to_string(),
         transport: McpTransport::Stdio,
         command,
@@ -287,7 +301,9 @@ fn parse_json_server(
         url: None,
         headers: None,
         source: source_label.to_string(),
-    })
+    };
+
+    (!is_maestro_pool_proxy(&server) && !is_maestro_internal_tooling(&server)).then_some(server)
 }
 
 pub fn discover_from_toml_file(label: &str, path: &Path) -> Result<Vec<DiscoveredMcpServer>> {
@@ -357,7 +373,7 @@ fn parse_toml_server(
         })
         .unwrap_or_default();
 
-    Some(DiscoveredMcpServer {
+    let server = DiscoveredMcpServer {
         name: name.to_string(),
         transport: McpTransport::Stdio,
         command,
@@ -370,7 +386,31 @@ fn parse_toml_server(
         url: None,
         headers: None,
         source: source_label.to_string(),
-    })
+    };
+
+    (!is_maestro_pool_proxy(&server) && !is_maestro_internal_tooling(&server)).then_some(server)
+}
+
+fn is_maestro_pool_proxy(server: &DiscoveredMcpServer) -> bool {
+    let executable = Path::new(&server.command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&server.command);
+
+    matches!(executable, "maestro" | "maestro.exe")
+        && server.args.len() >= 2
+        && server.args[0] == "mcp"
+        && server.args[1] == "proxy"
+}
+
+fn is_maestro_internal_tooling(server: &DiscoveredMcpServer) -> bool {
+    let executable = Path::new(&server.command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&server.command);
+
+    matches!(executable, "maestro" | "maestro.exe")
+        && server.args == ["mcp".to_string(), "tool-search".to_string()]
 }
 
 #[cfg(test)]
@@ -379,7 +419,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_discover_from_json_file_supports_iflow_and_droid_shapes() {
+    fn test_discover_from_json_file_ignores_proxy_configs_from_json_shapes() {
         let temp_file = NamedTempFile::new().unwrap();
         std::fs::write(
             temp_file.path(),
@@ -400,17 +440,7 @@ mod tests {
         .unwrap();
 
         let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
-        assert_eq!(discovered.len(), 2);
-        assert!(discovered.iter().any(|server| {
-            server.name == "iflow-local"
-                && server.transport == McpTransport::Stdio
-                && server.command == "maestro"
-        }));
-        assert!(discovered.iter().any(|server| {
-            server.name == "droid-local"
-                && server.transport == McpTransport::Stdio
-                && server.args == vec!["mcp", "proxy", "agent-browser"]
-        }));
+        assert!(discovered.is_empty());
     }
 
     #[test]
@@ -439,17 +469,29 @@ mod tests {
         .unwrap();
 
         let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
-        assert_eq!(discovered.len(), 2);
-        assert!(discovered.iter().any(|server| {
-            server.name == "amp-local"
-                && server.command == "maestro"
-                && server.args == vec!["mcp", "tool-search"]
-        }));
-        assert!(discovered.iter().any(|server| {
-            server.name == "opencode-local"
-                && server.command == "maestro"
-                && server.args == vec!["mcp", "proxy", "leindex"]
-                && server.env == serde_json::json!({"DEBUG": "1"})
-        }));
+        assert!(discovered.is_empty());
+    }
+
+    #[test]
+    fn test_discover_from_json_file_keeps_real_leindex_server() {
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            r#"{
+  "mcpServers": {
+    "leindex": {
+      "command": "leindex",
+      "args": ["mcp"]
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let discovered = discover_from_json_file("test", temp_file.path()).unwrap();
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].name, "leindex");
+        assert_eq!(discovered[0].command, "leindex");
+        assert_eq!(discovered[0].args, vec!["mcp"]);
     }
 }

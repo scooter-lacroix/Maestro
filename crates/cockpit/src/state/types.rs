@@ -62,7 +62,38 @@ pub enum McpOption {
     Pause,
     Logs,
     Add,
+    Install,
+    Reinstall,
     Remove,
+    Uninstall,
+}
+
+impl McpOption {
+    pub const ALL: [Self; 9] = [
+        Self::Start,
+        Self::Stop,
+        Self::Pause,
+        Self::Logs,
+        Self::Add,
+        Self::Install,
+        Self::Reinstall,
+        Self::Remove,
+        Self::Uninstall,
+    ];
+
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|option| *option == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    pub fn previous(self) -> Self {
+        let idx = Self::ALL.iter().position(|option| *option == self).unwrap_or(0);
+        if idx == 0 {
+            Self::ALL[Self::ALL.len() - 1]
+        } else {
+            Self::ALL[idx - 1]
+        }
+    }
 }
 
 /// Settings options
