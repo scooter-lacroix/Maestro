@@ -14,7 +14,7 @@ pub use leindex_core::*;
 use leindex_core::cli::implement::ImplementSessionTarget;
 use leindex_core::cli::integrate::{IntegrateAction, IntegrationTool};
 use leindex_core::cli::mcp;
-use leindex_core::cli::{analyze, implement, integrate, memory_impl as memory};
+use leindex_core::cli::{analyze, implement, integrate, memory_impl as mem_cmd};
 
 /// Maestro - AI-Powered Project Orchestrator
 #[derive(Parser)]
@@ -116,6 +116,16 @@ enum Commands {
 enum McpCommands {
     /// Start pooled stdio MCP servers on UNIX sockets
     Serve,
+    /// Register an MCP server directly in the Maestro pool
+    #[command(visible_alias = "install")]
+    Add(mcp::AddServerArgs),
+    /// Install a managed MCP server from a Maestro manifest
+    ManagedInstall(mcp::InstallServerArgs),
+    /// Uninstall a managed MCP server and remove its pool-local artifacts
+    Uninstall {
+        /// MCP server name
+        name: String,
+    },
     /// Bridge stdio to a pooled UNIX socket server
     Proxy {
         /// MCP server name
@@ -211,6 +221,9 @@ async fn main() -> Result<()> {
         } => implement::run(command, description, session, tool, path, title).await,
         Commands::Mcp { command } => match command {
             McpCommands::Serve => mcp::serve().await,
+            McpCommands::Add(args) => mcp::add(args).await,
+            McpCommands::ManagedInstall(args) => mcp::install(args).await,
+            McpCommands::Uninstall { name } => mcp::uninstall(name).await,
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
         },

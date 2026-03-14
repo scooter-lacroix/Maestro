@@ -6,7 +6,8 @@
 pub mod app;
 pub mod command_palette;
 pub mod conductor;
-pub mod maesterclaw;
+pub mod maestroclaw;
+pub mod maesterclaw; // Legacy module for backward compatibility
 pub mod maestro_paths;
 pub mod modals;
 pub mod omp;

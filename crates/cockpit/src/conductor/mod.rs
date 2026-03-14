@@ -10,8 +10,10 @@ pub mod git;
 pub mod header;
 pub mod input_modal;
 pub mod iteration_history;
+pub mod normalized_model;
 pub mod omp_agent;
 // pub mod mem; // Memory browser overlay
+pub mod launch_service;
 pub mod memory_browser;
 // pub mod mem; // TODO: Implement memory integration module
 pub mod conflict_panel;
@@ -31,6 +33,7 @@ pub mod telemetry;
 pub mod tests;
 pub mod theme;
 pub mod track_tree;
+pub mod tree_builder;
 
 pub use conflict_panel::*;
 pub use dashboard::*;
@@ -39,7 +42,9 @@ pub use footer::*;
 pub use git::*;
 pub use header::*;
 pub use iteration_history::*;
+pub use normalized_model::*;
 pub use keybindings::*;
+pub use launch_service::*;
 pub use modals::{ListSelectorModal, Modal, ModalCancelled, ModalResult, TextInputModal};
 pub use model::*;
 pub use observer::{
@@ -53,3 +58,4 @@ pub use selector_modal::*;
 pub use subagent_tree::*;
 pub use theme::*;
 pub use track_tree::*;
+pub use tree_builder::*;

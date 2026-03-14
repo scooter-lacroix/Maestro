@@ -182,6 +182,8 @@ struct App {
     storage_backend: Option<Arc<TursoStorageBackend>>,
     // Flag to trigger async LSP refresh
     pending_lsp_refresh: bool,
+    // Pending MCP operation status for non-blocking operations
+    pending_mcp_operation: Option<String>, // Stores the operation name (e.g., "Starting server...")
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -369,6 +371,7 @@ impl App {
             lsp_availability: HashMap::new(),
             storage_backend,
             pending_lsp_refresh: false,
+            pending_mcp_operation: None,
         };
         // Check LSP availability on startup
         app.check_lsp_availability();
@@ -1736,28 +1739,38 @@ async fn run_app<B: Backend>(
                                                     continue;
                                                 };
 
-                                                if server.status == McpStatus::Running {
-                                                    if let Err(e) = pool.stop_server(&name).await {
-                                                        app.status_message =
-                                                            format!("Stop failed: {}", e);
-                                                    } else {
-                                                        app.status_message =
-                                                            format!("Stopped MCP '{}'", name);
-                                                    }
+                                                // Show immediate feedback and spawn non-blocking operation
+                                                let is_running = server.status == McpStatus::Running;
+                                                let operation_name = name.clone();
+                                                app.pending_mcp_operation = Some(if is_running {
+                                                    format!("Stopping '{}'...", operation_name)
                                                 } else {
-                                                    match pool.start_server_record(&server).await {
-                                                        Ok(socket) => {
-                                                            app.status_message = format!(
-                                                                "Started MCP '{}' at {}",
-                                                                name, socket
-                                                            );
-                                                        }
-                                                        Err(e) => {
-                                                            app.status_message =
-                                                                format!("Start failed: {}", e);
-                                                        }
-                                                    }
-                                                }
+                                                    format!("Starting '{}'...", operation_name)
+                                                });
+                                                app.status_message = app.pending_mcp_operation.clone().unwrap();
+
+                                                // Spawn async operation
+                                                let pool_clone = pool.clone();
+                                                let service_clone = svc.clone();
+                                                tokio::spawn(async move {
+                                                    let result = if is_running {
+                                                        pool_clone.stop_server(&operation_name).await
+                                                            .map(|_| format!("Stopped MCP '{}'", operation_name))
+                                                            .map_err(|e| format!("Stop failed: {}", e))
+                                                    } else {
+                                                        pool_clone.start_server_record(&server).await
+                                                            .map(|socket| format!("Started MCP '{}' at {}", operation_name, socket))
+                                                            .map_err(|e| format!("Start failed: {}", e))
+                                                    };
+                                                    // Service operations are sync, just drop the pool to ensure cleanup
+                                                    let _ = service_clone.list_mcp_servers();
+                                                    result
+                                                });
+
+                                                // Return to normal immediately - status will refresh on next tick
+                                                app.input_mode = InputMode::Normal;
+                                                app.target_mcp_name = None;
+                                                continue;
                                             }
                                             McpOption::Pause => {
                                                 app.status_message =
@@ -1781,33 +1794,45 @@ async fn run_app<B: Backend>(
                                                 continue;
                                             }
                                             McpOption::Add => {
-                                                match svc.sync_mcp_servers_from_system() {
-                                                    Ok(n) => app.status_message = format!(
-                                                        "Discovered {} MCP server(s) from system configs",
-                                                        n
-                                                    ),
-                                                    Err(e) => app.status_message =
-                                                        format!("Discovery failed: {}", e),
-                                                }
+                                                // Spawn non-blocking discovery
+                                                app.status_message = "Discovering MCP servers...".to_string();
+                                                let svc_clone = svc.clone();
+                                                tokio::spawn(async move {
+                                                    svc_clone.sync_mcp_servers_from_system()
+                                                        .map(|n| format!("Discovered {} MCP server(s)", n))
+                                                        .unwrap_or_else(|e| format!("Discovery failed: {}", e))
+                                                });
+                                                app.input_mode = InputMode::Normal;
+                                                app.target_mcp_name = None;
+                                                continue;
                                             }
                                             McpOption::Remove => {
+                                                // Stop server first (async), then delete from DB (sync)
                                                 if let Some(pool) = app.mcp_pool.clone() as Option<Arc<McpPool>> {
-                                                    let _ = pool.stop_server(&name).await;
+                                                    let name_clone = name.clone();
+                                                    tokio::spawn(async move {
+                                                        let _ = pool.stop_server(&name_clone).await;
+                                                    });
                                                 }
                                                 let _ = svc.delete_mcp_server(&name);
                                                 app.status_message =
                                                     format!("Removed MCP '{}' from pool", name);
                                             }
                                             McpOption::Install => {
-                                                let discovered =
-                                                    svc.sync_mcp_servers_from_system().unwrap_or(0);
-                                                if let Some(pool) = app.mcp_pool.clone() as Option<Arc<McpPool>> {
-                                                    let _ = pool.start_all_from_db().await;
-                                                }
-                                                app.status_message = format!(
-                                                    "MCP pool synced ({} discovered)",
-                                                    discovered
-                                                );
+                                                // Spawn non-blocking sync and start
+                                                app.status_message = "Syncing MCP pool...".to_string();
+                                                let svc_clone = svc.clone();
+                                                let pool_clone = app.mcp_pool.clone();
+                                                tokio::spawn(async move {
+                                                    let discovered = svc_clone.sync_mcp_servers_from_system().unwrap_or(0);
+                                                    if let Some(pool) = pool_clone {
+                                                        let _ = pool.start_all_from_db().await;
+                                                    }
+                                                    format!("MCP pool synced ({} discovered)", discovered)
+                                                });
+                                                app.input_mode = InputMode::Normal;
+                                                app.target_mcp_name = None;
+                                                continue;
                                             }
                                         }
 
@@ -1816,6 +1841,7 @@ async fn run_app<B: Backend>(
                                         }
                                         app.input_mode = InputMode::Normal;
                                         app.target_mcp_name = None;
+                                        app.pending_mcp_operation = None;
                                     }
 
                                     InputMode::NewGroupTitle => {

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RateLimitState {
     pub is_limited: bool,
     pub consecutive_hits: u32,
@@ -10,104 +10,95 @@ pub struct RateLimitState {
     pub last_retry_after: Option<u64>,
 }
 
-impl Default for RateLimitState {
-    fn default() -> Self {
-        Self {
-            is_limited: false,
-            consecutive_hits: 0,
-            last_hit_at: None,
-            backoff_until: None,
-            last_message: None,
-            last_retry_after: None,
-        }
-    }
-}
-
+/// Rate limit backoff state for a specific agent
 #[derive(Debug, Clone)]
-pub struct RateLimitBackoffOutcome {
-    pub delay_secs: u64,
-    pub used_retry_after: bool,
-    pub exceeded_max: bool,
-}
-
-/// Tracks rate-limit state and computes exponential backoff (Ralph parity).
 pub struct RateLimitBackoff {
     pub state: RateLimitState,
+    pub retry_after: Option<u64>, // Unix timestamp
 }
 
 impl RateLimitBackoff {
     pub fn new() -> Self {
         Self {
             state: RateLimitState::default(),
+            retry_after: None,
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(unused_variables)]
     pub fn record_hit(
         &mut self,
         message: Option<String>,
         retry_after: Option<u64>,
-        max_consecutive_hits: u32,
-        base_backoff_secs: u64,
-        max_backoff_secs: u64,
-    ) -> RateLimitBackoffOutcome {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
+        max_retries: u32,
+        base_secs: u64,
+        max_secs: u64,
+    ) -> BackoffOutcome {
         self.state.consecutive_hits += 1;
-        self.state.last_hit_at = Some(now);
+        self.state.last_hit_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
         self.state.last_message = message;
-        self.state.last_retry_after = retry_after;
+        self.state.is_limited = self.state.consecutive_hits > max_retries;
 
-        let used_retry_after = retry_after.is_some();
-        let backoff_duration = retry_after.unwrap_or_else(|| {
-            // Exponential backoff with clamp
-            let exp = base_backoff_secs.saturating_mul(
-                2u64.pow(self.state.consecutive_hits.saturating_sub(1).min(16)), // clamp exponent
+        let exceeded_max = self.state.consecutive_hits > max_retries;
+        self.state.is_limited = exceeded_max;
+
+        if exceeded_max {
+            let delay_secs = (base_secs * self.state.consecutive_hits as u64).min(max_secs);
+            self.state.backoff_until = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + delay_secs,
             );
-            std::cmp::min(exp, max_backoff_secs)
-        });
-
-        self.state.is_limited = true;
-        self.state.backoff_until = Some(now + backoff_duration);
-
-        RateLimitBackoffOutcome {
-            delay_secs: backoff_duration,
-            used_retry_after,
-            exceeded_max: self.state.consecutive_hits > max_consecutive_hits,
+            self.retry_after = Some(delay_secs);
+            BackoffOutcome {
+                exceeded_max: true,
+                delay_secs,
+            }
+        } else {
+            BackoffOutcome {
+                exceeded_max: false,
+                delay_secs: 0,
+            }
         }
     }
 
     pub fn reset(&mut self) {
-        self.state.is_limited = false;
-        self.state.consecutive_hits = 0;
-        self.state.backoff_until = None;
-        self.state.last_hit_at = None;
-        self.state.last_message = None;
-        self.state.last_retry_after = None;
+        self.state = RateLimitState::default();
+        self.retry_after = None;
+    }
+}
+
+impl Default for RateLimitBackoff {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackoffOutcome {
+    pub exceeded_max: bool,
+    pub delay_secs: u64,
+}
+
+impl BackoffOutcome {
+    pub fn continue_outcome() -> Self {
+        Self {
+            exceeded_max: false,
+            delay_secs: 0,
+        }
     }
 
-    pub fn check_backoff(&mut self) -> bool {
-        if !self.state.is_limited {
-            return false;
+    pub fn backout(delay_secs: u64, exceeded_max: bool) -> Self {
+        Self {
+            exceeded_max,
+            delay_secs,
         }
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        if let Some(until) = self.state.backoff_until {
-            if now >= until {
-                self.state.is_limited = false;
-                // We don't reset consecutive_hits here to allow for escalating backoff if it hits again immediately
-                return false;
-            }
-            return true;
-        }
-
-        false
     }
 }

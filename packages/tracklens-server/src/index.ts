@@ -23,6 +23,10 @@ import { getRepoInfo } from "./repo";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR, sanitizeFileName, getSafeUploadPath } from "./image";
 import { openEditorDiff } from "./ide";
 import { detectProjectName, sanitizeTag } from "./project";
+import {
+  createClientReadyMonitor,
+  injectTrackLensBootstrap,
+} from "./ui-readiness";
 
 export interface ServerOptions {
   /** The plan markdown content */
@@ -47,6 +51,7 @@ export interface ServerResult {
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
   }>;
@@ -131,6 +136,7 @@ export async function startTrackLensServer(
         approved: boolean;
         feedback?: string;
         savedPath?: string;
+        annotations?: unknown[];
         agentSwitch?: string;
         autonomyMode?: string;
       }) => void)
@@ -140,11 +146,13 @@ export async function startTrackLensServer(
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
+  const clientReady = createClientReadyMonitor();
 
   // Mutable state for auto-close
   let shouldAutoClose = false;
@@ -241,6 +249,16 @@ export async function startTrackLensServer(
       if (url.pathname === "/api/project" && req.method === "GET") {
         const projectName = await detectProjectName();
         return Response.json({ projectName });
+      }
+
+      if (url.pathname === "/api/client-ready" && req.method === "POST") {
+        const authHeader = req.headers.get("authorization");
+        if (authHeader !== `Bearer ${authToken}`) {
+          return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        clientReady.markClientReady();
+        return Response.json({ ready: true });
       }
 
       // API: Validate image path
@@ -513,19 +531,25 @@ export async function startTrackLensServer(
             approved: boolean;
             feedback?: string;
             customPath?: string;
-            annotations?: string;
+            annotations?: unknown[] | string;
             agentSwitch?: string;
             autonomyMode?: string;
           };
 
           // Save final snapshot
           let savedPath: string | undefined;
+          const annotationSnapshot =
+            typeof annotations === "string"
+              ? annotations
+              : annotations
+                ? JSON.stringify(annotations, null, 2)
+                : "";
           if (feedback) {
             savedPath = saveFinalSnapshot(
               slug,
               approved ? "approved" : "denied",
               plan,
-              annotations || "",
+              annotationSnapshot,
               customPath
             );
           }
@@ -536,6 +560,12 @@ export async function startTrackLensServer(
               approved,
               feedback,
               savedPath,
+              annotations:
+                typeof annotations === "string"
+                  ? annotations
+                    ? [{ id: "tracklens-feedback", text: annotations }]
+                    : undefined
+                  : annotations,
               agentSwitch,
               autonomyMode: newAutonomyMode,
             });
@@ -556,9 +586,7 @@ export async function startTrackLensServer(
       }
 
       // Serve HTML
-      // Inject authentication token into HTML for client-side access
-      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
-      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
+      const htmlWithToken = injectTrackLensBootstrap(htmlContent, authToken);
       return new Response(htmlWithToken, {
         headers: { "Content-Type": "text/html" },
       });
@@ -575,11 +603,21 @@ export async function startTrackLensServer(
     port: number
   ): Promise<void> {
     if (!isRemote) {
-      await openBrowser(url);
+      const opened = await openBrowser(url);
+      if (!opened) {
+        throw new Error(`TrackLens could not open a browser for ${url}`);
+      }
     }
   }
 
   await handleServerReady(url, isRemote, port);
+  const ready = await clientReady.waitForClientReady();
+  if (!ready) {
+    server.stop();
+    throw new Error(
+      "TrackLens UI never reported readiness. Review aborted instead of assuming approval."
+    );
+  }
 
   return {
     port,

@@ -56,9 +56,96 @@ impl ConductorAction {
     }
 }
 
+/// Handle setup wizard key events
+fn handle_setup_wizard_key(
+    pane: &mut ConductorPane,
+    key: KeyEvent,
+) -> ConductorAction {
+    use leindex_core::orchestrate::setup::AgentTool;
+
+    match (key.modifiers, key.code) {
+        // Esc - dismiss wizard
+        (KeyModifiers::NONE, KeyCode::Esc) => {
+            pane.dismiss_setup_wizard();
+            ConductorAction::info("Setup wizard dismissed. Press 's' to start tracks when ready.")
+        }
+
+        // Enter - advance wizard
+        (KeyModifiers::NONE, KeyCode::Enter) => {
+            match pane.setup.wizard_step {
+                0 => {
+                    // Welcome -> Tool Selection
+                    // Auto-select first available tool
+                    if let Some(status) = pane.get_setup_status() {
+                        if let Some(&first_tool) = status.available_tools.first() {
+                            pane.select_setup_tool(first_tool);
+                        }
+                    }
+                    pane.advance_setup_wizard();
+                    ConductorAction::Handled
+                }
+                1 => {
+                    // Tool Selection -> Confirm (only if tool selected)
+                    if pane.setup.selected_tool.is_some() {
+                        pane.advance_setup_wizard();
+                        ConductorAction::Handled
+                    } else {
+                        ConductorAction::warning("Please select a tool first (press 1-5)")
+                    }
+                }
+                2 => {
+                    // Confirm -> Dismiss
+                    pane.dismiss_setup_wizard();
+                    ConductorAction::success("Setup complete! Press 's' to start a track.")
+                }
+                _ => {
+                    pane.dismiss_setup_wizard();
+                    ConductorAction::Handled
+                }
+            }
+        }
+
+        // Tool selection (step 1 only)
+        (KeyModifiers::NONE, KeyCode::Char('1')) if pane.setup.wizard_step == 1 => {
+            pane.select_setup_tool(AgentTool::Iflow);
+            ConductorAction::Handled
+        }
+        (KeyModifiers::NONE, KeyCode::Char('2')) if pane.setup.wizard_step == 1 => {
+            pane.select_setup_tool(AgentTool::Claude);
+            ConductorAction::Handled
+        }
+        (KeyModifiers::NONE, KeyCode::Char('3')) if pane.setup.wizard_step == 1 => {
+            pane.select_setup_tool(AgentTool::Gemini);
+            ConductorAction::Handled
+        }
+        (KeyModifiers::NONE, KeyCode::Char('4')) if pane.setup.wizard_step == 1 => {
+            pane.select_setup_tool(AgentTool::Qwen);
+            ConductorAction::Handled
+        }
+        (KeyModifiers::NONE, KeyCode::Char('5')) if pane.setup.wizard_step == 1 => {
+            pane.select_setup_tool(AgentTool::OpenCode);
+            ConductorAction::Handled
+        }
+
+        // Allow global navigation keys to pass through
+        (KeyModifiers::NONE, KeyCode::Tab)
+        | (KeyModifiers::NONE, KeyCode::BackTab)
+        | (KeyModifiers::SHIFT, KeyCode::BackTab) => ConductorAction::None,
+        (KeyModifiers::NONE, KeyCode::Char('1'..='8')) => ConductorAction::None,
+        (KeyModifiers::ALT, KeyCode::Char('1'..='8')) => ConductorAction::None,
+
+        _ => ConductorAction::Handled, // Absorb other keys when wizard is open
+    }
+}
+
 /// Handle Conductor-specific key events
 pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAction {
-    // 0. Handle modals first (they absorb all input when visible)
+    // 0. Handle setup wizard first (dominant overlay)
+    if pane.setup.show_setup_wizard {
+        return handle_setup_wizard_key(pane, key);
+    }
+
+    // 1. Handle modals first (they absorb all input when visible)
     if pane.steering_modal.visible {
         match pane.steering_modal.handle_key(key) {
             super::input_modal::InputAction::Submit(text) => {
@@ -592,14 +679,25 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
 
         // Execution control (Ralph-style shortcuts)
         (_, KeyCode::Char('s')) => {
+            if pane
+                .get_setup_status()
+                .is_some_and(|status| !status.is_minimally_configured())
+            {
+                pane.setup.show_setup_wizard = true;
+                pane.setup.wizard_step = 0;
+                return ConductorAction::warning(
+                    "Conductor setup is incomplete. Finish the setup wizard before launching.",
+                );
+            }
+
             let track_idx = match pane.get_selected_track_index() {
                 Some(idx) => idx,
                 None => return ConductorAction::warning("No track selected"),
             };
-            let track_id = &pane.tracks[track_idx].id;
+            let track_id = pane.tracks[track_idx].id.clone();
 
             // Prevention: Don't start if already running
-            if pane.state.track_runtime_statuses.get(track_id)
+            if pane.state.track_runtime_statuses.get(&track_id)
                 == Some(&crate::conductor::model::ConductorStatus::Running)
             {
                 return ConductorAction::warning(format!("Track {} is already running", track_id));
@@ -608,7 +706,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             let cmd = pane.get_start_command(None, false, false);
             match cmd {
                 Some(cmd) => {
-                    if let Err(e) = execute_orchestrate_command(&cmd) {
+                    if let Err(e) = execute_orchestrate_command(&track_id, &cmd) {
                         return ConductorAction::error(format!("Error: {}", e));
                     }
                     ConductorAction::success(format!("Started: {}", cmd))
@@ -622,7 +720,12 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             let cmd = pane.get_pause_command();
             match cmd {
                 Some(cmd) => {
-                    if let Err(e) = execute_orchestrate_command(&cmd) {
+                    let track_idx = match pane.get_selected_track_index() {
+                        Some(idx) => idx,
+                        None => return ConductorAction::warning("No track selected"),
+                    };
+                    let track_id = &pane.tracks[track_idx].id;
+                    if let Err(e) = execute_orchestrate_command(track_id, &cmd) {
                         return ConductorAction::error(format!("Error: {}", e));
                     }
                     ConductorAction::success(format!("Paused: {}", cmd))
@@ -636,7 +739,12 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             let cmd = pane.get_resume_command();
             match cmd {
                 Some(cmd) => {
-                    if let Err(e) = execute_orchestrate_command(&cmd) {
+                    let track_idx = match pane.get_selected_track_index() {
+                        Some(idx) => idx,
+                        None => return ConductorAction::warning("No track selected"),
+                    };
+                    let track_id = &pane.tracks[track_idx].id;
+                    if let Err(e) = execute_orchestrate_command(track_id, &cmd) {
                         return ConductorAction::error(format!("Error: {}", e));
                     }
                     ConductorAction::success(format!("Resumed: {}", cmd))
@@ -646,7 +754,12 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         }
         (_, KeyCode::Char('?')) => {
             let cmd = pane.get_status_command();
-            if let Err(e) = execute_orchestrate_command(&cmd) {
+            let track_idx = match pane.get_selected_track_index() {
+                Some(idx) => idx,
+                None => return ConductorAction::warning("No track selected"),
+            };
+            let track_id = &pane.tracks[track_idx].id;
+            if let Err(e) = execute_orchestrate_command(track_id, &cmd) {
                 return ConductorAction::error(format!("Error: {}", e));
             }
             ConductorAction::info(format!("Status checked: {}", cmd))
@@ -658,8 +771,29 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
 
 /// Execute an orchestrate command using type-safe CommandArgs.
 /// This avoids shell injection vulnerabilities by using proper argument separation.
-fn execute_orchestrate_command(cmd: &CommandArgs) -> std::io::Result<std::process::Child> {
-    cmd.spawn_detached()
+fn execute_orchestrate_command(track_id: &str, cmd: &CommandArgs) -> Result<(), String> {
+    use super::launch_service::{LaunchService, LaunchRequest};
+
+    // Create launch service
+    let service = match LaunchService::new() {
+        Ok(s) => s,
+        Err(e) => return Err(format!("Failed to create launch service: {}", e)),
+    };
+
+    // Create launch request
+    let request = LaunchRequest::new(track_id, cmd.clone());
+
+    // Execute launch with verification
+    let result = service.launch(request);
+
+    match result {
+        super::launch_service::LaunchResult::Success { .. } => Ok(()),
+        super::launch_service::LaunchResult::SpawnFailed { error, .. } => Err(error),
+        super::launch_service::LaunchResult::VerificationFailed { reason, .. } => Err(reason),
+        super::launch_service::LaunchResult::Timeout { timeout_secs, .. } => {
+            Err(format!("Launch verification timed out after {}s", timeout_secs))
+        }
+    }
 }
 
 /// Control command types for Ralph behavior enforcement

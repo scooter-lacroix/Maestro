@@ -57,7 +57,7 @@
   },
   "agents": {
     "path": "maestro/agents",
-    "count": 32,
+    "count": 37,
     "categories": [
       "orchestrators",
       "planners",

@@ -144,6 +144,38 @@ mod tests {
         assert!(track_idx.is_none(), "Selected track index should be None");
     }
 
+    #[test]
+    fn test_setup_wizard_auto_shows_when_tracks_missing() {
+        let temp = TempDir::new().unwrap();
+        let pane = ConductorPane::new(temp.path().to_path_buf());
+
+        assert!(
+            pane.setup.show_setup_wizard,
+            "setup wizard should auto-show when the workspace is not minimally configured"
+        );
+    }
+
+    #[test]
+    fn test_refresh_preserves_planned_tracks() {
+        let temp = TempDir::new().unwrap();
+        let track_dir = temp.path().join("demo-track");
+        fs::create_dir_all(&track_dir).unwrap();
+        fs::write(
+            temp.path().join("tracks.md"),
+            "## [ ] Demo Track\n*Link: [./demo-track/](./demo-track/)\n**Description**: Demo",
+        )
+        .unwrap();
+        fs::write(track_dir.join("plan.md"), "### [ ] Task 1: Ship it\n").unwrap();
+
+        let mut pane = ConductorPane::new(temp.path().to_path_buf());
+        pane.refresh_tracks_if_needed();
+
+        assert!(
+            pane.tracks.iter().any(|track| track.id == "demo-track"),
+            "planned tracks should remain visible even without a live session"
+        );
+    }
+
     // Phase 7.6: Observer event bridge tests (RED - expected to fail before implementation)
     #[test]
     fn test_observer_can_subscribe_to_session_events() {
