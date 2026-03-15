@@ -56,9 +56,7 @@ import { isVaultBrowserEnabled } from '@maestro/tracklens-ui';
 import type { Annotation, Block, EditorMode, ImageAttachment } from '@maestro/tracklens-ui';
 import type { Frontmatter } from '@maestro/tracklens-ui';
 
-// Initialize mermaid
-const mermaid = require('mermaid');
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' });
+// Initialize mermaid (lazy - loaded by MermaidBlock when needed)
 
 // Demo plan content
 const DEMO_PLAN = `# Implementation Plan: Real-time Collaboration
