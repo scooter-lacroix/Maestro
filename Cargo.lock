@@ -3053,6 +3053,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "unicode-width 0.2.0",
  "which 6.0.3",

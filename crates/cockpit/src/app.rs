@@ -270,9 +270,9 @@ pub struct App {
     // OMP agent manager for tool execution
     pub omp_manager: Option<OmpAgentManager>,
     // Phase 7.7: Hot cache for memory suggestions
-    pub hot_cache: crate::maestroclaw::HotCache,
+    pub hot_cache: crate::maesterclaw::HotCache,
     // MaestroClaw pane state
-    pub maestroclaw_pane: crate::maestroclaw::MaestroClawPane,
+    pub maestroclaw_pane: crate::maesterclaw::MaestroClawPane,
     // TrackLens review state
     pub tracklens_pane: TrackLensPane,
 }
@@ -392,8 +392,8 @@ impl App {
             } else {
                 None
             },
-            hot_cache: crate::maestroclaw::HotCache::new(),
-            maestroclaw_pane: crate::maestroclaw::MaestroClawPane::new(),
+            hot_cache: crate::maesterclaw::HotCache::new(),
+            maestroclaw_pane: crate::maesterclaw::MaestroClawPane::new(),
             tracklens_pane: TrackLensPane::new(),
         };
 
@@ -1383,8 +1383,8 @@ fn cycle_theme(app: &mut App) {
     }
 }
 
-fn handle_maestroclaw_action(app: &mut App, action: crate::maestroclaw::MaestroClawAction) -> bool {
-    use crate::maestroclaw::MaestroClawAction;
+fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroClawAction) -> bool {
+    use crate::maesterclaw::MaestroClawAction;
 
     match action {
         MaestroClawAction::None => false,
@@ -4025,7 +4025,7 @@ async fn run_app<B: Backend>(
                                         .sessions
                                         .get(app.maestroclaw_pane.selected_session.unwrap_or(0))
                                         .map(|session| session.project_path.clone())
-                                        .filter(|path| !path.trim().is_empty())
+                                        .filter(|path: &String| !path.trim().is_empty())
                                         .or_else(|| {
                                             app.projects
                                                 .get(app.project_state.selected().unwrap_or(0))
