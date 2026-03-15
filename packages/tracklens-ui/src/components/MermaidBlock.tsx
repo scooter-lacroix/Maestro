@@ -10,11 +10,17 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { Block } from '../types';
 
 let mermaidInitialized = false;
-let mermaidModulePromise: Promise<any> | null = null;
+// Mermaid API interface for type safety
+interface MermaidAPI {
+  initialize: (config: Record<string, unknown>) => void;
+  render: (id: string, content: string) => Promise<{ svg: string }>;
+}
 
-async function getMermaid() {
+let mermaidModulePromise: Promise<MermaidAPI> | null = null;
+
+async function getMermaid(): Promise<MermaidAPI> {
   if (!mermaidModulePromise) {
-    mermaidModulePromise = import('mermaid').then((mod) => mod.default ?? mod);
+    mermaidModulePromise = import('mermaid').then((mod) => (mod.default ?? mod) as MermaidAPI);
   }
   return mermaidModulePromise;
 }

@@ -48,7 +48,7 @@ impl RateLimitBackoff {
 
         if exceeded_max {
             let calculated_delay = (base_secs * self.state.consecutive_hits as u64).min(max_secs);
-            let delay_secs = retry_after.unwrap_or(calculated_delay);
+            let delay_secs = self.state.last_retry_after.unwrap_or(calculated_delay);
             self.state.backoff_until = Some(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
