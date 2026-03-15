@@ -298,6 +298,19 @@ fn find_bundle_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Generate the bootstrap script that injects auth token and client-ready signal
+fn generate_bootstrap_script(auth_token: &str) -> String {
+    format!(
+        r#"<script>
+window.TRACKLENS_AUTH_TOKEN = "{}";
+document.addEventListener('DOMContentLoaded', function() {{
+    fetch('/api/client-ready', {{ method: 'POST' }}).catch(function() {{}});
+}});
+</script>"#,
+        auth_token
+    )
+}
+
 async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
     if let Some(bundle_dir) = find_bundle_dir() {
         let html_names = ["index.html", "editor.html", "tracklens-editor.html"];
@@ -305,15 +318,7 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
             let path = bundle_dir.join(name);
             if let Ok(mut content) = tokio::fs::read_to_string(path).await {
                 // Inject auth token and client-ready signal into HTML
-                let bootstrap_script = format!(
-                    r#"<script>
-window.TRACKLENS_AUTH_TOKEN = "{}";
-document.addEventListener('DOMContentLoaded', function() {{
-    fetch('/api/client-ready', {{ method: 'POST' }}).catch(function() {{}});
-}});
-</script>"#,
-                    state.auth_token
-                );
+                let bootstrap_script = generate_bootstrap_script(&state.auth_token);
                 // Inject after <head> tag
                 content = content.replace("<head>", &format!("<head>{}", bootstrap_script));
                 return Html(content);
@@ -322,7 +327,7 @@ document.addEventListener('DOMContentLoaded', function() {{
     }
 
     // Fallback placeholder if no HTML bundle found
-    let token = &state.auth_token;
+    let bootstrap_script = generate_bootstrap_script(&state.auth_token);
     Html(format!(
         r#"<!DOCTYPE html>
 <html>
@@ -333,12 +338,7 @@ document.addEventListener('DOMContentLoaded', function() {{
         .warning {{ background: #fff3cd; border: 1px solid #ffc107; padding: 20px; border-radius: 4px; }}
         h1 {{ color: #333; }}
     </style>
-    <script>
-window.TRACKLENS_AUTH_TOKEN = "{}";
-document.addEventListener('DOMContentLoaded', function() {{
-    fetch('/api/client-ready', {{ method: 'POST' }}).catch(function() {{}});
-}});
-</script>
+    {}
 </head>
 <body>
     <h1>TrackLens Review</h1>
@@ -355,7 +355,7 @@ document.addEventListener('DOMContentLoaded', function() {{
     </ul>
 </body>
 </html>"#,
-        token
+        bootstrap_script
     ))
 }
 
@@ -405,7 +405,7 @@ async fn get_vaults() -> Json<serde_json::Value> {
 }
 
 async fn get_agents() -> Json<serde_json::Value> {
-    let agents = match discover_agents() {
+    let agents = match discover_agents().await {
         Some(agents) if !agents.is_empty() => agents,
         _ => vec![
             serde_json::json!({ "id": "build", "name": "Build Agent" }),
@@ -419,29 +419,32 @@ async fn get_agents() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "agents": agents }))
 }
 
-fn discover_agents() -> Option<Vec<serde_json::Value>> {
+async fn discover_agents() -> Option<Vec<serde_json::Value>> {
     let home = std::env::var("HOME").ok()?;
     let agents_dir = std::path::PathBuf::from(home).join(".maestro/agents");
-    let entries = std::fs::read_dir(&agents_dir).ok()?;
-    let mut agents: Vec<serde_json::Value> = entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
-        .map(|e| {
-            let id = e.file_name().to_string_lossy().to_string();
-            let name = id
-                .split('-')
-                .map(|w| {
-                    let mut chars = w.chars();
-                    match chars.next() {
-                        Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
-                        None => String::new(),
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            serde_json::json!({ "id": id, "name": name })
-        })
-        .collect();
+    let mut entries = tokio::fs::read_dir(&agents_dir).await.ok()?;
+    let mut agents: Vec<serde_json::Value> = Vec::new();
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(file_type) = entry.file_type().await {
+            if file_type.is_dir() {
+                let id = entry.file_name().to_string_lossy().to_string();
+                let name = id
+                    .split('-')
+                    .map(|w| {
+                        let mut chars = w.chars();
+                        match chars.next() {
+                            Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                agents.push(serde_json::json!({ "id": id, "name": name }));
+            }
+        }
+    }
+
     agents.sort_by(|a, b| {
         a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or(""))
     });
