@@ -61,6 +61,9 @@ pub struct ServerState {
     pub decision_rx: watch::Receiver<Option<TrackLensDecision>>,
     /// Authentication token for decision endpoint
     pub auth_token: String,
+    /// Client readiness signal
+    pub client_ready_tx: watch::Sender<bool>,
+    pub client_ready_rx: watch::Receiver<bool>,
 }
 
 /// Review content
@@ -104,6 +107,7 @@ impl TrackLensServer {
 
         // Create watch channel for decision updates
         let (decision_tx, decision_rx) = watch::channel(None);
+        let (client_ready_tx, client_ready_rx) = watch::channel(false);
 
         Self {
             config,
@@ -112,6 +116,8 @@ impl TrackLensServer {
                 decision_tx,
                 decision_rx,
                 auth_token,
+                client_ready_tx,
+                client_ready_rx,
             }),
         }
     }
@@ -169,7 +175,8 @@ impl TrackLensServer {
             .route("/api/plan", get(get_plan))
             .route("/api/status", get(get_status))
             .route("/api/vaults", get(get_vaults))
-            .route("/api/agents", get(get_agents));
+            .route("/api/agents", get(get_agents))
+            .route("/api/client-ready", post(mark_client_ready));
 
         // Add static asset serving if bundle directory found
         if let Some(ref dir) = bundle_dir {
@@ -224,6 +231,22 @@ impl TrackLensServer {
         Ok(())
     }
 
+    /// Wait for the client UI to report readiness
+    pub async fn wait_for_client_ready(&self, timeout: std::time::Duration) -> bool {
+        let mut rx = self.state.client_ready_rx.clone();
+        tokio::select! {
+            result = async {
+                while !*rx.borrow_and_update() {
+                    if rx.changed().await.is_err() {
+                        return false;
+                    }
+                }
+                true
+            } => result,
+            _ = tokio::time::sleep(timeout) => false,
+        }
+    }
+
     /// Wait for user decision (blocking)
     pub async fn wait_for_decision(&self) -> anyhow::Result<TrackLensDecision> {
         let mut rx = self.state.decision_rx.clone();
@@ -275,26 +298,36 @@ fn find_bundle_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Generate the bootstrap script that injects auth token and client-ready signal
+fn generate_bootstrap_script(auth_token: &str) -> String {
+    format!(
+        r#"<script>
+window.TRACKLENS_AUTH_TOKEN = "{}";
+document.addEventListener('DOMContentLoaded', function() {{
+    fetch('/api/client-ready', {{ method: 'POST' }}).catch(function() {{}});
+}});
+</script>"#,
+        auth_token
+    )
+}
+
 async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
     if let Some(bundle_dir) = find_bundle_dir() {
         let html_names = ["index.html", "editor.html", "tracklens-editor.html"];
         for name in html_names {
             let path = bundle_dir.join(name);
             if let Ok(mut content) = tokio::fs::read_to_string(path).await {
-                // Inject auth token into HTML
-                let token_script = format!(
-                    r#"<script>window.TRACKLENS_AUTH_TOKEN = "{}";</script>"#,
-                    state.auth_token
-                );
+                // Inject auth token and client-ready signal into HTML
+                let bootstrap_script = generate_bootstrap_script(&state.auth_token);
                 // Inject after <head> tag
-                content = content.replace("<head>", &format!("<head>{}", token_script));
+                content = content.replace("<head>", &format!("<head>{}", bootstrap_script));
                 return Html(content);
             }
         }
     }
 
     // Fallback placeholder if no HTML bundle found
-    let token = &state.auth_token;
+    let bootstrap_script = generate_bootstrap_script(&state.auth_token);
     Html(format!(
         r#"<!DOCTYPE html>
 <html>
@@ -305,7 +338,7 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
         .warning {{ background: #fff3cd; border: 1px solid #ffc107; padding: 20px; border-radius: 4px; }}
         h1 {{ color: #333; }}
     </style>
-    <script>window.TRACKLENS_AUTH_TOKEN = "{}";</script>
+    {}
 </head>
 <body>
     <h1>TrackLens Review</h1>
@@ -322,7 +355,7 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
     </ul>
 </body>
 </html>"#,
-        token
+        bootstrap_script
     ))
 }
 
@@ -356,6 +389,11 @@ async fn submit_decision(
     Ok(StatusCode::OK)
 }
 
+async fn mark_client_ready(State(state): State<Arc<ServerState>>) -> StatusCode {
+    let _ = state.client_ready_tx.send(true);
+    StatusCode::OK
+}
+
 async fn get_status() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
 }
@@ -367,17 +405,50 @@ async fn get_vaults() -> Json<serde_json::Value> {
 }
 
 async fn get_agents() -> Json<serde_json::Value> {
-    // Return standard Maestro agents for the UI settings dropdown
-    Json(serde_json::json!({
-        "agents": [
-            { "id": "build", "name": "Build Agent" },
-            { "id": "implement", "name": "Implementation Agent" },
-            { "id": "qwen-coder", "name": "Qwen Coder" },
-            { "id": "amp-code", "name": "Amp Code" },
-            { "id": "rovo-dev", "name": "Rovo Dev" },
-            { "id": "codex-reviewer", "name": "Codex Reviewer" }
-        ]
-    }))
+    let agents = match discover_agents().await {
+        Some(agents) if !agents.is_empty() => agents,
+        _ => vec![
+            serde_json::json!({ "id": "build", "name": "Build Agent" }),
+            serde_json::json!({ "id": "implement", "name": "Implementation Agent" }),
+            serde_json::json!({ "id": "qwen-coder", "name": "Qwen Coder" }),
+            serde_json::json!({ "id": "amp-code", "name": "Amp Code" }),
+            serde_json::json!({ "id": "rovo-dev", "name": "Rovo Dev" }),
+            serde_json::json!({ "id": "codex-reviewer", "name": "Codex Reviewer" }),
+        ],
+    };
+    Json(serde_json::json!({ "agents": agents }))
+}
+
+async fn discover_agents() -> Option<Vec<serde_json::Value>> {
+    let home = std::env::var("HOME").ok()?;
+    let agents_dir = std::path::PathBuf::from(home).join(".maestro/agents");
+    let mut entries = tokio::fs::read_dir(&agents_dir).await.ok()?;
+    let mut agents: Vec<serde_json::Value> = Vec::new();
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(file_type) = entry.file_type().await {
+            if file_type.is_dir() {
+                let id = entry.file_name().to_string_lossy().to_string();
+                let name = id
+                    .split('-')
+                    .map(|w| {
+                        let mut chars = w.chars();
+                        match chars.next() {
+                            Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                agents.push(serde_json::json!({ "id": id, "name": name }));
+            }
+        }
+    }
+
+    agents.sort_by(|a, b| {
+        a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or(""))
+    });
+    Some(agents)
 }
 
 async fn get_content(

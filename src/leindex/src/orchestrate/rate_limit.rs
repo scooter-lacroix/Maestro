@@ -26,7 +26,6 @@ impl RateLimitBackoff {
         }
     }
 
-    #[allow(unused_variables)]
     pub fn record_hit(
         &mut self,
         message: Option<String>,
@@ -43,13 +42,14 @@ impl RateLimitBackoff {
                 .as_secs(),
         );
         self.state.last_message = message;
-        self.state.is_limited = self.state.consecutive_hits > max_retries;
+        self.state.last_retry_after = retry_after;
 
         let exceeded_max = self.state.consecutive_hits > max_retries;
         self.state.is_limited = exceeded_max;
 
         if exceeded_max {
-            let delay_secs = (base_secs * self.state.consecutive_hits as u64).min(max_secs);
+            let calculated_delay = (base_secs * self.state.consecutive_hits as u64).min(max_secs);
+            let delay_secs = self.state.last_retry_after.unwrap_or(calculated_delay);
             self.state.backoff_until = Some(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
