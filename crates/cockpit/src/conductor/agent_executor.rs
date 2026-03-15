@@ -616,7 +616,12 @@ pub mod role_utils {
             Some(AgentRole::Scout) => AgentRole::Architect,
             Some(AgentRole::Architect) => AgentRole::Critic,
             Some(AgentRole::Critic) => AgentRole::Kraken,
-            Some(AgentRole::Kraken) => AgentRole::Scout,
+            Some(AgentRole::Kraken) => AgentRole::Sentinel,
+            Some(AgentRole::Sentinel) => AgentRole::Warden,
+            Some(AgentRole::Warden) => AgentRole::Mender,
+            Some(AgentRole::Mender) => AgentRole::Cartographer,
+            Some(AgentRole::Cartographer) => AgentRole::Prism,
+            Some(AgentRole::Prism) => AgentRole::Scout,
         }
     }
 
@@ -627,6 +632,11 @@ pub mod role_utils {
             AgentRole::Architect => "Architect",
             AgentRole::Critic => "Critic",
             AgentRole::Kraken => "Kraken",
+            AgentRole::Sentinel => "Sentinel",
+            AgentRole::Warden => "Warden",
+            AgentRole::Mender => "Mender",
+            AgentRole::Cartographer => "Cartographer",
+            AgentRole::Prism => "Prism",
         }
     }
 
@@ -637,6 +647,11 @@ pub mod role_utils {
             AgentRole::Architect => "Architecture design and planning",
             AgentRole::Critic => "Code review and quality analysis",
             AgentRole::Kraken => "Implementation and execution",
+            AgentRole::Sentinel => "Security and vulnerability scanning",
+            AgentRole::Warden => "Resource monitoring and protection",
+            AgentRole::Mender => "Auto-remediation and fixes",
+            AgentRole::Cartographer => "Codebase mapping and navigation",
+            AgentRole::Prism => "Multi-perspective analysis",
         }
     }
 }

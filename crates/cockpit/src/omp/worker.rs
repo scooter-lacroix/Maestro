@@ -15,8 +15,8 @@ use tracing::{debug, error, info};
 
 use super::protocol::{OmpRequest, OmpResponse, OmpWorkerInit, OmpWorkerStatus};
 
-/// Default timeout for worker responses
-const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default timeout for worker responses (24 hours)
+const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(86400);
 
 /// Default timeout for worker startup
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);

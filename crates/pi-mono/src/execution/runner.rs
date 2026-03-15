@@ -587,6 +587,11 @@ impl SubagentRunner {
             PiAgentType::Planner => "planner",
             PiAgentType::Reviewer => "reviewer",
             PiAgentType::Worker => "worker",
+            PiAgentType::EvidenceValidator => "evidence-validator",
+            PiAgentType::FinalReviewer => "final-reviewer",
+            PiAgentType::Remediator => "remediator",
+            PiAgentType::Researcher => "researcher",
+            PiAgentType::UxReviewer => "ux-reviewer",
         };
         cmd.arg(agent_arg);
 

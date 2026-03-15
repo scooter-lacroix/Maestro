@@ -20,6 +20,10 @@ name = "leindex_core"
 crate-type = ["rlib"]
 
 [[bin]]
+name = "tracklens-test"
+path = "bin/tracklens_test.rs"
+
+[[bin]]
 name = "maestro-setup"
 path = "bin/setup_main.rs"
 
