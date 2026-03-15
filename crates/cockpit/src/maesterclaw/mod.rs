@@ -82,11 +82,8 @@ impl MaestroClawPane {
     }
 
     /// Check if wizard should be shown
-    pub fn should_show_wizard(&self, _force: bool) -> bool {
-        if _force {
-            return true;
-        }
-        self.show_wizard && !self.wizard.is_dismissed() && !self.wizard.is_completed()
+    pub fn should_show_wizard(&self, force: bool) -> bool {
+        force || (self.show_wizard && !self.wizard.is_dismissed() && !self.wizard.is_completed())
     }
 
     /// Set whether to show the wizard
