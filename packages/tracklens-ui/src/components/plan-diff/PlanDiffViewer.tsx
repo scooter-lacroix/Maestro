@@ -66,7 +66,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
 
   return (
     <div className="relative z-50 w-full max-w-[832px] 2xl:max-w-5xl">
-      <article className="w-full max-w-[832px] 2xl:max-w-5xl bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative">
+      <article className="w-full max-w-[832px] 2xl:max-w-5xl bg-surface-glass border border-border/10 rounded-[32px] shadow-neu-extruded p-5 md:p-8 lg:p-10 xl:p-12 relative">
         <div className="absolute top-3 left-3 md:top-4 md:left-5 flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono">
           {repoInfo && (
             <div className="flex items-center gap-1.5">
@@ -124,13 +124,8 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
           </button>
         </div>
 
+
         <div className="mt-6 mb-6 flex items-center gap-3">
-          <PlanDiffModeSwitcher mode={diffMode} onChange={onDiffModeChange} />
-          {baseVersionLabel && (
-            <span className="text-[10px] text-muted-foreground">
-              vs {baseVersionLabel}
-            </span>
-          )}
           {canOpenVscodeDiff && (
             <button
               onClick={handleOpenVscodeDiff}

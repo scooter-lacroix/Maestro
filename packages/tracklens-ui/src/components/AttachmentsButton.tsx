@@ -65,7 +65,21 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   useEffect(() => {
     if (isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      setPosition({ top: rect.bottom + 8, left: Math.max(8, rect.left - 100) });
+      const windowHeight = window.innerHeight;
+      const spaceBelow = windowHeight - rect.bottom;
+
+      // If less than 350px below, open upwards
+      if (spaceBelow < 350) {
+        setPosition({
+          top: rect.top - 12,
+          left: Math.max(16, rect.left - 240)
+        });
+      } else {
+        setPosition({
+          top: rect.bottom + 12,
+          left: Math.max(16, rect.left - 100)
+        });
+      }
     }
   }, [isOpen]);
 
@@ -130,45 +144,49 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     return path.startsWith('/') ? path : `/${path}`;
   }
 
+  // Determine if popover should use translate-y because it's opening upwards
+  const currentRect = buttonRef.current?.getBoundingClientRect();
+  const isOpeningUpwards = currentRect ? (window.innerHeight - currentRect.bottom < 350) : false;
+
   return (
     <>
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="group relative flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        onClick={(e) => {
+          console.log('Images button clicked', { isOpen: !isOpen });
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(!isOpen);
+        }}
+        className="group relative flex items-center gap-2 px-4 py-2.5 rounded-full bg-background shadow-neu-extruded hover:-translate-y-0.5 hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all z-[100] cursor-pointer"
+        title="Image Attachments"
       >
-        {images.length > 0 ? (
-          <>
-            <div className="relative flex items-center">
-              {images.slice(0, 3).map((img, idx) => (
-                <div key={img.path} className="relative w-5 h-5 rounded border border-background" style={{ marginLeft: idx > 0 ? '-6px' : 0, zIndex: 3 - idx }}>
-                  <img src={getImageSrc(img.path)} alt={img.name} loading="lazy" className="w-5 h-5 rounded object-cover" />
-                </div>
-              ))}
-              {images.length > 3 && (
-                <div className="relative w-5 h-5 rounded bg-muted border border-background flex items-center justify-center text-[9px] font-medium" style={{ marginLeft: '-6px', zIndex: 0 }}>
-                  +{images.length - 3}
-                </div>
-              )}
-            </div>
-            <button onClick={handleClearAll} className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <svg className="w-2 h-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </>
-        ) : (
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="relative flex items-center justify-center pointer-events-none">
+          <svg className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
           </svg>
-        )}
-        <span className={variant === 'inline' ? 'sr-only' : ''}>{images.length > 0 ? `${images.length}` : 'Images'}</span>
+          {images.length > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground shadow-sm">
+              {images.length}
+            </span>
+          )}
+        </div>
+        <span className="text-sm font-semibold text-muted-foreground group-hover:text-foreground transition-colors pointer-events-none">Images</span>
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 z-50" onClick={() => setIsOpen(false)} />
+        <div className="fixed inset-0 z-[70] bg-black/10 backdrop-blur-[1px]" onClick={() => setIsOpen(false)} />
       )}
       {isOpen && (
-        <div className="fixed z-[100] w-72 bg-card border border-border rounded-xl shadow-2xl p-3" style={{ top: position.top, left: position.left }} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={`fixed z-[100] w-80 bg-surface-glass shadow-neu-extruded rounded-[32px] p-6 lg:p-8 animate-in fade-in zoom-in duration-200 ${isOpeningUpwards ? 'origin-bottom -translate-y-full mb-2' : 'origin-top'}`}
+          style={{
+            top: position.top,
+            left: position.left
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium">Attachments</div>
@@ -181,9 +199,8 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`flex flex-col items-center justify-center gap-2 px-3 py-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-                dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-muted-foreground'
-              }`}
+              className={`flex flex-col items-center justify-center gap-2 px-3 py-6 rounded-2xl cursor-pointer transition-all duration-300 ${dragOver ? 'bg-primary/5 shadow-neu-inset-deep' : 'bg-background shadow-neu-inset hover:shadow-neu-inset-deep border-none'
+                }`}
             >
               {uploading ? (
                 <div className="flex items-center gap-2 text-muted-foreground">
@@ -211,9 +228,9 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 onChange={(e) => setManualPath(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleManualAdd()}
                 placeholder="Paste path or URL..."
-                className="flex-1 px-2 py-1.5 text-xs bg-background border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                className="flex-1 px-4 py-2 text-xs bg-background shadow-neu-inset rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50"
               />
-              <button type="button" onClick={handleManualAdd} disabled={!manualPath.trim()} className="px-2 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:opacity-90 disabled:opacity-50">
+              <button type="button" onClick={handleManualAdd} disabled={!manualPath.trim()} className="px-4 py-2 text-xs font-medium bg-background text-foreground rounded-xl shadow-neu-extruded hover:-translate-y-px hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all disabled:opacity-50 disabled:-translate-y-0 disabled:shadow-neu-extruded">
                 Add
               </button>
             </div>

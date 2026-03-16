@@ -12,7 +12,6 @@ async fn main() -> anyhow::Result<()> {
     let url = server.start().await?;
 
     println!("TrackLens running at: {url}");
-    println!("Auth token: {}", server.auth_token());
 
     // Set sample content
     server.set_content(ReviewContent {

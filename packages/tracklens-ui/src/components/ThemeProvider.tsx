@@ -42,31 +42,29 @@ export function ThemeProvider({
   useEffect(() => {
     const root = window.document.documentElement;
 
-    // Remove light class (dark is default, no class needed)
-    root.classList.remove('light');
+    root.classList.remove('light', 'dark');
 
     let effectiveTheme = theme;
     if (theme === 'system') {
-      effectiveTheme = window.matchMedia('(prefers-color-scheme: light)').matches
-        ? 'light'
-        : 'dark';
+      effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
     }
 
-    // Only add 'light' class when in light mode
-    if (effectiveTheme === 'light') {
-      root.classList.add('light');
-    }
+    root.classList.add(effectiveTheme);
   }, [theme]);
 
   // Listen for system theme changes
   useEffect(() => {
     if (theme !== 'system') return;
 
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
       const root = window.document.documentElement;
-      root.classList.remove('light');
+      root.classList.remove('light', 'dark');
       if (mediaQuery.matches) {
+        root.classList.add('dark');
+      } else {
         root.classList.add('light');
       }
     };

@@ -28,7 +28,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 }) => {
   return (
     <div
-      className="fixed z-50 bg-card border border-border rounded-lg shadow-lg flex items-center gap-1 p-1"
+      className="fixed z-50 bg-card border border-border rounded-2xl shadow-neu-hover flex items-center gap-1 p-1.5"
       style={{ left: position.x, top: position.y }}
     >
       <button

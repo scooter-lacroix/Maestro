@@ -30,7 +30,7 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
     >
       <button
         onClick={() => onToggleTab("toc")}
-        className="sidebar-tab-flag group flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+        className="sidebar-tab-flag group flex items-center justify-center w-8 h-10 rounded-r-xl border border-transparent bg-background shadow-neu-extruded-small text-muted-foreground hover:text-foreground hover:shadow-neu-hover transition-all"
         title="Table of Contents"
       >
         <svg
@@ -50,7 +50,7 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
 
       <button
         onClick={() => onToggleTab("versions")}
-        className="sidebar-tab-flag group relative flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+        className="sidebar-tab-flag group relative flex items-center justify-center w-8 h-10 rounded-r-xl border border-transparent bg-background shadow-neu-extruded-small text-muted-foreground hover:text-foreground hover:shadow-neu-hover transition-all"
         title="Plan Versions"
       >
         <svg
@@ -74,7 +74,7 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
       {showVaultTab && (
         <button
           onClick={() => onToggleTab("vault")}
-          className="sidebar-tab-flag group flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+          className="sidebar-tab-flag group flex items-center justify-center w-8 h-10 rounded-r-xl border border-transparent bg-background shadow-neu-extruded-small text-muted-foreground hover:text-foreground hover:shadow-neu-hover transition-all"
           title="Vault Browser"
         >
           <svg

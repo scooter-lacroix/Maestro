@@ -129,16 +129,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }, [toolbar.handleLineSelectionEnd]);
 
-  // Determine theme for @pierre/diffs
-  const pierreTheme = useMemo(() => {
-    const effectiveTheme = theme === 'system'
-      ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-      : theme;
-    return effectiveTheme === 'light' ? 'pierre-light' : 'pierre-dark';
-  }, [theme]);
+  // Force dark mode for diff view
+  const pierreTheme = 'pierre-dark';
 
   return (
-    <div ref={containerRef} className="h-full overflow-auto relative" onMouseMove={toolbar.handleMouseMove}>
+    <div ref={containerRef} className="h-full overflow-auto relative bg-surface-glass" onMouseMove={toolbar.handleMouseMove}>
       <FileHeader
         filePath={filePath}
         patch={patch}
@@ -146,24 +141,26 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         onToggleViewed={onToggleViewed}
       />
 
-      <div className="p-4">
-        <PatchDiff
-          key={filePath}
-          patch={patch}
-          options={{
-            theme: pierreTheme,
-            themeType: 'dark',
-            diffStyle,
-            diffIndicators: 'bars',
-            enableLineSelection: true,
-            enableHoverUtility: true,
-            onLineSelectionEnd: (range) => toolbar.handleLineSelectionEnd(range as SelectedLineRange | null),
-          }}
-          lineAnnotations={lineAnnotations}
-          selectedLines={pendingSelection || undefined}
-          renderAnnotation={renderAnnotation}
-          renderHoverUtility={renderHoverUtility}
-        />
+      <div className="p-4 relative">
+        <div className="diff-dark-container relative z-10 p-4">
+          <PatchDiff
+            key={filePath}
+            patch={patch}
+            options={{
+              theme: pierreTheme,
+              themeType: 'dark',
+              diffStyle,
+              diffIndicators: 'bars',
+              enableLineSelection: true,
+              enableHoverUtility: true,
+              onLineSelectionEnd: (range) => toolbar.handleLineSelectionEnd(range as SelectedLineRange | null),
+            }}
+            lineAnnotations={lineAnnotations}
+            selectedLines={pendingSelection || undefined}
+            renderAnnotation={renderAnnotation}
+            renderHoverUtility={renderHoverUtility}
+          />
+        </div>
       </div>
 
       {toolbar.toolbarState && (

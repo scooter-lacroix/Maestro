@@ -27,8 +27,8 @@ import {
   useResizablePanel,
   ResizeHandle,
   ConfirmDialog,
-  ModeSwitcher,
   TableOfContents,
+  ModeSwitcher,
 } from '@maestro/tracklens-ui';
 import {
   getObsidianSettings,
@@ -94,47 +94,47 @@ export default function App() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [globalAttachments, setGlobalAttachments] = useState<ImageAttachment[]>([]);
-  
+
   // Editor state
   const [mode, setMode] = useState<EditorMode>('selection');
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>(() => getUIPreferences());
-  
+
   // Modal states
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showPermissionSetup, setShowPermissionSetup] = useState(false);
   const [showUIFeaturesSetup, setShowUIFeaturesSetup] = useState(false);
-  
+
   // Dialog states
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [showClaudeCodeWarning, setShowClaudeCodeWarning] = useState(false);
   const [showAgentWarning, setShowAgentWarning] = useState(false);
   const [agentWarningMessage, setAgentWarningMessage] = useState('');
-  
+
   // Completion state
   const [completionResult, setCompletionResult] = useState<'approved' | 'denied' | 'feedback' | null>(null);
-  
+
   // API/Mode state
   const [isApiMode, setIsApiMode] = useState(false);
   const [origin, setOrigin] = useState<'claude-code' | 'opencode' | 'pi' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
-  
+
   // Toast notification
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
+
   // Export dropdown
   const [showExportDropdown, setShowExportDropdown] = useState(false);
-  const [initialExportTab, setInitialExportTab] = useState<'annotations' | 'notes'>('annotations');
+  const [initialExportTab, setInitialExportTab] = useState<'export' | 'settings'>('export');
 
   // Refs
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Resizable panels
-  const leftPanel = useResizablePanel({ 
-    storageKey: 'tracklens-left-panel-width', 
+  const leftPanel = useResizablePanel({
+    storageKey: 'tracklens-left-panel-width',
     defaultWidth: 320,
     minWidth: 240,
     maxWidth: 480,
@@ -147,10 +147,10 @@ export default function App() {
     side: 'left',
   });
   const isResizing = leftPanel.isDragging || tocPanel.isDragging;
-  
+
   // Sidebar (TOC + Vault)
   const sidebar = useSidebar(uiPrefs.tocEnabled);
-  
+
   // Vault browser
   const vaultBrowser = useVaultBrowser();
   const showVaultTab = useMemo(() => isVaultBrowserEnabled(), [uiPrefs]);
@@ -159,14 +159,20 @@ export default function App() {
     const settings = getObsidianSettings();
     return getEffectiveVaultPath(settings);
   }, [showVaultTab]);
-  
+
+  const obsidianFolder = useMemo(() => {
+    if (!showVaultTab) return '';
+    const settings = getObsidianSettings();
+    return settings.folder;
+  }, [showVaultTab]);
+
   // Track active section for TOC
-  const headingIds = useMemo(() => 
-    blocks.filter(b => b.type === 'heading').map(b => b.id), 
+  const headingIds = useMemo(() =>
+    blocks.filter(b => b.type === 'heading').map(b => b.id),
     [blocks]
   );
   const activeSection = useActiveSection(headingIds);
-  
+
   // Linked document navigation
   const sidebarForLinkedDoc = { open: (tab: string) => sidebar.open(tab as any) };
   const linkedDocHook = useLinkedDoc({
@@ -174,7 +180,7 @@ export default function App() {
     setMarkdown, setAnnotations, setSelectedAnnotationId, setGlobalAttachments,
     viewerRef, sidebar: sidebarForLinkedDoc,
   });
-  
+
   // Agent validation (for OpenCode)
   const { getAgentWarning } = useAgents(origin);
 
@@ -185,8 +191,8 @@ export default function App() {
         if (!res.ok) throw new Error('Not in API mode');
         return res.json();
       })
-      .then((data: { 
-        plan: string; 
+      .then((data: {
+        plan: string;
         origin?: 'claude-code' | 'opencode' | 'pi';
         sharingEnabled?: boolean;
         repoInfo?: { display: string; branch?: string };
@@ -235,11 +241,11 @@ export default function App() {
 
   // Auto-fetch vault tree when vault tab opened
   useEffect(() => {
-    if (sidebar.activeTab === 'vault' && showVaultTab && vaultPath && 
-        vaultBrowser.tree.length === 0 && !vaultBrowser.isLoading) {
-      vaultBrowser.fetchTree(vaultPath);
+    if (sidebar.activeTab === 'vault' && showVaultTab && vaultPath &&
+      vaultBrowser.tree.length === 0 && !vaultBrowser.isLoading) {
+      vaultBrowser.fetchTree(vaultPath, obsidianFolder);
     }
-  }, [sidebar.activeTab, showVaultTab, vaultPath, vaultBrowser]);
+  }, [sidebar.activeTab, showVaultTab, vaultPath, obsidianFolder, vaultBrowser]);
 
   // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
   useEffect(() => {
@@ -248,15 +254,15 @@ export default function App() {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-        
-        if (showExportModal || showImportModal || showFeedbackPrompt || 
-            showClaudeCodeWarning || showAgentWarning || showPermissionSetup || 
-            showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive) {
+
+        if (showExportModal || showImportModal || showFeedbackPrompt ||
+          showClaudeCodeWarning || showAgentWarning || showPermissionSetup ||
+          showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive) {
           return;
         }
-        
+
         e.preventDefault();
-        
+
         if (annotations.length === 0) {
           // Check agent for OpenCode
           if (origin === 'opencode') {
@@ -273,18 +279,18 @@ export default function App() {
         }
         return;
       }
-      
+
       // Cmd/Ctrl+S - Save to notes
       if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-        
+
         if (showExportModal || showFeedbackPrompt || showClaudeCodeWarning ||
-            showAgentWarning || showPermissionSetup || showUIFeaturesSetup || 
-            isSubmitting || !isApiMode) {
+          showAgentWarning || showPermissionSetup || showUIFeaturesSetup ||
+          isSubmitting || !isApiMode) {
           return;
         }
-        
+
         e.preventDefault();
         handleSaveShortcut();
       }
@@ -360,11 +366,11 @@ export default function App() {
       const obsidianSettings = getObsidianSettings();
       const bearSettings = getBearSettings();
       const agentSwitchSettings = getAgentSwitchSettings();
-      
-      const body: { 
+
+      const body: {
         approved: boolean;
-        obsidian?: object; 
-        bear?: object; 
+        obsidian?: object;
+        bear?: object;
         agentSwitch?: string;
         permissionMode?: string;
         feedback?: string;
@@ -422,7 +428,7 @@ export default function App() {
     setIsSubmitting(true);
     try {
       const annotationsOutput = exportAnnotations(blocks, annotations, globalAttachments);
-      
+
       const token = (window as any).TRACKLENS_AUTH_TOKEN;
       const res = await fetch('/api/decision', {
         method: 'POST',
@@ -436,7 +442,7 @@ export default function App() {
           annotations: JSON.stringify(annotations),
         }),
       });
-      
+
       if (res.ok) {
         setCompletionResult('denied');
       }
@@ -452,11 +458,11 @@ export default function App() {
       setShowFeedbackPrompt(true);
       return;
     }
-    
+
     setIsSubmitting(true);
     try {
       const annotationsOutput = exportAnnotations(blocks, annotations, globalAttachments);
-      
+
       const token = (window as any).TRACKLENS_AUTH_TOKEN;
       const res = await fetch('/api/decision', {
         method: 'POST',
@@ -470,7 +476,7 @@ export default function App() {
           annotations: JSON.stringify(annotations),
         }),
       });
-      
+
       if (res.ok) {
         setCompletionResult('feedback');
       }
@@ -543,7 +549,7 @@ export default function App() {
     } else if (defaultApp === 'bear' && bearOk) {
       handleQuickSaveToNotes('bear');
     } else {
-      setInitialExportTab('notes');
+      setInitialExportTab('settings');
       setShowExportModal(true);
     }
   };
@@ -610,7 +616,7 @@ export default function App() {
   }, [blocks, annotations, globalAttachments, linkedDocHook.isActive]);
 
   const annotationCount = annotations.length;
-  
+
   const agentName = useMemo(() => {
     if (origin === 'opencode') return 'OpenCode';
     if (origin === 'claude-code') return 'Claude Code';
@@ -634,33 +640,51 @@ export default function App() {
     <ThemeProvider>
       <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
         {/* Header */}
-        <header className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-20">
+        <header className="h-12 flex items-center justify-between px-2 md:px-4 fabric-border-b bg-card/50 backdrop-blur-xl sticky top-0 z-20">
           <div className="flex items-center gap-2 md:gap-3">
-            <h1 className="text-sm font-semibold tracking-tight">TrackLens</h1>
+            <button
+              onClick={() => sidebar.isOpen ? sidebar.close() : sidebar.open()}
+              className={`p-1.5 rounded-md transition-all ${sidebar.isOpen ? 'bg-primary/10 text-primary shadow-neu-inset-small' : 'text-muted-foreground hover:text-foreground hover:bg-muted shadow-neu-small'}`}
+              title={sidebar.isOpen ? 'Close sidebar' : 'Open sidebar'}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+              </svg>
+            </button>
             {origin && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
-                origin === 'claude-code'
-                  ? 'bg-orange-500/15 text-orange-400'
-                  : origin === 'pi'
-                    ? 'bg-violet-500/15 text-violet-400'
-                    : 'bg-zinc-500/20 text-zinc-400'
-              }`}>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${origin === 'claude-code'
+                ? 'bg-orange-500/15 text-orange-400'
+                : origin === 'pi'
+                  ? 'bg-violet-500/15 text-violet-400'
+                  : 'bg-zinc-500/20 text-zinc-400'
+                }`}>
                 {agentName}
               </span>
             )}
           </div>
 
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <a
+              href="https://github.com/scooter-lacroix/Maestro.git"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-background border border-border/10 shadow-neu-extruded hover:-translate-y-0.5 hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all animate-brand-pulse"
+            >
+              <h1 className="text-sm font-bold font-display tracking-tight text-foreground/90 group-hover:text-primary transition-colors">
+                TrackLens
+              </h1>
+            </a>
+          </div>
           <div className="flex items-center gap-1 md:gap-2">
             {isApiMode && !linkedDocHook.isActive && (
               <>
                 <button
                   onClick={handleFeedback}
                   disabled={isSubmitting}
-                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
-                    isSubmitting
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
-                  }`}
+                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${isSubmitting
+                    ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                    : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
+                    }`}
                   title="Send Feedback (Cmd+Enter)"
                 >
                   <span className="hidden md:inline">{isSubmitting ? 'Sending...' : 'Feedback'}</span>
@@ -687,11 +711,10 @@ export default function App() {
                       handleApprove();
                     }}
                     disabled={isSubmitting}
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                      isSubmitting
-                        ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : 'bg-success text-success-foreground hover:opacity-90'
-                    }`}
+                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${isSubmitting
+                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                      : 'bg-success text-success-foreground hover:opacity-90'
+                      }`}
                     title="Approve (Cmd+Enter)"
                   >
                     <span className="md:hidden">{isSubmitting ? '...' : 'OK'}</span>
@@ -711,11 +734,11 @@ export default function App() {
             )}
 
             <ModeToggle />
-            
+
             {!linkedDocHook.isActive && (
-              <Settings 
-                onIdentityChange={handleIdentityChange} 
-                origin={origin} 
+              <Settings
+                onIdentityChange={handleIdentityChange}
+                origin={origin}
                 mode="plan"
                 onUIPreferencesChange={setUiPrefs}
               />
@@ -723,12 +746,11 @@ export default function App() {
 
             <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
-              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
-                isPanelOpen
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
-              title="Toggle Annotation Panel"
+              className={`p-1.5 rounded-md transition-all ml-1 ${isPanelOpen
+                ? 'bg-primary/10 text-primary shadow-neu-inset-small'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted shadow-neu-small'
+                }`}
+              title={isPanelOpen ? 'Close annotations' : 'Open annotations'}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
@@ -738,7 +760,7 @@ export default function App() {
             {/* Export Dropdown */}
             <div className="relative flex" data-export-dropdown>
               <button
-                onClick={() => { setInitialExportTab('annotations'); setShowExportModal(true); }}
+                onClick={() => { setShowExportModal(true); setInitialExportTab('export'); }}
                 className="p-1.5 md:px-2.5 md:py-1 rounded-l-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
                 title="Export"
               >
@@ -797,41 +819,40 @@ export default function App() {
         </header>
 
         {/* Linked document error banner */}
-        {linkedDocHook.error && (
-          <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
-            <span className="text-xs text-destructive">{linkedDocHook.error}</span>
-          </div>
-        )}
+        {
+          linkedDocHook.error && (
+            <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2 flex items-center gap-2 flex-shrink-0">
+              <span className="text-xs text-destructive">{linkedDocHook.error}</span>
+            </div>
+          )
+        }
 
-        {/* Main Content */}
-        <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
+        <div className={`flex-1 flex overflow-hidden bg-complex relative ${isResizing ? 'select-none' : ''}`}>
           {/* Left Sidebar: TOC / Vault */}
           {sidebar.isOpen && (
             <>
-              <div 
-                className="border-r border-border overflow-hidden flex flex-col bg-card/30"
+              <div
+                className="fabric-border-r overflow-hidden flex flex-col bg-card/30"
                 style={{ width: tocPanel.width }}
               >
                 {/* Tab Switcher */}
                 <div className="flex border-b border-border">
                   <button
                     onClick={() => sidebar.toggleTab('toc')}
-                    className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                      sidebar.activeTab === 'toc' 
-                        ? 'bg-primary/10 text-primary border-b-2 border-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                    }`}
+                    className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${sidebar.activeTab === 'toc'
+                      ? 'bg-primary/10 text-primary border-b-2 border-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                      }`}
                   >
                     Contents
                   </button>
                   {showVaultTab && (
                     <button
                       onClick={() => sidebar.toggleTab('vault')}
-                      className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                        sidebar.activeTab === 'vault' 
-                          ? 'bg-primary/10 text-primary border-b-2 border-primary' 
-                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                      }`}
+                      className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${sidebar.activeTab === 'vault'
+                        ? 'bg-primary/10 text-primary border-b-2 border-primary'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        }`}
                     >
                       Vault
                     </button>
@@ -874,17 +895,20 @@ export default function App() {
             </>
           )}
 
-          {/* Document Area */}
-          <main ref={containerRef} className="flex-1 min-w-0 overflow-y-auto bg-grid">
-            <div className="min-h-full flex flex-col items-center px-4 py-3 md:px-10 md:py-8 xl:px-16">
-              {/* Mode Switcher */}
-              <div className="w-full max-w-[832px] 2xl:max-w-5xl mb-3 md:mb-4 flex justify-start">
-                <ModeSwitcher 
-                  mode={mode} 
-                  onChange={handleModeChange} 
-                />
+          <main ref={containerRef} className="flex-1 min-w-0 overflow-y-auto relative">
+            {/* Mode Switcher - Sticky Placement with Sliding Animation */}
+            <div
+              className="sticky top-6 z-30 flex justify-end px-8 pointer-events-none transition-all duration-300 ease-in-out"
+              style={{
+                right: isPanelOpen ? `${leftPanel.width + 32}px` : '32px'
+              }}
+            >
+              <div className="pointer-events-auto">
+                <ModeSwitcher mode={mode} onChange={handleModeChange} />
               </div>
+            </div>
 
+            <div className="min-h-full flex flex-col items-center px-4 py-1 md:px-10 md:py-4 xl:px-16">
               <Viewer
                 key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
                 ref={viewerRef}
@@ -902,8 +926,8 @@ export default function App() {
                 onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
                 stickyActions={uiPrefs.stickyActionsEnabled}
                 onOpenLinkedDoc={handleOpenLinkedDoc}
-                linkedDocInfo={linkedDocHook.isActive ? { 
-                  filepath: linkedDocHook.filepath!, 
+                linkedDocInfo={linkedDocHook.isActive ? {
+                  filepath: linkedDocHook.filepath!,
                   onBack: handleLinkedDocBack
                 } : null}
                 showToc={false}
@@ -915,22 +939,23 @@ export default function App() {
           {isPanelOpen && <ResizeHandle {...leftPanel.handleProps} />}
 
           {/* Annotation Panel */}
-          <AnnotationPanel
-            isOpen={isPanelOpen}
-            annotations={annotations}
-            blocks={blocks}
-            onSelect={handleSelectAnnotation}
-            onDelete={handleDeleteAnnotation}
-            onEdit={handleEditAnnotation}
-            selectedId={selectedAnnotationId}
-            width={leftPanel.width}
-          />
+          <div className="fabric-border-l flex flex-col bg-card/30" style={{ width: leftPanel.width }}>
+            <AnnotationPanel
+              isOpen={isPanelOpen}
+              annotations={annotations}
+              blocks={blocks}
+              onSelect={handleSelectAnnotation}
+              onDelete={handleDeleteAnnotation}
+              onEdit={handleEditAnnotation}
+              selectedId={selectedAnnotationId}
+            />
+          </div>
         </div>
 
         {/* Export Modal */}
         <ExportModal
           isOpen={showExportModal}
-          onClose={() => { setShowExportModal(false); setInitialExportTab('annotations'); }}
+          onClose={() => { setShowExportModal(false); setInitialExportTab('export'); }}
           annotationsOutput={annotationsOutput}
           annotationCount={annotationCount}
           markdown={markdown}
@@ -939,40 +964,42 @@ export default function App() {
         />
 
         {/* Import Modal */}
-        {showImportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-card border border-border rounded-lg shadow-xl p-6 w-full max-w-md">
-              <h2 className="text-lg font-semibold mb-4">Import Review</h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                Paste a share URL to import a review.
-              </p>
-              <input
-                type="text"
-                placeholder="https://tracklens.dev/share/..."
-                className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm mb-4"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    setShowImportModal(false);
-                  }
-                }}
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="px-4 py-2 text-sm bg-muted rounded-md hover:bg-muted/80"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90"
-                >
-                  Import
-                </button>
+        {
+          showImportModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="bg-card border border-border rounded-lg shadow-xl p-6 w-full max-w-md">
+                <h2 className="text-lg font-semibold mb-4">Import Review</h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Paste a share URL to import a review.
+                </p>
+                <input
+                  type="text"
+                  placeholder="https://tracklens.dev/share/..."
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm mb-4"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      setShowImportModal(false);
+                    }
+                  }}
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    className="px-4 py-2 text-sm bg-muted rounded-md hover:bg-muted/80"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90"
+                  >
+                    Import
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        }
 
         {/* Feedback prompt dialog */}
         <ConfirmDialog
@@ -1017,52 +1044,59 @@ export default function App() {
         />
 
         {/* Permission Mode Setup */}
-        {showPermissionSetup && (
-          <PermissionModeSetup
-            isOpen={showPermissionSetup}
-            onComplete={(mode) => {
-              setPermissionMode(mode);
-              setShowPermissionSetup(false);
-              if (needsUIFeaturesSetup()) {
-                setShowUIFeaturesSetup(true);
-              }
-            }}
-          />
-        )}
+        {
+          showPermissionSetup && (
+            <PermissionModeSetup
+              isOpen={showPermissionSetup}
+              onComplete={(mode) => {
+                setPermissionMode(mode);
+                setShowPermissionSetup(false);
+                if (needsUIFeaturesSetup()) {
+                  setShowUIFeaturesSetup(true);
+                }
+              }}
+            />
+          )
+        }
 
         {/* UI Features Setup */}
-        {showUIFeaturesSetup && (
-          <UIFeaturesSetup
-            isOpen={showUIFeaturesSetup}
-            onComplete={(prefs) => {
-              setUiPrefs(prefs);
-              setShowUIFeaturesSetup(false);
-            }}
-          />
-        )}
+        {
+          showUIFeaturesSetup && (
+            <UIFeaturesSetup
+              isOpen={showUIFeaturesSetup}
+              onComplete={(prefs) => {
+                setUiPrefs(prefs);
+                setShowUIFeaturesSetup(false);
+              }}
+            />
+          )
+        }
 
         {/* Completion overlay */}
-        {completionResult && (
-          <CompletionOverlay
-            submitted={completionResult}
-            title={completionTitles[completionResult]}
-            subtitle={completionSubtitles[completionResult]}
-            agentLabel={agentName}
-          />
-        )}
+        {
+          completionResult && (
+            <CompletionOverlay
+              submitted={completionResult}
+              title={completionTitles[completionResult]}
+              subtitle={completionSubtitles[completionResult]}
+              agentLabel={agentName}
+            />
+          )
+        }
 
         {/* Toast notification */}
-        {toast && (
-          <div className={`fixed top-16 right-4 z-50 px-3 py-2 rounded-lg text-xs font-medium shadow-lg transition-opacity ${
-            toast.type === 'success'
+        {
+          toast && (
+            <div className={`fixed top-16 right-4 z-50 px-3 py-2 rounded-lg text-xs font-medium shadow-lg transition-opacity ${toast.type === 'success'
               ? 'bg-success/15 text-success border border-success/30'
               : 'bg-destructive/15 text-destructive border border-destructive/30'
-          }`}>
-            {toast.message}
-          </div>
-        )}
-      </div>
-    </ThemeProvider>
+              }`}>
+              {toast.message}
+            </div>
+          )
+        }
+      </div >
+    </ThemeProvider >
   );
 }
 
@@ -1083,24 +1117,23 @@ function VaultNodeComponent({ node, activeFile, onSelect, depth = 0 }: VaultNode
   const [expanded, setExpanded] = useState(true);
   const isActive = activeFile === node.path;
   const isFolder = node.type === 'folder';
-  
+
   return (
     <div>
       <button
         onClick={() => isFolder ? setExpanded(!expanded) : onSelect(node.path)}
-        className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center gap-1.5 transition-colors ${
-          isActive 
-            ? 'bg-primary/10 text-primary' 
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-        }`}
+        className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center gap-1.5 transition-colors ${isActive
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`}
         style={{ paddingLeft: `${8 + depth * 12}px` }}
       >
         {isFolder && (
-          <svg 
-            className={`w-3 h-3 transition-transform ${expanded ? '' : '-rotate-90'}`} 
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor" 
+          <svg
+            className={`w-3 h-3 transition-transform ${expanded ? '' : '-rotate-90'}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
             strokeWidth={2}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />

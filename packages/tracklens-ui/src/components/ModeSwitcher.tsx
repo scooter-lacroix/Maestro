@@ -17,7 +17,7 @@ interface ModeSwitcherProps {
 
 export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ mode, onChange }) => {
   return (
-    <div className="inline-flex items-center bg-muted/50 rounded-lg p-0.5 border border-border/30">
+    <div className="inline-flex items-center bg-background rounded-2xl p-1.5 shadow-neu-inset border-none gap-1">
       <ModeButton
         active={mode === 'selection'}
         onClick={() => onChange('selection')}
@@ -64,14 +64,14 @@ const ModeButton: React.FC<{
   label: string;
   destructive?: boolean;
 }> = ({ active, onClick, icon, label, destructive }) => (
-  <button
+    <button
     onClick={onClick}
-    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
       active
         ? destructive
-          ? 'bg-destructive/15 text-destructive shadow-sm'
-          : 'bg-background text-foreground shadow-sm'
-        : 'text-muted-foreground hover:text-foreground'
+          ? 'bg-background text-destructive shadow-neu-small'
+          : 'bg-background text-primary shadow-neu-small'
+        : 'text-muted-foreground hover:text-foreground hover:bg-muted/10'
     }`}
   >
     {icon}
