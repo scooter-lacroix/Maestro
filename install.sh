@@ -167,17 +167,22 @@ echo -e "    ${C}Please wait while the orchestra tunes (compiling setup tool)${N
 # Change to leindex Rust directory
 cd "$INSTALL_DIR/src/leindex"
 
+SETUP_SUCCESS=0
+
 # Check for headless mode (non-interactive install)
 if [[ "${MAESTRO_HEADLESS:-}" == "1" || "${MAESTRO_HEADLESS:-}" == "true" ]]; then
     echo -e "${C}    Running in headless mode (skipping interactive TUI)...${NC}"
-    echo -e "${Y}  [!] Headless install not yet fully implemented. Please run interactively.${NC}"
-    echo -e "${Y}      Or manually build and install the components.${NC}"
-    exit 1
-fi
-
+    echo -e "${C}    Use environment variables to customize installation:${NC}"
+    echo -e "${C}      MAESTRO_INSTALL_PATH, MAESTRO_EDITOR, MAESTRO_INSTALL_*${NC}"
+    echo
+    if cargo run --release --bin maestro-setup -- --headless; then
+        SETUP_SUCCESS=1
+    else
+        echo -e "${R}  [✗] Headless installation failed${NC}"
+        exit 1
+    fi
 # Check if we have a TTY for the TUI (need both stdin and stdout)
-SETUP_SUCCESS=0
-if [[ -t 0 && -t 1 ]]; then
+elif [[ -t 0 && -t 1 ]]; then
     # Both stdin and stdout are TTYs, run directly
     echo -e "${C}    Launching interactive setup wizard...${NC}"
     if cargo run --release --bin maestro-setup; then
