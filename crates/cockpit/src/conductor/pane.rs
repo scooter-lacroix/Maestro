@@ -1185,7 +1185,7 @@ impl ConductorPane {
         }
 
         if self.normalized_tree.expanded_nodes.is_empty() {
-            for root_id in self.normalized_tree.roots.clone() {
+            for root_id in self.normalized_tree.root_ids.clone() {
                 self.normalized_tree.expanded_nodes.insert(root_id);
             }
         }
@@ -1201,7 +1201,7 @@ impl ConductorPane {
             self.sync_selection_from_legacy();
             if self.normalized_tree.selected_node.is_none() {
                 self.normalized_tree.selected_node =
-                    self.normalized_tree.visible_nodes().first().map(|node| node.id().clone());
+                    self.normalized_tree.visible_nodes().first().map(|(node_id, _)| node_id.clone());
             }
         }
 
@@ -1269,9 +1269,11 @@ impl ConductorPane {
 
                                     external_sessions.push(
                                         super::tree_builder::ExternalSession {
-                                            session_id: session.session_id.clone(),
-                                            track_id: Some(track_id.clone()),
-                                            status: session.status,
+                                            id: session.session_id.clone(),
+                                            track_id: track_id.clone(),
+                                            task_id: String::new(),
+                                            title: format!("Session {}", session.session_id),
+                                            status: super::normalized_model::ConductorNodeStatus::from(session.status),
                                         },
                                     );
                                 }
@@ -1295,7 +1297,8 @@ impl ConductorPane {
 
     /// Get the currently selected node from the normalized tree
     pub fn get_selected_node(&self) -> Option<&Arc<dyn super::ConductorNode>> {
-        self.normalized_tree.selected()
+        self.normalized_tree.selected_node.as_ref()
+            .and_then(|id| self.normalized_tree.nodes.get(id))
     }
 
     /// Set the selected node in the normalized tree
@@ -1304,8 +1307,11 @@ impl ConductorPane {
     }
 
     /// Get all visible nodes from the normalized tree
-    pub fn get_visible_nodes(&self) -> Vec<&Arc<dyn super::ConductorNode>> {
+    pub fn get_visible_nodes(&self) -> Vec<Arc<dyn super::ConductorNode>> {
         self.normalized_tree.visible_nodes()
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect()
     }
 
     fn sync_selection_from_legacy(&mut self) {
