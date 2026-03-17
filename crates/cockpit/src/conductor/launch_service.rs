@@ -71,7 +71,9 @@ impl LaunchService{
                     },
                     Err(_) => {
                         // Kill the process if it timed out
-                        let _ = child.kill();
+                        if let Err(e) = child.kill() {
+                            eprintln!("Warning: Failed to kill timed-out process {}: {}", request.track_id, e);
+                        }
                         LaunchResult::Timeout {
                             track_id: request.track_id,
                             timeout_secs: self.timeout_secs,

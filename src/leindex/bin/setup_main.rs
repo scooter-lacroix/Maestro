@@ -122,6 +122,14 @@ impl LogEntry {
 }
 
 fn main() -> Result<(), io::Error> {
+    // Check for headless mode
+    let headless = std::env::args().any(|arg| arg == "--headless" || arg == "-h")
+        || std::env::var("MAESTRO_HEADLESS").map(|v| v == "1" || v == "true").unwrap_or(false);
+
+    if headless {
+        return run_headless_install();
+    }
+
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         eprintln!("Error: Maestro Setup Wizard requires an interactive terminal.");
         eprintln!();
@@ -133,8 +141,8 @@ fn main() -> Result<(), io::Error> {
         eprintln!("  1. Run the installer directly in your terminal (not via a script redirect)");
         eprintln!("  2. Make sure you're not piping input/output");
         eprintln!("  3. Try: bash install.sh (from your terminal)");
+        eprintln!("  4. For headless/CI installs, use: cargo run --bin maestro-setup -- --headless");
         eprintln!();
-        eprintln!("For automation/headless installs, a non-interactive mode will be added in a future release.");
         std::process::exit(1);
     }
 
@@ -220,6 +228,166 @@ fn cleanup_terminal(
     terminal.show_cursor()?;
     disable_raw_mode()?;
     std::thread::sleep(Duration::from_millis(50));
+    Ok(())
+}
+
+/// Run installation in headless mode (no TUI) for CI/automation
+fn run_headless_install() -> Result<(), io::Error> {
+    use std::sync::mpsc;
+    use std::thread;
+
+    println!("╔══════════════════════════════════════════════════════════╗");
+    println!("║       Maestro Setup Wizard (Headless Mode)               ║");
+    println!("╚══════════════════════════════════════════════════════════╝");
+    println!();
+
+    let detected_distro = detect_distro();
+    println!("Detected environment: {} ({})",
+        detected_distro,
+        detected_distro.package_manager_name()
+    );
+
+    // Default configuration for headless mode
+    let install_path = std::env::var("MAESTRO_INSTALL_PATH").unwrap_or_else(|_| "~/.maestro".to_string());
+    let editor = std::env::var("MAESTRO_EDITOR").unwrap_or_else(|_| "hx".to_string());
+
+    // Get tool selections from environment or use defaults
+    let mut selected_tools = Vec::new();
+    let all_tools = vec![
+        ("Go Language (for Zoekt)", "MAESTRO_INSTALL_GO"),
+        ("Zoekt (Fast Code Search)", "MAESTRO_INSTALL_ZOEKT"),
+        ("Tmux / Tmux-RS", "MAESTRO_INSTALL_TMUX"),
+        ("Yazi (Terminal File Manager)", "MAESTRO_INSTALL_YAZI"),
+        ("Claude Code (by Anthropic)", "MAESTRO_INSTALL_CLAUDE"),
+        ("Gemini CLI (by Google)", "MAESTRO_INSTALL_GEMINI"),
+        ("iFlow CLI (by iFlow)", "MAESTRO_INSTALL_IFLOW"),
+        ("Qwen Code (QwenLM)", "MAESTRO_INSTALL_QWEN"),
+        ("Codex CLI (OpenAI)", "MAESTRO_INSTALL_CODEX"),
+        ("OpenCode (Independent)", "MAESTRO_INSTALL_OPENCODE"),
+        ("Amp CLI (by Sourcegraph)", "MAESTRO_INSTALL_AMP"),
+        ("Droid CLI (by Factory)", "MAESTRO_INSTALL_DROID"),
+        ("pi-mono (Multi-Model CLI)", "MAESTRO_INSTALL_PIMONO"),
+    ];
+
+    // In headless mode, install all tools by default unless explicitly disabled
+    for (tool_name, env_var) in &all_tools {
+        let should_install = match std::env::var(env_var) {
+            Ok(v) => v != "0" && v != "false" && v != "no",
+            Err(_) => true, // Default to installing if env var not set
+        };
+        if should_install {
+            selected_tools.push(tool_name.to_string());
+        }
+    }
+
+    println!("Install path: {}", install_path);
+    println!("Editor: {}", editor);
+    println!("Selected components: {}", selected_tools.len());
+    for tool in &selected_tools {
+        println!("  - {}", tool);
+    }
+    println!();
+
+    // Create config and run orchestra
+    let config = Config {
+        install_path,
+        editor,
+        selected_tools,
+        password_cache: Arc::new(PasswordCache::new()),
+        distro: detected_distro,
+    };
+
+    let (tx, rx) = mpsc::channel();
+
+    // Spawn orchestra in a thread
+    thread::spawn(move || {
+        run_orchestra(tx, config);
+    });
+
+    // Process events and print to stdout
+    let mut current_step = 0;
+    let mut total_steps = 0;
+    let mut failed = false;
+
+    loop {
+        match rx.recv() {
+            Ok(event) => {
+                match event {
+                    SetupEvent::PlanReady(plan) => {
+                        total_steps = plan.len();
+                        println!("Installation plan: {} steps", total_steps);
+                        println!();
+                    }
+                    SetupEvent::StepStarted { current, total, step } => {
+                        current_step = current;
+                        print!("[{}/{}] {}... ", current, total, step.name);
+                        io::Write::flush(&mut io::stdout())?;
+                    }
+                    SetupEvent::StepCompleted { current, total, step_name: _ } => {
+                        println!("✓");
+                        if current == total {
+                            println!();
+                            println!("═══════════════════════════════════════════════════════════");
+                            println!("Installation completed successfully!");
+                            println!("═══════════════════════════════════════════════════════════");
+                            println!();
+                            println!("Next command: maestro");
+                        }
+                    }
+                    SetupEvent::Log(msg) => {
+                        // Only print important logs in headless mode
+                        let trimmed = msg.trim();
+                        if trimmed.starts_with("[ERR]") ||
+                           trimmed.starts_with("[WARN]") ||
+                           trimmed.starts_with("Error:") ||
+                           trimmed.starts_with("Warning:") {
+                            println!();
+                            println!("  → {}", trimmed);
+                            print!("[{}/{}] Continuing... ", current_step, total_steps);
+                            io::Write::flush(&mut io::stdout())?;
+                        }
+                    }
+                    SetupEvent::Error { step, message, hint } => {
+                        failed = true;
+                        println!();
+                        println!();
+                        println!("═══════════════════════════════════════════════════════════");
+                        println!("INSTALLATION FAILED");
+                        println!("═══════════════════════════════════════════════════════════");
+                        if let Some(s) = step {
+                            println!("Failed step: {}", s);
+                        }
+                        println!("Error: {}", message);
+                        if let Some(h) = hint {
+                            println!("Hint: {}", h);
+                        }
+                        println!();
+                    }
+                    SetupEvent::Finished => {
+                        if !failed {
+                            println!();
+                            println!("═══════════════════════════════════════════════════════════");
+                            println!("Installation completed successfully!");
+                            println!("═══════════════════════════════════════════════════════════");
+                            println!();
+                            println!("Next command: maestro");
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            Err(_) => {
+                println!("Installation channel closed unexpectedly.");
+                break;
+            }
+        }
+    }
+
+    if failed {
+        std::process::exit(1);
+    }
+
     Ok(())
 }
 
