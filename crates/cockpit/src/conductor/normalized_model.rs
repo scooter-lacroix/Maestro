@@ -385,7 +385,14 @@ impl TreeBuilder {
 
             // Get metadata for additional track info
             let metadata = self.metadata.get(&track.id);
-            let track_type = metadata.map(|m| format!("{:?}", m.track_type)).unwrap_or_default();
+            let track_type = metadata
+                .map(|m| match m.track_type {
+                    leindex_core::orchestrate::model::TrackType::Feature => "Feature",
+                    leindex_core::orchestrate::model::TrackType::Master => "Master",
+                    leindex_core::orchestrate::model::TrackType::Refactor => "Refactor",
+                    leindex_core::orchestrate::model::TrackType::Hotfix => "Hotfix",
+                })
+                .unwrap_or("");
 
             // Collect task children for this track
             let mut task_children: Vec<Arc<dyn ConductorNode>> = Vec::new();

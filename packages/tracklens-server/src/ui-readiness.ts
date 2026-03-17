@@ -49,22 +49,36 @@ export function createClientReadyMonitor(): ClientReadyMonitor {
 }
 
 /**
+ * Escape special characters to prevent XSS when injecting into HTML/JS
+ */
+function escapeForJs(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
+/**
  * Inject TrackLens bootstrap script into HTML content
  */
 export function injectTrackLensBootstrap(
   htmlContent: string,
   authToken: string
 ): string {
+  const escapedToken = escapeForJs(authToken);
   const bootstrapScript = `
 <script>
   window.__TRACKLENS__ = {
-    authToken: "${authToken}",
+    authToken: "${escapedToken}",
     clientReady: false,
     markReady: function() {
       fetch('/api/client-ready', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer ${authToken}',
+          'Authorization': 'Bearer ${escapedToken}',
           'Content-Type': 'application/json'
         }
       }).then(() => {

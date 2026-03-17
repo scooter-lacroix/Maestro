@@ -33,13 +33,18 @@ impl InMemoryEventBridge {
     }
     
     fn get_or_create_sender(&self, session_id: &str) -> broadcast::Sender<ConductorEvent> {
-        let senders = self.senders.read().unwrap();
+        let senders = self.senders.read().expect("RwLock read lock poisoned");
         if let Some(sender) = senders.get(session_id) {
             return sender.clone();
         }
         drop(senders);
-        
-        let mut senders = self.senders.write().unwrap();
+
+        let mut senders = self.senders.write().expect("RwLock write lock poisoned");
+        // Re-check after acquiring write lock to prevent race condition.
+        if let Some(sender) = senders.get(session_id) {
+            return sender.clone();
+        }
+
         let sender = broadcast::channel(EVENT_BUFFER_SIZE).0;
         senders.insert(session_id.to_string(), sender.clone());
         sender

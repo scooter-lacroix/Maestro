@@ -86,19 +86,24 @@ impl LaunchService{
         }
     }
 
-    /// Wait for a child process with a timeout
+    /// Wait for a child process with a timeout using efficient polling
     fn wait_with_timeout(&self, child: &mut Child, timeout: Duration) -> Result<(), ()> {
         let start = std::time::Instant::now();
+        let check_interval = Duration::from_millis(500); // Check every 500ms instead of 100ms
 
         loop {
             match child.try_wait() {
                 Ok(Some(_)) => return Ok(()), // Process exited
                 Ok(None) => {
                     // Process still running, check timeout
-                    if start.elapsed() >= timeout {
+                    let elapsed = start.elapsed();
+                    if elapsed >= timeout {
                         return Err(()); // Timeout
                     }
-                    thread::sleep(Duration::from_millis(100));
+                    // Sleep for the check interval or remaining time, whichever is shorter
+                    let remaining = timeout - elapsed;
+                    let sleep_duration = if remaining < check_interval { remaining } else { check_interval };
+                    thread::sleep(sleep_duration);
                 }
                 Err(_) => return Err(()), // Error checking status
             }
