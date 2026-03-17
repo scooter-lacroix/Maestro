@@ -678,7 +678,29 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         action: StepAction::Internal(Box::new(|| {
             let repo_root = find_repo_root()?;
             let manifest_path = repo_root.join("crates").join("cli").join("Cargo.toml");
+            let mut logs = Vec::new();
 
+            // Verify cargo is available
+            if !command_exists_on_path("cargo") {
+                anyhow::bail!(
+                    "Cargo (Rust build tool) not found in PATH. \
+                    Please install Rust: https://rustup.rs/"
+                );
+            }
+
+            // Verify manifest exists
+            if !manifest_path.exists() {
+                anyhow::bail!(
+                    "CLI manifest not found at {}. \
+                    The repository may be incomplete or corrupted.",
+                    manifest_path.display()
+                );
+            }
+            logs.push(format!("Found CLI manifest at {}", manifest_path.display()));
+
+            // Run cargo build with verbose output capture
+            logs.push("Starting cargo build (this may take a few minutes)...".to_string());
+            
             let output = std::process::Command::new("cargo")
                 .arg("build")
                 .arg("--release")
@@ -692,21 +714,55 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 .output()
                 .context("Failed to launch cargo build for crates/cli")?;
 
+            // Capture stdout for debugging
+            if !output.stdout.is_empty() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines().take(10) {
+                    logs.push(format!("  cargo: {}", line));
+                }
+            }
+
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 anyhow::bail!(
-                    "Failed to build canonical Maestro CLI (crates/cli): {}",
-                    stderr.trim()
+                    "Failed to build canonical Maestro CLI (crates/cli): {}\n\n\
+                    Troubleshooting:\n\
+                    1. Ensure you have a stable internet connection\n\
+                    2. Check that all dependencies are installed (see README.md)\n\
+                    3. Try running manually: cargo build --release --manifest-path {}\n\
+                    4. For detailed errors, run with RUST_BACKTRACE=1",
+                    stderr.trim(),
+                    manifest_path.display()
                 );
             }
 
-            Ok(vec![
-                format!(
-                    "Built canonical Maestro CLI via {}",
-                    manifest_path.display()
-                ),
-                "Verified build target: crates/cli (not leindex-core shim)".to_string(),
-            ])
+            // Verify binary was actually created
+            let expected_bin = repo_root.join("target").join("release").join("maestro");
+            if !expected_bin.exists() {
+                anyhow::bail!(
+                    "Build reported success but binary not found at {}. \
+                    This may indicate a build configuration issue.",
+                    expected_bin.display()
+                );
+            }
+            
+            // Get binary size for verification
+            if let Ok(metadata) = std::fs::metadata(&expected_bin) {
+                let size_mb = metadata.len() as f64 / 1_048_576.0;
+                logs.push(format!(
+                    "Binary built successfully: {:.2} MB at {}",
+                    size_mb,
+                    expected_bin.display()
+                ));
+            }
+
+            logs.push(format!(
+                "Built canonical Maestro CLI via {}",
+                manifest_path.display()
+            ));
+            logs.push("Verified build target: crates/cli (not leindex-core shim)".to_string());
+            
+            Ok(logs)
         })),
     });
 
@@ -716,58 +772,155 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         action: StepAction::Internal(Box::new(|| {
             let repo_root = find_repo_root()?;
             let src_bin = repo_root.join("target").join("release").join("maestro");
+            let mut logs = Vec::new();
+
+            // Verify source binary exists
             if !src_bin.exists() {
                 anyhow::bail!(
-                    "Expected canonical binary at {} but it does not exist",
+                    "Expected canonical binary at {} but it does not exist.\n\n\
+                    This usually means the previous build step failed or was skipped.\n\
+                    Try running the installer again, or build manually:\n\
+                    cargo build --release --manifest-path crates/cli/Cargo.toml",
                     src_bin.display()
                 );
             }
+            logs.push(format!("Found source binary at {}", src_bin.display()));
+
+            // Verify source binary is executable
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = src_bin.metadata()
+                    .with_context(|| format!("Cannot read metadata for {}", src_bin.display()))?;
+                let permissions = metadata.permissions();
+                if permissions.mode() & 0o111 == 0 {
+                    anyhow::bail!(
+                        "Source binary at {} is not executable.\n\
+                        The build may have produced an invalid binary.",
+                        src_bin.display()
+                    );
+                }
+            }
 
             let dst_dir = home_dir()?.join(".local").join("bin");
-            std::fs::create_dir_all(&dst_dir)?;
+            
+            // Create destination directory if it doesn't exist
+            if !dst_dir.exists() {
+                logs.push(format!("Creating destination directory: {}", dst_dir.display()));
+                std::fs::create_dir_all(&dst_dir).with_context(|| {
+                    format!(
+                        "Failed to create destination directory: {}\n\n\
+                        This may be a permissions issue. Try:\n\
+                        1. Ensure you have write access to ~/.local/\n\
+                        2. Create the directory manually: mkdir -p {}\n\
+                        3. Or choose a different install path",
+                        dst_dir.display(),
+                        dst_dir.display()
+                    )
+                })?;
+            }
+            
             let dst_bin = dst_dir.join("maestro");
+            
+            // Remove existing binary if present (to avoid copy errors)
+            if dst_bin.exists() {
+                logs.push("Removing existing binary".to_string());
+                std::fs::remove_file(&dst_bin).with_context(|| {
+                    format!("Failed to remove existing binary at {}", dst_bin.display())
+                })?;
+            }
+            
+            // Copy the binary
+            logs.push(format!("Copying binary to {}", dst_bin.display()));
             std::fs::copy(&src_bin, &dst_bin).with_context(|| {
                 format!(
-                    "Failed copying Maestro CLI from {} to {}",
+                    "Failed copying Maestro CLI from {} to {}\n\n\
+                    Possible causes:\n\
+                    1. Insufficient disk space\n\
+                    2. Permission denied (check ~/.local/bin permissions)\n\
+                    3. Source binary was modified during copy",
                     src_bin.display(),
                     dst_bin.display()
                 )
             })?;
 
+            // Set executable permissions
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let mut perms = std::fs::metadata(&dst_bin)?.permissions();
                 perms.set_mode(0o755);
                 std::fs::set_permissions(&dst_bin, perms)?;
+                logs.push("Set executable permissions (755)".to_string());
             }
 
+            // Verify the installed binary works
+            logs.push("Verifying installed binary...".to_string());
             let help_output = std::process::Command::new(&dst_bin)
                 .arg("--help")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .output()
-                .with_context(|| format!("Failed to execute {} --help", dst_bin.display()))?;
+                .with_context(|| {
+                    format!(
+                        "Failed to execute {} --help\n\n\
+                        The binary may have been corrupted during installation.\n\
+                        Try removing it and running the installer again:
+\
+                        rm {}\n\
+                        bash install.sh",
+                        dst_bin.display(),
+                        dst_bin.display()
+                    )
+                })?;
 
             if !help_output.status.success() {
                 let stderr = String::from_utf8_lossy(&help_output.stderr);
-                anyhow::bail!("Installed maestro --help failed: {}", stderr.trim());
+                anyhow::bail!(
+                    "Installed maestro --help failed: {}\n\n\
+                    The binary was installed but does not run correctly.\n\
+                    This may indicate a build or linking issue.",
+                    stderr.trim()
+                );
             }
 
+            // Verify required commands are present
             let help_text = String::from_utf8_lossy(&help_output.stdout);
+            let mut missing_commands = Vec::new();
             for required in ["orchestrate", "pi-status", "pi-test", "pi-agents"] {
                 if !help_text.contains(required) {
-                    anyhow::bail!(
-                        "Installed binary missing '{}' command; non-canonical binary likely installed",
-                        required
-                    );
+                    missing_commands.push(required);
                 }
             }
+            
+            if !missing_commands.is_empty() {
+                anyhow::bail!(
+                    "Installed binary missing required commands: {}\n\n\
+                    This indicates a non-canonical or outdated binary was installed.\n\
+                    Please ensure you're installing from the official Maestro repository.",
+                    missing_commands.join(", ")
+                );
+            }
 
-            Ok(vec![
-                format!("Installed Maestro CLI to {}", dst_bin.display()),
-                "Verified command surface includes orchestrate/pi-* commands".to_string(),
-            ])
+            logs.push(format!("Installed Maestro CLI to {}", dst_bin.display()));
+            logs.push("Verified command surface includes orchestrate/pi-* commands".to_string());
+            
+            // Check if ~/.local/bin is in PATH
+            if let Ok(path) = std::env::var("PATH") {
+                let local_bin = dst_dir.to_string_lossy();
+                if !path.contains(local_bin.as_ref()) {
+                    logs.push("".to_string());
+                    logs.push(format!("⚠️  Warning: {} is not in your PATH", local_bin));
+                    logs.push("   Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):".to_string());
+                    logs.push(format!("   export PATH=\"{}:$PATH\"", local_bin));
+                    logs.push("".to_string());
+                    logs.push("   Then reload your profile: source ~/.bashrc (or ~/.zshrc)".to_string());
+                } else {
+                    logs.push("✓ ~/.local/bin is in PATH".to_string());
+                }
+            }
+            
+            Ok(logs)
         })),
     });
 

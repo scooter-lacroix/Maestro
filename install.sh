@@ -167,14 +167,64 @@ echo -e "    ${C}Please wait while the orchestra tunes (compiling setup tool)${N
 # Change to leindex Rust directory
 cd "$INSTALL_DIR/src/leindex"
 
-# Check if we have a TTY for the TUI
-if [[ -t 0 ]]; then
-    # stdin is a TTY, run directly
-    cargo run --release --bin maestro-setup
+# Check for headless mode (non-interactive install)
+if [[ "${MAESTRO_HEADLESS:-}" == "1" || "${MAESTRO_HEADLESS:-}" == "true" ]]; then
+    echo -e "${C}    Running in headless mode (skipping interactive TUI)...${NC}"
+    echo -e "${Y}  [!] Headless install not yet fully implemented. Please run interactively.${NC}"
+    echo -e "${Y}      Or manually build and install the components.${NC}"
+    exit 1
+fi
+
+# Check if we have a TTY for the TUI (need both stdin and stdout)
+SETUP_SUCCESS=0
+if [[ -t 0 && -t 1 ]]; then
+    # Both stdin and stdout are TTYs, run directly
+    echo -e "${C}    Launching interactive setup wizard...${NC}"
+    if cargo run --release --bin maestro-setup; then
+        SETUP_SUCCESS=1
+    fi
 else
-    # No TTY available, use script to provide a pseudo-TTY
-    # This is needed for the ratatui TUI to work
-    script -qec "cargo run --release --bin maestro-setup" /dev/null
+    echo -e "${Y}  [!] No TTY detected. Attempting to provide pseudo-terminal...${NC}"
+    
+    # Try different methods to provide a pseudo-TTY
+    if command -v script &> /dev/null; then
+        # Try script command with different options
+        if script -q -c "cargo run --release --bin maestro-setup" /dev/null 2>/dev/null; then
+            SETUP_SUCCESS=1
+        elif script -qec "cargo run --release --bin maestro-setup" /dev/null 2>/dev/null; then
+            SETUP_SUCCESS=1
+        elif script "cargo run --release --bin maestro-setup" /dev/null 2>/dev/null; then
+            SETUP_SUCCESS=1
+        fi
+    fi
+    
+    # If script command failed or isn't available, try expect
+    if [[ $SETUP_SUCCESS -eq 0 ]] && command -v expect &> /dev/null; then
+        echo -e "${C}    Trying expect for pseudo-terminal...${NC}"
+        if expect -c "spawn cargo run --release --bin maestro-setup; interact"; then
+            SETUP_SUCCESS=1
+        fi
+    fi
+fi
+
+# If all TTY methods failed, provide helpful error message
+if [[ $SETUP_SUCCESS -eq 0 ]]; then
+    echo ""
+    echo -e "${R}  [!] Setup wizard failed to run.${NC}"
+    echo -e "${Y}      This installer requires an interactive terminal.${NC}"
+    echo ""
+    echo -e "${C}    Possible solutions:${NC}"
+    echo -e "      1. Run directly in a terminal: ${Y}bash install.sh${NC}"
+    echo -e "      2. If using SSH, ensure TTY allocation: ${Y}ssh -t user@host 'bash install.sh'${NC}"
+    echo -e "      3. If running in a container, allocate TTY: ${Y}docker run -it ...${NC}"
+    echo -e "      4. For CI/automation, install components manually (see docs)"
+    echo ""
+    echo -e "${C}    Manual installation steps:${NC}"
+    echo -e "      1. Build CLI: ${Y}cargo build --release --manifest-path crates/cli/Cargo.toml${NC}"
+    echo -e "      2. Copy binary: ${Y}cp target/release/maestro ~/.local/bin/${NC}"
+    echo -e "      3. See README.md for full manual setup instructions"
+    echo ""
+    exit 1
 fi
 
 # Clean up temp install directory if we cloned
