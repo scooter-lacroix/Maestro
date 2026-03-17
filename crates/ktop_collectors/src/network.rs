@@ -289,7 +289,7 @@ mod tests {
             .collect()
             .expect("Failed to collect network metrics");
 
-        let _ = metrics;
+        assert!(metrics.total_recv_bytes >= 0);
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
             .download_speed()
             .expect("Failed to get download speed");
 
-        let _ = speed;
+        assert!(speed >= 0.0, "Download speed should be non-negative");
     }
 
     #[test]
@@ -331,7 +331,7 @@ mod tests {
             .upload_speed()
             .expect("Failed to get upload speed");
 
-        let _ = speed;
+        assert!(speed >= 0.0, "Upload speed should be non-negative");
     }
 
     #[test]

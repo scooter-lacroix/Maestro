@@ -29,7 +29,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_turns: 20,
-            turn_timeout_secs: 86400,
+            turn_timeout_secs: 300,
             error_strategy: ErrorStrategy::Retry(3),
             summary_prompt:
                 "Please provide a brief 2–3 sentence summary of our conversation so far, \
