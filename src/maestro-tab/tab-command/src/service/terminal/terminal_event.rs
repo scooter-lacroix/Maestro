@@ -27,9 +27,9 @@ impl Service for TerminalEventService {
                 let state = TerminalSizeState(size);
 
                 // Use the dimension methods to check for changes
-                let dims_changed = last_state.as_ref().map_or(true, |last| {
-                    last.dimensions() != state.dimensions()
-                });
+                let dims_changed = last_state
+                    .as_ref()
+                    .map_or(true, |last| last.dimensions() != state.dimensions());
 
                 if dims_changed {
                     debug!(

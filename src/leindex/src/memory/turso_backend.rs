@@ -1050,8 +1050,8 @@ impl TursoStorageBackend {
                         libsql::Value::Text(importance),
                         source.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         session_id.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
-                        project_id.map(|id| libsql::Value::Integer(id as i64)).unwrap_or(libsql::Value::Null),
-                        track_id.map(|id| libsql::Value::Integer(id as i64)).unwrap_or(libsql::Value::Null),
+                        project_id.map(libsql::Value::Integer).unwrap_or(libsql::Value::Null),
+                        track_id.map(libsql::Value::Integer).unwrap_or(libsql::Value::Null),
                         command.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         command_context.map(libsql::Value::Text).unwrap_or(libsql::Value::Null),
                         libsql::Value::Text(created_at),
@@ -1114,8 +1114,8 @@ impl TursoStorageBackend {
                         importance: string_to_memory_importance(row.get::<String>(4)?.as_str()),
                         source: row.get(5)?,
                         session_id: row.get(6)?,
-                        project_id: row.get::<i64>(7)?.try_into().ok(),
-                        track_id: row.get::<i64>(8)?.try_into().ok(),
+                        project_id: row.get(7)?,
+                        track_id: row.get(8)?,
                         command: row.get(9)?,
                         command_context: row
                             .get::<Option<String>>(10)?

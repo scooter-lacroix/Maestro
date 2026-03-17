@@ -4,15 +4,11 @@
 //! keyboard shortcut and command reference for the Cockpit TUI.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
-<<<<<<< HEAD
-use crate::theme::theme_from_name;
-=======
-use crate::theme::{theme_from_name, Theme};
->>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
 use crate::app::App;
+use crate::theme::theme_from_name;
 
 /// Renders the help modal.
 ///
@@ -170,23 +166,53 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-<<<<<<< HEAD
-            " CONDUCTOR (Tab 3):",
-=======
-            " MEMORY (Tab 6):",
+            " CONDUCTOR (Tab 4):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
-            Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Search memories (hybrid Tantivy/SQLite)"),
+            Span::styled("   o / O         ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Next / Previous Track"),
         ]),
         Line::from(vec![
-            Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Clear memory search"),
+            Span::styled("   Space         ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Toggle Task Expansion"),
         ]),
         Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Refresh/import system-wide memories"),
+            Span::styled(
+                "   s             ",
+                Style::default().fg(Color::Green).bold(),
+            ),
+            Span::raw(" Start Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   p             ",
+                Style::default().fg(Color::Yellow).bold(),
+            ),
+            Span::raw(" Pause Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   r             ",
+                Style::default().fg(Color::Green).bold(),
+            ),
+            Span::raw(" Resume Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled("   x             ", Style::default().fg(Color::Red).bold()),
+            Span::raw(" Abort Orchestrate Loop"),
+        ]),
+        Line::from(vec![
+            Span::styled("   c             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Clear Output"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + 1-3     ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Switch View Mode (Details, Output, Prompt)"),
+        ]),
+        Line::from(vec![
+            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Toggle Focus between Tree and Output"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -202,80 +228,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " ANALYSIS (Tab 3):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Enter Analysis Command Box"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " ORCHESTRATE (Tab 4):",
->>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   o / O         ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Next / Previous Track"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Space         ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Toggle Task Expansion"),
-        ]),
-        Line::from(vec![
-            Span::styled("   s             ", Style::default().fg(Color::Green).bold()),
-            Span::raw(" Start Orchestrate Loop"),
-        ]),
-        Line::from(vec![
-            Span::styled("   p             ", Style::default().fg(Color::Yellow).bold()),
-            Span::raw(" Pause Orchestrate Loop"),
-        ]),
-        Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Green).bold()),
-            Span::raw(" Resume Orchestrate Loop"),
-        ]),
-        Line::from(vec![
-            Span::styled("   x             ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" Abort Orchestrate Loop"),
-        ]),
-        Line::from(vec![
-            Span::styled("   c             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Clear Output"),
-        ]),
-<<<<<<< HEAD
-        Line::from(vec![
-            Span::styled("   Alt + 1-3     ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Switch View Mode (Details, Output, Prompt)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Toggle Focus between Tree and Output"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " PROJECTS (Tab 4):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled(
-                "   Enter         ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Open Zide (File Picker + Editor)"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " ANALYSIS (Tab 5):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Enter Analysis Command Box"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " MEMORY (Tab 6):",
+            " MEMORY (Tab 5):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
@@ -292,6 +245,25 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
+            " ANALYSIS (Tab 6):",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Enter Analysis Command Box"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("   m             ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Toggle Ultra / Balanced mode"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("   1-5 / b       ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" Run analysis phases / bundle"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
             " KRUSTOP (Tab 7):",
             Style::default().fg(Color::Yellow).bold(),
         )]),
@@ -299,6 +271,7 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Force refresh metrics"),
         ]),
+        Line::from(""),
         Line::from(vec![
             Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
             Span::raw(" Pause/Resume updates"),
@@ -317,7 +290,10 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(Color::Yellow).bold(),
         )]),
         Line::from(vec![
-            Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
+            Span::styled(
+                "   Enter         ",
+                Style::default().fg(Color::Green).bold(),
+            ),
             Span::raw(" Toggle Start/Stop LSP"),
         ]),
         Line::from(vec![
@@ -338,11 +314,12 @@ pub fn build_help_text(app: &App) -> Vec<Line<'static>> {
             Span::raw(" Navigate options"),
         ]),
         Line::from(vec![
-            Span::styled("   Enter         ", Style::default().fg(Color::Green).bold()),
+            Span::styled(
+                "   Enter         ",
+                Style::default().fg(Color::Green).bold(),
+            ),
             Span::raw(" Change setting"),
         ]),
-=======
->>>>>>> 0cef1ec7 (feat(v2.5-phase5): Extract modal rendering to dedicated modals module)
         Line::from(""),
         Line::from("  ---------------------------------- "),
         Line::from(format!(

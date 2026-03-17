@@ -19,7 +19,7 @@ export interface UseVaultBrowserReturn {
   error: string | null;
   expandedFolders: Set<string>;
   toggleFolder: (path: string) => void;
-  fetchTree: (vaultPath: string) => void;
+  fetchTree: (vaultPath: string, folder?: string) => void;
   activeFile: string | null;
   setActiveFile: (path: string | null) => void;
 }
@@ -31,7 +31,7 @@ export function useVaultBrowser(): UseVaultBrowserReturn {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
-  const fetchTree = useCallback(async (vaultPath: string) => {
+  const fetchTree = useCallback(async (vaultPath: string, folder: string = '') => {
     setIsLoading(true);
     setError(null);
 
@@ -41,7 +41,7 @@ export function useVaultBrowser(): UseVaultBrowserReturn {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vaultPath,
-          folder: 'tracklens',
+          folder,
         }),
       });
       const data = await res.json();

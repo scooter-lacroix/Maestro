@@ -21,9 +21,7 @@ pub enum AgentStatus {
     /// Agent is idle (no active session)
     Idle,
     /// Agent encountered an error
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 impl AgentStatus {
@@ -186,12 +184,7 @@ pub struct TurnDisplay {
 
 impl TurnDisplay {
     /// Create from turn data
-    pub fn new(
-        role: String,
-        content: &str,
-        tool_calls: &[ToolCallInfo],
-        index: usize,
-    ) -> Self {
+    pub fn new(role: String, content: &str, tool_calls: &[ToolCallInfo], index: usize) -> Self {
         let preview = if content.len() > MAX_PREVIEW_LENGTH {
             format!("{}...", &content[..MAX_PREVIEW_LENGTH.saturating_sub(3)])
         } else {
@@ -232,10 +225,7 @@ impl TurnDisplay {
         };
         format!(
             "{} {}: {}{}",
-            self.index,
-            self.role,
-            self.preview,
-            tool_indicator
+            self.index, self.role, self.preview, tool_indicator
         )
     }
 }
@@ -363,7 +353,10 @@ mod tests {
 
         // format_list_item uses the icon + label from the enum
         let item = display.format_list_item();
-        assert!(item.contains("Running"), "list item should contain status label");
+        assert!(
+            item.contains("Running"),
+            "list item should contain status label"
+        );
         assert!(item.contains("◐"), "list item should contain running icon");
     }
 
@@ -382,7 +375,11 @@ mod tests {
         let turn = TurnDisplay::new(
             "Assistant".into(),
             "Let me check that file for you.",
-            &[ToolCallInfo::new("c1".into(), "bash".into(), r#"{"cmd":"ls"}"#)],
+            &[ToolCallInfo::new(
+                "c1".into(),
+                "bash".into(),
+                r#"{"cmd":"ls"}"#,
+            )],
             0,
         );
 

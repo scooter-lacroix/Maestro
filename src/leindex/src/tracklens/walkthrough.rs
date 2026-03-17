@@ -114,12 +114,7 @@ impl WalkthroughGenerator {
     }
 
     /// Generate walkthrough for a track
-    pub fn generate(
-        &self,
-        track_id: &str,
-        spec: &str,
-        plan: &str,
-    ) -> anyhow::Result<Walkthrough> {
+    pub fn generate(&self, track_id: &str, spec: &str, plan: &str) -> anyhow::Result<Walkthrough> {
         // Extract completed tasks
         let completed_tasks = self.extract_completed_tasks(plan)?;
 
@@ -147,7 +142,10 @@ impl WalkthroughGenerator {
 
         // Metadata
         doc.push_str(&format!("**Track ID**: {}\n", walkthrough.track_id));
-        doc.push_str(&format!("**Completed**: {}\n\n", walkthrough.metadata.completed_at));
+        doc.push_str(&format!(
+            "**Completed**: {}\n\n",
+            walkthrough.metadata.completed_at
+        ));
 
         // Spec summary
         doc.push_str("## Spec Summary\n\n");
@@ -389,10 +387,7 @@ mod tests {
     #[test]
     fn test_extract_completed_tasks() {
         let plan = "- [x] Task 1\n- [ ] Task 2\n- [X] Task 3\n";
-        let generator = WalkthroughGenerator::new(
-            Path::new("/tmp"),
-            WalkthroughConfig::default(),
-        );
+        let generator = WalkthroughGenerator::new(Path::new("/tmp"), WalkthroughConfig::default());
         let tasks = generator.extract_completed_tasks(plan).unwrap();
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0], "Task 1");

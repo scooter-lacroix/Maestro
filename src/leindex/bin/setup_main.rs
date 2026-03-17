@@ -1,5 +1,6 @@
 use std::io::{self, IsTerminal};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,25 +10,22 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use leindex_core::setup::password::PasswordCache;
+use leindex_core::setup::{
+    detect_distro, run_orchestra, Config, Distro, SetupEvent, StepDescriptor,
+};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Gauge, List, ListItem, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
-use std::sync::Arc;
 
-use leindex_core::setup::{detect_distro, run_orchestra, Config, Distro, SetupEvent};
-
-/// Password input state for TUI-based password entry
 #[derive(Debug, Clone, PartialEq)]
 pub enum PasswordState {
     None,
-    Prompting(String), // Service name requesting password
-    Inputting(String), // Current masked input
-    Error(String),     // Error message
+    Prompting { service: String, prompt: String },
 }
 
 struct App {
@@ -36,18 +34,17 @@ struct App {
     should_quit: bool,
     install_progress: f64,
     current_action: String,
-    logs: Vec<String>,
+    logs: Vec<LogEntry>,
+    steps: Vec<InstallStep>,
+    active_step: Option<usize>,
+    completed_steps: usize,
     receiver: Option<Receiver<SetupEvent>>,
-    error: Option<String>,
-    // Password handling
+    error: Option<SetupFailure>,
     password_state: PasswordState,
     password_buffer: String,
-    // Detected distribution
     distro: Distro,
-    // Config options
     install_path: String,
     editor: String,
-    // Granular tool selection
     tool_selections: Vec<(String, bool)>,
     config_selection: usize,
     starred: bool,
@@ -58,9 +55,70 @@ struct App {
 enum Phase {
     Overture,
     Tuning,
-    Performance,
-    Crescendo,
+    Installing,
     Ovation,
+    Failed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InstallStepState {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+struct InstallStep {
+    name: String,
+    description: String,
+    state: InstallStepState,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LogLevel {
+    Info,
+    Output,
+    Success,
+    Warning,
+    Error,
+}
+
+struct LogEntry {
+    level: LogLevel,
+    message: String,
+}
+
+struct SetupFailure {
+    step: Option<String>,
+    message: String,
+    hint: Option<String>,
+}
+
+impl LogEntry {
+    fn info(message: impl Into<String>) -> Self {
+        Self {
+            level: LogLevel::Info,
+            message: message.into(),
+        }
+    }
+
+    fn from_setup_log(message: impl Into<String>) -> Self {
+        let message = message.into();
+        let trimmed = message.trim();
+        let level = if trimmed.starts_with("[ERR]") {
+            LogLevel::Error
+        } else if trimmed.starts_with("[WARN]") || trimmed.starts_with("[sudo]") {
+            LogLevel::Warning
+        } else if trimmed.starts_with("[OK]") {
+            LogLevel::Success
+        } else if trimmed.starts_with("[OUT]") {
+            LogLevel::Output
+        } else {
+            LogLevel::Info
+        };
+
+        Self { level, message }
+    }
 }
 
 fn main() -> Result<(), io::Error> {
@@ -80,45 +138,43 @@ fn main() -> Result<(), io::Error> {
         std::process::exit(1);
     }
 
-    // Set up terminal with proper error handling
     let mut stdout = io::stdout();
-
-    // Enable raw mode first
     enable_raw_mode().map_err(|e| {
         eprintln!("Failed to enable raw mode: {}", e);
         e
     })?;
 
-    // Enter alternate screen and enable mouse
-    let enter_result = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
-    if let Err(e) = enter_result {
+    if let Err(e) = execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
         let _ = disable_raw_mode();
         eprintln!("Failed to enter alternate screen: {}", e);
         return Err(e);
     }
 
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend).inspect_err(|_e| {
+    let mut terminal = Terminal::new(backend).inspect_err(|_| {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
     })?;
 
     let detected_distro = detect_distro();
-
     let app = App {
         phase: Phase::Overture,
         frame_count: 0,
         should_quit: false,
         install_progress: 0.0,
-        current_action: "Arranging the orchestra...".to_string(),
+        current_action: "Review the score before we start.".to_string(),
         logs: vec![
-            "Welcome to Maestro Setup v2.5".to_string(),
-            format!(
-                "Detected: {} ({})",
+            LogEntry::info("Welcome to Maestro Setup"),
+            LogEntry::info(format!(
+                "Detected environment: {} ({})",
                 detected_distro,
                 detected_distro.package_manager_name()
-            ),
+            )),
+            LogEntry::info("Choose what to install, then launch the conductor."),
         ],
+        steps: Vec::new(),
+        active_step: None,
+        completed_steps: 0,
         receiver: None,
         error: None,
         password_state: PasswordState::None,
@@ -133,6 +189,7 @@ fn main() -> Result<(), io::Error> {
             ("Yazi (Terminal File Manager)".to_string(), true),
             ("Claude Code (by Anthropic)".to_string(), true),
             ("Gemini CLI (by Google)".to_string(), true),
+            ("iFlow CLI (by iFlow)".to_string(), true),
             ("Qwen Code (QwenLM)".to_string(), true),
             ("Codex CLI (OpenAI)".to_string(), true),
             ("OpenCode (Independent)".to_string(), true),
@@ -146,26 +203,20 @@ fn main() -> Result<(), io::Error> {
     };
 
     let res = run_app(&mut terminal, app);
-
-    // Cleanup with proper sequencing
     cleanup_terminal(&mut terminal)?;
 
     if let Err(err) = res {
-        println!("{:?}", err)
+        println!("{:?}", err);
     }
 
     Ok(())
 }
 
-/// Clean up terminal state properly to prevent lag/corruption
 fn cleanup_terminal(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> Result<(), io::Error> {
-    // First, disable mouse capture
     execute!(terminal.backend_mut(), DisableMouseCapture)?;
-    // Leave alternate screen
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    // Show cursor before disabling raw mode
     terminal.show_cursor()?;
     disable_raw_mode()?;
     std::thread::sleep(Duration::from_millis(50));
@@ -177,56 +228,130 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
     let mut last_tick = Instant::now();
 
     loop {
-        // Draw UI
         terminal.draw(|f| ui(f, &mut app))?;
 
-        // Check for setup events
-        if let Some(ref rx) = app.receiver {
-            while let Ok(event) = rx.try_recv() {
-                match event {
-                    SetupEvent::ActionStarted(msg) => {
-                        app.current_action = msg.clone();
-                        app.logs.push(format!("CONDUCTOR: {}", msg));
-                        if msg.contains("Compiling") {
-                            app.phase = Phase::Crescendo;
-                        } else {
-                            app.phase = Phase::Performance;
+        loop {
+            let next_event = match app.receiver.as_ref() {
+                Some(rx) => rx.try_recv().ok(),
+                None => None,
+            };
+
+            let Some(event) = next_event else {
+                break;
+            };
+
+            match event {
+                SetupEvent::PlanReady(plan) => {
+                    app.steps = plan
+                        .into_iter()
+                        .map(|step| InstallStep {
+                            name: step.name,
+                            description: step.description,
+                            state: InstallStepState::Pending,
+                        })
+                        .collect();
+                    app.logs.push(LogEntry::info(format!(
+                        "Prepared {} installation step(s).",
+                        app.steps.len()
+                    )));
+                }
+                SetupEvent::StepStarted {
+                    current,
+                    total,
+                    step,
+                } => {
+                    app.phase = Phase::Installing;
+                    app.current_action = step.description.clone();
+                    app.active_step = Some(current.saturating_sub(1));
+                    app.install_progress = if total == 0 {
+                        0.0
+                    } else {
+                        ((current.saturating_sub(1)) as f64 / total as f64) * 100.0
+                    };
+                    sync_step_plan(&mut app, current, total, &step);
+                    app.logs.push(LogEntry::info(format!(
+                        "Starting step {}/{}: {}",
+                        current, total, step.name
+                    )));
+                }
+                SetupEvent::StepCompleted {
+                    current,
+                    total,
+                    step_name,
+                } => {
+                    app.completed_steps = current;
+                    app.install_progress = if total == 0 {
+                        100.0
+                    } else {
+                        (current as f64 / total as f64) * 100.0
+                    };
+                    if let Some(step) = app.steps.get_mut(current.saturating_sub(1)) {
+                        step.state = InstallStepState::Completed;
+                    }
+                    app.active_step = None;
+                    app.current_action = format!("Completed {}", step_name);
+                    app.logs.push(LogEntry::info(format!(
+                        "Completed step {}/{}.",
+                        current, total
+                    )));
+                }
+                SetupEvent::PasswordPrompt { service, prompt } => {
+                    app.password_state = PasswordState::Prompting {
+                        service,
+                        prompt: prompt.clone(),
+                    };
+                    app.password_buffer.clear();
+                    app.logs.push(LogEntry {
+                        level: LogLevel::Warning,
+                        message: prompt,
+                    });
+                }
+                SetupEvent::Log(msg) => {
+                    app.logs.push(LogEntry::from_setup_log(msg));
+                    if app.logs.len() > 250 {
+                        app.logs.remove(0);
+                    }
+                }
+                SetupEvent::Finished => {
+                    app.phase = Phase::Ovation;
+                    app.install_progress = 100.0;
+                    app.password_state = PasswordState::None;
+                    app.current_action = "Installation completed.".to_string();
+                    app.completed_steps = app.steps.len();
+                    for step in &mut app.steps {
+                        if step.state == InstallStepState::Running {
+                            step.state = InstallStepState::Completed;
                         }
                     }
-                    SetupEvent::StepCompleted(current, total) => {
-                        app.install_progress = (current as f64 / total as f64) * 100.0;
-                    }
-                    SetupEvent::Log(msg) => {
-                        // Check for password prompt in log
-                        if msg.contains("[sudo]") && msg.contains("password") {
-                            app.password_state = PasswordState::Prompting("sudo".to_string());
-                            app.password_buffer.clear();
-                            app.logs.push(msg.clone());
-                        } else if msg.contains("[PROMPT]") {
-                            // Custom prompt marker from setup module
-                            app.password_state = PasswordState::Prompting("system".to_string());
-                            app.password_buffer.clear();
-                            app.logs.push(msg.clone());
-                        } else {
-                            app.logs.push(msg);
-                        }
-                        // Limit log size to prevent memory issues
-                        if app.logs.len() > 100 {
-                            app.logs.remove(0);
+                }
+                SetupEvent::Error {
+                    step,
+                    message,
+                    hint,
+                } => {
+                    if let Some(active) = app.active_step {
+                        if let Some(step) = app.steps.get_mut(active) {
+                            step.state = InstallStepState::Failed;
                         }
                     }
-                    SetupEvent::Finished => {
-                        app.phase = Phase::Ovation;
-                        app.install_progress = 100.0;
-                        app.password_state = PasswordState::None;
-                    }
-                    SetupEvent::Error(msg) => {
-                        if msg.contains("password") || msg.contains("authentication") {
-                            app.password_state = PasswordState::Error(msg.clone());
-                        } else {
-                            app.error = Some(msg);
+                    if let Some(step_name) = &step {
+                        if let Some(index) =
+                            app.steps.iter().position(|entry| &entry.name == step_name)
+                        {
+                            app.steps[index].state = InstallStepState::Failed;
                         }
                     }
+                    app.phase = Phase::Failed;
+                    app.password_state = PasswordState::None;
+                    app.error = Some(SetupFailure {
+                        step,
+                        message: message.clone(),
+                        hint,
+                    });
+                    app.logs.push(LogEntry {
+                        level: LogLevel::Error,
+                        message,
+                    });
                 }
             }
         }
@@ -237,42 +362,35 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                // Handle password input mode
-                if matches!(app.password_state, PasswordState::Prompting(_)) {
+                if matches!(app.password_state, PasswordState::Prompting { .. }) {
                     match key.code {
                         KeyCode::Enter => {
-                            // Submit password
                             let password = app.password_buffer.clone();
-                            app.logs
-                                .push(format!("[PASSWORD] Received {} characters", password.len()));
-                            // Set the password in the cache for the orchestra thread to pick up
+                            app.logs.push(LogEntry::info(format!(
+                                "Password received ({} character(s)).",
+                                password.len()
+                            )));
                             app.password_cache.set_password(password);
                             app.password_state = PasswordState::None;
                             app.password_buffer.clear();
                         }
-
                         KeyCode::Backspace => {
                             app.password_buffer.pop();
                         }
-                        KeyCode::Esc => {
-                            app.password_state = PasswordState::None;
-                            app.password_buffer.clear();
+                        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.should_quit = true;
                         }
-                        KeyCode::Char(c) => {
-                            app.password_buffer.push(c);
-                        }
+                        KeyCode::Char(c) => app.password_buffer.push(c),
                         _ => {}
                     }
                     continue;
                 }
 
-                // Normal key handling
                 match key.code {
-                    KeyCode::Enter => {
-                        if app.phase == Phase::Overture {
-                            app.phase = Phase::Tuning;
-                        } else if app.phase == Phase::Tuning {
-                            let total_options = 3 + app.tool_selections.len() + 1;
+                    KeyCode::Enter => match app.phase {
+                        Phase::Overture => app.phase = Phase::Tuning,
+                        Phase::Tuning => {
+                            let total_options = 4 + app.tool_selections.len();
                             if app.config_selection == total_options - 1 {
                                 let config = Config {
                                     install_path: app.install_path.clone(),
@@ -280,8 +398,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                     selected_tools: app
                                         .tool_selections
                                         .iter()
-                                        .filter(|(_, s)| *s)
-                                        .map(|(n, _)| n.clone())
+                                        .filter(|(_, selected)| *selected)
+                                        .map(|(name, _)| name.clone())
                                         .collect(),
                                     password_cache: Arc::clone(&app.password_cache),
                                     distro: app.distro,
@@ -289,20 +407,24 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 
                                 let (tx, rx) = mpsc::channel();
                                 app.receiver = Some(rx);
+                                app.phase = Phase::Installing;
+                                app.error = None;
+                                app.logs.push(LogEntry::info(
+                                    "Launching the conductor and generating the installation plan.",
+                                ));
                                 thread::spawn(move || {
                                     run_orchestra(tx, config);
                                 });
-                                app.phase = Phase::Performance;
                             } else {
                                 app.config_selection = (app.config_selection + 1) % total_options;
                             }
-                        } else if app.phase == Phase::Ovation {
-                            app.should_quit = true;
                         }
-                    }
+                        Phase::Ovation | Phase::Failed => app.should_quit = true,
+                        Phase::Installing => {}
+                    },
                     KeyCode::Up => {
                         if app.phase == Phase::Tuning {
-                            let total_options = 3 + app.tool_selections.len() + 1;
+                            let total_options = 4 + app.tool_selections.len();
                             app.config_selection = if app.config_selection == 0 {
                                 total_options - 1
                             } else {
@@ -312,7 +434,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     }
                     KeyCode::Down => {
                         if app.phase == Phase::Tuning {
-                            let total_options = 3 + app.tool_selections.len() + 1;
+                            let total_options = 4 + app.tool_selections.len();
                             app.config_selection = (app.config_selection + 1) % total_options;
                         }
                     }
@@ -369,461 +491,765 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
     }
 }
 
+fn sync_step_plan(app: &mut App, current: usize, total: usize, active_step: &StepDescriptor) {
+    if app.steps.is_empty() {
+        app.steps = (0..total)
+            .map(|_| InstallStep {
+                name: "Pending".to_string(),
+                description: "Waiting to start...".to_string(),
+                state: InstallStepState::Pending,
+            })
+            .collect();
+    }
+
+    while app.steps.len() < total {
+        app.steps.push(InstallStep {
+            name: "Pending".to_string(),
+            description: "Waiting to start...".to_string(),
+            state: InstallStepState::Pending,
+        });
+    }
+
+    for (idx, step) in app.steps.iter_mut().enumerate() {
+        step.state = if idx < app.completed_steps {
+            InstallStepState::Completed
+        } else if idx == current.saturating_sub(1) {
+            InstallStepState::Running
+        } else if step.state == InstallStepState::Failed {
+            InstallStepState::Failed
+        } else {
+            InstallStepState::Pending
+        };
+    }
+
+    if let Some(step) = app.steps.get_mut(current.saturating_sub(1)) {
+        step.name = active_step.name.clone();
+        step.description = active_step.description.clone();
+        step.state = InstallStepState::Running;
+    }
+}
+
 fn ui(f: &mut Frame, app: &mut App) {
     let size = f.area();
-    let bg_style = Style::default().bg(Color::Rgb(10, 10, 18));
-    f.render_widget(Block::default().style(bg_style), size);
-
-    // Render password modal if prompting
-    if matches!(app.password_state, PasswordState::Prompting(_)) {
-        render_password_modal(f, app, size);
-        return;
-    }
-
-    // Render password error if any
-    if matches!(app.password_state, PasswordState::Error(_)) {
-        if let PasswordState::Error(ref msg) = app.password_state {
-            render_error_modal(f, msg, size);
-        }
-        return;
-    }
+    f.render_widget(
+        Block::default().style(Style::default().bg(Color::Rgb(9, 12, 18))),
+        size,
+    );
 
     match app.phase {
         Phase::Overture => render_overture(f, app, size),
         Phase::Tuning => render_tuning(f, app, size),
-        Phase::Performance => render_performance(f, app, size),
-        Phase::Crescendo => render_crescendo(f, app, size),
+        Phase::Installing => render_installing(f, app, size),
         Phase::Ovation => render_ovation(f, app, size),
+        Phase::Failed => render_failure(f, app, size),
     }
 
-    if let Some(ref err) = app.error {
-        render_error_modal(f, err, size);
+    if matches!(app.password_state, PasswordState::Prompting { .. }) {
+        render_password_modal(f, app, size);
     }
 }
 
 fn render_password_modal(f: &mut Frame, app: &mut App, area: Rect) {
-    let modal_area = centered_rect(50, 25, area);
+    let modal_area = centered_rect(52, 28, area);
     f.render_widget(Clear, modal_area);
-
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" 🔐 Password Required ")
+        .title(" Password Required ")
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
+        .style(Style::default().bg(Color::Rgb(20, 24, 32)));
 
-    let masked_password = "*".repeat(app.password_buffer.len());
-
+    let (requester, prompt) = match &app.password_state {
+        PasswordState::Prompting { service, prompt } => (service.as_str(), prompt.as_str()),
+        PasswordState::None => ("system", "Administrator privileges are required."),
+    };
+    let masked = "*".repeat(app.password_buffer.len());
     let text = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Password: ", Style::default().fg(Color::Cyan)),
-            Span::styled(masked_password, Style::default().fg(Color::White)),
-            Span::styled("▌", Style::default().fg(Color::Yellow)), // Cursor
+            Span::styled(
+                "  Secure action requested by ",
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(requester, Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {}", prompt),
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Password: ", Style::default().fg(Color::Yellow)),
+            Span::styled(masked, Style::default().fg(Color::White)),
+            Span::styled("▌", Style::default().fg(Color::Green)),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Press ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Green)),
-            Span::styled(" to submit, ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::Red)),
-            Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Enter", Style::default().fg(Color::Green)),
+            Span::raw(" submit  "),
+            Span::styled("Ctrl+Q", Style::default().fg(Color::Red)),
+            Span::raw(" exit installer"),
         ]),
     ];
-
-    let p = Paragraph::new(text).block(block).alignment(Alignment::Left);
-    f.render_widget(p, modal_area);
+    f.render_widget(Paragraph::new(text).block(block), modal_area);
 }
 
 fn render_overture(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(20),
-            Constraint::Percentage(60),
-            Constraint::Percentage(20),
+            Constraint::Length(5),
+            Constraint::Min(0),
+            Constraint::Length(4),
         ])
         .split(area);
 
-    let anim_char = match (app.frame_count / 10) % 4 {
+    let pulse = match (app.frame_count / 10) % 4 {
         0 => "⠋",
         1 => "⠙",
         2 => "⠹",
         _ => "⠸",
     };
 
-    let title = Paragraph::new(vec![
+    let hero = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled(
-                format!(" {}  ", anim_char),
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled(format!(" {} ", pulse), Style::default().fg(Color::Yellow)),
             Span::styled(
                 "MAESTRO CONDUCTOR WIZARD",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                format!("  {} ", anim_char),
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled(format!(" {} ", pulse), Style::default().fg(Color::Yellow)),
         ]),
-        Line::from(vec![Span::styled(
-            "v2.5 Unified Installer",
-            Style::default().fg(Color::DarkGray),
-        )]),
+        Line::from(Span::styled(
+            "Interactive installer for the current Maestro build",
+            Style::default().fg(Color::Gray),
+        )),
     ])
     .alignment(Alignment::Center);
-    f.render_widget(title, chunks[0]);
+    f.render_widget(hero, chunks[0]);
 
-    let welcome_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(15, 15, 25)));
-
-    let welcome_text = vec![
-        Line::from("Welcome to the Grand Performance."),
+    let body_area = centered_rect(72, 56, chunks[1]);
+    let body = Paragraph::new(vec![
+        Line::from("The overture sets the stage before anything changes on disk."),
         Line::from(""),
-        Line::from("Every masterpiece needs a conductor, and every conductor needs a score."),
-        Line::from("I will scan your environment and harmonize your system dependencies."),
+        Line::from("What you can expect:"),
+        Line::from("  • clear component selection"),
+        Line::from("  • step-by-step installation progress"),
+        Line::from("  • live logs and explicit failure messages"),
         Line::from(""),
         Line::from(vec![
-            Span::raw("Press "),
+            Span::raw("Environment: "),
             Span::styled(
-                "[ ENTER ]",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
+                format!("{} ({})", app.distro, app.distro.package_manager_name()),
+                Style::default().fg(Color::Magenta),
             ),
-            Span::raw(" to begin the Overture."),
         ]),
-    ];
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Press ", Style::default().fg(Color::Gray)),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::styled(" to configure the score.", Style::default().fg(Color::Gray)),
+        ]),
+    ])
+    .alignment(Alignment::Left)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Before We Begin ")
+            .style(Style::default().bg(Color::Rgb(16, 20, 28))),
+    )
+    .wrap(Wrap { trim: true });
+    f.render_widget(body, body_area);
 
-    let p = Paragraph::new(welcome_text)
-        .alignment(Alignment::Center)
-        .block(welcome_block);
-    f.render_widget(p, centered_rect(70, 40, chunks[1]));
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("Ctrl+Q", Style::default().fg(Color::Red)),
+        Span::styled(" quits at any time", Style::default().fg(Color::Gray)),
+    ]))
+    .alignment(Alignment::Center);
+    f.render_widget(footer, chunks[2]);
 }
 
 fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
-    let areas = Layout::default()
+    let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(3),
         ])
         .split(area);
 
-    f.render_widget(
-        Paragraph::new("🛠 THE TUNING PHASE 🛠")
-            .alignment(Alignment::Center)
-            .style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+    let header = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Installation Plan Builder",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Choose your install path, preferred editor, and which components belong in this run.",
+            Style::default().fg(Color::Gray),
+        )),
+    ]);
+    f.render_widget(header, sections[0]);
+
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(sections[1]);
+
+    let summary = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Install path: ", Style::default().fg(Color::Gray)),
+            Span::styled(&app.install_path, Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("Editor: ", Style::default().fg(Color::Gray)),
+            Span::styled(app.editor.to_uppercase(), Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("Environment: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{} ({})", app.distro, app.distro.package_manager_name()),
+                Style::default().fg(Color::Magenta),
             ),
-        areas[0],
-    );
+        ]),
+        Line::from(vec![
+            Span::styled("Selected components: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.tool_selections
+                    .iter()
+                    .filter(|(_, selected)| *selected)
+                    .count()
+                    .to_string(),
+                Style::default().fg(Color::Green),
+            ),
+            Span::styled(
+                format!(" of {}", app.tool_selections.len()),
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(""),
+        Line::from("The installer will build a concrete step plan from these choices."),
+        Line::from("The themed phrases stay, but the progress screen will show real output."),
+    ])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Run Summary "),
+    )
+    .wrap(Wrap { trim: true });
+    f.render_widget(summary, columns[0]);
 
     let mut items = vec![
         ListItem::new(vec![
-            Line::from(vec![
-                Span::styled(
-                    "  System Environment: ",
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("{} ({})", app.distro, app.distro.package_manager_name()),
-                    Style::default().fg(Color::Magenta),
-                ),
-            ]),
-            Line::from(""),
-        ]),
-        ListItem::new(vec![
-            Line::from("  Installation Path:"),
-            Line::from(vec![Span::styled(
-                format!("    > {}", app.install_path),
+            Line::from(Span::styled(
+                "Install path",
                 if app.config_selection == 0 {
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 },
-            )]),
+            )),
+            Line::from(Span::styled(
+                format!("  > {}", app.install_path),
+                if app.config_selection == 0 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            )),
         ]),
         ListItem::new(vec![
-            Line::from("  Preferred Editor:"),
-            Line::from(vec![Span::styled(
-                format!(
-                    "    ← {} → (Press Space/Right to cycle)",
-                    app.editor.to_uppercase()
-                ),
+            Line::from(Span::styled(
+                "Preferred editor",
                 if app.config_selection == 1 {
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 },
-            )]),
+            )),
+            Line::from(Span::styled(
+                format!("  ← {} →", app.editor.to_uppercase()),
+                if app.config_selection == 1 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            )),
         ]),
-        ListItem::new(Line::from("  Include Tooling (Space to toggle):")),
+        ListItem::new(Line::from(Span::styled(
+            "Components",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ))),
     ];
 
     for (idx, (name, selected)) in app.tool_selections.iter().enumerate() {
-        let sel_idx = 2 + idx;
-        let checkbox = if *selected { " [X] " } else { " [ ] " };
-        items.push(ListItem::new(Line::from(vec![Span::styled(
-            format!("    {}{}", checkbox, name),
-            if app.config_selection == sel_idx {
+        let is_selected = *selected;
+        let is_active = app.config_selection == idx + 2;
+        let marker = if is_selected { "[x]" } else { "[ ]" };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(
+                format!("  {} ", marker),
+                if is_selected {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                },
+            ),
+            Span::styled(
+                name,
+                if is_active {
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+        ])));
+    }
+
+    let star_idx = 2 + app.tool_selections.len();
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled(
+            if app.starred { "  [★] " } else { "  [ ] " },
+            if app.starred {
+                Style::default().fg(Color::Magenta)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+        Span::styled(
+            "Star Maestro on GitHub",
+            if app.config_selection == star_idx {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             },
-        )])));
-    }
+        ),
+    ])));
 
-    let star_idx = 2 + app.tool_selections.len();
-    let star_check = if app.starred { " ⭐ " } else { " ☆ " };
-    items.push(ListItem::new(vec![
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            format!("  {} Star the Maestro on GitHub", star_check),
-            if app.config_selection == star_idx {
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            },
-        )]),
-    ]));
+    let launch_idx = star_idx + 1;
+    items.push(ListItem::new(Line::from(vec![Span::styled(
+        "  Launch installation",
+        if app.config_selection == launch_idx {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        },
+    )])));
 
-    let confirm_idx = 3 + app.tool_selections.len();
-    items.push(ListItem::new(vec![
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "  [ STRIKE THE FIRST CHORD (Launch Installation) ]",
-            if app.config_selection == confirm_idx {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Green)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Green)
-            },
-        )]),
-    ]));
+    let config_list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Configuration ")
+            .style(Style::default().bg(Color::Rgb(14, 18, 26))),
+    );
+    f.render_widget(config_list, columns[1]);
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" System Configuration ")
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
-        .style(Style::default().fg(Color::White));
-
-    f.render_widget(list, centered_rect(70, 70, areas[1]));
-
-    let footer = Paragraph::new(vec![Line::from(vec![
-        Span::styled(" ↑/↓: Navigate ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Space/→: Toggle ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Enter: Confirm ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Ctrl+Q: Quit ", Style::default().fg(Color::Red)),
-    ])])
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("↑/↓", Style::default().fg(Color::Gray)),
+        Span::styled(" move  ", Style::default().fg(Color::Gray)),
+        Span::styled("Space/→", Style::default().fg(Color::Gray)),
+        Span::styled(" toggle or cycle  ", Style::default().fg(Color::Gray)),
+        Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::styled(" continue  ", Style::default().fg(Color::Gray)),
+        Span::styled("Ctrl+Q", Style::default().fg(Color::Red)),
+        Span::styled(" quit", Style::default().fg(Color::Gray)),
+    ]))
     .alignment(Alignment::Center);
-    f.render_widget(footer, areas[2]);
+    f.render_widget(footer, sections[2]);
 }
 
-fn render_performance(f: &mut Frame, app: &mut App, area: Rect) {
-    let chunks = Layout::default()
+fn render_installing(f: &mut Frame, app: &mut App, area: Rect) {
+    let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(4),
+            Constraint::Length(6),
             Constraint::Min(0),
+            Constraint::Length(3),
         ])
         .split(area);
 
-    let anim_frames = ["♪", "♫", "♬", "♩"];
-    let anim = anim_frames[(app.frame_count / 15 % 4) as usize];
+    let header = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Installer Dashboard",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            current_flavor_line(app),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::ITALIC),
+        )),
+    ]);
+    f.render_widget(header, sections[0]);
 
-    f.render_widget(
-        Paragraph::new(format!("{} The Performance is in Progress {}", anim, anim))
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Cyan)),
-        chunks[0],
-    );
+    let summary_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Length(3)])
+        .split(sections[1]);
+    let total_steps = app.steps.len().max(app.completed_steps.max(1));
+    let current_step_label = if let Some(active) = app.active_step {
+        format!("Step {} of {}", active + 1, total_steps)
+    } else if app.completed_steps == total_steps {
+        format!("All {} steps completed", total_steps)
+    } else {
+        format!("{} of {} steps completed", app.completed_steps, total_steps)
+    };
+    let summary = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled(current_step_label, Style::default().fg(Color::Green)),
+            Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&app.current_action, Style::default().fg(Color::White)),
+        ]),
+        Line::from(Span::styled(
+            format!("Progress: {:.1}%", app.install_progress),
+            Style::default().fg(Color::Gray),
+        )),
+    ]);
+    f.render_widget(summary, summary_chunks[0]);
 
     let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(" Progress "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Overall Progress "),
+        )
         .gauge_style(
             Style::default()
                 .fg(Color::Green)
                 .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
         )
-        .percent(app.install_progress as u16);
-    f.render_widget(gauge, chunks[1]);
+        .percent(app.install_progress.round().clamp(0.0, 100.0) as u16);
+    f.render_widget(gauge, summary_chunks[1]);
 
-    // Show only last 15 logs for better performance
-    let logs: Vec<ListItem> = app
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(sections[2]);
+
+    let step_items: Vec<ListItem> = app
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(idx, step)| {
+            let (marker, style) = match step.state {
+                InstallStepState::Pending => ("○", Style::default().fg(Color::DarkGray)),
+                InstallStepState::Running => (
+                    "▶",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                InstallStepState::Completed => ("✓", Style::default().fg(Color::Green)),
+                InstallStepState::Failed => ("✗", Style::default().fg(Color::Red)),
+            };
+            ListItem::new(vec![
+                Line::from(vec![
+                    Span::styled(format!(" {} ", marker), style),
+                    Span::styled(
+                        &step.name,
+                        if Some(idx) == app.active_step {
+                            style
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ),
+                ]),
+                Line::from(Span::styled(
+                    format!("   {}", step.description),
+                    Style::default().fg(Color::Gray),
+                )),
+            ])
+        })
+        .collect();
+    let step_list = List::new(step_items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Step Plan "),
+    );
+    f.render_widget(step_list, body[0]);
+
+    let log_items: Vec<ListItem> = app
         .logs
         .iter()
         .rev()
-        .take(15)
-        .map(|l| ListItem::new(l.as_str()))
+        .take(18)
+        .map(|entry| {
+            let style = match entry.level {
+                LogLevel::Info => Style::default().fg(Color::White),
+                LogLevel::Output => Style::default().fg(Color::Gray),
+                LogLevel::Success => Style::default().fg(Color::Green),
+                LogLevel::Warning => Style::default().fg(Color::Yellow),
+                LogLevel::Error => Style::default().fg(Color::Red),
+            };
+            ListItem::new(Line::from(Span::styled(&entry.message, style)))
+        })
         .collect();
-    let log_list = List::new(logs).block(
+    let logs = List::new(log_items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Conductor's Notes "),
+            .border_type(BorderType::Rounded)
+            .title(" Live Output "),
     );
-    f.render_widget(log_list, chunks[2]);
+    f.render_widget(logs, body[1]);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Themed status lines are decorative only. ",
+            Style::default().fg(Color::Gray),
+        ),
+        Span::styled("Live Output", Style::default().fg(Color::Cyan)),
+        Span::styled(
+            " shows the real command stream.",
+            Style::default().fg(Color::Gray),
+        ),
+    ]))
+    .alignment(Alignment::Center);
+    f.render_widget(footer, sections[3]);
 }
 
-fn render_crescendo(f: &mut Frame, app: &mut App, area: Rect) {
-    let chunks = Layout::default()
+fn render_ovation(f: &mut Frame, app: &mut App, area: Rect) {
+    let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),
-            Constraint::Length(10),
+            Constraint::Length(4),
             Constraint::Min(0),
+            Constraint::Length(5),
         ])
         .split(area);
-
-    let pulse = [" ", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃"];
-    let pulse_str = pulse[(app.frame_count % 12) as usize];
 
     let header = Paragraph::new(vec![
-        Line::from(vec![Span::styled(
-            "⚡ THE CRESCENDO ⚡",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from("Compiling the Grand Orchestra (Maestro Core)"),
-    ])
-    .alignment(Alignment::Center);
-    f.render_widget(header, chunks[0]);
-
-    let visual = Paragraph::new(format!(
-        "{}{}{}{}{}{}{}{}{}{}",
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str,
-        pulse_str
-    ))
-    .alignment(Alignment::Center)
-    .style(Style::default().fg(Color::Rgb(200, 100, 255)));
-    f.render_widget(visual, chunks[1]);
-
-    let quirky_phrases = [
-        "Brass section entering with intensity...",
-        "Polishing the violins for the final solo...",
-        "Tuning the harps for a perfect finish...",
-        "Wait, is that a rogue oboe? Fixed it.",
-        "The percussion is hitting just right.",
-        "Almost at the grand finale!",
-    ];
-    let phrase = quirky_phrases[(app.frame_count / 100 % 6) as usize];
-
-    let p = Paragraph::new(vec![
-        Line::from(vec![Span::styled(
-            phrase,
+        Line::from(Span::styled(
+            "Standing Ovation",
             Style::default()
                 .fg(Color::Yellow)
-                .add_modifier(Modifier::ITALIC),
-        )]),
-        Line::from(""),
-        Line::from(format!("Current Progress: {:.1}%", app.install_progress)),
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Every requested installation step finished successfully.",
+            Style::default().fg(Color::Gray),
+        )),
     ])
     .alignment(Alignment::Center);
-    f.render_widget(p, chunks[2]);
+    f.render_widget(header, sections[0]);
+
+    let summary = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Completed steps: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.completed_steps.to_string(),
+                Style::default().fg(Color::Green),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Selected components: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.tool_selections
+                    .iter()
+                    .filter(|(_, selected)| *selected)
+                    .count()
+                    .to_string(),
+                Style::default().fg(Color::Green),
+            ),
+        ]),
+        Line::from(""),
+        Line::from("Next command:"),
+        Line::from(Span::styled(
+            "  maestro",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("Press Enter to leave the installer."),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Summary "),
+    );
+    f.render_widget(summary, centered_rect(64, 56, sections[1]));
 }
 
-fn render_ovation(f: &mut Frame, _app: &mut App, area: Rect) {
-    let chunks = Layout::default()
+fn render_failure(f: &mut Frame, app: &mut App, area: Rect) {
+    let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(30),
+            Constraint::Length(4),
             Constraint::Min(0),
-            Constraint::Length(5),
+            Constraint::Length(4),
         ])
         .split(area);
 
-    let congrat = Paragraph::new("✨ STANDING OVATION ✨")
-        .style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+    let header = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "The Score Broke",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Installation stopped before completion. The logs below contain the exact failure details.",
+            Style::default().fg(Color::Gray),
+        )),
+    ]);
+    f.render_widget(header, sections[0]);
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+        .split(sections[1]);
+
+    let steps = List::new(
+        app.steps
+            .iter()
+            .map(|step| {
+                let marker = match step.state {
+                    InstallStepState::Completed => "✓",
+                    InstallStepState::Running => "▶",
+                    InstallStepState::Failed => "✗",
+                    InstallStepState::Pending => "○",
+                };
+                let style = match step.state {
+                    InstallStepState::Completed => Style::default().fg(Color::Green),
+                    InstallStepState::Running => Style::default().fg(Color::Cyan),
+                    InstallStepState::Failed => Style::default().fg(Color::Red),
+                    InstallStepState::Pending => Style::default().fg(Color::DarkGray),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!(" {} ", marker), style),
+                    Span::styled(&step.name, Style::default().fg(Color::White)),
+                ]))
+            })
+            .collect::<Vec<_>>(),
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Step Status "),
+    );
+    f.render_widget(steps, body[0]);
+
+    let failure_right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(0)])
+        .split(body[1]);
+
+    let failure_lines = if let Some(error) = &app.error {
+        let mut lines = vec![
+            Line::from(Span::styled(
+                &error.message,
+                Style::default().fg(Color::Red),
+            )),
+            Line::from(""),
+        ];
+        if let Some(step) = &error.step {
+            lines.push(Line::from(vec![
+                Span::styled("Failed step: ", Style::default().fg(Color::Gray)),
+                Span::styled(step, Style::default().fg(Color::White)),
+            ]));
+        }
+        if let Some(hint) = &error.hint {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Hint: ", Style::default().fg(Color::Yellow)),
+                Span::styled(hint, Style::default().fg(Color::Gray)),
+            ]));
+        }
+        lines
+    } else {
+        vec![Line::from(Span::styled(
+            "Installation failed without an explicit error message.",
+            Style::default().fg(Color::Red),
+        ))]
+    };
+
+    let error_text = Paragraph::new(failure_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Failure Details "),
         )
-        .alignment(Alignment::Center);
-    f.render_widget(congrat, chunks[0]);
+        .wrap(Wrap { trim: true });
+    f.render_widget(error_text, failure_right[0]);
 
-    let summary = vec![
-        Line::from("The performance was a masterpiece."),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("→ System Harmony: ", Style::default().fg(Color::Cyan)),
-            Span::raw("Achieved"),
-        ]),
-        Line::from(vec![
-            Span::styled("→ Maestro Core: ", Style::default().fg(Color::Cyan)),
-            Span::raw("Compiled & Ready"),
-        ]),
-        Line::from(vec![
-            Span::styled("→ Zoekt Search: ", Style::default().fg(Color::Cyan)),
-            Span::raw("Operational"),
-        ]),
-        Line::from(""),
-        Line::from("You may now begin conducting your projects."),
-    ];
-    let p = Paragraph::new(summary).alignment(Alignment::Center);
-    f.render_widget(p, chunks[1]);
+    let log_items: Vec<ListItem> = app
+        .logs
+        .iter()
+        .rev()
+        .take(12)
+        .map(|entry| {
+            let style = match entry.level {
+                LogLevel::Info => Style::default().fg(Color::White),
+                LogLevel::Output => Style::default().fg(Color::Gray),
+                LogLevel::Success => Style::default().fg(Color::Green),
+                LogLevel::Warning => Style::default().fg(Color::Yellow),
+                LogLevel::Error => Style::default().fg(Color::Red),
+            };
+            ListItem::new(Line::from(Span::styled(&entry.message, style)))
+        })
+        .collect();
+    let logs = List::new(log_items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" Live Output "),
+    );
+    f.render_widget(logs, failure_right[1]);
 
-    let command = Paragraph::new(vec![
-        Line::from("To start your cockpit:"),
-        Line::from(vec![Span::styled(
-            "  maestro  ",
-            Style::default()
-                .bg(Color::White)
-                .fg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        )]),
-    ])
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Review the failure details above, then press ",
+            Style::default().fg(Color::Gray),
+        ),
+        Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::styled(" to exit.", Style::default().fg(Color::Gray)),
+    ]))
     .alignment(Alignment::Center);
-    f.render_widget(command, chunks[2]);
+    f.render_widget(footer, sections[2]);
 }
 
-fn render_error_modal(f: &mut Frame, msg: &str, area: Rect) {
-    let modal_area = centered_rect(60, 20, area);
-    f.render_widget(Clear, modal_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" ❌ DISTORTION IN THE SCORE ")
-        .border_style(Style::default().fg(Color::Red));
-    let p = Paragraph::new(msg)
-        .block(block)
-        .style(Style::default().fg(Color::Red))
-        .wrap(ratatui::widgets::Wrap { trim: true });
-    f.render_widget(p, modal_area);
+fn current_flavor_line(app: &App) -> &'static str {
+    if app.error.is_some() {
+        "The brass section missed a cue. We are holding for recovery."
+    } else if app.install_progress >= 90.0 {
+        "Final cadence. The house lights are already warming."
+    } else if app.current_action.contains("Compiling") || app.current_action.contains("build") {
+        "Percussion is carrying the build while the strings hold tempo."
+    } else if app.install_progress >= 50.0 {
+        "Mid-performance. The orchestra is settling into the groove."
+    } else {
+        "The overture is under way. Every section is joining in order."
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

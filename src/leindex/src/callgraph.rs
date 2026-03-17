@@ -283,12 +283,12 @@ impl CallGraphAnalyzer {
     /// Extract function call names from a line of code
     fn extract_calls_from_line(&self, line: &str) -> Vec<String> {
         let mut calls = Vec::new();
-        let mut chars = line.chars().peekable();
+        let chars = line.chars();
         let mut current_name = String::new();
         let mut in_string = false;
         let mut string_char = ' ';
 
-        while let Some(ch) = chars.next() {
+        for ch in chars {
             // Handle strings
             if (ch == '"' || ch == '\'') && !in_string {
                 in_string = true;
@@ -314,8 +314,8 @@ impl CallGraphAnalyzer {
 
                 if !self.is_builtin(&call_name) && !call_name.starts_with('.') {
                     // Handle method calls like self.method -> just method
-                    let clean_name = if call_name.starts_with("self.") {
-                        call_name[5..].to_string()
+                    let clean_name = if let Some(rest) = call_name.strip_prefix("self.") {
+                        rest.to_string()
                     } else if call_name.contains('.') && !call_name.contains("self") {
                         // Keep the full qualified name for external calls
                         call_name
@@ -428,7 +428,7 @@ impl CallGraphAnalyzer {
         lines.push(String::new());
         lines.push("## Call Relationships".to_string());
 
-        for (_id, node) in &graph.nodes {
+        for node in graph.nodes.values() {
             if node.callees.is_empty() {
                 continue;
             }

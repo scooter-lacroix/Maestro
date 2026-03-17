@@ -19,6 +19,7 @@ tests/
 *.swp
 *.swo
 *~
+*.code-workspace
 
 # OS
 .DS_Store
@@ -72,6 +73,11 @@ coverage.json
 *.tmp
 *.bak
 *.backup
+*.tsbuildinfo
+telemetry-id
+.mcp.json
+/maestro/tmp/
+/maestro/tmp/**
 
 # Session files
 *.db-shm
@@ -128,6 +134,7 @@ maestro/memory/data/
 
 # Prompts directory
 claude-code/prompts/
+tracks/
 
 # Logs directory
 logs/
@@ -175,6 +182,10 @@ target/
 # Runtime state and configs
 .omx/
 .gemini/
+.claude/
+.claude-marketplace.json
+CLAUDE.md
+.vibe/config.toml
 
 # Vibe CLI session logs
 .vibe/logs/

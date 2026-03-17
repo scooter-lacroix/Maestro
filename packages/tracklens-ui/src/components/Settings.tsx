@@ -192,18 +192,25 @@ export const Settings: React.FC<SettingsProps> = ({ onIdentityChange, origin, mo
 
       {showDialog && createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
           onClick={() => setShowDialog(false)}
         >
+          {/* Natural texture overlay for the backdrop */}
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-xl" />
+
           <div
-            className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-2xl relative"
+            className="bg-background rounded-[32px] w-full max-w-4xl shadow-neu-extruded relative overflow-hidden flex flex-col max-h-[90vh]"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 className="font-semibold text-sm">Settings</h3>
+            {/* Header Area */}
+            <div className="flex items-start justify-between p-8 pb-4">
+              <div>
+                <h3 className="font-bold font-display text-2xl">Settings</h3>
+                <p className="text-sm text-muted-foreground mt-1">Configure your application preferences</p>
+              </div>
               <button
                 onClick={() => setShowDialog(false)}
-                className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-background shadow-neu-extruded-small text-muted-foreground hover:text-foreground active:shadow-neu-inset transition-all"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -211,394 +218,383 @@ export const Settings: React.FC<SettingsProps> = ({ onIdentityChange, origin, mo
               </button>
             </div>
 
-            <div className="flex" style={{ minHeight: '420px' }}>
+            {/* Horizontal Tabs Area */}
+            <div className="px-8 pb-6">
               {tabs.length > 1 && (
-                <nav className="w-40 border-r border-border p-2 space-y-1 flex-shrink-0">
+                <div className="inline-flex p-1 bg-background shadow-neu-inset rounded-2xl">
                   {tabs.map(tab => (
                     <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
-                      className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
-                        activeTab === tab.id
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-                      }`}
+                      className={`px-5 py-2 rounded-xl text-sm font-medium transition-all duration-300 ${activeTab === tab.id
+                        ? 'bg-background shadow-neu-extruded-small text-foreground transform -translate-y-[1px]'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5'
+                        }`}
                     >
                       {tab.label}
                     </button>
                   ))}
-                </nav>
+                </div>
               )}
+            </div>
 
-              <div className="flex-1 p-4 space-y-4 overflow-y-auto max-h-[70vh]">
-                {activeTab === 'general' && (
-                  <>
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Your Identity</div>
-                      <div className="text-xs text-muted-foreground">
-                        Used for annotation tracking
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 px-3 py-2 bg-muted rounded-lg text-xs font-mono truncate">
-                          {identity}
-                        </div>
-                        <button
-                          onClick={handleRegenerateIdentity}
-                          className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Regenerate identity"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                        </button>
-                      </div>
+            {/* Content Area */}
+            <div className="flex-1 overflow-y-auto px-8 pb-8 custom-scrollbar">
+              {activeTab === 'general' && (
+                <>
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Your Identity</div>
+                    <div className="text-xs text-muted-foreground">
+                      Used for annotation tracking
                     </div>
+                    <div className="flex items-center gap-3 mt-4">
+                      <div className="flex-1 px-4 py-3 bg-background shadow-neu-inset rounded-xl text-sm font-mono truncate">
+                        {identity}
+                      </div>
+                      <button
+                        onClick={handleRegenerateIdentity}
+                        className="p-3 rounded-xl bg-background shadow-neu-extruded text-muted-foreground hover:text-foreground hover:-translate-y-px hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all duration-300"
+                        title="Regenerate identity"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
 
-                    {origin === 'claude-code' && mode === 'plan' && (
-                      <>
-                        <div className="border-t border-border" />
-                        <div className="space-y-2">
-                          <div>
-                            <div className="text-sm font-medium">Permission Mode</div>
-                            <div className="text-xs text-muted-foreground">
-                              Automation level after review approval
-                            </div>
-                          </div>
-                          <select
-                            value={permissionMode}
-                            onChange={(e) => handlePermissionModeChange(e.target.value as PermissionMode)}
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                          >
-                            {PERMISSION_MODE_OPTIONS.map((option: { value: string; label: string; description: string }) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="text-[10px] text-muted-foreground/70">
-                            {PERMISSION_MODE_OPTIONS.find((o: { value: string; label: string; description: string }) => o.value === permissionMode)?.description}
+                  {origin === 'claude-code' && mode === 'plan' && (
+                    <>
+                      <div className="border-t border-border" />
+                      <div className="space-y-2">
+                        <div>
+                          <div className="text-sm font-medium">Permission Mode</div>
+                          <div className="text-xs text-muted-foreground">
+                            Automation level after review approval
                           </div>
                         </div>
-                      </>
-                    )}
+                        <select
+                          value={permissionMode}
+                          onChange={(e) => handlePermissionModeChange(e.target.value as PermissionMode)}
+                          className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer transition-all"
+                        >
+                          {PERMISSION_MODE_OPTIONS.map((option: { value: string; label: string; description: string }) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="text-[10px] text-muted-foreground/70">
+                          {PERMISSION_MODE_OPTIONS.find((o: { value: string; label: string; description: string }) => o.value === permissionMode)?.description}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
-                    {origin === 'opencode' && (
-                      <>
-                        <div className="border-t border-border" />
-                        <div className="space-y-2">
-                          <div>
-                            <div className="text-sm font-medium">Agent Switching</div>
-                            <div className="text-xs text-muted-foreground">
-                              Which agent to switch to after approval
-                            </div>
+                  {origin === 'opencode' && (
+                    <>
+                      <div className="border-t border-border" />
+                      <div className="space-y-2">
+                        <div>
+                          <div className="text-sm font-medium">Agent Switching</div>
+                          <div className="text-xs text-muted-foreground">
+                            Which agent to switch to after approval
                           </div>
-                          {agentWarning && (
-                            <div className="flex items-start gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-600 dark:text-amber-400">
-                              <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                              </svg>
-                              <span>{agentWarning}</span>
-                            </div>
-                          )}
-                          <select
-                            value={agent.switchTo}
-                            onChange={(e) => { handleAgentChange(e.target.value); setAgentWarning(null); }}
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                          >
-                            {availableAgents.length > 0 ? (
-                              <>
-                                {agent.switchTo !== 'custom' && agent.switchTo !== 'disabled' &&
-                                 !availableAgents.some(a => a.id.toLowerCase() === agent.switchTo.toLowerCase()) && (
+                        </div>
+                        {agentWarning && (
+                          <div className="flex items-start gap-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-600 dark:text-amber-400">
+                            <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <span>{agentWarning}</span>
+                          </div>
+                        )}
+                        <select
+                          value={agent.switchTo}
+                          onChange={(e) => { handleAgentChange(e.target.value); setAgentWarning(null); }}
+                          className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer transition-all"
+                        >
+                          {availableAgents.length > 0 ? (
+                            <>
+                              {agent.switchTo !== 'custom' && agent.switchTo !== 'disabled' &&
+                                !availableAgents.some(a => a.id.toLowerCase() === agent.switchTo.toLowerCase()) && (
                                   <option value={agent.switchTo} disabled>{agent.switchTo} (not found)</option>
                                 )}
-                                {availableAgents.map((a) => (
-                                  <option key={a.id} value={a.id}>{a.name}</option>
-                                ))}
-                                <option value="custom">Custom</option>
-                                <option value="disabled">Disabled</option>
-                              </>
-                            ) : (
-                              AGENT_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))
-                            )}
-                          </select>
+                              {availableAgents.map((a) => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                              ))}
+                              <option value="custom">Custom</option>
+                              <option value="disabled">Disabled</option>
+                            </>
+                          ) : (
+                            AGENT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="border-t border-border" />
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Auto-close Tab</div>
+                    <select
+                      value={autoCloseDelay}
+                      onChange={(e) => { const next = e.target.value as AutoCloseDelay; setAutoCloseDelayState(next); setAutoCloseDelay(next); }}
+                      className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer transition-all mt-4"
+                    >
+                      {AUTO_CLOSE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <div className="text-[10px] text-muted-foreground/70">
+                      {AUTO_CLOSE_OPTIONS.find(o => o.value === autoCloseDelay)?.description}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {activeTab === 'display' && mode === 'plan' && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Auto-open Sidebar</div>
+                      <div className="text-xs text-muted-foreground">
+                        Open sidebar with Table of Contents on load
+                      </div>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={uiPrefs.tocEnabled}
+                      onClick={() => handleUIPrefsChange({ tocEnabled: !uiPrefs.tocEnabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${uiPrefs.tocEnabled ? 'bg-primary' : 'bg-muted'
+                        }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${uiPrefs.tocEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                    </button>
+                  </div>
+
+                  <div className="border-t border-border" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Sticky Actions</div>
+                      <div className="text-xs text-muted-foreground">
+                        Keep action buttons visible while scrolling
+                      </div>
+                    </div>
+                    <button
+                      role="switch"
+                      aria-checked={uiPrefs.stickyActionsEnabled}
+                      onClick={() => handleUIPrefsChange({ stickyActionsEnabled: !uiPrefs.stickyActionsEnabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${uiPrefs.stickyActionsEnabled ? 'bg-primary' : 'bg-muted'
+                        }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${uiPrefs.stickyActionsEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {activeTab === 'saving' && mode === 'plan' && (
+                <>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Save Reviews</div>
+                        <div className="text-xs text-muted-foreground">
+                          Auto-save reviews to ~/.maestro/tracklens/reviews/
                         </div>
-                      </>
+                      </div>
+                      <button
+                        role="switch"
+                        aria-checked={planSave.enabled}
+                        onClick={() => handlePlanSaveChange({ enabled: !planSave.enabled })}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${planSave.enabled ? 'bg-primary' : 'bg-muted'
+                          }`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${planSave.enabled ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                      </button>
+                    </div>
+                    {planSave.enabled && (
+                      <div className="space-y-1.5 pl-0.5">
+                        <label className="text-xs text-muted-foreground">Custom Path (optional)</label>
+                        <input
+                          type="text"
+                          value={planSave.customPath || ''}
+                          onChange={(e) => handlePlanSaveChange({ customPath: e.target.value || null })}
+                          placeholder="~/.maestro/tracklens/reviews/"
+                          className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                        <div className="text-[10px] text-muted-foreground/70">Leave empty to use default location</div>
+                      </div>
                     )}
+                  </div>
 
-                    <div className="border-t border-border" />
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Auto-close Tab</div>
-                      <select
-                        value={autoCloseDelay}
-                        onChange={(e) => { const next = e.target.value as AutoCloseDelay; setAutoCloseDelayState(next); setAutoCloseDelay(next); }}
-                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                      >
-                        {AUTO_CLOSE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                      <div className="text-[10px] text-muted-foreground/70">
-                        {AUTO_CLOSE_OPTIONS.find(o => o.value === autoCloseDelay)?.description}
+                  <div className="border-t border-border" />
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-sm font-medium">Default Save Action</div>
+                      <div className="text-xs text-muted-foreground">
+                        Used for keyboard shortcut ({navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S)
                       </div>
                     </div>
-                  </>
-                )}
+                    <select
+                      value={defaultNotesApp}
+                      onChange={(e) => handleDefaultNotesAppChange(e.target.value as DefaultNotesApp)}
+                      className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer transition-all mt-4"
+                    >
+                      <option value="ask">Ask each time</option>
+                      <option value="download">Download Annotations</option>
+                      {obsidian.enabled && <option value="obsidian">Obsidian</option>}
+                      {bear.enabled && <option value="bear">Bear</option>}
+                    </select>
+                  </div>
 
-                {activeTab === 'display' && mode === 'plan' && (
-                  <>
+                  <div className="border-t border-border" />
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm font-medium">Auto-open Sidebar</div>
+                        <div className="text-sm font-medium">Obsidian Integration</div>
                         <div className="text-xs text-muted-foreground">
-                          Open sidebar with Table of Contents on load
+                          Auto-save approved reviews to your vault
                         </div>
                       </div>
                       <button
                         role="switch"
-                        aria-checked={uiPrefs.tocEnabled}
-                        onClick={() => handleUIPrefsChange({ tocEnabled: !uiPrefs.tocEnabled })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          uiPrefs.tocEnabled ? 'bg-primary' : 'bg-muted'
-                        }`}
+                        aria-checked={obsidian.enabled}
+                        onClick={() => handleObsidianChange({ enabled: !obsidian.enabled })}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${obsidian.enabled ? 'bg-primary' : 'bg-muted'
+                          }`}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                          uiPrefs.tocEnabled ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${obsidian.enabled ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
                       </button>
                     </div>
-
-                    <div className="border-t border-border" />
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">Sticky Actions</div>
-                        <div className="text-xs text-muted-foreground">
-                          Keep action buttons visible while scrolling
-                        </div>
-                      </div>
-                      <button
-                        role="switch"
-                        aria-checked={uiPrefs.stickyActionsEnabled}
-                        onClick={() => handleUIPrefsChange({ stickyActionsEnabled: !uiPrefs.stickyActionsEnabled })}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          uiPrefs.stickyActionsEnabled ? 'bg-primary' : 'bg-muted'
-                        }`}
-                      >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                          uiPrefs.stickyActionsEnabled ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {activeTab === 'saving' && mode === 'plan' && (
-                  <>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-medium">Save Reviews</div>
-                          <div className="text-xs text-muted-foreground">
-                            Auto-save reviews to ~/.maestro/tracklens/reviews/
-                          </div>
-                        </div>
-                        <button
-                          role="switch"
-                          aria-checked={planSave.enabled}
-                          onClick={() => handlePlanSaveChange({ enabled: !planSave.enabled })}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            planSave.enabled ? 'bg-primary' : 'bg-muted'
-                          }`}
-                        >
-                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                            planSave.enabled ? 'translate-x-6' : 'translate-x-1'
-                          }`} />
-                        </button>
-                      </div>
-                      {planSave.enabled && (
-                        <div className="space-y-1.5 pl-0.5">
-                          <label className="text-xs text-muted-foreground">Custom Path (optional)</label>
-                          <input
-                            type="text"
-                            value={planSave.customPath || ''}
-                            onChange={(e) => handlePlanSaveChange({ customPath: e.target.value || null })}
-                            placeholder="~/.maestro/tracklens/reviews/"
-                            className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                          />
-                          <div className="text-[10px] text-muted-foreground/70">Leave empty to use default location</div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="border-t border-border" />
-                    <div className="space-y-2">
-                      <div>
-                        <div className="text-sm font-medium">Default Save Action</div>
-                        <div className="text-xs text-muted-foreground">
-                          Used for keyboard shortcut ({navigator.platform?.includes('Mac') ? 'Cmd' : 'Ctrl'}+S)
-                        </div>
-                      </div>
-                      <select
-                        value={defaultNotesApp}
-                        onChange={(e) => handleDefaultNotesAppChange(e.target.value as DefaultNotesApp)}
-                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                      >
-                        <option value="ask">Ask each time</option>
-                        <option value="download">Download Annotations</option>
-                        {obsidian.enabled && <option value="obsidian">Obsidian</option>}
-                        {bear.enabled && <option value="bear">Bear</option>}
-                      </select>
-                    </div>
-
-                    <div className="border-t border-border" />
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-medium">Obsidian Integration</div>
-                          <div className="text-xs text-muted-foreground">
-                            Auto-save approved reviews to your vault
-                          </div>
-                        </div>
-                        <button
-                          role="switch"
-                          aria-checked={obsidian.enabled}
-                          onClick={() => handleObsidianChange({ enabled: !obsidian.enabled })}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            obsidian.enabled ? 'bg-primary' : 'bg-muted'
-                          }`}
-                        >
-                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                            obsidian.enabled ? 'translate-x-6' : 'translate-x-1'
-                          }`} />
-                        </button>
-                      </div>
-                      {obsidian.enabled && (
-                        <div className="space-y-3 pl-0.5">
-                          <div className="flex gap-3">
-                            <div className="flex-1 space-y-1.5">
-                              <label className="text-xs text-muted-foreground">Vault</label>
-                              {vaultsLoading ? (
-                                <div className="w-full px-3 py-2 bg-muted rounded-lg text-xs text-muted-foreground">Detecting...</div>
-                              ) : detectedVaults.length > 0 ? (
-                                <>
-                                  <select
-                                    value={obsidian.vaultPath}
-                                    onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
-                                    className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
-                                  >
-                                    {detectedVaults.map((vault) => (
-                                      <option key={vault} value={vault}>{vault.split('/').pop() || vault}</option>
-                                    ))}
-                                    <option value={CUSTOM_PATH_SENTINEL}>Custom path...</option>
-                                  </select>
-                                  {obsidian.vaultPath === CUSTOM_PATH_SENTINEL && (
-                                    <input
-                                      type="text"
-                                      value={obsidian.customPath || ''}
-                                      onChange={(e) => handleObsidianChange({ customPath: e.target.value })}
-                                      placeholder="/path/to/vault"
-                                      className="w-full mt-2 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                                    />
-                                  )}
-                                </>
-                              ) : (
-                                <input
-                                  type="text"
+                    {obsidian.enabled && (
+                      <div className="space-y-3 pl-0.5">
+                        <div className="flex gap-3">
+                          <div className="flex-1 space-y-1.5">
+                            <label className="text-xs text-muted-foreground">Vault</label>
+                            {vaultsLoading ? (
+                              <div className="w-full px-3 py-2 bg-muted rounded-lg text-xs text-muted-foreground">Detecting...</div>
+                            ) : detectedVaults.length > 0 ? (
+                              <>
+                                <select
                                   value={obsidian.vaultPath}
                                   onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
-                                  placeholder="/path/to/vault"
-                                  className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-                                />
-                              )}
-                            </div>
-                            <div className="w-44 space-y-1.5">
-                              <label className="text-xs text-muted-foreground">Folder</label>
+                                  className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer transition-all mt-2"
+                                >
+                                  {detectedVaults.map((vault) => (
+                                    <option key={vault} value={vault}>{vault.split('/').pop() || vault}</option>
+                                  ))}
+                                  <option value={CUSTOM_PATH_SENTINEL}>Custom path...</option>
+                                </select>
+                                {obsidian.vaultPath === CUSTOM_PATH_SENTINEL && (
+                                  <input
+                                    type="text"
+                                    value={obsidian.customPath || ''}
+                                    onChange={(e) => handleObsidianChange({ customPath: e.target.value })}
+                                    placeholder="/path/to/vault"
+                                    className="w-full mt-2 px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                                  />
+                                )}
+                              </>
+                            ) : (
                               <input
                                 type="text"
-                                value={obsidian.folder}
-                                onChange={(e) => handleObsidianChange({ folder: e.target.value })}
-                                placeholder="tracklens"
+                                value={obsidian.vaultPath}
+                                onChange={(e) => handleObsidianChange({ vaultPath: e.target.value })}
+                                placeholder="/path/to/vault"
                                 className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
                               />
-                            </div>
+                            )}
                           </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Filename Format</label>
+                          <div className="w-44 space-y-1.5">
+                            <label className="text-xs text-muted-foreground">Folder</label>
                             <input
                               type="text"
-                              value={obsidian.filenameFormat || ''}
-                              onChange={(e) => handleObsidianChange({ filenameFormat: e.target.value || undefined })}
-                              placeholder={DEFAULT_FILENAME_FORMAT}
-                              className="w-full px-3 py-2 bg-muted rounded-lg text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                              value={obsidian.folder}
+                              onChange={(e) => handleObsidianChange({ folder: e.target.value })}
+                              placeholder="tracklens"
+                              className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/50"
                             />
-                            <div className="text-[10px] text-muted-foreground/70">
-                              Variables: <code className="text-[10px]">{'{title}'}</code> <code className="text-[10px]">{'{YYYY}'}</code> <code className="text-[10px]">{'{MM}'}</code> <code className="text-[10px]">{'{DD}'}</code> <code className="text-[10px]">{'{Mon}'}</code> <code className="text-[10px]">{'{h}'}</code> <code className="text-[10px]">{'{mm}'}</code>
-                            </div>
                           </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs text-muted-foreground">Filename Format</label>
+                          <input
+                            type="text"
+                            value={obsidian.filenameFormat || ''}
+                            onChange={(e) => handleObsidianChange({ filenameFormat: e.target.value || undefined })}
+                            placeholder={DEFAULT_FILENAME_FORMAT}
+                            className="w-full px-4 py-3 bg-background shadow-neu-inset rounded-xl text-xs font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                          />
                           <div className="text-[10px] text-muted-foreground/70">
-                            Reviews saved to: {obsidian.vaultPath === CUSTOM_PATH_SENTINEL ? (obsidian.customPath || '...') : (obsidian.vaultPath || '...')}/{obsidian.folder || 'tracklens'}/
+                            Variables: <code className="text-[10px]">{'{title}'}</code> <code className="text-[10px]">{'{YYYY}'}</code> <code className="text-[10px]">{'{MM}'}</code> <code className="text-[10px]">{'{DD}'}</code> <code className="text-[10px]">{'{Mon}'}</code> <code className="text-[10px]">{'{h}'}</code> <code className="text-[10px]">{'{mm}'}</code>
                           </div>
-                          <div className="space-y-1.5">
-                            <label className="text-xs text-muted-foreground">Frontmatter (auto-generated)</label>
-                            <pre className="px-3 py-2 bg-muted/50 rounded-lg text-[10px] font-mono text-muted-foreground overflow-x-auto">
-{`---
+                        </div>
+                        <div className="text-[10px] text-muted-foreground/70">
+                          Reviews saved to: {obsidian.vaultPath === CUSTOM_PATH_SENTINEL ? (obsidian.customPath || '...') : (obsidian.vaultPath || '...')}/{obsidian.folder || 'tracklens'}/
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs text-muted-foreground">Frontmatter (auto-generated)</label>
+                          <pre className="px-3 py-2 bg-muted/50 rounded-lg text-[10px] font-mono text-muted-foreground overflow-x-auto">
+                            {`---
 created: ${new Date().toISOString().slice(0, 19)}Z
 source: tracklens
 tags: [review, ...]
 ---`}
-                            </pre>
-                          </div>
-                          <div className="border-t border-border/30 pt-3">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <div className="text-xs font-medium">Vault Browser</div>
-                                <div className="text-[10px] text-muted-foreground">
-                                  Browse vault files from the sidebar
-                                </div>
-                              </div>
-                              <button
-                                role="switch"
-                                aria-checked={obsidian.vaultBrowserEnabled}
-                                onClick={() => handleObsidianChange({ vaultBrowserEnabled: !obsidian.vaultBrowserEnabled })}
-                                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                                  obsidian.vaultBrowserEnabled ? 'bg-primary' : 'bg-muted'
-                                }`}
-                              >
-                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                                  obsidian.vaultBrowserEnabled ? 'translate-x-6' : 'translate-x-1'
-                                }`} />
-                              </button>
-                            </div>
-                          </div>
+                          </pre>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="border-t border-border" />
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">Bear Notes</div>
-                        <div className="text-xs text-muted-foreground">
-                          Auto-save approved reviews to Bear
+                        <div className="border-t border-border/30 pt-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-xs font-medium">Vault Browser</div>
+                              <div className="text-[10px] text-muted-foreground">
+                                Browse vault files from the sidebar
+                              </div>
+                            </div>
+                            <button
+                              role="switch"
+                              aria-checked={obsidian.vaultBrowserEnabled}
+                              onClick={() => handleObsidianChange({ vaultBrowserEnabled: !obsidian.vaultBrowserEnabled })}
+                              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${obsidian.vaultBrowserEnabled ? 'bg-primary' : 'bg-muted'
+                                }`}
+                            >
+                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${obsidian.vaultBrowserEnabled ? 'translate-x-6' : 'translate-x-1'
+                                }`} />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                      <button
-                        role="switch"
-                        aria-checked={bear.enabled}
-                        onClick={() => handleBearChange(!bear.enabled)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          bear.enabled ? 'bg-primary' : 'bg-muted'
-                        }`}
-                      >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-                          bear.enabled ? 'translate-x-6' : 'translate-x-1'
-                        }`} />
-                      </button>
+                    )}
+                  </div>
+
+                  <div className="border-t border-border" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium">Bear Notes</div>
+                      <div className="text-xs text-muted-foreground">
+                        Auto-save approved reviews to Bear
+                      </div>
                     </div>
-                  </>
-                )}
-              </div>
+                    <button
+                      role="switch"
+                      aria-checked={bear.enabled}
+                      onClick={() => handleBearChange(!bear.enabled)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${bear.enabled ? 'bg-primary' : 'bg-muted'
+                        }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${bear.enabled ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>,

@@ -12,12 +12,12 @@ import { sanitizeTag } from "./project";
 export interface ObsidianConfig {
   vaultPath: string;
   folder: string;
-  plan: string;
+  content: string;
   filenameFormat?: string; // Custom format string, e.g. '{YYYY}-{MM}-{DD} - {title}'
 }
 
 export interface BearConfig {
-  plan: string;
+  content: string;
 }
 
 export interface IntegrationResult {
@@ -202,7 +202,7 @@ export async function saveToObsidian(
   config: ObsidianConfig
 ): Promise<IntegrationResult> {
   try {
-    const { vaultPath, folder, plan } = config;
+    const { vaultPath, folder, content } = config;
 
     // Normalize path (handle ~ on Unix, forward/back slashes)
     let normalizedVault = vaultPath.trim();
@@ -236,15 +236,15 @@ export async function saveToObsidian(
     mkdirSync(folderPath, { recursive: true });
 
     // Generate content with frontmatter
-    const filename = generateFilename(plan, config.filenameFormat);
-    const tags = await extractTags(plan);
+    const filename = generateFilename(content, config.filenameFormat);
+    const tags = await extractTags(content);
     const frontmatter = generateFrontmatter(tags);
 
-    const content = `${frontmatter}\n\n${plan}`;
+    const fullContent = `${frontmatter}\n\n${content}`;
 
     // Write file
     const filePath = join(folderPath, `${filename}.md`);
-    writeFileSync(filePath, content, "utf-8");
+    writeFileSync(filePath, fullContent, "utf-8");
 
     return { success: true, path: filePath };
   } catch (error) {
@@ -262,25 +262,29 @@ export async function saveToBear(
   config: BearConfig
 ): Promise<IntegrationResult> {
   try {
-    const { plan } = config;
+    const { content } = config;
 
     // Extract title and tags
-    const title = extractTitle(plan);
-    const tags = await extractTags(plan);
+    const title = extractTitle(content);
+    const tags = await extractTags(content);
     const hashtags = tags.map((t) => `#${t}`).join(" ");
 
     // Append hashtags to content
-    const content = `${plan}\n\n${hashtags}`;
+    const fullContent = `${content}\n\n${hashtags}`;
 
     // Build Bear URL
     const url = `bear://x-callback-url/create?title=${encodeURIComponent(
       title
-    )}&text=${encodeURIComponent(content)}&mode=append`;
+    )}&text=${encodeURIComponent(fullContent)}&mode=append`;
 
     // Open Bear URL
-    // Note: This requires Bun.spawn or similar to open the URL
-    // For now, return the URL for the caller to open
-    console.log(`[TrackLens] Open this URL in Bear: ${url}`);
+    if (process.platform === "darwin") {
+      Bun.spawn(["open", url]);
+    } else if (process.platform === "win32") {
+      Bun.spawn(["cmd", "/c", "start", "", url]);
+    } else {
+      Bun.spawn(["xdg-open", url]);
+    }
 
     return { success: true };
   } catch (error) {

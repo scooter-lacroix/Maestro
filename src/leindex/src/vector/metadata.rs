@@ -76,12 +76,12 @@ impl VectorMetadata {
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum ChunkType {
-    #[default]
     Function = 0,
     Class = 1,
     Module = 2,
     Import = 3,
     Comment = 4,
+    #[default]
     Text = 5,
     Other = 6, // Must remain 6 for backward compatibility
 }

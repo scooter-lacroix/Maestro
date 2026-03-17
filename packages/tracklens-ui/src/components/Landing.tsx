@@ -17,8 +17,8 @@ interface LandingProps {
 
 export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <nav className="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
+    <div className="min-h-screen bg-background text-foreground font-sans">
+      <nav className="fixed top-0 left-0 right-0 h-16 flex items-center justify-between px-8 bg-background/80 backdrop-blur-md z-50 shadow-neu-small">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold tracking-tight">
             TrackLens
@@ -48,19 +48,19 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
         </div>
       </nav>
 
-      <div className="max-w-4xl mx-auto border-x border-border/30">
-        <section className="pt-32 pb-20 px-8">
+      <div className="max-w-4xl mx-auto my-24 rounded-[32px] bg-background shadow-neu-extruded overflow-hidden">
+        <section className="pt-24 pb-20 px-12">
           <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium mb-6">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-background shadow-neu-inset-small text-primary text-xs font-medium mb-8">
               <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
               For Claude Code & OpenCode
             </div>
 
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight leading-[1.1] mb-4">
+            <h1 className="font-display text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6">
               Annotate plans.
               <br />
               <span className="text-muted-foreground">
-                Not in the terminal.
+                Not the terminal.
               </span>
             </h1>
 
@@ -73,7 +73,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
               {onEnter ? (
                 <button
                   onClick={onEnter}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                  className="inline-flex items-center gap-2 px-8 py-3 rounded-2xl bg-primary text-primary-foreground font-medium transition-all duration-300 ease-out shadow-neu-extruded hover:-translate-y-px hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset"
                 >
                   Open App
                   <svg
@@ -95,23 +95,24 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
           </div>
         </section>
 
-        <section className="py-16 px-8 border-t border-border/30">
-          <div className="grid md:grid-cols-2 gap-8 max-w-2xl">
+        <section className="py-16 px-12 mt-8">
+          <div className="w-full h-px bg-transparent shadow-neu-inset-small mb-16 rounded-full" />
+          <div className="grid md:grid-cols-2 gap-12 max-w-3xl border-none">
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              <h3 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground mb-4">
                 The Problem
               </h3>
-              <p className="text-foreground/90">
+              <p className="text-muted-foreground/90 leading-relaxed">
                 Coding agents show plans in the terminal. You approve or deny, but
                 giving specific feedback means typing everything out. Hard to
                 reference exact sections. Zero collaboration features.
               </p>
             </div>
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              <h3 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground mb-4">
                 The Solution
               </h3>
-              <p className="text-foreground/90">
+              <p className="text-muted-foreground/90 leading-relaxed">
                 Select the exact parts of the plan you want to change. Mark for
                 deletion, add a comment, or suggest a replacement.
                 Feedback flows back to your agent automatically.
@@ -120,10 +121,11 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
           </div>
         </section>
 
-        <section className="py-16 px-8 border-t border-border/30">
-          <div className="grid md:grid-cols-2 gap-8 max-w-2xl">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/10 flex items-center justify-center shrink-0">
+        <section className="py-16 px-12">
+          <div className="w-full h-px bg-transparent shadow-neu-inset-small mb-16 rounded-full" />
+          <div className="grid md:grid-cols-2 gap-12 max-w-3xl">
+            <div className="flex items-start gap-5">
+              <div className="w-12 h-12 rounded-2xl bg-background shadow-neu-inset-deep flex items-center justify-center shrink-0">
                 <svg
                   className="w-5 h-5 text-secondary"
                   fill="none"
@@ -139,15 +141,15 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold mb-1">Runs locally.</h3>
-                <p className="text-muted-foreground text-sm">
+                <h3 className="font-bold font-display mb-1">Runs locally.</h3>
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   Local plugin. No network requests. TrackLens runs entirely
                   in your browser. Plans never leave your machine.
                 </p>
               </div>
             </div>
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[#7c3aed]/10 flex items-center justify-center shrink-0">
+            <div className="flex items-start gap-5">
+              <div className="w-12 h-12 rounded-2xl bg-background shadow-neu-inset-deep flex items-center justify-center shrink-0">
                 <svg
                   className="w-5 h-5 text-[#7c3aed]"
                   fill="none"
@@ -163,16 +165,16 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold mb-1">Save to Obsidian.</h3>
-                <p className="text-muted-foreground text-sm">
+                <h3 className="font-bold font-display mb-1">Save to Obsidian.</h3>
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   Approved plans auto-save to your vault with frontmatter and
                   auto-extracted tags. Build a searchable archive of every plan
                   your agents create.
                 </p>
               </div>
             </div>
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+            <div className="flex items-start gap-5">
+              <div className="w-12 h-12 rounded-2xl bg-background shadow-neu-inset-deep flex items-center justify-center shrink-0">
                 <svg
                   className="w-5 h-5 text-accent"
                   fill="none"
@@ -188,8 +190,8 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold mb-1">Save to Bear.</h3>
-                <p className="text-muted-foreground text-sm">
+                <h3 className="font-bold font-display mb-1">Save to Bear.</h3>
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   Native Bear notes integration. Export your reviews directly
                   to Bear with proper formatting and tags.
                 </p>
@@ -198,108 +200,114 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
           </div>
         </section>
 
-        <section className="py-16 px-8 border-t border-border/30">
-          <h2 className="text-xl font-semibold mb-8 text-center">
+        <section className="py-16 px-12">
+          <div className="w-full h-px bg-transparent shadow-neu-inset-small mb-16 rounded-full" />
+          <h2 className="text-2xl font-bold font-display mb-10 text-center">
             What it looks like
           </h2>
 
-          <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden shadow-2xl">
-            <div className="h-10 bg-card/80 border-b border-border/30 flex items-center px-4 gap-2">
-              <div className="flex gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-destructive/60" />
-                <div className="w-2.5 h-2.5 rounded-full bg-accent/60" />
-                <div className="w-2.5 h-2.5 rounded-full bg-secondary/60" />
-              </div>
-              <div className="flex-1 flex justify-center">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <div className="w-4 h-4 rounded bg-primary/20" />
-                  <span>TrackLens</span>
+          <div className="rounded-[32px] bg-background p-6 shadow-neu-inset-deep">
+            <div className="rounded-[24px] bg-background overflow-hidden shadow-neu-extruded flex flex-col">
+              <div className="h-12 bg-background shadow-neu-small z-10 flex items-center px-6 gap-3">
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-destructive/60" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-accent/60" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-secondary/60" />
                 </div>
-              </div>
-              <div className="w-16" />
-            </div>
-
-            <div className="flex h-80">
-              <div className="flex-1 p-6 bg-background/50 flex items-start justify-center">
-                <div className="w-full max-w-sm bg-card rounded-lg border border-border/30 p-5 shadow-lg">
-                  <div className="h-3 w-3/4 bg-foreground/80 rounded mb-4" />
-
-                  <div className="space-y-2 mb-4">
-                    <div className="h-2 w-full bg-muted-foreground/30 rounded" />
-                    <div className="h-2 w-5/6 bg-muted-foreground/30 rounded" />
-                    <div className="flex items-center gap-1">
-                      <div className="h-2 w-1/4 bg-muted-foreground/30 rounded" />
-                      <div className="h-2 w-1/3 bg-destructive/40 rounded line-through" />
-                      <div className="h-2 w-1/6 bg-muted-foreground/30 rounded" />
-                    </div>
-                  </div>
-
-                  <div className="h-2.5 w-1/2 bg-foreground/60 rounded mb-3 mt-5" />
-
-                  <div className="space-y-2 mb-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-1 h-1 rounded-full bg-primary/60" />
-                      <div className="h-2 w-4/5 bg-muted-foreground/30 rounded" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-1 h-1 rounded-full bg-primary/60" />
-                      <div className="h-2 w-2/3 bg-accent/40 rounded border-b border-accent" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-1 h-1 rounded-full bg-primary/60" />
-                      <div className="h-2 w-3/4 bg-muted-foreground/30 rounded" />
-                    </div>
-                  </div>
-
-                  <div className="bg-muted/50 rounded p-2 space-y-1.5">
-                    <div className="h-1.5 w-1/2 bg-primary/40 rounded" />
-                    <div className="h-1.5 w-2/3 bg-muted-foreground/30 rounded" />
-                    <div className="h-1.5 w-1/3 bg-secondary/40 rounded" />
+                <div className="flex-1 flex justify-center">
+                  <div className="flex items-center gap-2 px-4 py-1.5 rounded-full shadow-neu-inset-small text-xs font-medium text-muted-foreground">
+                    <div className="w-4 h-4 rounded shadow-neu-extruded-small bg-primary/20" />
+                    <span>TrackLens</span>
                   </div>
                 </div>
+                <div className="w-16" />
               </div>
 
-              <div className="w-48 border-l border-border/30 bg-card/30 p-3">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3 flex items-center justify-between">
-                  <span>Annotations</span>
-                  <span className="bg-muted px-1.5 py-0.5 rounded text-[9px]">
-                    2
-                  </span>
+              <div className="flex h-[360px]">
+                <div className="flex-1 p-8 bg-background flex items-start justify-center">
+                  <div className="w-full max-w-md bg-background rounded-[24px] shadow-neu-extruded p-6">
+                    <div className="h-3 w-3/4 bg-foreground/80 rounded mb-4" />
+
+                    <div className="space-y-2 mb-4">
+                      <div className="h-2 w-full bg-muted-foreground/30 rounded" />
+                      <div className="h-2 w-5/6 bg-muted-foreground/30 rounded" />
+                      <div className="flex items-center gap-1">
+                        <div className="h-2 w-1/4 bg-muted-foreground/30 rounded" />
+                        <div className="h-2 w-1/3 bg-destructive/40 rounded line-through" />
+                        <div className="h-2 w-1/6 bg-muted-foreground/30 rounded" />
+                      </div>
+                    </div>
+
+                    <div className="h-2.5 w-1/2 bg-foreground/60 rounded mb-3 mt-5" />
+
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1 h-1 rounded-full bg-primary/60" />
+                        <div className="h-2 w-4/5 bg-muted-foreground/30 rounded" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-1 h-1 rounded-full bg-primary/60" />
+                        <div className="h-2 w-2/3 bg-accent/40 rounded border-b border-accent" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-1 h-1 rounded-full bg-primary/60" />
+                        <div className="h-2 w-3/4 bg-muted-foreground/30 rounded" />
+                      </div>
+                    </div>
+
+                    <div className="shadow-neu-inset-small rounded-xl p-3 space-y-2 mt-2">
+                      <div className="h-1.5 w-1/2 bg-primary/40 rounded-full" />
+                      <div className="h-1.5 w-2/3 bg-muted-foreground/30 rounded-full" />
+                      <div className="h-1.5 w-1/3 bg-secondary/40 rounded-full" />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <div className="p-2 rounded-md border border-destructive/30 bg-destructive/5">
-                    <div className="flex items-center gap-1 mb-1.5">
-                      <div className="w-3 h-3 rounded bg-destructive/20" />
-                      <span className="text-[9px] font-semibold text-destructive uppercase">
-                        Delete
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full bg-muted rounded" />
+                <div className="w-56 shadow-neu-inset-small p-4 rounded-tl-[24px]">
+                  <div className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-4 flex items-center justify-between px-1">
+                    <span>Annotations</span>
+                    <span className="shadow-neu-extruded px-2 py-0.5 rounded-full text-[9px]">
+                      2
+                    </span>
                   </div>
 
-                  <div className="p-2 rounded-md border border-accent/30 bg-accent/5">
-                    <div className="flex items-center gap-1 mb-1.5">
-                      <div className="w-3 h-3 rounded bg-accent/20" />
-                      <span className="text-[9px] font-semibold text-accent uppercase">
-                        Comment
-                      </span>
+                  <div className="space-y-4 shadow-neu-inset p-3 rounded-2xl h-[calc(100%-2rem)]">
+                    <div className="p-3 rounded-xl shadow-neu-extruded bg-background relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-destructive/60" />
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-3 h-3 rounded-full shadow-neu-inset-small bg-destructive/10" />
+                        <span className="text-[9px] font-bold text-destructive uppercase tracking-widest">
+                          Delete
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full bg-muted-foreground/20 rounded-full" />
                     </div>
-                    <div className="h-1.5 w-3/4 bg-muted rounded mb-1" />
-                    <div className="h-1.5 w-full bg-accent/20 rounded" />
+
+                    <div className="p-3 rounded-xl shadow-neu-extruded bg-background relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-accent/60" />
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-3 h-3 rounded-full shadow-neu-inset-small bg-accent/10" />
+                        <span className="text-[9px] font-bold text-accent uppercase tracking-widest">
+                          Comment
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-3/4 bg-muted-foreground/20 rounded-full mb-2" />
+                      <div className="h-1.5 w-full bg-accent/30 rounded-full" />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <p className="text-center text-sm text-muted-foreground mt-6">
+          <p className="text-center font-medium text-sm text-muted-foreground mt-8">
             Select text → annotate → export feedback
           </p>
         </section>
 
-        <section className="py-16 px-8 border-t border-border/30 bg-card/30">
-          <h2 className="text-xl font-semibold mb-8">How it works</h2>
+        <section className="py-16 px-12">
+          <div className="w-full h-px bg-transparent shadow-neu-inset-small mb-16 rounded-full" />
+          <h2 className="text-2xl font-bold font-display mb-10">How it works</h2>
 
           <div className="space-y-6 max-w-2xl">
             <Step num={1} title="Agent triggers TrackLens">
@@ -321,8 +329,9 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
           </div>
         </section>
 
-        <section className="py-16 px-8 border-t border-border/30 bg-card/30">
-          <h2 className="text-xl font-semibold mb-6">Technical details</h2>
+        <section className="py-16 px-12">
+          <div className="w-full h-px bg-transparent shadow-neu-inset-small mb-16 rounded-full" />
+          <h2 className="text-2xl font-bold font-display mb-8">Technical details</h2>
           <ul className="space-y-2 text-sm text-muted-foreground max-w-2xl mb-6">
             <li className="flex items-center gap-2">
               <span className="text-primary">•</span>
@@ -356,14 +365,14 @@ export const Landing: React.FC<LandingProps> = ({ onEnter }) => {
                 <span className="text-xs font-medium">GitHub</span>
               </span>
             </span>
-            <span className="underline underline-offset-2">
+            <span className="underline underline-offset-4">
               View GitHub repository
             </span>
           </a>
         </section>
 
-        <footer className="py-8 px-8 border-t border-border/30 text-center">
-          <p className="text-xs text-muted-foreground/60 mt-2">
+        <footer className="py-10 px-8 bg-background shadow-neu-inset-small text-center opacity-80">
+          <p className="font-medium text-xs text-muted-foreground/80 mt-2">
             &copy; 2025 Maestro. All rights reserved.
           </p>
         </footer>
@@ -377,13 +386,13 @@ const Step: React.FC<{
   title: string;
   children: React.ReactNode;
 }> = ({ num, title, children }) => (
-  <div className="flex gap-4">
-    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary text-sm font-semibold flex items-center justify-center shrink-0">
+  <div className="flex gap-5">
+    <div className="w-10 h-10 rounded-2xl bg-background shadow-neu-extruded text-primary text-sm font-bold font-display flex items-center justify-center shrink-0">
       {num}
     </div>
-    <div>
-      <h4 className="font-medium mb-1">{title}</h4>
-      <p className="text-sm text-muted-foreground">{children}</p>
+    <div className="pt-2">
+      <h4 className="font-bold font-display text-lg mb-2">{title}</h4>
+      <p className="text-sm font-medium leading-relaxed text-muted-foreground">{children}</p>
     </div>
   </div>
 );

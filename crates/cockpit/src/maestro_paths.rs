@@ -4,14 +4,14 @@
 //! product.md, workflow.md and other Maestro docs regardless of where
 //! the Cockpit TUI is launched from.
 
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 /// Potential locations to search for tracks.md relative to a starting directory
 const TRACKS_SEARCH_PATHS: &[&str] = &[
-    "maestro/tracks.md",       // Standard Maestro project structure
-    "tracks.md",               // Legacy or flat structure
-    ".maestro/tracks.md",      // Hidden config structure
+    "maestro/tracks.md",        // Standard Maestro project structure
+    "tracks.md",                // Legacy or flat structure
+    ".maestro/tracks.md",       // Hidden config structure
     "maestro/tracks/tracks.md", // Deep structure
 ];
 
@@ -41,9 +41,12 @@ impl MaestroProject {
         };
 
         let tracks_dir = absolute_path.parent()?.to_path_buf();
-        
+
         // Determine root_dir: if tracks_dir ends with "maestro" or ".maestro", parent is root
-        let dir_name = tracks_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let dir_name = tracks_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
         let root_dir = if dir_name == "maestro" || dir_name == ".maestro" {
             tracks_dir.parent()?.to_path_buf()
         } else {
@@ -105,7 +108,7 @@ pub fn resolve_maestro_project(start: Option<&Path>) -> Option<MaestroProject> {
 
     // Walk up the directory tree
     let mut current = start_dir.as_path();
-    
+
     loop {
         // Try each search path pattern
         for pattern in TRACKS_SEARCH_PATHS {
@@ -137,15 +140,18 @@ pub fn resolve_maestro_project(start: Option<&Path>) -> Option<MaestroProject> {
 /// * `Vec<MaestroProject>` - Unique discovered projects
 pub fn discover_projects_from_dirs(working_dirs: &[PathBuf]) -> Vec<MaestroProject> {
     use std::collections::HashSet;
-    
+
     let mut seen_roots: HashSet<PathBuf> = HashSet::new();
     let mut projects = Vec::new();
 
     for dir in working_dirs {
         if let Some(project) = resolve_maestro_project(Some(dir)) {
             // Canonicalize for deduplication
-            let canonical_root = project.root_dir.canonicalize().unwrap_or_else(|_| project.root_dir.clone());
-            
+            let canonical_root = project
+                .root_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project.root_dir.clone());
+
             if !seen_roots.contains(&canonical_root) {
                 seen_roots.insert(canonical_root);
                 projects.push(project);
@@ -158,15 +164,15 @@ pub fn discover_projects_from_dirs(working_dirs: &[PathBuf]) -> Vec<MaestroProje
 
 /// Discover all Maestro projects by scanning the current directory and all active tmux panes.
 pub fn discover_all_projects() -> Vec<MaestroProject> {
-    use leindex_analyzers::multiplexer::TmuxMultiplexer;
-    
+    use leindex_core::multiplexer::TmuxMultiplexer;
+
     let mut working_dirs = Vec::new();
-    
+
     // Add current working directory
     if let Ok(cwd) = std::env::current_dir() {
         working_dirs.push(cwd);
     }
-    
+
     // Add tmux pane paths if available
     let mux = TmuxMultiplexer::new();
     if let Ok(tmux_paths) = mux.get_all_pane_paths() {
@@ -174,7 +180,7 @@ pub fn discover_all_projects() -> Vec<MaestroProject> {
             working_dirs.push(PathBuf::from(path));
         }
     }
-    
+
     discover_projects_from_dirs(&working_dirs)
 }
 
@@ -189,8 +195,8 @@ pub fn get_default_tracks_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_resolve_tracks_dir_maestro_structure() {

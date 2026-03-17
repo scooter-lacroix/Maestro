@@ -358,8 +358,6 @@ mod tests {
             // All values should be non-negative where applicable
             assert!(proc.cpu_percent >= 0.0);
             assert!(proc.memory_percent >= 0.0);
-            assert!(proc.rss_bytes >= 0);
-            assert!(proc.shared_bytes >= 0);
             assert!(proc.pid > 0);
             // Note: Some kernel processes may have empty names, so we don't assert on name
         }

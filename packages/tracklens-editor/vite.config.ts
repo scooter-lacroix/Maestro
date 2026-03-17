@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite';
-import { viteSingleFile } from 'vite-plugin-singlefile';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/postcss';
 import * as fs from 'fs';
@@ -21,7 +20,7 @@ const copyToApps = () => ({
 });
 
 export default defineConfig({
-  plugins: [react(), viteSingleFile(), copyToApps()],
+  plugins: [react(), copyToApps()],
   css: {
     postcss: {
       plugins: [tailwindcss()],
@@ -29,12 +28,5 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    // Create a single-file bundle with all assets inlined
-    // This allows the HTML to be served directly without external asset requests
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
-    },
   },
 });

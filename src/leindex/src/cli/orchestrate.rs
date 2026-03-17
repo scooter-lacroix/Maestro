@@ -177,7 +177,7 @@ pub async fn run(cmd: OrchestrateCommand) -> Result<()> {
                 sandbox,
             };
 
-            let mut engine = OrchestrateEngine::new(config, tracks_dir)?;
+            let engine = OrchestrateEngine::new(config, tracks_dir)?;
             engine.start(&track_id, loop_mode, agent_config).await?;
             Ok(())
         }

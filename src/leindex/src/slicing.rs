@@ -312,7 +312,7 @@ impl SlicingAnalyzer {
 
             // Update definition points
             for var in defs {
-                var_defs.entry(var).or_insert_with(Vec::new).push(line_idx);
+                var_defs.entry(var).or_default().push(line_idx);
             }
         }
     }
@@ -579,6 +579,7 @@ impl SlicingAnalyzer {
 
         // Extract relevant variables from data edges
         for edge in &pdg.edges {
+            #[allow(clippy::collapsible_if)]
             if edge.dep_type == DependenceType::Data {
                 if result.relevant_lines.contains(&edge.from_line)
                     || result.relevant_lines.contains(&edge.to_line)

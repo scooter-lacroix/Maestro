@@ -19,6 +19,11 @@ pub enum AgentRole {
     Architect,
     Critic,
     Kraken,
+    Sentinel,
+    Warden,
+    Mender,
+    Cartographer,
+    Prism,
 }
 
 /// Pi-mono agent types
@@ -28,6 +33,11 @@ pub enum PiAgentType {
     Planner,
     Reviewer,
     Worker,
+    EvidenceValidator,
+    FinalReviewer,
+    Remediator,
+    Researcher,
+    UxReviewer,
 }
 
 /// Tool access permissions for agents
@@ -221,6 +231,101 @@ pub fn default_mappings() -> Vec<AgentMapping> {
             complexity_range: (TaskComplexity::Medium, TaskComplexity::Expert),
             description: "Implementation and execution".to_string(),
         },
+        AgentMapping {
+            maestro_role: AgentRole::Sentinel,
+            pi_agent_type: PiAgentType::EvidenceValidator,
+            tool_access: ToolAccess {
+                can_read: true,
+                can_write: true,
+                can_execute: true,
+                can_search: true,
+                allowed_tools: {
+                    let mut set = HashSet::new();
+                    set.insert("grep".to_string());
+                    set.insert("read".to_string());
+                    set.insert("execute".to_string());
+                    set
+                },
+            },
+            complexity_range: (TaskComplexity::Simple, TaskComplexity::Complex),
+            description: "Evidence-focused QA validation".to_string(),
+        },
+        AgentMapping {
+            maestro_role: AgentRole::Warden,
+            pi_agent_type: PiAgentType::FinalReviewer,
+            tool_access: ToolAccess {
+                can_read: true,
+                can_write: false,
+                can_execute: false,
+                can_search: true,
+                allowed_tools: {
+                    let mut set = HashSet::new();
+                    set.insert("grep".to_string());
+                    set.insert("read".to_string());
+                    set
+                },
+            },
+            complexity_range: (TaskComplexity::Simple, TaskComplexity::Expert),
+            description: "Skeptical final review gate".to_string(),
+        },
+        AgentMapping {
+            maestro_role: AgentRole::Mender,
+            pi_agent_type: PiAgentType::Remediator,
+            tool_access: ToolAccess {
+                can_read: true,
+                can_write: true,
+                can_execute: true,
+                can_search: true,
+                allowed_tools: {
+                    let mut set = HashSet::new();
+                    set.insert("grep".to_string());
+                    set.insert("find".to_string());
+                    set.insert("read".to_string());
+                    set.insert("write".to_string());
+                    set.insert("execute".to_string());
+                    set
+                },
+            },
+            complexity_range: (TaskComplexity::Simple, TaskComplexity::Complex),
+            description: "Remediation coordination and retry management".to_string(),
+        },
+        AgentMapping {
+            maestro_role: AgentRole::Cartographer,
+            pi_agent_type: PiAgentType::Researcher,
+            tool_access: ToolAccess {
+                can_read: true,
+                can_write: false,
+                can_execute: false,
+                can_search: true,
+                allowed_tools: {
+                    let mut set = HashSet::new();
+                    set.insert("grep".to_string());
+                    set.insert("find".to_string());
+                    set.insert("read".to_string());
+                    set
+                },
+            },
+            complexity_range: (TaskComplexity::Trivial, TaskComplexity::Complex),
+            description: "Discovery research and pre-spec investigation".to_string(),
+        },
+        AgentMapping {
+            maestro_role: AgentRole::Prism,
+            pi_agent_type: PiAgentType::UxReviewer,
+            tool_access: ToolAccess {
+                can_read: true,
+                can_write: false,
+                can_execute: false,
+                can_search: true,
+                allowed_tools: {
+                    let mut set = HashSet::new();
+                    set.insert("grep".to_string());
+                    set.insert("read".to_string());
+                    set
+                },
+            },
+            complexity_range: (TaskComplexity::Simple, TaskComplexity::Complex),
+            description: "UX architecture and frontend pattern review".to_string(),
+        },
     ]
 }
 
@@ -373,6 +478,11 @@ fn role_to_config_key(role: &AgentRole) -> String {
         AgentRole::Architect => "architect".to_string(),
         AgentRole::Critic => "critic".to_string(),
         AgentRole::Kraken => "kraken".to_string(),
+        AgentRole::Sentinel => "sentinel".to_string(),
+        AgentRole::Warden => "warden".to_string(),
+        AgentRole::Mender => "mender".to_string(),
+        AgentRole::Cartographer => "cartographer".to_string(),
+        AgentRole::Prism => "prism".to_string(),
     }
 }
 
@@ -831,7 +941,7 @@ mod tests {
             let registry = AgentRegistry::new(config);
 
             // Verify registry was created
-            assert_eq!(registry.registered_roles().len(), 4);
+            assert_eq!(registry.registered_roles().len(), 9);
         }
 
         #[test]
@@ -839,8 +949,8 @@ mod tests {
             let config = PiMonoConfig::default();
             let registry = AgentRegistry::new(config);
 
-            // Registry should still cache all 4 default agents
-            assert_eq!(registry.registered_roles().len(), 4);
+            // Registry should still cache all 9 default agents
+            assert_eq!(registry.registered_roles().len(), 9);
         }
 
         #[test]
@@ -1123,11 +1233,16 @@ mod tests {
             let registry = AgentRegistry::new(config);
 
             let roles = registry.registered_roles();
-            assert_eq!(roles.len(), 4);
+            assert_eq!(roles.len(), 9);
             assert!(roles.contains(&AgentRole::Scout));
             assert!(roles.contains(&AgentRole::Architect));
             assert!(roles.contains(&AgentRole::Critic));
             assert!(roles.contains(&AgentRole::Kraken));
+            assert!(roles.contains(&AgentRole::Sentinel));
+            assert!(roles.contains(&AgentRole::Warden));
+            assert!(roles.contains(&AgentRole::Mender));
+            assert!(roles.contains(&AgentRole::Cartographer));
+            assert!(roles.contains(&AgentRole::Prism));
         }
 
         #[test]
@@ -1142,7 +1257,7 @@ mod tests {
             let registry = AgentRegistry::new(config).with_detection(detection);
 
             // Verify registry still works
-            assert_eq!(registry.registered_roles().len(), 4);
+            assert_eq!(registry.registered_roles().len(), 9);
             let agent = registry.get_agent(AgentRole::Scout).unwrap();
             assert_eq!(agent.role, AgentRole::Scout);
         }
@@ -1153,6 +1268,11 @@ mod tests {
             assert_eq!(role_to_config_key(&AgentRole::Architect), "architect");
             assert_eq!(role_to_config_key(&AgentRole::Critic), "critic");
             assert_eq!(role_to_config_key(&AgentRole::Kraken), "kraken");
+            assert_eq!(role_to_config_key(&AgentRole::Sentinel), "sentinel");
+            assert_eq!(role_to_config_key(&AgentRole::Warden), "warden");
+            assert_eq!(role_to_config_key(&AgentRole::Mender), "mender");
+            assert_eq!(role_to_config_key(&AgentRole::Cartographer), "cartographer");
+            assert_eq!(role_to_config_key(&AgentRole::Prism), "prism");
         }
 
         #[test]

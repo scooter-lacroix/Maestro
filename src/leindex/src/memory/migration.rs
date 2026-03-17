@@ -114,7 +114,7 @@ impl LegacyMigrator {
                 metadata: None,
             };
 
-            if let Ok(_) = service.import_session(session) {
+            if service.import_session(session).is_ok() {
                 migrated_count += 1;
             }
         }

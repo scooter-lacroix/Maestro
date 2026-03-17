@@ -289,11 +289,7 @@ mod tests {
             .collect()
             .expect("Failed to collect network metrics");
 
-        // Values should be non-negative
         assert!(metrics.total_recv_bytes >= 0);
-        assert!(metrics.total_sent_bytes >= 0);
-        assert!(metrics.download_speed_bps >= 0);
-        assert!(metrics.upload_speed_bps >= 0);
     }
 
     #[test]
@@ -325,8 +321,7 @@ mod tests {
             .download_speed()
             .expect("Failed to get download speed");
 
-        // Should be non-negative
-        assert!(speed >= 0);
+        assert!(speed >= 0.0, "Download speed should be non-negative");
     }
 
     #[test]
@@ -336,8 +331,7 @@ mod tests {
             .upload_speed()
             .expect("Failed to get upload speed");
 
-        // Should be non-negative
-        assert!(speed >= 0);
+        assert!(speed >= 0.0, "Upload speed should be non-negative");
     }
 
     #[test]
@@ -391,13 +385,7 @@ mod tests {
 
         for (name, stats) in interfaces {
             assert_eq!(name, stats.name);
-            // Stats should be non-negative
-            assert!(stats.recv_bytes >= 0);
-            assert!(stats.sent_bytes >= 0);
-            assert!(stats.recv_packets >= 0);
-            assert!(stats.sent_packets >= 0);
-            assert!(stats.recv_errors >= 0);
-            assert!(stats.send_errors >= 0);
+            let _ = stats;
         }
     }
 
@@ -436,13 +424,13 @@ mod tests {
         let metrics1 = collector
             .collect()
             .expect("Failed to collect network metrics");
-        assert!(metrics1.total_recv_bytes >= 0);
+        let _ = metrics1.total_recv_bytes;
 
         // Second collection
         let metrics2 = collector
             .collect()
             .expect("Failed to collect network metrics");
-        assert!(metrics2.total_recv_bytes >= 0);
+        let _ = metrics2.total_recv_bytes;
 
         // Second collection should have >= bytes than first
         assert!(metrics2.total_recv_bytes >= metrics1.total_recv_bytes);
@@ -500,8 +488,6 @@ mod tests {
             .collect()
             .expect("Failed to collect network metrics");
 
-        // Speeds should be valid (even if 0 for no activity)
-        assert!(metrics2.download_speed_bps >= 0);
-        assert!(metrics2.upload_speed_bps >= 0);
+        let _ = metrics2;
     }
 }

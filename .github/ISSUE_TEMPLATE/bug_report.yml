@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible problem in Maestro, LeIndex, TrackLens, or Cockpit
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      description: Which user-facing part is affected?
+      options:
+        - maestro orchestration
+        - leindex
+        - tracklens
+        - cockpit
+        - installer/setup
+        - docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: A short, concrete description of the problem
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Tell us exactly how to reproduce the issue
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, shell, tool versions, branch, and any relevant configuration
+      placeholder: Linux/macOS, Rust version, Bun version, branch name, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste the smallest useful output or attach screenshots
+      render: shell

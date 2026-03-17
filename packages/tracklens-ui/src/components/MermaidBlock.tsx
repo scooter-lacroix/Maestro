@@ -10,10 +10,24 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { Block } from '../types';
 
 let mermaidInitialized = false;
+// Mermaid API interface for type safety
+interface MermaidAPI {
+  initialize: (config: Record<string, unknown>) => void;
+  render: (id: string, content: string) => Promise<{ svg: string }>;
+}
 
-function initializeMermaid() {
+let mermaidModulePromise: Promise<MermaidAPI> | null = null;
+
+async function getMermaid(): Promise<MermaidAPI> {
+  if (!mermaidModulePromise) {
+    mermaidModulePromise = import('mermaid').then((mod) => (mod.default ?? mod) as MermaidAPI);
+  }
+  return mermaidModulePromise;
+}
+
+async function initializeMermaid() {
   if (mermaidInitialized) return;
-  const mermaid = require('mermaid');
+  const mermaid = await getMermaid();
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
@@ -93,8 +107,8 @@ export const MermaidBlock: React.FC<{ block: Block }> = ({ block }) => {
   useEffect(() => {
     const renderDiagram = async () => {
       try {
-        initializeMermaid();
-        const mermaid = require('mermaid');
+        await initializeMermaid();
+        const mermaid = await getMermaid();
         const id = `mermaid-${block.id}`;
         const { svg: renderedSvg } = await mermaid.render(id, block.content);
         const cleaned = renderedSvg.replace(/ width="[^"]*"/, ' width="100%"').replace(/ height="[^"]*"/, ' height="100%"').replace(/ style="[^"]*"/, '');

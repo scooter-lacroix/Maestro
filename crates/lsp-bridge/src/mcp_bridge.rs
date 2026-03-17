@@ -43,7 +43,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::memory::LspType;
+use leindex_core::LspType;
 
 /// Maximum message size to prevent DoS (16MB)
 const MAX_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
@@ -970,8 +970,10 @@ mod tests {
             .expect("definition tool should exist");
 
         assert_eq!(definition_tool.name, "lsp/definition");
-        assert!(definition_tool.description.contains("definition") ||
-                definition_tool.description.contains("Definition"));
+        assert!(
+            definition_tool.description.contains("definition")
+                || definition_tool.description.contains("Definition")
+        );
     }
 
     /// Test LSP type to binary name mapping
@@ -1006,10 +1008,7 @@ mod tests {
             let schema = &tool.input_schema;
 
             // Verify it's an object type
-            assert_eq!(
-                schema.get("type").and_then(|v| v.as_str()),
-                Some("object")
-            );
+            assert_eq!(schema.get("type").and_then(|v| v.as_str()), Some("object"));
 
             // Verify it has properties
             if let Some(props) = schema.get("properties") {

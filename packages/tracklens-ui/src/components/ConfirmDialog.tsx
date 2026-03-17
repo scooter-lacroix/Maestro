@@ -61,13 +61,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl w-full max-w-sm shadow-2xl p-6">
-        <div className="flex items-center gap-3 mb-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-xl p-4">
+      <div className="bg-background rounded-[32px] w-full max-w-sm shadow-neu-extruded p-8 border border-border/10">
+        <div className="flex items-center gap-3 mb-6">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${iconColors[variant]}`}>
             {icons[variant]}
           </div>
-          <h3 className="font-semibold">{title}</h3>
+          <h3 className="font-bold font-display text-lg">{title}</h3>
         </div>
         <div className="text-sm text-muted-foreground mb-2">
           {message}
@@ -78,11 +78,11 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </div>
         )}
         {!subMessage && <div className="mb-4" />}
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-3 mt-8">
           {showCancel && (
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-opacity"
+              className="px-5 py-2.5 rounded-xl text-sm font-medium bg-background text-muted-foreground shadow-neu-extruded hover:-translate-y-px hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all duration-300"
             >
               {cancelText}
             </button>
@@ -95,7 +95,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 onClose();
               }
             }}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-opacity ${buttonColors[variant]}`}
+            className={`px-5 py-2.5 rounded-xl text-sm font-medium shadow-neu-extruded hover:-translate-y-px hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all duration-300 ${buttonColors[variant]}`}
           >
             {confirmText}
           </button>

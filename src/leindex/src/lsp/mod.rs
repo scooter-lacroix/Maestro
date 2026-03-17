@@ -23,7 +23,7 @@
 //!
 //! To use the bridge, depend on `maestro-lsp-mcp-bridge`:
 //!
-//! ```no_run
+//! ```ignore
 //! use maestro_lsp_mcp_bridge::McpBridge;
 //! use leindex_core::memory::lsp_manager::LspType;
 //!

@@ -16,6 +16,8 @@ pub mod turso_backend;
 #[cfg(feature = "rusqlite")]
 pub mod db;
 #[cfg(feature = "rusqlite")]
+pub mod mcp_installer;
+#[cfg(feature = "rusqlite")]
 pub mod mcp_pool;
 #[cfg(feature = "rusqlite")]
 pub mod migration;

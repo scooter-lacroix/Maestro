@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose a focused improvement with clear user value
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - maestro orchestration
+        - leindex
+        - tracklens
+        - cockpit
+        - installer/setup
+        - docs
+        - ecosystem/repo UX
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user pain or limitation does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the behavior you want
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this matters
+      description: Explain the user value, adoption impact, or workflow improvement
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional

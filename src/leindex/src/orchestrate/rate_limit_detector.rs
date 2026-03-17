@@ -48,6 +48,12 @@ pub struct RateLimitDetector {
     loose_patterns: Vec<Regex>,
 }
 
+impl Default for RateLimitDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RateLimitDetector {
     pub fn new() -> Self {
         Self {

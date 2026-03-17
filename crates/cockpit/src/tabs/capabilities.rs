@@ -55,10 +55,9 @@ pub fn render_capabilities(frame: &mut Frame, app: &App) {
 
     // Render content based on selected section
     render_section_content(frame, app, chunks[1]);
-    let iflow_hint =
-        Paragraph::new(" iFlow non-interactive: iflow -p \"<prompt>\" ")
-            .alignment(Alignment::Center)
-            .style(ratatui::style::Style::default().fg(theme.muted));
+    let iflow_hint = Paragraph::new(" iFlow non-interactive: iflow -p \"<prompt>\" ")
+        .alignment(Alignment::Center)
+        .style(ratatui::style::Style::default().fg(theme.muted));
     frame.render_widget(iflow_hint, chunks[2]);
 }
 

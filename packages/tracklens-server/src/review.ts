@@ -82,10 +82,10 @@ export async function startReviewServer(
   // Decision promise
   let resolveDecision:
     | ((result: {
-        feedback: string;
-        annotations: unknown[];
-        agentSwitch?: string;
-      }) => void)
+      feedback: string;
+      annotations: unknown[];
+      agentSwitch?: string;
+    }) => void)
     | undefined;
 
   const decisionPromise = new Promise<{
@@ -163,6 +163,62 @@ export async function startReviewServer(
         }
       }
 
+      // API: Save to Obsidian
+      if (url.pathname === "/api/obsidian" && req.method === "POST") {
+        try {
+          const body = await req.json();
+          const { vaultPath, folder, filenameFormat, content } = body as {
+            vaultPath: string;
+            folder: string;
+            filenameFormat?: string;
+            content?: string;
+          };
+
+          const { saveToObsidian: save } = await import("./integrations");
+          const result = await save({
+            vaultPath,
+            folder,
+            content: content || currentPatch,
+            filenameFormat,
+          });
+
+          return Response.json(result);
+        } catch (error) {
+          return Response.json(
+            {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      // API: Save to Bear
+      if (url.pathname === "/api/bear" && req.method === "POST") {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const { content } = body as { content?: string };
+          const { saveToBear: save } = await import("./integrations");
+          const result = await save({ content: content || currentPatch });
+          return Response.json(result);
+        } catch (error) {
+          return Response.json(
+            {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      // API: List Obsidian vaults
+      if (url.pathname === "/api/vaults" && req.method === "GET") {
+        const { detectObsidianVaults } = await import("./integrations");
+        const vaults = detectObsidianVaults();
+        return Response.json({ vaults });
+      }
       // API: Validate image path
       if (url.pathname === "/api/validate-image" && req.method === "POST") {
         try {

@@ -67,10 +67,14 @@ impl IntegrationTool {
 
         match self {
             IntegrationTool::Claude => Some(Utf8PathBuf::from(format!("{}/.claude", home_str))),
-            IntegrationTool::OpenCode => Some(Utf8PathBuf::from(format!("{}/.config/opencode", home_str))),
+            IntegrationTool::OpenCode => {
+                Some(Utf8PathBuf::from(format!("{}/.config/opencode", home_str)))
+            }
             IntegrationTool::Codex => {
                 let codex_home = std::env::var("CODEX_HOME").ok();
-                Some(Utf8PathBuf::from(codex_home.unwrap_or_else(|| format!("{}/.codex", home_str))))
+                Some(Utf8PathBuf::from(
+                    codex_home.unwrap_or_else(|| format!("{}/.codex", home_str)),
+                ))
             }
             IntegrationTool::Gemini => Some(Utf8PathBuf::from(format!("{}/.gemini", home_str))),
             IntegrationTool::Qwen => Some(Utf8PathBuf::from(format!("{}/.qwen", home_str))),
@@ -134,7 +138,12 @@ impl IntegrationTool {
         };
 
         match self {
-            IntegrationTool::Claude | IntegrationTool::Gemini | IntegrationTool::Qwen | IntegrationTool::Pi | IntegrationTool::Omp | IntegrationTool::Iflow => json!({
+            IntegrationTool::Claude
+            | IntegrationTool::Gemini
+            | IntegrationTool::Qwen
+            | IntegrationTool::Pi
+            | IntegrationTool::Omp
+            | IntegrationTool::Iflow => json!({
                 "command": command,
                 "args": ["mcp", "proxy", "leindex"]
             }),
@@ -167,7 +176,11 @@ impl IntegrationTool {
         match self {
             IntegrationTool::Claude => Some("mcpServers"),
             IntegrationTool::OpenCode => Some("mcp"),
-            IntegrationTool::Gemini | IntegrationTool::Qwen | IntegrationTool::Pi | IntegrationTool::Omp | IntegrationTool::Iflow => Some("mcpServers"),
+            IntegrationTool::Gemini
+            | IntegrationTool::Qwen
+            | IntegrationTool::Pi
+            | IntegrationTool::Omp
+            | IntegrationTool::Iflow => Some("mcpServers"),
             IntegrationTool::Amp => Some("amp.mcpServers"),
             IntegrationTool::Droid => Some("mcpServers"),
             IntegrationTool::Codex => None, // Uses TOML
@@ -197,7 +210,8 @@ impl Integrator {
     /// Create a backup of a file
     fn backup_file(&self, path: &Path) -> Result<Utf8PathBuf> {
         if !path.exists() {
-            let path_str = path.to_str()
+            let path_str = path
+                .to_str()
                 .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path"))?;
             return Ok(Utf8PathBuf::from(path_str));
         }
@@ -215,14 +229,11 @@ impl Integrator {
     }
 
     /// Merge MCP server config into existing config
-    fn merge_mcp_config(
-        &self,
-        tool: IntegrationTool,
-        existing: &Value,
-    ) -> Result<Value> {
+    fn merge_mcp_config(&self, tool: IntegrationTool, existing: &Value) -> Result<Value> {
         let server_name = tool.mcp_server_name();
         let new_config = tool.leindex_mcp_config();
-        let config_path = tool.mcp_config_json_path()
+        let config_path = tool
+            .mcp_config_json_path()
             .ok_or_else(|| anyhow::anyhow!("No MCP config path for {:?}", tool))?;
 
         // Navigate to the MCP config location using a recursive approach
@@ -273,30 +284,30 @@ impl Integrator {
     }
 
     /// Update a JSON config file with MCP server config
-    fn update_json_config(
-        &self,
-        tool: IntegrationTool,
-        config_path: &Path,
-    ) -> Result<()> {
+    fn update_json_config(&self, tool: IntegrationTool, config_path: &Path) -> Result<()> {
         if !config_path.exists() {
-            self.log(&format!("Config file {} does not exist, creating new", config_path.display()));
+            self.log(&format!(
+                "Config file {} does not exist, creating new",
+                config_path.display()
+            ));
             let server_name = tool.mcp_server_name();
             let new_config = tool.leindex_mcp_config();
-            let config_path_str = tool.mcp_config_json_path()
+            let config_path_str = tool
+                .mcp_config_json_path()
                 .ok_or_else(|| anyhow::anyhow!("No MCP config path for {:?}", tool))?;
 
             // Use the same recursive insertion logic as merge_mcp_config
             let config_obj = if config_path_str.contains('.') {
                 // Build the nested structure from scratch
                 let parts: Vec<&str> = config_path_str.split('.').collect();
-<<<<<<< HEAD
-                #[allow(unused_variables)]
                 let result = json!({});
-=======
-                let mut result = json!({});
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
-                fn insert_new_at_path(mut value: Value, parts: &[&str], key: &str, config: Value) -> Value {
+                fn insert_new_at_path(
+                    mut value: Value,
+                    parts: &[&str],
+                    key: &str,
+                    config: Value,
+                ) -> Value {
                     if parts.is_empty() {
                         if let Some(obj) = value.as_object_mut() {
                             obj.insert(key.to_string(), config);
@@ -338,10 +349,7 @@ impl Integrator {
             };
 
             if !self.dry_run {
-                fs::write(
-                    config_path,
-                    serde_json::to_string_pretty(&config_obj)?,
-                )?;
+                fs::write(config_path, serde_json::to_string_pretty(&config_obj)?)?;
             }
             return Ok(());
         }
@@ -355,10 +363,7 @@ impl Integrator {
         let updated = self.merge_mcp_config(tool, &existing_json)?;
 
         if !self.dry_run {
-            fs::write(
-                config_path,
-                serde_json::to_string_pretty(&updated)?,
-            )?;
+            fs::write(config_path, serde_json::to_string_pretty(&updated)?)?;
         }
 
         self.log(&format!("Updated MCP config in {}", config_path.display()));
@@ -366,13 +371,12 @@ impl Integrator {
     }
 
     /// Update a TOML config file with MCP server config
-    fn update_toml_config(
-        &self,
-        tool: IntegrationTool,
-        config_path: &Path,
-    ) -> Result<()> {
+    fn update_toml_config(&self, tool: IntegrationTool, config_path: &Path) -> Result<()> {
         if !config_path.exists() {
-            self.log(&format!("Config file {} does not exist, creating new", config_path.display()));
+            self.log(&format!(
+                "Config file {} does not exist, creating new",
+                config_path.display()
+            ));
 
             // Create basic TOML structure
             let toml_content = format!(
@@ -398,7 +402,8 @@ args = ["mcp", "proxy", "{}"]
         self.backup_file(config_path)?;
 
         let existing = fs::read_to_string(config_path)?;
-        let mut toml_val: TomlValue = existing.parse()
+        let mut toml_val: TomlValue = existing
+            .parse()
             .with_context(|| format!("Invalid TOML in {}", config_path.display()))?;
 
         // Build the TOML structure for the MCP server
@@ -418,7 +423,10 @@ args = ["mcp", "proxy", "{}"]
 
             if let Some(mcp_servers) = table.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
                 let mut server_table = TomlMap::new();
-                server_table.insert("command".to_string(), TomlValue::String(command.to_string()));
+                server_table.insert(
+                    "command".to_string(),
+                    TomlValue::String(command.to_string()),
+                );
                 server_table.insert(
                     "args".to_string(),
                     TomlValue::Array(vec![
@@ -541,7 +549,8 @@ args = ["mcp", "proxy", "{}"]
     fn install_opencode_artifacts(&self, tool: IntegrationTool) -> Result<()> {
         self.log("Installing OpenCode artifacts");
 
-        let config_dir = tool.config_dir()
+        let config_dir = tool
+            .config_dir()
             .ok_or_else(|| anyhow::anyhow!("No config dir for OpenCode"))?;
 
         // Skill directory
@@ -578,7 +587,10 @@ args = ["mcp", "proxy", "{}"]
 
     /// Install Gemini/Qwen TOML command files
     fn install_toml_commands(&self, tool: IntegrationTool, commands_dir: &Path) -> Result<()> {
-        self.log(&format!("Installing {} TOML commands", format!("{:?}", tool).to_lowercase()));
+        self.log(&format!(
+            "Installing {} TOML commands",
+            format!("{:?}", tool).to_lowercase()
+        ));
 
         self.ensure_dir(commands_dir)?;
 
@@ -634,12 +646,13 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
 
     /// Update OpenCode opencode.json with command entries
     fn update_opencode_json_commands(&self, tool: IntegrationTool) -> Result<()> {
-        let config_dir = tool.config_dir()
+        let config_dir = tool
+            .config_dir()
             .ok_or_else(|| anyhow::anyhow!("No config dir for OpenCode"))?;
         let opencode_json = config_dir.join("opencode.json");
 
         if !opencode_json.exists() {
-            self.log(&format!("opencode.json does not exist, creating new"));
+            self.log("opencode.json does not exist, creating new");
             let mut commands = JsonMap::new();
 
             // Add maestro parent command
@@ -684,8 +697,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         self.backup_file(opencode_json.as_std_path())?;
 
         let existing = fs::read_to_string(opencode_json.as_std_path())?;
-        let mut existing_json: Value = serde_json::from_str(&existing)
-            .with_context(|| "Invalid JSON in opencode.json")?;
+        let mut existing_json: Value =
+            serde_json::from_str(&existing).with_context(|| "Invalid JSON in opencode.json")?;
 
         // Ensure command object exists
         if !existing_json.is_object() {
@@ -694,7 +707,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
 
         let obj = existing_json.as_object_mut().unwrap();
         if !obj.contains_key("command") {
-            obj.insert("command".to_string(), json!( {}));
+            obj.insert("command".to_string(), json!({}));
         }
 
         if let Some(commands) = obj.get_mut("command").and_then(|v| v.as_object_mut()) {
@@ -769,7 +782,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     /// Remove MCP server from JSON config
     fn remove_mcp_from_json(&self, tool: IntegrationTool, config_path: &Path) -> Result<()> {
         let server_name = tool.mcp_server_name();
-        let config_key = tool.mcp_config_json_path()
+        let config_key = tool
+            .mcp_config_json_path()
             .ok_or_else(|| anyhow::anyhow!("No MCP config path for {:?}", tool))?;
 
         let existing = fs::read_to_string(config_path)?;
@@ -794,13 +808,14 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         }
 
         if !self.dry_run {
-            fs::write(
-                config_path,
-                serde_json::to_string_pretty(&existing_json)?,
-            )?;
+            fs::write(config_path, serde_json::to_string_pretty(&existing_json)?)?;
         }
 
-        self.log(&format!("Removed {} from {}", server_name, config_path.display()));
+        self.log(&format!(
+            "Removed {} from {}",
+            server_name,
+            config_path.display()
+        ));
         Ok(())
     }
 
@@ -821,7 +836,11 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             fs::write(config_path, toml_val.to_string())?;
         }
 
-        self.log(&format!("Removed {} from {}", server_name, config_path.display()));
+        self.log(&format!(
+            "Removed {} from {}",
+            server_name,
+            config_path.display()
+        ));
         Ok(())
     }
 
@@ -872,7 +891,6 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             report.passed = false;
         }
 
-<<<<<<< HEAD
         // Check 6: Tool-specific config validation
         let check = self.check_tool_specific_config(tool);
         report.checks.push(check);
@@ -900,20 +918,13 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             report.checks.push(check);
             // Don't fail overall on connectivity issues (may be network-dependent)
         }
-
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
         Ok(report)
     }
 
     /// Check if config directory exists
     fn check_config_dir(&self, tool: IntegrationTool) -> CheckResult {
         let config_dir = tool.config_dir();
-<<<<<<< HEAD
-        let exists = config_dir.as_ref().map(|d| d.as_std_path().exists()).unwrap_or(false);
-=======
         let exists = config_dir.as_ref().map(|d| d.exists()).unwrap_or(false);
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         CheckResult {
             name: "Config directory exists".to_string(),
@@ -929,11 +940,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     /// Check if commands directory exists
     fn check_commands_dir(&self, tool: IntegrationTool) -> CheckResult {
         let commands_dir = tool.commands_dir();
-<<<<<<< HEAD
-        let exists = commands_dir.as_ref().map(|d| d.as_std_path().exists()).unwrap_or(false);
-=======
         let exists = commands_dir.as_ref().map(|d| d.exists()).unwrap_or(false);
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         CheckResult {
             name: "Commands directory exists".to_string(),
@@ -941,7 +948,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             message: if exists {
                 format!("Found: {}", commands_dir.unwrap())
             } else {
-                format!("Not required for this tool")
+                "Not required for this tool".to_string()
             },
         }
     }
@@ -949,11 +956,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     /// Check if MCP config file exists
     fn check_mcp_config(&self, tool: IntegrationTool) -> CheckResult {
         let mcp_config = tool.mcp_config_path();
-<<<<<<< HEAD
-        let exists = mcp_config.as_ref().map(|c| c.as_std_path().exists()).unwrap_or(false);
-=======
         let exists = mcp_config.as_ref().map(|c| c.exists()).unwrap_or(false);
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
 
         CheckResult {
             name: "MCP config file exists".to_string(),
@@ -972,11 +975,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         let server_name = tool.mcp_server_name();
 
         let (exists, message) = match mcp_config {
-<<<<<<< HEAD
-            Some(path) if path.as_std_path().exists() => {
-=======
             Some(path) if path.exists() => {
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 if tool.uses_json_config() {
                     match fs::read_to_string(path.as_std_path()) {
                         Ok(content) => {
@@ -987,7 +986,11 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                         let parts: Vec<&str> = key.split('.').collect();
 
                                         // Helper to navigate JSON tree
-                                        fn navigate_immutable<'a>(value: &'a Value, parts: &[&str]) -> Option<&'a Value> {
+                                        fn navigate_immutable<'a>(
+                                            value: &'a Value,
+                                            parts: &[&str],
+                                        ) -> Option<&'a Value>
+                                        {
                                             let mut current = value;
                                             for part in parts {
                                                 current = current.as_object()?.get(*part)?;
@@ -1000,46 +1003,51 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                             .and_then(|o| o.get(server_name))
                                             .is_some();
 
-                                        (registered, if registered {
-                                            format!("LeIndex registered as '{}'", server_name)
-                                        } else {
-                                            format!("LeIndex not found in {}", key)
-                                        })
+                                        (
+                                            registered,
+                                            if registered {
+                                                format!("LeIndex registered as '{}'", server_name)
+                                            } else {
+                                                format!("LeIndex not found in {}", key)
+                                            },
+                                        )
                                     } else {
                                         (false, "No MCP config path".to_string())
                                     }
                                 }
-                                Err(e) => (false, format!("Invalid JSON: {}", e))
+                                Err(e) => (false, format!("Invalid JSON: {}", e)),
                             }
                         }
-                        Err(e) => (false, format!("Cannot read: {}", e))
+                        Err(e) => (false, format!("Cannot read: {}", e)),
                     }
                 } else {
                     // TOML
                     match fs::read_to_string(path.as_std_path()) {
-                        Ok(content) => {
-                            match content.parse::<TomlValue>() {
-                                Ok(toml) => {
-                                    let registered = toml.as_table()
-                                        .and_then(|t| t.get("mcp_servers"))
-                                        .and_then(|v| v.as_table())
-                                        .and_then(|t| t.get(server_name))
-                                        .is_some();
+                        Ok(content) => match content.parse::<TomlValue>() {
+                            Ok(toml) => {
+                                let registered = toml
+                                    .as_table()
+                                    .and_then(|t| t.get("mcp_servers"))
+                                    .and_then(|v| v.as_table())
+                                    .and_then(|t| t.get(server_name))
+                                    .is_some();
 
-                                    (registered, if registered {
+                                (
+                                    registered,
+                                    if registered {
                                         format!("LeIndex registered as '{}'", server_name)
                                     } else {
-                                        format!("LeIndex not found in mcp_servers")
-                                    })
-                                }
-                                Err(e) => (false, format!("Invalid TOML: {}", e))
+                                        "LeIndex not found in mcp_servers".to_string()
+                                    },
+                                )
                             }
-                        }
-                        Err(e) => (false, format!("Cannot read: {}", e))
+                            Err(e) => (false, format!("Invalid TOML: {}", e)),
+                        },
+                        Err(e) => (false, format!("Cannot read: {}", e)),
                     }
                 }
             }
-            _ => (false, "MCP config file not found".to_string())
+            _ => (false, "MCP config file not found".to_string()),
         };
 
         CheckResult {
@@ -1097,7 +1105,6 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         false
     }
 
-<<<<<<< HEAD
     /// Check tool-specific config validation
     fn check_tool_specific_config(&self, tool: IntegrationTool) -> CheckResult {
         match tool {
@@ -1114,7 +1121,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
 
     /// Validate Amp MCP config structure
     fn validate_amp_config(&self) -> CheckResult {
-        let config_path: Option<std::path::PathBuf> = IntegrationTool::Amp.config_dir()
+        let config_path: Option<std::path::PathBuf> = IntegrationTool::Amp
+            .config_dir()
             .map(|d| d.as_std_path().join("settings.json"));
 
         let (passed, message) = match config_path {
@@ -1124,7 +1132,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                         match serde_json::from_str::<Value>(&content) {
                             Ok(json) => {
                                 // Check for mcp.mcpServers structure
-                                let has_valid_structure = json.get("mcp")
+                                let has_valid_structure = json
+                                    .get("mcp")
                                     .and_then(|m| m.get("mcpServers"))
                                     .and_then(|s| s.as_object())
                                     .is_some();
@@ -1135,13 +1144,13 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                     (false, "Missing mcp.mcpServers in settings.json".to_string())
                                 }
                             }
-                            Err(e) => (false, format!("Invalid JSON in settings.json: {}", e))
+                            Err(e) => (false, format!("Invalid JSON in settings.json: {}", e)),
                         }
                     }
-                    Err(e) => (false, format!("Cannot read settings.json: {}", e))
+                    Err(e) => (false, format!("Cannot read settings.json: {}", e)),
                 }
             }
-            _ => (false, "Amp settings.json not found".to_string())
+            _ => (false, "Amp settings.json not found".to_string()),
         };
 
         CheckResult {
@@ -1153,7 +1162,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
 
     /// Validate Codex TOML config format
     fn validate_codex_config(&self) -> CheckResult {
-        let config_path: Option<std::path::PathBuf> = IntegrationTool::Codex.config_dir()
+        let config_path: Option<std::path::PathBuf> = IntegrationTool::Codex
+            .config_dir()
             .map(|d| d.as_std_path().join("config.toml"));
 
         let (passed, message) = match config_path {
@@ -1163,7 +1173,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                         match content.parse::<TomlValue>() {
                             Ok(toml) => {
                                 // Check for mcp_servers table
-                                let has_mcp_servers = toml.as_table()
+                                let has_mcp_servers = toml
+                                    .as_table()
                                     .and_then(|t| t.get("mcp_servers"))
                                     .and_then(|v| v.as_table())
                                     .is_some();
@@ -1171,16 +1182,19 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                 if has_mcp_servers {
                                     (true, "Valid mcp_servers TOML structure".to_string())
                                 } else {
-                                    (false, "Missing [mcp_servers] table in config.toml".to_string())
+                                    (
+                                        false,
+                                        "Missing [mcp_servers] table in config.toml".to_string(),
+                                    )
                                 }
                             }
-                            Err(e) => (false, format!("Invalid TOML in config.toml: {}", e))
+                            Err(e) => (false, format!("Invalid TOML in config.toml: {}", e)),
                         }
                     }
-                    Err(e) => (false, format!("Cannot read config.toml: {}", e))
+                    Err(e) => (false, format!("Cannot read config.toml: {}", e)),
                 }
             }
-            _ => (false, "Codex config.toml not found".to_string())
+            _ => (false, "Codex config.toml not found".to_string()),
         };
 
         CheckResult {
@@ -1192,7 +1206,8 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
 
     /// Validate Droid MCP config (Factory)
     fn validate_droid_config(&self) -> CheckResult {
-        let config_path: Option<std::path::PathBuf> = IntegrationTool::Droid.config_dir()
+        let config_path: Option<std::path::PathBuf> = IntegrationTool::Droid
+            .config_dir()
             .map(|d| d.as_std_path().join("mcp.json"));
 
         let (passed, message) = match config_path {
@@ -1211,21 +1226,29 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                     });
 
                                     if has_stdio_servers {
-                                        (true, "Valid Factory MCP structure with stdio servers".to_string())
+                                        (
+                                            true,
+                                            "Valid Factory MCP structure with stdio servers"
+                                                .to_string(),
+                                        )
                                     } else {
-                                        (false, "No stdio-type MCP servers found in mcp.json".to_string())
+                                        (
+                                            false,
+                                            "No stdio-type MCP servers found in mcp.json"
+                                                .to_string(),
+                                        )
                                     }
                                 } else {
                                     (false, "mcp.json is not a JSON object".to_string())
                                 }
                             }
-                            Err(e) => (false, format!("Invalid JSON in mcp.json: {}", e))
+                            Err(e) => (false, format!("Invalid JSON in mcp.json: {}", e)),
                         }
                     }
-                    Err(e) => (false, format!("Cannot read mcp.json: {}", e))
+                    Err(e) => (false, format!("Cannot read mcp.json: {}", e)),
                 }
             }
-            _ => (false, "Droid mcp.json not found".to_string())
+            _ => (false, "Droid mcp.json not found".to_string()),
         };
 
         CheckResult {
@@ -1250,14 +1273,21 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             IntegrationTool::Iflow => "iflow",
         };
 
-        match std::process::Command::new(binary_name).arg("--version").output() {
+        match std::process::Command::new(binary_name)
+            .arg("--version")
+            .output()
+        {
             Ok(output) => {
                 if output.status.success() {
                     let version = String::from_utf8_lossy(&output.stdout);
                     CheckResult {
                         name: format!("{} binary version", binary_name),
                         passed: true,
-                        message: version.lines().next().unwrap_or("version found").to_string(),
+                        message: version
+                            .lines()
+                            .next()
+                            .unwrap_or("version found")
+                            .to_string(),
                     }
                 } else {
                     CheckResult {
@@ -1280,20 +1310,24 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         let config_path = tool.mcp_config_path();
 
         let (passed, message) = match config_path {
-            Some(ref path) if path.exists() => {
-                match fs::metadata(path.as_std_path()) {
-                    Ok(metadata) => {
-                        let readonly = metadata.permissions().readonly();
-                        if readonly {
-                            (false, "Config file is read-only (cannot be modified)".to_string())
-                        } else {
-                            (true, "Config file is writable".to_string())
-                        }
+            Some(ref path) if path.exists() => match fs::metadata(path.as_std_path()) {
+                Ok(metadata) => {
+                    let readonly = metadata.permissions().readonly();
+                    if readonly {
+                        (
+                            false,
+                            "Config file is read-only (cannot be modified)".to_string(),
+                        )
+                    } else {
+                        (true, "Config file is writable".to_string())
                     }
-                    Err(e) => (false, format!("Cannot read config metadata: {}", e))
                 }
-            }
-            _ => (true, "Config file not found (will be created during install)".to_string())
+                Err(e) => (false, format!("Cannot read config metadata: {}", e)),
+            },
+            _ => (
+                true,
+                "Config file not found (will be created during install)".to_string(),
+            ),
         };
 
         CheckResult {
@@ -1306,7 +1340,10 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
     /// Check MCP server connectivity
     fn check_mcp_connectivity(&self, _tool: IntegrationTool) -> CheckResult {
         // Check if maestro binary exists (can test connectivity)
-        match std::process::Command::new("maestro").arg("--version").output() {
+        match std::process::Command::new("maestro")
+            .arg("--version")
+            .output()
+        {
             Ok(output) => {
                 if output.status.success() {
                     CheckResult {
@@ -1324,14 +1361,11 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             }
             Err(_) => CheckResult {
                 name: "LeIndex MCP connectivity".to_string(),
-                passed: true,  // Don't fail overall - may be using different install method
+                passed: true, // Don't fail overall - may be using different install method
                 message: "maestro binary not found in PATH (may need PATH adjustment)".to_string(),
             },
         }
     }
-
-=======
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
     /// Print config patch for a tool
     pub fn print(&self, tool: IntegrationTool) -> Result<()> {
         let mcp_config = tool.leindex_mcp_config();

@@ -28,9 +28,9 @@ use tracing::{debug, info, warn};
 /// ```
 pub fn launch_yazi(project_path: &str, project_name: &str) -> Result<()> {
     // 1. Find Yazi executable
-    let yazi_path = find_yazi().ok_or_else(|| anyhow::anyhow!(
-        "Yazi not found. Please install Yazi: https://github.com/sxyazi/yazi"
-    ))?;
+    let yazi_path = find_yazi().ok_or_else(|| {
+        anyhow::anyhow!("Yazi not found. Please install Yazi: https://github.com/sxyazi/yazi")
+    })?;
     info!("Found Yazi at: {:?}", yazi_path);
 
     // 2. Expand the project path (handle ~)
@@ -59,9 +59,18 @@ pub fn launch_yazi(project_path: &str, project_name: &str) -> Result<()> {
     let mut cmd = Command::new(&yazi_path);
     cmd.current_dir(&expanded_path)
         .env("YAZI_CONFIG_HOME", get_yazi_config_dir())
-        .env("EDITOR", std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string()))
-        .env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string()))
-        .env("COLORTERM", std::env::var("COLORTERM").unwrap_or_else(|_| "truecolor".to_string()));
+        .env(
+            "EDITOR",
+            std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string()),
+        )
+        .env(
+            "TERM",
+            std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_string()),
+        )
+        .env(
+            "COLORTERM",
+            std::env::var("COLORTERM").unwrap_or_else(|_| "truecolor".to_string()),
+        );
 
     // Inherit all stdio handles - this is critical for TUI apps
     cmd.stdin(std::process::Stdio::inherit())
@@ -69,12 +78,12 @@ pub fn launch_yazi(project_path: &str, project_name: &str) -> Result<()> {
         .stderr(std::process::Stdio::inherit());
 
     debug!("Spawning Yazi process...");
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .context("Failed to launch Yazi. Ensure Yazi is properly installed.")?;
 
     // Wait for Yazi to complete
-    let status = child.wait()
-        .context("Failed to wait for Yazi process")?;
+    let status = child.wait().context("Failed to wait for Yazi process")?;
 
     debug!("Yazi process completed with status: {:?}", status);
 

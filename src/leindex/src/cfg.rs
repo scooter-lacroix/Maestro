@@ -228,6 +228,7 @@ impl CFGAnalyzer {
             // Track nesting depth
             while !indent_stack.is_empty() && indent <= *indent_stack.last().unwrap() {
                 indent_stack.pop();
+                #[allow(clippy::implicit_saturating_sub)]
                 if nesting_depth > 0 {
                     nesting_depth -= 1;
                 }

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: https://github.com/scooter-lacroix/Maestro/security
+    about: Please report vulnerabilities privately through GitHub Security Advisories.
+  - name: Installation guide
+    url: https://github.com/scooter-lacroix/Maestro/blob/main/docs/INSTALLATION.md
+    about: Check the installer and setup guide before opening setup-related issues.

@@ -195,7 +195,7 @@ let result = runner.run(PiAgentType::Scout, "Analyze codebase", None).await?;
 - `anyhow`/`thiserror` - Error handling (already in use)
 
 ### External Tools
-- **pi-mono CLI** at `/home/stan/pi-mono/pi` (or detectable)
+- **pi-mono CLI** available on `$PATH` (or configured explicitly)
 - **LLM provider API keys** (managed by user via environment variables)
 
 ---

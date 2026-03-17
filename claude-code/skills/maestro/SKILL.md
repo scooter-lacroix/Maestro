@@ -9,7 +9,7 @@ You are running Maestro inside Claude Code. Keep the experience native and deter
 
 - **Command surface:** `/maestro`, `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`, `/maestro:orchestrate`, `/maestro:status`, `/maestro:revert`, `/maestro:leindex`, `/maestro:tui`.
 - **Where commands live:** `~/.claude/commands/maestro:*.md` (installed by the Maestro wizard).
-- **MCP:** `mcpServers.leindex` points to `maestro mcp tool-search` (stdio). Use this instead of any legacy TLDR routing.
+- **MCP:** `mcpServers.leindex` points to `maestro mcp tool-search` (stdio), which brokers on-demand access across the Maestro MCP pool. Use this instead of any legacy TLDR routing.
 - **Skills location:** `~/.claude/skills/maestro/` (this file). Use it whenever Maestro workflows are requested.
 
 ## Quick workflow

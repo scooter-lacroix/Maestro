@@ -191,7 +191,7 @@ impl MultiLangASTAnalyzer {
                 name: None,
                 alias: None,
                 line,
-                is_default: text.contains("import {") == false,
+                is_default: !text.contains("import {"),
             });
         }
         None
@@ -610,6 +610,7 @@ impl MultiLangASTAnalyzer {
         let text = node_text(node, source);
         if let Some(arrow_idx) = text.find("->") {
             let ret_part = &text[arrow_idx + 2..];
+            #[allow(clippy::manual_pattern_char_comparison)]
             // Find the end (before { or :)
             let end_idx = ret_part
                 .find(|c| c == '{' || c == ':')
@@ -806,8 +807,8 @@ impl MultiLangASTAnalyzer {
                 .imports
                 .iter()
                 .take(10)
-                .map(|i| i.module.split('/').last().unwrap_or(&i.module))
-                .map(|s| s.split('.').last().unwrap_or(s))
+                .map(|i| i.module.rsplit('/').next().unwrap_or(&i.module))
+                .map(|s| s.rsplit('.').next().unwrap_or(s))
                 .collect();
             lines.push(format!("imp:{}", imp_names.join(",")));
         }

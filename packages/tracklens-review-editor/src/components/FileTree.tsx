@@ -84,7 +84,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   };
 
   return (
-    <aside className="border-r border-border bg-card/30 flex flex-col flex-shrink-0 overflow-hidden" style={{ width: width ?? 256 }}>
+    <aside className="fabric-border-r bg-surface-glass flex flex-col flex-shrink-0 overflow-hidden" style={{ width: width ?? 256 }}>
       {/* Header */}
       <div className="p-3 border-b border-border/50">
         <div className="flex items-center justify-between">

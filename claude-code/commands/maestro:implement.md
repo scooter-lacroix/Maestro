@@ -26,6 +26,7 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
     -   `maestro/tech-stack.md`
     -   `maestro/workflow.md`
     -   `maestro/product.md`
+    -   `maestro/code_styleguides/general.md`
 
 2.  **Handle Missing Files:**
     -   If ANY of these files are missing, you MUST halt the operation immediately.
@@ -77,7 +78,15 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
         - `maestro/tracks/<track_id>/plan.md`
         - `maestro/tracks/<track_id>/spec.md`
         - `maestro/workflow.md`
+        - `maestro/tech-stack.md`
     c. **Error Handling:** If you fail to read any of these files, you MUST stop and inform the user of the error.
+    d. **Resolve Active Code Style Guides (MANDATORY):**
+        - You MUST read `maestro/code_styleguides/general.md`.
+        - You MUST determine every additional required guide from `maestro/tech-stack.md`, the track `spec.md`, the track `plan.md`, and the languages/frameworks of the files you expect to touch.
+        - You MUST read each applicable guide before writing code, tests, refactors, or agent prompts.
+        - If any required guide is missing, you MUST halt and tell the user exactly which guide is missing.
+        - You MUST maintain an `active_style_guides` list and include it in every Task prompt, review request, and self-check for this track.
+        - No task may be marked complete while there are unresolved violations of the active style guides.
 
 4.  **Execute Tasks and Update Track Plan:**
     a. **Announce:** State that you will now execute the tasks from the track's `plan.md` by following the procedures in `workflow.md`.
@@ -91,7 +100,10 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
 
     c. **Iterate Through Tasks:** You MUST now loop through each task in the track's `plan.md` one by one.
     d. **For Each Task, You MUST:**
-        i. **CRITICAL THINK INTEGRATION - BEFORE IMPLEMENTATION:**
+        i. **STYLE GUIDE GATE - BEFORE IMPLEMENTATION:**
+            Before implementation work begins, you MUST confirm which entries in `active_style_guides` apply to this task based on the files and frameworks involved. If the task scope changes, refresh the guide set before proceeding.
+
+        ii. **CRITICAL THINK INTEGRATION - BEFORE IMPLEMENTATION:**
             Before starting code implementation, you MUST apply Critical Think analysis:
             1. Read the template at `maestro/critical_think/templates/criticalthink_implementation.md`
             2. Execute pre-implementation analysis:
@@ -102,7 +114,7 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
                - **Step 5:** What are the implementation risks? How to mitigate?
                - **Step 6:** Revised confidence and proceed with implementation
 
-        ii. **CRITICAL THINK INTEGRATION - BEFORE AGENT DELEGATION:**
+        iii. **CRITICAL THINK INTEGRATION - BEFORE AGENT DELEGATION:**
             If delegating to an agent, you MUST apply Critical Think analysis:
             1. Read the template at `maestro/critical_think/templates/criticalthink_agent_delegation.md`
             2. Execute pre-delegation analysis:
@@ -113,7 +125,7 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
                - **Step 5:** What are the risks? What's the contingency if delegation fails?
                - **Step 6:** Proceed with delegation or handle yourself
 
-        iii. **MANDATORY AGENT DEPLOYMENT - EXACT INSTRUCTIONS:**
+        iv. **MANDATORY AGENT DEPLOYMENT - EXACT INSTRUCTIONS:**
 
             **CRITICAL:** You MUST use the Task tool to deploy specialized agents. Agent deployment is NOT optional.
 
@@ -160,27 +172,31 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
 
             **IMPORTANT:** Always await TaskOutput completion before proceeding. Use TaskOutput with block=true to wait for results.
 
-        iv. **Defer to Workflow:** The `workflow.md` file is the **single source of truth** for the entire task lifecycle. You MUST now read and execute the procedures defined in the "Task Workflow" section of the `workflow.md` file you have in your context. Follow its steps for implementation, testing, and committing precisely.
+        v. **Defer to Workflow:** The `workflow.md` file is the **single source of truth** for the entire task lifecycle. You MUST now read and execute the procedures defined in the "Task Workflow" section of the `workflow.md` file you have in your context. Follow its steps for implementation, testing, and committing precisely.
 
-        v. **CRITICAL THINK INTEGRATION - AFTER IMPLEMENTATION:**
+        vi. **AGENT PROMPT STYLE REQUIREMENT:**
+
+            Every Task prompt MUST include the current `active_style_guides` list with file paths and an explicit instruction that guide violations are not allowed. Review prompts MUST ask for style-guide compliance verification in addition to correctness, testing, security, and performance.
+
+        vii. **CRITICAL THINK INTEGRATION - AFTER IMPLEMENTATION:**
             After completing code implementation, you MUST validate the work:
             1. Read the template at `maestro/critical_think/templates/criticalthink_after_action.md`
             2. Execute post-implementation validation:
                - **Step 1:** Does implementation meet requirements? Confidence?
                - **Step 2:** Did assumptions hold? Any corrections needed?
                - **Step 3:** Is the logic sound? Any bugs or issues?
-               - **Step 4:** Check for code quality issues, missing error handling, incomplete implementation, unverified claims
+               - **Step 4:** Check for code quality issues, missing error handling, incomplete implementation, unverified claims, and active style-guide violations
                - **Step 5:** What issues were found? What corrections are needed?
                - **Step 6:** Is implementation ready for commit? Any improvements needed?
 
-        vi. **CRITICAL THINK INTEGRATION - AFTER AGENT DELEGATION:**
+        viii. **CRITICAL THINK INTEGRATION - AFTER AGENT DELEGATION:**
             After agent returns results, you MUST validate the agent's work:
             1. Read the template at `maestro/critical_think/templates/criticalthink_after_action.md`
             2. Execute post-agent validation:
                - **Step 1:** Did agent deliver what was expected? Confidence?
                - **Step 2:** Did assumptions about agent capabilities hold?
                - **Step 3:** Is the agent's work logically sound?
-               - **Step 4:** Check for quality issues, incomplete deliverables, integration problems
+               - **Step 4:** Check for quality issues, incomplete deliverables, integration problems, and active style-guide violations
                - **Step 5:** What issues were found in agent's work?
                - **Step 6:** Is work ready to proceed? What revisions are needed?
 
@@ -320,6 +336,7 @@ CRITICAL: **PROACTIVE AGENT USAGE IS DEFAULT.** You MUST automatically leverage 
 
 4.  **Load Project Documents:** You MUST read the contents of the following project-level documents into your context:
     -   `maestro/product.md`
+    -   `maestro/code_styleguides/general.md`
     -   `maestro/product-guidelines.md`
     -   `maestro/tech-stack.md`
 

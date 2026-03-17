@@ -28,6 +28,34 @@ fn parse_tracks_content(content: &str, base_path: &Path) -> Result<Vec<Track>> {
     Ok(tracks)
 }
 
+/// Try to load metadata.json from a track directory
+/// Returns None if the file doesn't exist or is invalid
+fn try_load_metadata(track_path: &Path) -> Option<TrackMetadata> {
+    let metadata_path = track_path.join("metadata.json");
+
+    // Check if metadata.json exists
+    if !metadata_path.exists() {
+        tracing::debug!("No metadata.json found at {:?}", metadata_path);
+        return None;
+    }
+
+    // Try to parse the metadata
+    match parse_metadata(&metadata_path) {
+        Ok(metadata) => {
+            tracing::debug!("Successfully loaded metadata from {:?}", metadata_path);
+            Some(metadata)
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to parse metadata.json at {:?}: {}",
+                metadata_path,
+                e
+            );
+            None
+        }
+    }
+}
+
 fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>> {
     let lines: Vec<&str> = section.lines().collect();
     if lines.is_empty() {
@@ -57,8 +85,7 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
     let mut track_id = String::new();
 
     // Get the parent directory of the tracks.md file, not the file itself
-    let tracks_parent = base_path.parent()
-        .unwrap_or(base_path);
+    let tracks_parent = base_path.parent().unwrap_or(base_path);
 
     for line in &lines {
         if line.contains("*Link:") {
@@ -68,15 +95,17 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     let path_str = &line[start + 2..start + end];
                     // Join against parent directory of tracks.md, not the file itself
                     let relative_path = path_str.trim_start_matches("./").trim_start_matches(".");
-<<<<<<< HEAD
-                    
+
                     // Intelligent path resolution:
                     // If the path starts with the same directory name as tracks_parent,
                     // it's likely relative to the project root, not the maestro/ directory.
                     let resolved_path = if let Some(dir_name) = tracks_parent.file_name() {
                         if relative_path.starts_with(dir_name.to_str().unwrap_or("")) {
                             // Relative to project root (parent of tracks_parent)
-                            tracks_parent.parent().unwrap_or(tracks_parent).join(relative_path)
+                            tracks_parent
+                                .parent()
+                                .unwrap_or(tracks_parent)
+                                .join(relative_path)
                         } else {
                             // Relative to tracks_parent (maestro/ directory)
                             tracks_parent.join(relative_path)
@@ -85,55 +114,47 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                         tracks_parent.join(relative_path)
                     };
 
-                    // SECURITY: Canonicalize and validate path to prevent traversal attacks
-                    // If canonicalize fails (file doesn't exist), we still want to keep it
-                    // but we should make it absolute if possible to make starts_with reliable.
-                    let canonical_path = resolved_path.canonicalize()
-                        .unwrap_or_else(|_| {
-                            if resolved_path.is_relative() {
-                                std::env::current_dir().unwrap_or_default().join(&resolved_path)
-                            } else {
-                                resolved_path.clone()
-                            }
-                        });
-                    
-                    let canonical_base = tracks_parent.canonicalize()
-                        .unwrap_or_else(|_| {
-                            if tracks_parent.is_relative() {
-                                std::env::current_dir().unwrap_or_default().join(tracks_parent)
-                            } else {
-                                tracks_parent.to_path_buf()
-                            }
-                        });
+                    // SECURITY: Canonicalize and validate path to prevent traversal attacks.
+                    // If canonicalize fails (file doesn't exist yet), make the path absolute
+                    // so starts_with checks stay meaningful.
+                    let canonical_path = resolved_path.canonicalize().unwrap_or_else(|_| {
+                        if resolved_path.is_relative() {
+                            std::env::current_dir()
+                                .unwrap_or_default()
+                                .join(&resolved_path)
+                        } else {
+                            resolved_path.clone()
+                        }
+                    });
 
-                    // For the check, we use the root (parent of maestro/ if named maestro)
-                    let check_base_owned = if canonical_base.file_name().map_or(false, |n| n == "maestro" || n == ".maestro") {
-                        canonical_base.parent().unwrap_or(&canonical_base).to_path_buf()
+                    let canonical_base = tracks_parent.canonicalize().unwrap_or_else(|_| {
+                        if tracks_parent.is_relative() {
+                            std::env::current_dir()
+                                .unwrap_or_default()
+                                .join(tracks_parent)
+                        } else {
+                            tracks_parent.to_path_buf()
+                        }
+                    });
+
+                    // For the check, use the project root (parent of maestro/ if named maestro).
+                    let check_base_owned = if canonical_base
+                        .file_name()
+                        .is_some_and(|n| n == "maestro" || n == ".maestro")
+                    {
+                        canonical_base
+                            .parent()
+                            .unwrap_or(&canonical_base)
+                            .to_path_buf()
                     } else {
                         canonical_base.clone()
                     };
 
-                    // Verify the resolved path is within the project root
                     if !canonical_path.starts_with(&check_base_owned) {
                         tracing::warn!(
                             "Track path {} resolves outside project root ({:?}), rejecting",
                             path_str,
                             check_base_owned
-=======
-                    let resolved_path = tracks_parent.join(relative_path);
-
-                    // SECURITY: Canonicalize and validate path to prevent traversal attacks
-                    let canonical_path = resolved_path.canonicalize()
-                        .unwrap_or(resolved_path.clone());
-                    let canonical_base = tracks_parent.canonicalize()
-                        .unwrap_or(tracks_parent.to_path_buf());
-
-                    // Verify the resolved path is within the project root (parent directory)
-                    if !canonical_path.starts_with(&canonical_base) {
-                        tracing::warn!(
-                            "Track path {} resolves outside project root, rejecting",
-                            path_str
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                         );
                         continue;
                     }
@@ -141,13 +162,8 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
                     link_path = Some(canonical_path);
 
                     // Extract track ID from path
-<<<<<<< HEAD
                     if let Some(folder_name) = path_str.trim_end_matches('/').rsplit('/').next() {
                         track_id = folder_name.to_string();
-=======
-                    if let Some(folder_name) = path_str.rsplit('/').next() {
-                        track_id = folder_name.trim_end_matches('/').to_string();
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                     }
                 }
             }
@@ -163,12 +179,16 @@ fn parse_track_section(section: &str, base_path: &Path) -> Result<Option<Track>>
         return Ok(None);
     }
 
+    // Try to load metadata.json if it exists
+    let link_path_unwrapped = link_path.as_ref().unwrap();
+    let metadata = try_load_metadata(link_path_unwrapped);
+
     Ok(Some(Track {
         id: track_id,
         description,
         status,
         link_path: link_path.unwrap(),
-        metadata: None,
+        metadata,
         plan: None,
     }))
 }
@@ -183,7 +203,7 @@ pub fn parse_metadata<P: AsRef<Path>>(metadata_path: P) -> Result<TrackMetadata>
 /// Parse plan.md into a TrackPlan
 pub fn parse_plan_md<P: AsRef<Path>>(plan_path: P) -> Result<TrackPlan> {
     let content = fs::read_to_string(plan_path.as_ref())?;
-    parse_plan_content(&content, &plan_path.as_ref())
+    parse_plan_content(&content, plan_path.as_ref())
 }
 
 fn parse_plan_content(content: &str, path: &Path) -> Result<TrackPlan> {
@@ -219,10 +239,7 @@ fn parse_plan_content(content: &str, path: &Path) -> Result<TrackPlan> {
             }
 
             in_phase = true;
-            current_phase_name = trimmed
-                .strip_prefix("## ")
-                .unwrap_or(trimmed)
-                .to_string();
+            current_phase_name = trimmed.strip_prefix("## ").unwrap_or(trimmed).to_string();
             line_number += 1;
             continue;
         }
@@ -277,13 +294,14 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
     // Extract task ID from the task header format
     // Format: "### [ ] Task 1.1: Title"
     // or: "- [ ] Task 1.1: Title"
-    let title = trimmed
-        .split(']')
-        .last()?
-        .trim()
-        .trim_start_matches("Task ")
-        .trim_start_matches("task ")
-        .to_string();
+    let title = if let Some(idx) = trimmed.find(']') {
+        trimmed[idx + 1..].trim()
+    } else {
+        return None;
+    }
+    .trim_start_matches("Task ")
+    .trim_start_matches("task ")
+    .to_string();
 
     // Generate ID from title using the same normalization as dependencies
     // This ensures task IDs match dependency references
@@ -295,6 +313,7 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
         .trim_start_matches("Task ")
         .trim_start_matches("task ")
         .to_lowercase();
+    #[allow(clippy::collapsible_str_replace)]
     let id = normalized
         .replace(' ', "-")
         .replace('.', "-")
@@ -329,7 +348,9 @@ fn parse_task_line(line: &str, all_lines: &[&str], line_num: &mut usize) -> Opti
         }
 
         // Check for subtasks (more indented)
-        if next_trimmed.starts_with("- [") && next_line.len() - next_line.trim_start().len() > indent_level {
+        if next_trimmed.starts_with("- [")
+            && next_line.len() - next_line.trim_start().len() > indent_level
+        {
             // Parse subtask recursively
             *line_num = i;
             if let Some(subtask) = parse_task_line(next_line, all_lines, line_num) {
@@ -451,12 +472,20 @@ fn update_task_status_in_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_parse_status_marker() {
         assert_eq!(TrackStatus::from_marker("[ ]"), Some(TrackStatus::Pending));
-        assert_eq!(TrackStatus::from_marker("[~]"), Some(TrackStatus::InProgress));
-        assert_eq!(TrackStatus::from_marker("[x]"), Some(TrackStatus::Completed));
+        assert_eq!(
+            TrackStatus::from_marker("[~]"),
+            Some(TrackStatus::InProgress)
+        );
+        assert_eq!(
+            TrackStatus::from_marker("[x]"),
+            Some(TrackStatus::Completed)
+        );
         assert_eq!(TrackStatus::from_marker("[?]"), None);
     }
 
@@ -465,5 +494,118 @@ mod tests {
         assert_eq!(TrackStatus::Pending.to_marker(), "[ ]");
         assert_eq!(TrackStatus::InProgress.to_marker(), "[~]");
         assert_eq!(TrackStatus::Completed.to_marker(), "[x]");
+    }
+
+    #[test]
+    fn test_try_load_metadata_with_valid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("metadata.json");
+
+        let metadata_content = r#"{
+            "track_id": "test-track",
+            "type": "feature",
+            "status": "pending",
+            "created_at": "2026-03-12T00:00:00Z",
+            "updated_at": "2026-03-12T00:00:00Z",
+            "description": "Test track"
+        }"#;
+
+        fs::write(&metadata_path, metadata_content).unwrap();
+
+        let result = try_load_metadata(temp_dir.path());
+        assert!(result.is_some());
+
+        let metadata = result.unwrap();
+        assert_eq!(metadata.track_id, "test-track");
+        assert_eq!(metadata.track_type, TrackType::Feature);
+        assert_eq!(metadata.status, TrackStatus::Pending);
+        assert_eq!(metadata.description, "Test track");
+    }
+
+    #[test]
+    fn test_try_load_metadata_with_missing_file() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let result = try_load_metadata(temp_dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_load_metadata_with_invalid_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata_path = temp_dir.path().join("metadata.json");
+
+        fs::write(&metadata_path, "invalid json {{{").unwrap();
+
+        let result = try_load_metadata(temp_dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_track_section_with_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let track_dir = temp_dir.path().join("test-track");
+        fs::create_dir(&track_dir).unwrap();
+
+        let metadata_content = r#"{
+            "track_id": "test-track",
+            "type": "feature",
+            "status": "inprogress",
+            "created_at": "2026-03-12T00:00:00Z",
+            "updated_at": "2026-03-12T00:00:00Z",
+            "description": "Test track from metadata"
+        }"#;
+
+        fs::write(track_dir.join("metadata.json"), metadata_content).unwrap();
+
+        // Use absolute path to avoid canonicalize issues in tests
+        let absolute_path = track_dir.canonicalize().unwrap();
+        let tracks_md = format!(
+            r#"## [ ] Test Track
+*Link: [{}]({})
+
+**Description**: Basic description
+"#,
+            absolute_path.display(),
+            absolute_path.display()
+        );
+
+        let result = parse_track_section(&tracks_md, temp_dir.path());
+        assert!(result.is_ok());
+
+        let track = result.unwrap().unwrap();
+        assert_eq!(track.id, "test-track");
+        assert!(track.metadata.is_some());
+
+        let metadata = track.metadata.unwrap();
+        assert_eq!(metadata.track_id, "test-track");
+        assert_eq!(metadata.status, TrackStatus::InProgress);
+        assert_eq!(metadata.description, "Test track from metadata");
+    }
+
+    #[test]
+    fn test_parse_track_section_without_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let track_dir = temp_dir.path().join("test-track");
+        fs::create_dir(&track_dir).unwrap();
+
+        // Use absolute path to avoid canonicalize issues in tests
+        let absolute_path = track_dir.canonicalize().unwrap();
+        let tracks_md = format!(
+            r#"## [ ] Test Track
+*Link: [{}]({})
+
+**Description**: Basic description
+"#,
+            absolute_path.display(),
+            absolute_path.display()
+        );
+
+        let result = parse_track_section(&tracks_md, temp_dir.path());
+        assert!(result.is_ok());
+
+        let track = result.unwrap().unwrap();
+        assert_eq!(track.id, "test-track");
+        assert!(track.metadata.is_none());
     }
 }

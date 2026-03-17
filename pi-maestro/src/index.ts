@@ -66,7 +66,7 @@ export default function (pi: ExtensionAPI) {
 
   // Core workflow commands (implement maestro workflows)
   registerSetup(pi, "maestro:setup");
-  registerNewTrack(pi, "maestro:newTrack");  // CRITICAL COMMAND
+  registerNewTrack(pi, "maestro:newTrack"); // CRITICAL COMMAND
   registerImplement(pi, "maestro:implement");
   registerOrchestrate(pi, "maestro:orchestrate");
   registerStatus(pi, "maestro:status");
@@ -105,6 +105,10 @@ You are in a maestro project. Use these slash commands for maestro workflows:
 - **/maestro:status** - Show all tracks and their progress
 
 - **/maestro:setup** - Initialize/refresh maestro project structure
+
+- **TrackLens Visual Review**:
+  - \`tracklens_review\` (tool): Request visual review/approval for spec or plan.
+  - \`tracklens_walkthrough\` (tool): Generate visual summary of completed work.
 
 - **/maestro:orchestrate** - Orchestrate master track (manages sub-tracks)
 

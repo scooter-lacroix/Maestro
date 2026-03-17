@@ -154,8 +154,8 @@ impl ASTAnalyzer {
             }
 
             // Track decorators
-            if line.starts_with('@') {
-                let decorator = line[1..].split('(').next().unwrap_or(line);
+            if let Some(rest) = line.strip_prefix('@') {
+                let decorator = rest.split('(').next().unwrap_or(line);
                 pending_decorators.push(decorator.to_string());
                 continue;
             }
@@ -227,9 +227,8 @@ impl ASTAnalyzer {
     }
 
     fn parse_import(&self, line: &str, line_num: usize) -> Option<ImportInfo> {
-        if line.starts_with("from ") {
+        if let Some(rest) = line.strip_prefix("from ") {
             // from module import name [as alias]
-            let rest = &line[5..];
             if let Some(import_pos) = rest.find(" import ") {
                 let module = rest[..import_pos].trim().to_string();
                 let imports_part = rest[import_pos + 8..].trim();
@@ -260,9 +259,8 @@ impl ASTAnalyzer {
                     });
                 }
             }
-        } else if line.starts_with("import ") {
+        } else if let Some(rest) = line.strip_prefix("import ") {
             // import module [as alias]
-            let rest = &line[7..];
             let (module, alias) = if let Some(as_pos) = rest.find(" as ") {
                 (
                     rest[..as_pos].trim().to_string(),
@@ -450,7 +448,7 @@ impl ASTAnalyzer {
                     let type_hint = &arg[colon_pos + 1..];
                     let condensed_type = self.condense_type(type_hint.trim());
                     if condensed_type.len() > 15 {
-                        format!("{}", name.trim())
+                        name.trim().to_string()
                     } else {
                         format!("{}:{}", name.trim(), condensed_type)
                     }
@@ -501,12 +499,12 @@ impl ASTAnalyzer {
     fn extract_function_calls(&mut self, source: &str) {
         // Simple regex-free extraction of function calls
         // Look for patterns like: name( or name.method(
-        let mut chars = source.chars().peekable();
+        let chars = source.chars();
         let mut current_name = String::new();
         let mut in_string = false;
         let mut string_char = ' ';
 
-        while let Some(ch) = chars.next() {
+        for ch in chars {
             // Handle strings
             if (ch == '"' || ch == '\'') && !in_string {
                 in_string = true;

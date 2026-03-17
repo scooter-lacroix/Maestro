@@ -84,11 +84,7 @@ impl StateManager {
             pid: std::process::id(),
             hostname: hostname::get()
                 .ok()
-<<<<<<< HEAD
                 .and_then(|h: std::ffi::OsString| h.into_string().ok())
-=======
-                .and_then(|h| h.to_str().map(|s| s.to_string()))
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 .unwrap_or_else(|| "unknown".to_string()),
         };
 
@@ -220,11 +216,7 @@ impl StateManager {
         // First check if we're on the same hostname
         let current_hostname = hostname::get()
             .ok()
-<<<<<<< HEAD
             .and_then(|h: std::ffi::OsString| h.into_string().ok())
-=======
-            .and_then(|h| h.to_str().map(|s| s.to_string()))
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
             .unwrap_or_else(|| "unknown".to_string());
 
         if current_hostname != lock.hostname {
@@ -275,11 +267,7 @@ impl SessionLock {
             pid: std::process::id(),
             hostname: hostname::get()
                 .ok()
-<<<<<<< HEAD
                 .and_then(|h: std::ffi::OsString| h.into_string().ok())
-=======
-                .and_then(|h| h.to_str().map(|s| s.to_string()))
->>>>>>> 5e3f2afb (feat(v2.5-phase5): Extract state types to dedicated module)
                 .unwrap_or_else(|| "unknown".to_string()),
         }
     }

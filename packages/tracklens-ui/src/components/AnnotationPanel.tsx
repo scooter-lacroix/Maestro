@@ -37,10 +37,10 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   if (!isOpen) return null;
 
   return (
-    <aside className="border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
+    <aside className="bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0" style={{ width: width ?? 288 }}>
       <div className="p-3 border-b border-border/50">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <h2 className="text-xs font-bold font-display uppercase tracking-wider text-muted-foreground">
             Annotations
           </h2>
           <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
@@ -184,9 +184,8 @@ const AnnotationCard: React.FC<{
   return (
     <div
       onClick={onSelect}
-      className={`p-3 rounded-lg border cursor-pointer transition-all ${
-        isSelected ? 'bg-accent/20 border-accent shadow-sm' : 'bg-card border-border hover:border-accent hover:shadow-sm'
-      }`}
+      className={`p-3 rounded-2xl border cursor-pointer transition-all ${isSelected ? 'bg-accent/20 border-accent shadow-sm' : 'bg-card border-border hover:border-accent hover:shadow-sm'
+        }`}
     >
       <div className="flex items-start justify-between mb-2">
         <div className={`flex items-center gap-1.5 ${config.color}`}>
@@ -230,7 +229,7 @@ const AnnotationCard: React.FC<{
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full px-2 py-1.5 text-sm bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+          className="w-full px-3 py-2 text-sm bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
           rows={3}
           onClick={(e) => e.stopPropagation()}
         />

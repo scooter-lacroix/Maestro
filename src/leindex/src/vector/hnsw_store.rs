@@ -436,9 +436,9 @@ impl HnswVectorStore {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         for &val in query_embedding {
-            hasher.update(&val.to_le_bytes());
+            hasher.update(val.to_le_bytes());
         }
-        hasher.update(&(top_k as u64).to_le_bytes());
+        hasher.update((top_k as u64).to_le_bytes());
         let cache_key = format!("{:x}", hasher.finalize());
 
         if let Some(cached) = self.cache.get(&cache_key)? {
@@ -475,7 +475,7 @@ impl HnswVectorStore {
             if let Some(data) = id_map.get(&result.id) {
                 // HNSW returns distance, convert to similarity score
                 // For cosine similarity: distance = 1 - similarity, so similarity = 1 - distance
-                let similarity = 1.0 - result.distance.max(0.0).min(1.0);
+                let similarity = 1.0 - result.distance.clamp(0.0, 1.0);
 
                 search_results.push(SearchResult {
                     vector_id: data.id.clone(),

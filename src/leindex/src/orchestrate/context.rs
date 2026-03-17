@@ -10,7 +10,6 @@ use crate::five_phase::{
 use crate::orchestrate::model::TrackPlan;
 use crate::token_format::FormatMode;
 use anyhow::Result;
-use std::path::PathBuf;
 
 pub struct ContextEngine {
     budget: usize,
@@ -22,7 +21,7 @@ impl ContextEngine {
     }
 
     /// Generate a context bundle for the given track using all 5 phases with prioritization
-    pub fn build_context(&self, tracks_dir: &PathBuf, plan: &TrackPlan) -> Result<String> {
+    pub fn build_context(&self, tracks_dir: &std::path::Path, plan: &TrackPlan) -> Result<String> {
         // Skip LeIndex if context budget is too low (< 10K tokens)
         const MIN_BUDGET_FOR_LEINDEX: usize = 10000;
         if self.budget < MIN_BUDGET_FOR_LEINDEX {
@@ -34,7 +33,7 @@ impl ContextEngine {
         let project_root = if track_path.exists() {
             track_path.clone()
         } else {
-            tracks_dir.clone()
+            tracks_dir.to_path_buf()
         };
 
         // Determine the analysis mode based on context budget

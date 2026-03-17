@@ -64,7 +64,7 @@ const reviewHtmlContent = await loadHtmlContent([
   resolve(__dirname, "..", "dist", "review.html"),
   resolve(projectRoot, "packages", "tracklens-review-editor", "dist", "index.html"),
 ]);
-const annotateHtmlContent = planHtmlContent;
+const annotateHtmlContent = reviewHtmlContent;
 
 // Check for subcommand
 const args = process.argv.slice(2);
@@ -108,7 +108,7 @@ if (args[0] === "review") {
       // Claude Code will handle the agent switch based on stdout
     }
 
-    process.exit(0);
+    process.exit(result.feedback ? 0 : 1);
   } finally {
     server.stop();
   }
@@ -150,7 +150,7 @@ if (args[0] === "review") {
       console.log(result.feedback);
     }
 
-    process.exit(0);
+    process.exit(result.feedback ? 0 : 1);
   } finally {
     server.stop();
   }

@@ -139,44 +139,38 @@ Do NOT proceed with implementation until your plan is approved.
         htmlContent: reviewHtmlContent,
       });
 
-      // Wait for user decision
-      const result = await server.waitForDecision();
+      try {
+        const result = await server.waitForDecision();
 
-      // Give browser time to receive response and update UI
-      await Bun.sleep(1500);
+        await Bun.sleep(1500);
 
-      // Handle agent switch if requested
-      if (result.agentSwitch) {
-        // Switch to the specified agent
-        const targetAgent = result.agentSwitch;
-        console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
+        if (result.agentSwitch) {
+          const targetAgent = result.agentSwitch;
+          console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
 
-        // Get agent list to find the agent ID
-        try {
-          const agentsResponse = await ctx.client.app.agents({
-            query: { directory: ctx.directory }
-          });
-          const agents = agentsResponse.data;
-          const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
-
-          if (targetAgentObj) {
-            // @ts-ignore - Agent has id field
-            await ctx.client.agents.switch({
-              agent_id: targetAgentObj.id,
+          try {
+            const agentsResponse = await ctx.client.app.agents({
+              query: { directory: ctx.directory }
             });
-          }
-        } catch (error) {
-          console.error(`[TrackLens] Failed to switch agent: ${error}`);
-        }
-      }
+            const agents = agentsResponse.data;
+            const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
 
-      // Return feedback to agent
-      if (result.feedback) {
-        // Format as structured response
-        return {
-          content: `## Code Review Feedback\n\n${result.feedback}`,
-          wait: true,
-        };
+            if (targetAgentObj) {
+              // @ts-ignore - Agent has id field
+              await ctx.client.agents.switch({
+                agent_id: targetAgentObj.id,
+              });
+            }
+          } catch (error) {
+            console.error(`[TrackLens] Failed to switch agent: ${error}`);
+          }
+        }
+
+        if (result.feedback) {
+          console.log(`## Code Review Feedback\n\n${result.feedback}`);
+        }
+      } finally {
+        server.stop();
       }
     }
   };
@@ -186,7 +180,7 @@ Do NOT proceed with implementation until your plan is approved.
     config,
     "experimental.chat.system.transform": experimentalChatSystemTransform,
     event: eventHandler,
-    tools: {
+    tool: {
       submit_plan: tool({
         description: `
           Submit your plan for user review in the TrackLens UI.
@@ -203,26 +197,13 @@ Do NOT proceed with implementation until your plan is approved.
 
           IMPORTANT: Do NOT proceed with implementation until the plan is approved.
         `,
-        parameters: {
-          plan: {
-            type: "string",
-            description: "The plan markdown content to submit for review",
-          },
-          agentSwitch: {
-            type: "string",
-            description: "Optional agent name to switch to after approval",
-          },
-          autonomyMode: {
-            type: "string",
-            description: "Optional autonomy mode to set after approval",
-          },
+        args: {
+          plan: tool.schema.string().describe("The plan markdown content to submit for review"),
+          agentSwitch: tool.schema.string().optional().describe("Optional agent name to switch to after approval"),
+          autonomyMode: tool.schema.string().optional().describe("Optional autonomy mode to set after approval"),
         },
-        execute: async (params: { plan?: string; agentSwitch?: string; autonomyMode?: string }) => {
+        execute: async (params: { plan: string; agentSwitch?: string; autonomyMode?: string }) => {
           const { plan, agentSwitch, autonomyMode } = params;
-
-          if (!plan) {
-            return { content: "Error: Plan content is required" };
-          }
 
           // Start TrackLens server with plan content
           const server = await startTrackLensServer({
@@ -232,48 +213,44 @@ Do NOT proceed with implementation until your plan is approved.
             autonomyMode,
           });
 
-          // Wait for user decision
-          const result = await server.waitForDecision();
+          try {
+            const result = await server.waitForDecision();
 
-          // Give browser time to receive response and update UI
-          await Bun.sleep(1500);
+            await Bun.sleep(1500);
 
-          // Handle agent switch if requested
-          if (result.agentSwitch) {
-            const targetAgent = result.agentSwitch;
-            console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
+            if (result.agentSwitch) {
+              const targetAgent = result.agentSwitch;
+              console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
 
-            try {
-              const agentsResponse = await ctx.client.app.agents({
-                query: { directory: ctx.directory }
-              });
-              const agents = agentsResponse.data;
-              const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
-
-              if (targetAgentObj) {
-                // @ts-ignore - Agent has id field
-                await ctx.client.agents.switch({
-                  agent_id: targetAgentObj.id,
+              try {
+                const agentsResponse = await ctx.client.app.agents({
+                  query: { directory: ctx.directory }
                 });
-              }
-            } catch (error) {
-              console.error(`[TrackLens] Failed to switch agent: ${error}`);
-            }
-          }
+                const agents = agentsResponse.data;
+                const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
 
-          // Return feedback based on decision
-          if (result.approved) {
-            return {
-              content: result.feedback
+                if (targetAgentObj) {
+                  // @ts-ignore - Agent has id field
+                  await ctx.client.agents.switch({
+                    agent_id: targetAgentObj.id,
+                  });
+                }
+              } catch (error) {
+                console.error(`[TrackLens] Failed to switch agent: ${error}`);
+              }
+            }
+
+            if (result.approved) {
+              return result.feedback
                 ? `## Plan Approved\n\n${result.feedback}`
-                : "Plan approved. You may proceed with implementation.",
-            };
-          } else {
-            return {
-              content: result.feedback
-                ? `## Plan Rejected\n\n${result.feedback}`
-                : "Plan rejected. Please revise based on user feedback.",
-            };
+                : "Plan approved. You may proceed with implementation.";
+            }
+
+            return result.feedback
+              ? `## Plan Rejected\n\n${result.feedback}`
+              : "Plan rejected. Please revise based on user feedback.";
+          } finally {
+            server.stop();
           }
         },
       }),
@@ -292,21 +269,12 @@ Do NOT proceed with implementation until your plan is approved.
           - last-commit: The most recent commit
           - branch: Current branch vs default branch
         `,
-        parameters: {
-          diffType: {
-            type: "string",
-            description: "Git diff type: uncommitted, staged, unstaged, last-commit, branch",
-            default: "uncommitted",
-          },
+        args: {
+          diffType: tool.schema.enum(["uncommitted", "staged", "unstaged", "last-commit", "branch"]).optional().describe("Git diff type: uncommitted, staged, unstaged, last-commit, branch"),
         },
-        execute: async (params: { diffType?: string }) => {
+        execute: async (params: { diffType?: "uncommitted" | "staged" | "unstaged" | "last-commit" | "branch" }) => {
           const gitContext = await getGitContext();
-          const diffType = (params.diffType || "uncommitted") as
-            | "uncommitted"
-            | "staged"
-            | "unstaged"
-            | "last-commit"
-            | "branch";
+          const diffType = params.diffType || "uncommitted";
 
           const { patch, label, error } = await runGitDiff(diffType, gitContext.defaultBranch);
 
@@ -320,44 +288,41 @@ Do NOT proceed with implementation until your plan is approved.
             htmlContent: reviewHtmlContent,
           });
 
-          const result = await server.waitForDecision();
+          try {
+            const result = await server.waitForDecision();
 
-          // Give browser time to receive response and update UI
-          await Bun.sleep(1500);
+            await Bun.sleep(1500);
 
-          // Handle agent switch if requested
-          if (result.agentSwitch) {
-            const targetAgent = result.agentSwitch;
-            console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
+            if (result.agentSwitch) {
+              const targetAgent = result.agentSwitch;
+              console.log(`[TrackLens] Switching to agent: ${targetAgent}`);
 
-            try {
-              const agentsResponse = await ctx.client.app.agents({
-                query: { directory: ctx.directory }
-              });
-              const agents = agentsResponse.data;
-              const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
-
-              if (targetAgentObj) {
-                // @ts-ignore - Agent has id field
-                await ctx.client.agents.switch({
-                  agent_id: targetAgentObj.id,
+              try {
+                const agentsResponse = await ctx.client.app.agents({
+                  query: { directory: ctx.directory }
                 });
+                const agents = agentsResponse.data;
+                const targetAgentObj = agents?.find((a: { name: string }) => a.name === targetAgent);
+
+                if (targetAgentObj) {
+                  // @ts-ignore - Agent has id field
+                  await ctx.client.agents.switch({
+                    agent_id: targetAgentObj.id,
+                  });
+                }
+              } catch (error) {
+                console.error(`[TrackLens] Failed to switch agent: ${error}`);
               }
-            } catch (error) {
-              console.error(`[TrackLens] Failed to switch agent: ${error}`);
             }
-          }
 
-          // Return feedback to agent
-          if (result.feedback) {
-            return {
-              content: `## Code Review Feedback\n\n${result.feedback}`,
-            };
-          }
+            if (result.feedback) {
+              return `## Code Review Feedback\n\n${result.feedback}`;
+            }
 
-          return {
-            content: "Review complete. No feedback provided.",
-          };
+            return "Review complete. No feedback provided.";
+          } finally {
+            server.stop();
+          }
         },
       }),
 
@@ -371,52 +336,42 @@ Do NOT proceed with implementation until your plan is approved.
           Use this tool when you want the user to review or annotate a specific file,
           such as a spec document, plan, or any markdown content.
         `,
-        parameters: {
-          filePath: {
-            type: "string",
-            description: "Path to the file to annotate (relative to project root)",
-          },
+        args: {
+          filePath: tool.schema.string().describe("Path to the file to annotate (relative to project root)"),
         },
-        execute: async (params: { filePath?: string }) => {
+        execute: async (params: { filePath: string }, context) => {
           const { filePath } = params;
-
-          if (!filePath) {
-            return { content: "Error: filePath is required" };
-          }
+          const resolvedFilePath = new URL(filePath, `file://${context.directory}/`).pathname;
 
           // Read the file content
           let fileContent: string;
           try {
-            fileContent = await Bun.file(filePath).text();
+            fileContent = await Bun.file(resolvedFilePath).text();
           } catch (error) {
-            return {
-              content: `Error: Failed to read file "${filePath}": ${error}`,
-            };
+            return `Error: Failed to read file "${filePath}": ${error}`;
           }
 
           // Start annotate server
           const server = await startAnnotateServer({
             markdown: fileContent,
-            filePath,
+            filePath: resolvedFilePath,
             origin: "opencode",
             htmlContent: reviewHtmlContent, // Reuse review HTML for annotation mode
           });
 
-          const result = await server.waitForDecision();
+          try {
+            const result = await server.waitForDecision();
 
-          // Give browser time to receive response and update UI
-          await Bun.sleep(1500);
+            await Bun.sleep(1500);
 
-          // Return feedback to agent
-          if (result.feedback) {
-            return {
-              content: `## Annotation Feedback\n\n${result.feedback}`,
-            };
+            if (result.feedback) {
+              return `## Annotation Feedback\n\n${result.feedback}`;
+            }
+
+            return "Annotation complete. No feedback provided.";
+          } finally {
+            server.stop();
           }
-
-          return {
-            content: "Annotation complete. No feedback provided.",
-          };
         },
       }),
     },

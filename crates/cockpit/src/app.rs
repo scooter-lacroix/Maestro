@@ -3,23 +3,28 @@
 //! Beautiful Terminal User Interface using ratatui.
 //! Shows projects, memories, and analysis status.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::{
     cursor::MoveTo,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear as TerminalClear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, BorderType, Borders, Paragraph, Tabs},
+    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Tabs, Wrap},
 };
 use std::hash::{Hash, Hasher};
 use std::{
     collections::hash_map::DefaultHasher,
     collections::{HashMap, HashSet},
+    fs,
     io,
     io::Write,
+    path::PathBuf,
     sync::Arc,
     time::Instant,
 };
@@ -27,6 +32,8 @@ use tracing::debug;
 
 use leindex_core::config::Config;
 use leindex_core::memory::lsp_manager::LspType;
+use leindex_core::memory::mcp_installer::ManagedMcpInstaller;
+use leindex_core::memory::models::McpManagedInstallManifest;
 use leindex_core::memory::turso_backend::LspStatus;
 use leindex_core::memory::turso_backend::TursoStorageBackend;
 use leindex_core::memory::McpPool;
@@ -43,10 +50,7 @@ use crate::state::{
     AnalysisMode, DashFocus, DashSessionEntry, HubFocus, InputMode, McpOption, MemoryInfo,
     ProjectInfo, SessionEntry, SettingsMenuKind, SettingsOption, Stats,
 };
-use crate::tabs::{
-    render_analysis, render_dashboard, render_lsps, render_memory, render_projects,
-    render_sessions, render_settings, render_tracklens, session_log_tail,
-};
+use crate::tabs::render_tracklens;
 use crate::tracklens::TrackLensPane;
 
 // Re-export for use in tabs
@@ -54,10 +58,10 @@ pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
 
 /// Tab identifiers with explicit indices for maintainability
-/// Order: Welcome(0) → MaesterClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9) → TrackLens(10)
+/// Order: Welcome(0) → MaestroClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9) → TrackLens(10)
 pub mod tabs {
     pub const DASHBOARD: usize = 0;
-    pub const MAESTERCLAW: usize = 1;
+    pub const MAESTROCLAW: usize = 1;
     pub const SESSIONS: usize = 2;
     pub const PROJECTS: usize = 3;
     pub const CONDUCTOR: usize = 4;
@@ -72,7 +76,7 @@ pub mod tabs {
     pub fn all_titles() -> Vec<&'static str> {
         vec![
             "Welcome",
-            "MaesterClaw",
+            "MaestroClaw",
             "Sessions",
             "Projects",
             "Conductor",
@@ -267,6 +271,8 @@ pub struct App {
     pub omp_manager: Option<OmpAgentManager>,
     // Phase 7.7: Hot cache for memory suggestions
     pub hot_cache: crate::maesterclaw::HotCache,
+    // MaestroClaw pane state
+    pub maestroclaw_pane: crate::maesterclaw::MaestroClawPane,
     // TrackLens review state
     pub tracklens_pane: TrackLensPane,
 }
@@ -387,6 +393,7 @@ impl App {
                 None
             },
             hot_cache: crate::maesterclaw::HotCache::new(),
+            maestroclaw_pane: crate::maesterclaw::MaestroClawPane::new(),
             tracklens_pane: TrackLensPane::new(),
         };
 
@@ -917,15 +924,6 @@ impl App {
         }
     }
 
-    /// Refresh LSP status cache from Turso database
-    ///
-    /// Sets a flag to trigger async refresh in the main event loop.
-    /// This avoids the Tokio panic when calling async from sync context.
-    #[allow(dead_code)]
-    fn refresh_lsp_status(&mut self) {
-        self.refresh_lsp_status_impl(false);
-    }
-
     /// Refresh LSP status cache from Turso database (internal implementation)
     ///
     /// Sets a flag to trigger async refresh in the main event loop.
@@ -1385,6 +1383,62 @@ fn cycle_theme(app: &mut App) {
     }
 }
 
+fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroClawAction) -> bool {
+    use crate::maesterclaw::MaestroClawAction;
+
+    match action {
+        MaestroClawAction::None => false,
+        MaestroClawAction::FocusChanged | MaestroClawAction::Navigate => {
+            app.maestroclaw_pane.sync_sessions(app.sessions.len());
+            true
+        }
+        MaestroClawAction::NewSession => {
+            app.input_mode = InputMode::NewSessionTitle;
+            app.new_session_title = "MaestroClaw Session".to_string();
+            app.status_message = "Creating a new MaestroClaw session".to_string();
+            true
+        }
+        MaestroClawAction::OpenSelected => {
+            app.maestroclaw_pane.sync_sessions(app.sessions.len());
+            if let Some(session) = app
+                .maestroclaw_pane
+                .selected_session
+                .and_then(|idx| app.sessions.get(idx))
+                .cloned()
+            {
+                app.refresh_session_entries();
+                if let Some(entry_idx) = app.session_entries.iter().position(|entry| match entry {
+                    SessionEntry::Session(s) => s.session_id == session.session_id,
+                    _ => false,
+                }) {
+                    app.session_state.select(Some(entry_idx));
+                    app.tab_index = tabs::SESSIONS;
+                }
+                app.status_message = format!("Focused MaestroClaw session '{}'", session.title);
+            } else {
+                app.status_message = "No MaestroClaw session selected".to_string();
+            }
+            true
+        }
+        MaestroClawAction::StartSetup | MaestroClawAction::RepairBootstrap => {
+            app.maestroclaw_pane.activate_wizard();
+            app.status_message = "Opening MaestroClaw setup walkthrough".to_string();
+            true
+        }
+        MaestroClawAction::WizardAdvanced
+        | MaestroClawAction::WizardBack
+        | MaestroClawAction::WizardSelection => true,
+        MaestroClawAction::WizardComplete => {
+            app.status_message = "MaestroClaw setup complete".to_string();
+            true
+        }
+        MaestroClawAction::WizardDismissed => {
+            app.status_message = "MaestroClaw setup dismissed".to_string();
+            true
+        }
+    }
+}
+
 fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
     // If we're already inside a Zellij pane, switching the terminal's alternate
     // screen can cause rendering glitches. In that case, let the spawned app
@@ -1401,7 +1455,7 @@ fn suspend_fullscreen_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> 
     execute!(io::stdout(), LeaveAlternateScreen)?;
 
     // 3. Clear the main screen to ensure clean state for spawned app
-    execute!(io::stdout(), Clear(ClearType::All))?;
+    execute!(io::stdout(), TerminalClear(ClearType::All))?;
 
     // 4. Move cursor to home position
     execute!(io::stdout(), MoveTo(0, 0))?;
@@ -1424,6 +1478,32 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
     }
     execute!(io::stdout(), EnterAlternateScreen)?;
     enable_raw_mode()?;
+    Ok(())
+}
+
+fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!("maestro-managed-mcp-{}.toml", server_name.replace('/', "-")));
+    path
+}
+
+fn edit_managed_manifest<B: Backend>(
+    terminal: &mut Terminal<B>,
+    editor: &str,
+    manifest_path: &PathBuf,
+    template: &str,
+) -> Result<()> {
+    fs::write(manifest_path, template)
+        .with_context(|| format!("Failed to write manifest {}", manifest_path.display()))?;
+    suspend_fullscreen_app(terminal)?;
+    let status = std::process::Command::new(editor)
+        .arg(manifest_path)
+        .status()
+        .with_context(|| format!("Failed to launch editor '{}'", editor))?;
+    resume_fullscreen_app(terminal)?;
+    if !status.success() {
+        anyhow::bail!("Editor exited with status {}", status);
+    }
     Ok(())
 }
 
@@ -2229,13 +2309,253 @@ async fn run_app<B: Backend>(
                                                     }
                                                 }
                                             }
+                                            McpOption::Install => {
+                                                let installer =
+                                                    match ManagedMcpInstaller::new(svc.clone(), None)
+                                                    {
+                                                        Ok(installer) => installer,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Installer init failed: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                let template = match installer
+                                                    .template(server.as_ref(), Some(&name))
+                                                {
+                                                    Ok(template) => template,
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Template generation failed: {}",
+                                                            e
+                                                        );
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_mcp_name = None;
+                                                        continue;
+                                                    }
+                                                };
+                                                let manifest_path =
+                                                    managed_manifest_temp_path(&name);
+                                                if let Err(e) = edit_managed_manifest(
+                                                    terminal,
+                                                    &app.config.editor,
+                                                    &manifest_path,
+                                                    &template,
+                                                ) {
+                                                    app.status_message =
+                                                        format!("Managed install cancelled: {}", e);
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                }
+
+                                                let manifest_toml =
+                                                    match fs::read_to_string(&manifest_path) {
+                                                        Ok(text) => text,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Failed to read manifest: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                let manifest: McpManagedInstallManifest =
+                                                    match toml::from_str(&manifest_toml) {
+                                                        Ok(manifest) => manifest,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Invalid manifest: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+
+                                                match installer
+                                                    .install_from_manifest_str(&manifest_toml)
+                                                    .await
+                                                {
+                                                    Ok(installed) => {
+                                                        if manifest.auto_start {
+                                                            if let Some(pool) =
+                                                                app.mcp_pool.clone()
+                                                            {
+                                                                if let Err(error) = pool
+                                                                    .start_server_record(&installed)
+                                                                    .await
+                                                                {
+                                                                    app.status_message = format!(
+                                                                        "Installed '{}', but start failed: {}",
+                                                                        installed.name, error
+                                                                    );
+                                                                } else {
+                                                                    app.status_message = format!(
+                                                                        "Installed and started managed MCP '{}'",
+                                                                        installed.name
+                                                                    );
+                                                                }
+                                                            } else {
+                                                                app.status_message = format!(
+                                                                    "Installed managed MCP '{}'",
+                                                                    installed.name
+                                                                );
+                                                            }
+                                                        } else {
+                                                            app.status_message = format!(
+                                                                "Installed managed MCP '{}'",
+                                                                installed.name
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Managed install failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                                let _ = fs::remove_file(&manifest_path);
+                                            }
+                                            McpOption::Reinstall => {
+                                                let Some(server) = server.as_ref() else {
+                                                    app.status_message =
+                                                        "MCP server not found".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+                                                if !server.managed {
+                                                    app.status_message = format!(
+                                                        "MCP '{}' is not managed by Maestro",
+                                                        name
+                                                    );
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                }
+                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                    let _ = pool.stop_server(&name).await;
+                                                }
+                                                let installer =
+                                                    match ManagedMcpInstaller::new(svc.clone(), None)
+                                                    {
+                                                        Ok(installer) => installer,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Installer init failed: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                match installer.reinstall(&name).await {
+                                                    Ok(installed) => {
+                                                        if let Some(pool) = app.mcp_pool.clone() {
+                                                            if let Err(error) = pool
+                                                                .start_server_record(&installed)
+                                                                .await
+                                                            {
+                                                                app.status_message = format!(
+                                                                    "Reinstalled '{}', but start failed: {}",
+                                                                    installed.name, error
+                                                                );
+                                                            } else {
+                                                                app.status_message = format!(
+                                                                    "Reinstalled managed MCP '{}'",
+                                                                    installed.name
+                                                                );
+                                                            }
+                                                        } else {
+                                                            app.status_message = format!(
+                                                                "Reinstalled managed MCP '{}'",
+                                                                installed.name
+                                                            );
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Managed reinstall failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
+                                            }
                                             McpOption::Remove => {
                                                 if let Some(pool) = app.mcp_pool.clone() {
                                                     let _ = pool.stop_server(&name).await;
                                                 }
-                                                let _ = svc.delete_mcp_server(&name);
-                                                app.status_message =
-                                                    format!("Removed MCP '{}' from pool", name);
+                                                match svc.delete_mcp_server(&name) {
+                                                    Ok(_) => {
+                                                        app.status_message = format!(
+                                                            "Removed MCP '{}' from pool",
+                                                            name
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Remove failed: {}", e);
+                                                    }
+                                                }
+                                            }
+                                            McpOption::Uninstall => {
+                                                let Some(server) = server.as_ref() else {
+                                                    app.status_message =
+                                                        "MCP server not found".to_string();
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                };
+                                                if !server.managed {
+                                                    app.status_message = format!(
+                                                        "MCP '{}' is not managed by Maestro",
+                                                        name
+                                                    );
+                                                    app.input_mode = InputMode::Normal;
+                                                    app.target_mcp_name = None;
+                                                    continue;
+                                                }
+                                                if let Some(pool) = app.mcp_pool.clone() {
+                                                    let _ = pool.stop_server(&name).await;
+                                                }
+                                                let installer =
+                                                    match ManagedMcpInstaller::new(svc.clone(), None)
+                                                    {
+                                                        Ok(installer) => installer,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Installer init failed: {}",
+                                                                e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                match installer.uninstall(&name).await {
+                                                    Ok(_) => {
+                                                        app.status_message = format!(
+                                                            "Uninstalled managed MCP '{}'",
+                                                            name
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        app.status_message = format!(
+                                                            "Managed uninstall failed: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -2253,7 +2573,8 @@ async fn run_app<B: Backend>(
                                         app.config.editor = app.rename_buffer.clone();
                                         std::env::set_var("EDITOR", &app.config.editor);
                                         if let Err(e) = app.config.save() {
-                                            app.status_message = format!("Failed to save config: {}", e);
+                                            app.status_message =
+                                                format!("Failed to save config: {}", e);
                                         } else {
                                             app.status_message =
                                                 format!("Editor set to '{}'", app.config.editor);
@@ -2263,7 +2584,8 @@ async fn run_app<B: Backend>(
                                     InputMode::SettingsInstallPath => {
                                         app.config.install_path = app.rename_buffer.clone();
                                         if let Err(e) = app.config.save() {
-                                            app.status_message = format!("Failed to save config: {}", e);
+                                            app.status_message =
+                                                format!("Failed to save config: {}", e);
                                         } else {
                                             app.status_message = format!(
                                                 "Install path set to '{}'",
@@ -2295,7 +2617,8 @@ async fn run_app<B: Backend>(
                                                 app.config.editor = id.clone();
                                                 std::env::set_var("EDITOR", &app.config.editor);
                                                 if let Err(e) = app.config.save() {
-                                                    app.status_message = format!("Failed to save config: {}", e);
+                                                    app.status_message =
+                                                        format!("Failed to save config: {}", e);
                                                 } else {
                                                     app.status_message = format!(
                                                         "Editor set to '{}'",
@@ -2306,10 +2629,13 @@ async fn run_app<B: Backend>(
                                             SettingsMenuKind::Theme => {
                                                 app.config.theme = id.clone();
                                                 if let Err(e) = app.config.save() {
-                                                    app.status_message = format!("Failed to save config: {}", e);
-                                                } else {
                                                     app.status_message =
-                                                        format!("Theme set to '{}'", app.config.theme);
+                                                        format!("Failed to save config: {}", e);
+                                                } else {
+                                                    app.status_message = format!(
+                                                        "Theme set to '{}'",
+                                                        app.config.theme
+                                                    );
                                                 }
                                             }
                                         }
@@ -2689,8 +3015,8 @@ async fn run_app<B: Backend>(
                                     InputMode::NewSessionTool => {
                                         // Cycle tools
                                         let tools = [
-                                            "claude", "gemini", "shell", "codex", "opencode", "amp",
-                                            "qwen", "pi", "omp", "iflow",
+                                            "claude", "gemini", "shell", "codex", "opencode",
+                                            "amp", "qwen", "pi", "omp", "iflow",
                                         ];
                                         if let Some(pos) =
                                             tools.iter().position(|&t| t == app.new_session_tool)
@@ -2893,14 +3219,7 @@ async fn run_app<B: Backend>(
                                     };
                                     app.settings_menu_state.select(Some(i));
                                 } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Stop,
-                                        McpOption::Stop => McpOption::Pause,
-                                        McpOption::Pause => McpOption::Logs,
-                                        McpOption::Logs => McpOption::Add,
-                                        McpOption::Add => McpOption::Remove,
-                                        McpOption::Remove => McpOption::Start,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.next();
                                 } else if app.input_mode == InputMode::LspInstaller {
                                     let count =
                                         crate::tabs::lsp_registry::get_available_lsps().len();
@@ -2990,20 +3309,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == tabs::MAESTERCLAW {
-                                    // MaesterClaw - cycle through sections
-                                    app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
-                                            Some(crate::tabs::CapabilitiesSection::McpServers)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
-                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
-                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
-                                        }
-                                        None => Some(crate::tabs::CapabilitiesSection::CronJobs),
-                                    };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Down, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -3018,14 +3328,7 @@ async fn run_app<B: Backend>(
                             }
                             KeyCode::Up if app.tab_index != tabs::CONDUCTOR => {
                                 if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Remove,
-                                        McpOption::Stop => McpOption::Start,
-                                        McpOption::Pause => McpOption::Stop,
-                                        McpOption::Logs => McpOption::Pause,
-                                        McpOption::Add => McpOption::Logs,
-                                        McpOption::Remove => McpOption::Add,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.previous();
                                 } else if app.input_mode == InputMode::McpLogs {
                                     if app.lsp_log_source.is_some() {
                                         app.lsp_log_scroll = app.lsp_log_scroll.saturating_sub(1);
@@ -3134,20 +3437,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.memory_state.select(Some(i));
-                                } else if app.tab_index == tabs::MAESTERCLAW {
-                                    // MaesterClaw - cycle through sections (reverse)
-                                    app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
-                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
-                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
-                                            Some(crate::tabs::CapabilitiesSection::McpServers)
-                                        }
-                                        None => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                    };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Up, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -3191,10 +3485,15 @@ async fn run_app<B: Backend>(
                                         DashFocus::Sessions => app.dash_focus = DashFocus::Mcp,
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Tabs,
                                         DashFocus::Tabs => {
-                                            app.tab_index = tabs::MAESTERCLAW;
+                                            app.tab_index = tabs::MAESTROCLAW;
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                     };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Tab, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else {
                                     let tab_count = tabs::all_titles().len();
                                     app.tab_index = (app.tab_index + 1) % tab_count;
@@ -3213,6 +3512,11 @@ async fn run_app<B: Backend>(
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
                                         DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
                                     };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::BackTab, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else {
                                     app.tab_index = if app.tab_index == tabs::DASHBOARD {
                                         tabs::SETTINGS
@@ -3259,7 +3563,7 @@ async fn run_app<B: Backend>(
                                 app.tab_index = tabs::DASHBOARD
                             }
                             (KeyModifiers::ALT, KeyCode::Char('2')) => {
-                                app.tab_index = tabs::MAESTERCLAW
+                                app.tab_index = tabs::MAESTROCLAW
                             }
                             (KeyModifiers::ALT, KeyCode::Char('3')) => {
                                 app.tab_index = tabs::SESSIONS
@@ -3712,6 +4016,22 @@ async fn run_app<B: Backend>(
                                     app.input_mode = InputMode::NewMemoryContent;
                                     app.status_message =
                                         "Creating new memory - enter content".to_string();
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Char('n'), app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
+                                    app.new_session_path = app
+                                        .sessions
+                                        .get(app.maestroclaw_pane.selected_session.unwrap_or(0))
+                                        .map(|session| session.project_path.clone())
+                                        .filter(|path: &String| !path.trim().is_empty())
+                                        .or_else(|| {
+                                            app.projects
+                                                .get(app.project_state.selected().unwrap_or(0))
+                                                .map(|project| project.path.clone())
+                                        })
+                                        .unwrap_or_default();
                                 } else {
                                     // New session wizard for other tabs
                                     app.input_mode = InputMode::NewSessionTitle;
@@ -4136,7 +4456,7 @@ async fn run_app<B: Backend>(
                                         .first()
                                         .map(|s| s.project_path.clone())
                                         .unwrap_or_else(|| ".".to_string());
-                                    let prompt = crate::tabs::lsps::generate_agent_prompt(
+                                    let prompt = generate_agent_prompt(
                                         &app.lsp_diagnostics_cache,
                                         &project_path,
                                     );
@@ -4291,14 +4611,7 @@ async fn run_app<B: Backend>(
                                         app.diagnostic_view.selected_index = 0;
                                     }
                                 } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Stop,
-                                        McpOption::Stop => McpOption::Pause,
-                                        McpOption::Pause => McpOption::Logs,
-                                        McpOption::Logs => McpOption::Add,
-                                        McpOption::Add => McpOption::Remove,
-                                        McpOption::Remove => McpOption::Start,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.next();
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_add(1);
                                 } else if app.tab_index == tabs::DASHBOARD {
@@ -4389,6 +4702,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Enter, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -4419,14 +4737,7 @@ async fn run_app<B: Backend>(
                                             count.saturating_sub(1);
                                     }
                                 } else if app.input_mode == InputMode::McpMenu {
-                                    app.mcp_menu_option = match app.mcp_menu_option {
-                                        McpOption::Start => McpOption::Remove,
-                                        McpOption::Stop => McpOption::Start,
-                                        McpOption::Pause => McpOption::Stop,
-                                        McpOption::Logs => McpOption::Pause,
-                                        McpOption::Add => McpOption::Logs,
-                                        McpOption::Remove => McpOption::Add,
-                                    };
+                                    app.mcp_menu_option = app.mcp_menu_option.previous();
                                 } else if app.preview_focused {
                                     app.preview_scroll = app.preview_scroll.saturating_sub(1);
                                 } else if app.tab_index == tabs::DASHBOARD {
@@ -4518,20 +4829,11 @@ async fn run_app<B: Backend>(
                                         None => 0,
                                     };
                                     app.lsp_state.select(Some(i));
-                                } else if app.tab_index == tabs::MAESTERCLAW {
-                                    // MaesterClaw - cycle through sections (reverse)
-                                    app.capabilities_section = match app.capabilities_section {
-                                        Some(crate::tabs::CapabilitiesSection::CronJobs) => {
-                                            Some(crate::tabs::CapabilitiesSection::Sandbox)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::McpServers) => {
-                                            Some(crate::tabs::CapabilitiesSection::CronJobs)
-                                        }
-                                        Some(crate::tabs::CapabilitiesSection::Sandbox) => {
-                                            Some(crate::tabs::CapabilitiesSection::McpServers)
-                                        }
-                                        None => Some(crate::tabs::CapabilitiesSection::Sandbox),
-                                    };
+                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Up, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
                                     app.settings_option = match app.settings_option {
@@ -4749,16 +5051,15 @@ async fn run_app<B: Backend>(
                                                 };
                                             }
                                         }
-                                        SettingsOption::Save => {
-                                            match app.config.save() {
-                                                Ok(()) => {
-                                                    app.toast_queue.success("Configuration saved to ~/.config/maestro/config.toml");
-                                                }
-                                                Err(e) => {
-                                                    app.toast_queue.error(format!("Failed to save config: {}", e));
-                                                }
+                                        SettingsOption::Save => match app.config.save() {
+                                            Ok(()) => {
+                                                app.toast_queue.success("Configuration saved to ~/.config/maestro/config.toml");
                                             }
-                                        }
+                                            Err(e) => {
+                                                app.toast_queue
+                                                    .error(format!("Failed to save config: {}", e));
+                                            }
+                                        },
                                     }
                                 } else if app.tab_index == tabs::PROJECTS {
                                     // Projects Tab - Launch Yazi via maestro-tab
@@ -4778,18 +5079,23 @@ async fn run_app<B: Backend>(
 
                                         // Properly handle suspend errors
                                         if let Err(e) = suspend_fullscreen_app(terminal) {
-                                            app.status_message = format!("Failed to suspend TUI: {}", e);
+                                            app.status_message =
+                                                format!("Failed to suspend TUI: {}", e);
                                             continue;
                                         }
 
                                         // Small delay to ensure terminal state is synced
                                         std::thread::sleep(std::time::Duration::from_millis(50));
 
-                                        let res = crate::yazi_launcher::launch_yazi(&project.path, &project.name);
+                                        let res = crate::yazi_launcher::launch_yazi(
+                                            &project.path,
+                                            &project.name,
+                                        );
 
                                         // Resume TUI
                                         if let Err(e) = resume_fullscreen_app(terminal) {
-                                            app.status_message = format!("Failed to resume TUI: {}", e);
+                                            app.status_message =
+                                                format!("Failed to resume TUI: {}", e);
                                             continue;
                                         }
 
@@ -5072,6 +5378,56 @@ async fn run_app<B: Backend>(
     Ok(())
 }
 
+fn generate_agent_prompt(
+    diagnostics: &[crate::state::LspDiagnosticDetail],
+    project_path: &str,
+) -> String {
+    let mut lines = vec![
+        "Investigate these LSP diagnostics and propose the smallest safe fix.".to_string(),
+        format!("Project path: {}", project_path),
+        String::new(),
+    ];
+
+    if diagnostics.is_empty() {
+        lines.push("No diagnostic details are currently cached.".to_string());
+        return lines.join("\n");
+    }
+
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        let location = match (diagnostic.line, diagnostic.column) {
+            (Some(line), Some(column)) => format!("{}:{}", line, column),
+            (Some(line), None) => line.to_string(),
+            _ => "?".to_string(),
+        };
+        let lsp_name = diagnostic.lsp_name.as_deref().unwrap_or("unknown-lsp");
+        let session = diagnostic
+            .session_title
+            .as_deref()
+            .or(diagnostic.session_id.as_deref())
+            .unwrap_or("unknown-session");
+
+        lines.push(format!(
+            "{}. [{}] {} :: {} ({})",
+            index + 1,
+            diagnostic.severity,
+            diagnostic.file_path,
+            location,
+            lsp_name
+        ));
+        lines.push(format!("   Session: {}", session));
+        lines.push(format!("   Message: {}", diagnostic.message));
+        if let Some(source) = diagnostic.source.as_deref() {
+            lines.push(format!("   Source: {}", source));
+        }
+        if let Some(code) = diagnostic.code.as_deref() {
+            lines.push(format!("   Code: {}", code));
+        }
+        lines.push(String::new());
+    }
+
+    lines.join("\n")
+}
+
 fn ui(frame: &mut Frame, app: &mut App) {
     let theme = app.theme();
     frame.render_widget(
@@ -5113,7 +5469,16 @@ fn ui(frame: &mut Frame, app: &mut App) {
 
     match app.tab_index {
         tabs::DASHBOARD => render_dashboard(frame, chunks[1], app),
-        tabs::MAESTERCLAW => crate::tabs::capabilities::render_capabilities(frame, app),
+        tabs::MAESTROCLAW => {
+            app.maestroclaw_pane.sync_sessions(app.sessions.len());
+            if app.maestroclaw_pane.wizard.available_tools.is_empty() {
+                app.maestroclaw_pane.wizard.detect_tools();
+            }
+            if app.sessions.is_empty() && app.maestroclaw_pane.should_show_wizard(false) {
+                app.maestroclaw_pane.activate_wizard();
+            }
+            app.maestroclaw_pane.render(frame, chunks[1], app)
+        }
         tabs::SESSIONS => render_sessions(frame, chunks[1], app),
         tabs::PROJECTS => render_projects(frame, chunks[1], app),
         tabs::CONDUCTOR => {
@@ -5307,79 +5672,6 @@ fn truncate_str(s: &str, max_width: usize) -> String {
         let truncated: String = s.chars().take(max_width.saturating_sub(3)).collect();
         format!("{}...", truncated)
     }
-}
-
-fn render_action_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, frame.area());
-    frame.render_widget(Clear, area);
-
-    let (title, prompt, value) = match app.input_mode {
-        InputMode::RenameGroup => (" Rename Group ", "New Name:", Some(&app.rename_buffer)),
-        InputMode::ForkSession => (" Fork Session ", "Fork Name:", Some(&app.rename_buffer)),
-        InputMode::KillConfirm => (" Kill Session ", "Are you sure? (y/n)", None),
-        InputMode::DeleteConfirm => (
-            " Permanent Delete ",
-            "Are you sure you want to PERMANENTLY delete? (y/n)",
-            None,
-        ),
-        InputMode::NewSessionTitle => (
-            " New Session ",
-            "Enter Title:",
-            Some(&app.new_session_title),
-        ),
-        InputMode::NewGroupTitle => (" New Group ", "Group Name:", Some(&app.rename_buffer)),
-        InputMode::MoveToGroup => (" Move to Group ", "Target Path:", Some(&app.rename_buffer)),
-        _ => ("", "", None),
-    };
-
-    let theme = app.theme();
-    let title_style = match app.input_mode {
-        InputMode::KillConfirm | InputMode::DeleteConfirm => {
-            Style::default().fg(theme.error).bold()
-        }
-        _ => Style::default().fg(theme.warning).bold(),
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .title(title)
-        .title_style(title_style);
-
-    let content = if let Some(v) = value {
-        format!("{}\n\n> {}", prompt, v)
-    } else {
-        prompt.to_string()
-    };
-
-    let para = Paragraph::new(content)
-        .block(block)
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true });
-
-    frame.render_widget(para, area);
-}
-
-fn render_spawning_overlay(frame: &mut Frame, app: &App) {
-    let area = centered_rect(40, 10, frame.area());
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(30, 0, 30)).fg(Color::Yellow));
-
-    let text = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  ⚡ ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(&app.status_message),
-        ]),
-    ];
-
-    let para = Paragraph::new(text)
-        .block(block)
-        .alignment(Alignment::Center);
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
 }
 
 fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -5729,8 +6021,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .mcp_servers
         .iter()
         .map(|s| {
-            let status_color = if s.status == leindex_core::memory::models::McpStatus::Running
-            {
+            let status_color = if s.status == leindex_core::memory::models::McpStatus::Running {
                 Color::Green
             } else {
                 Color::Red
@@ -5759,430 +6050,6 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         )
         .highlight_symbol(">> ");
     frame.render_stateful_widget(mcp_list, mcp_chunks[1], &mut app.mcp_state);
-}
-
-fn render_help_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    let theme = theme_from_name(&app.config.theme);
-    let block = Block::default()
-        .title(" Commands Cheat-sheet ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let text = build_help_text(app);
-
-    let para = Paragraph::new(text)
-        .block(block)
-        .alignment(Alignment::Left)
-        .scroll((app.help_scroll, 0))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
-}
-
-fn build_help_text(app: &App) -> Vec<Line<'static>> {
-    vec![
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " GLOBAL CONTROLS:",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   Tab / S-Tab   ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Cycle Tabs / Focus Preview (e.g. 1->2->3)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   ↑ / ↓         ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Navigate / Scroll Preview"),
-        ]),
-        Line::from(vec![
-            Span::styled("   / or ?        ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Open/close this modal"),
-        ]),
-        Line::from(vec![
-            Span::styled("   PgUp/PgDn     ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Scroll modal content"),
-        ]),
-        Line::from(vec![
-            Span::styled("   q / Ctrl-C    ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" Quit Maestro Cockpit"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("   Dash: k / d   ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Kill / Delete Highlighted Dashboard Session"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " SESSIONS (Tab 2):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled(
-                "   n             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" New Session Wizard (Title, Path, Tool)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   Enter         ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Attach (auto-resume if terminated)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   u             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Resume (restore shell + resume agent, best-effort)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   R             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Restart (restore shell + start tool fresh)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Session Hub (Rename, Move, Search history)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Alt + p       ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Focus Preview Pane (for scrolling history)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Alt + ↑/↓     ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Reorder group/session (persists to DB)"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   m             ",
-                Style::default().fg(Color::Magenta).bold(),
-            ),
-            Span::raw(" Move Session to Group / Create New Group"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   G             ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Create Standalone Group"),
-        ]),
-        Line::from(vec![
-            Span::styled("   k             ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" Kill tmux Session Process"),
-        ]),
-        Line::from(vec![
-            Span::styled("   d / Alt + D   ", Style::default().fg(Color::Red).bold()),
-            Span::raw(" PURMANENT DELETE Session/Group from DB"),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "   f             ",
-                Style::default().fg(Color::Magenta).bold(),
-            ),
-            Span::raw(" Fork Session (Clone state to new session)"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " MEMORY (Tab 5):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   Ctrl + f      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Search memories (hybrid Tantivy/SQLite)"),
-        ]),
-        Line::from(vec![
-            Span::styled("   Ctrl + l      ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Clear memory search"),
-        ]),
-        Line::from(vec![
-            Span::styled("   r             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Refresh/import system-wide memories"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " PROJECTS (Tab 3):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled(
-                "   Enter         ",
-                Style::default().fg(Color::Green).bold(),
-            ),
-            Span::raw(" Open Zide (File Picker + Editor)"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            " ANALYSIS (Tab 4):",
-            Style::default().fg(Color::Yellow).bold(),
-        )]),
-        Line::from(vec![
-            Span::styled("   a             ", Style::default().fg(Color::Cyan).bold()),
-            Span::raw(" Enter Analysis Command Box"),
-        ]),
-        Line::from(""),
-        Line::from("  ---------------------------------- "),
-        Line::from(format!(
-            "  Maestro TUI Cockpit v2.0-beta-8  {}",
-            if (app.frame_count / 30) % 2 == 0 {
-                "⚡"
-            } else {
-                "  "
-            }
-        )),
-    ]
-}
-
-fn render_session_hub_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(80, 60, frame.area());
-    frame.render_widget(Clear, area);
-
-    let block = Block::default()
-        .title(" SESSION HUB Control ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 10, 15)));
-    frame.render_widget(block, area);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // RENAME
-            Constraint::Length(3), // GROUP
-            Constraint::Min(0),    // PREVIEW
-            Constraint::Length(3), // SEARCH
-        ])
-        .split(area);
-
-    // Rename Box
-    let rename_style = if app.hub_focus == HubFocus::Rename {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    let rename_title = if app.hub_focus == HubFocus::Rename {
-        ">> RENAME (Enter to Commit) "
-    } else {
-        " RENAME "
-    };
-    let rename = Paragraph::new(app.rename_buffer.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(rename_title)
-            .border_style(rename_style),
-    );
-    frame.render_widget(rename, chunks[0]);
-
-    // Group Box
-    let group_style = if app.hub_focus == HubFocus::Group {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default()
-    };
-    let group_title = if app.hub_focus == HubFocus::Group {
-        ">> GROUP ASSIGNMENT (Enter to change) "
-    } else {
-        " GROUP ASSIGNMENT "
-    };
-    let group = Paragraph::new("Current: /default (Press 'm' to Move)").block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(group_title)
-            .border_style(group_style),
-    );
-    frame.render_widget(group, chunks[1]);
-
-    // Search Results / Pane Preview
-    let preview = Paragraph::new(app.session_preview_content.as_str())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" PANE HISTORY PREVIEW / SEARCH RESULTS "),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(preview, chunks[2]);
-
-    // Search Input
-    let search_style = if app.hub_focus == HubFocus::Search {
-        Style::default().fg(Color::Magenta).bold()
-    } else {
-        Style::default()
-    };
-    let search_title = if app.hub_focus == HubFocus::Search {
-        ">> SEARCH IN PANE (Type to filter) "
-    } else {
-        " SEARCH IN PANE "
-    };
-    let search_content = if app.hub_focus == HubFocus::Search {
-        format!("{}_", app.hub_search_buffer)
-    } else {
-        app.hub_search_buffer.clone()
-    };
-    let search_input = Paragraph::new(search_content).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(search_title)
-            .border_style(search_style),
-    );
-    frame.render_widget(search_input, chunks[3]);
-}
-
-fn render_mcp_menu(frame: &mut Frame, app: &App) {
-    let area = centered_rect(40, 40, frame.area());
-    frame.render_widget(Clear, area);
-    let theme = theme_from_name(&app.config.theme);
-
-    let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
-    let block = Block::default()
-        .title(format!(" MCP: {} ", name))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let options = vec![
-        (McpOption::StartStop, "▶/■ Start/Stop Server"),
-        (McpOption::Pause, "⏸ Pause Connection"),
-        (McpOption::Logs, "📋 View Server Logs"),
-        (McpOption::Add, "➕ Add New Server"),
-        (McpOption::Remove, "❌ Remove from Pool"),
-        (McpOption::Install, "🛠️ Install Component"),
-    ];
-
-    let mut list_items = Vec::new();
-    for (opt, label) in options {
-        let style = if app.mcp_menu_option == opt {
-            Style::default()
-                .fg(Color::Yellow)
-                .bold()
-                .bg(Color::Rgb(40, 40, 60))
-        } else {
-            Style::default()
-        };
-        list_items.push(ListItem::new(vec![Line::from(vec![
-            Span::styled(
-                if app.mcp_menu_option == opt {
-                    " >> "
-                } else {
-                    "    "
-                },
-                style,
-            ),
-            Span::styled(label, style),
-        ])]));
-    }
-
-    let list = List::new(list_items).block(block);
-    frame.render_widget(list, area);
-}
-
-fn render_mcp_logs_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(80, 70, frame.area());
-    frame.render_widget(Clear, area);
-
-    // Determine if we're showing MCP or LSP logs
-    let is_lsp_logs = app.lsp_log_source.is_some();
-
-    let (title, content, scroll_offset) = if is_lsp_logs {
-        // LSP logs
-        let (session_id, lsp_name) = app.lsp_log_source.as_ref().unwrap();
-        let title = format!(
-            " LSP Logs: {} - Session {} (Esc to close) ",
-            lsp_name, session_id
-        );
-        let content = if app.lsp_log_content.is_empty() {
-            vec![
-                Line::from(""),
-                Line::from("  No logs found."),
-                Line::from(""),
-                Line::from("  Tip: LSP logs may not be enabled for this server."),
-            ]
-        } else {
-            app.lsp_log_content.lines().map(|l| Line::from(l)).collect()
-        };
-        let scroll_offset = (app.lsp_log_scroll, 0);
-        (title, content, scroll_offset)
-    } else {
-        // MCP logs
-        let name = app.target_mcp_name.as_deref().unwrap_or("Unknown");
-        let title = format!(" MCP Logs: {} (Esc to close) ", name);
-        let content = if app.mcp_log_lines.is_empty() {
-            vec![
-                Line::from(""),
-                Line::from("  No logs found."),
-                Line::from(""),
-                Line::from("  Tip: start the server to generate logs."),
-            ]
-        } else {
-            app.mcp_log_lines
-                .iter()
-                .map(|l| Line::from(l.as_str()))
-                .collect()
-        };
-        let scroll_offset = (app.mcp_log_scroll, 0);
-        (title, content, scroll_offset)
-    };
-
-    let theme = theme_from_name(&app.config.theme);
-    let block = Block::default()
-        .title(title)
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let para = Paragraph::new(content)
-        .scroll(scroll_offset)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(para, inner);
-}
-
-fn render_settings_menu_modal(frame: &mut Frame, app: &mut App) {
-    let theme = theme_from_name(&app.config.theme);
-    let area = centered_rect(60, 60, frame.area());
-    frame.render_widget(Clear, area);
-
-    let title = match app.settings_menu_kind {
-        Some(SettingsMenuKind::Editor) => " Select Preferred Editor ",
-        Some(SettingsMenuKind::Theme) => " Select Theme ",
-        None => " Select ",
-    };
-
-    let block = Block::default()
-        .title(title)
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    let items: Vec<ListItem> = app
-        .settings_menu_items
-        .iter()
-        .map(|(_, label)| ListItem::new(label.clone()))
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(theme.highlight_bg)
-                .fg(theme.highlight_fg)
-                .bold(),
-        )
-        .highlight_symbol(">> ");
-
-    frame.render_stateful_widget(list, area, &mut app.settings_menu_state);
 }
 
 fn render_settings(frame: &mut Frame, app: &App) {
@@ -6271,353 +6138,6 @@ fn render_settings(frame: &mut Frame, app: &App) {
         .alignment(Alignment::Center)
         .style(Style::default().fg(theme.muted));
     frame.render_widget(help, chunks[4]);
-}
-
-fn render_new_project_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    frame.render_widget(Clear, area);
-
-    let step = match app.input_mode {
-        InputMode::NewProjectName => 1,
-        InputMode::NewProjectPath => 2,
-        InputMode::NewProjectTool => 3,
-        _ => 1,
-    };
-
-    let block = Block::default()
-        .title(format!(" NEW PROJECT WIZARD (Step {} of 3) ", step))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(15, 10, 20)));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // Name
-            Constraint::Length(3), // Path
-            Constraint::Length(3), // Tool
-            Constraint::Min(0),    // Help/Hint
-        ])
-        .split(area);
-
-    let name_style = if step == 1 {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let name = Paragraph::new(app.new_project_name.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 1. PROJECT NAME ")
-            .border_style(name_style),
-    );
-    frame.render_widget(name, chunks[0]);
-
-    let path_style = if step == 2 {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let path = Paragraph::new(app.new_project_path.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 2. TARGET PATH (Enter for current) ")
-            .border_style(path_style),
-    );
-    frame.render_widget(path, chunks[1]);
-
-    let tool_style = if step == 3 {
-        Style::default().fg(Color::Magenta).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let tool = Paragraph::new(app.new_project_tool.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 3. INITIAL TOOL (None/claude/gemini) ")
-            .border_style(tool_style),
-    );
-    frame.render_widget(tool, chunks[2]);
-
-    let hint = Paragraph::new("Press 'Enter' to confirm step, 'Esc' to cancel\n\nThis will run /maestro:setup in the target directory.")
-        .alignment(Alignment::Center);
-    frame.render_widget(hint, chunks[3]);
-    frame.render_widget(block, area);
-}
-
-fn render_group_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    frame.render_widget(Clear, area);
-
-    let step = match app.input_mode {
-        InputMode::NewGroupTitle | InputMode::RenameGroup => 1,
-        InputMode::NewGroupCategory | InputMode::RenameGroupCategory => 2,
-        _ => 1,
-    };
-
-    let title = if matches!(
-        app.input_mode,
-        InputMode::RenameGroup | InputMode::RenameGroupCategory
-    ) {
-        " RENAME GROUP WIZARD "
-    } else {
-        " NEW GROUP WIZARD "
-    };
-
-    let block = Block::default()
-        .title(format!(" {} (Step {} of 2) ", title, step))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 20, 15)));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // Name
-            Constraint::Length(3), // Category
-            Constraint::Min(0),    // Help/Hint
-        ])
-        .split(area);
-
-    let name_style = if step == 1 {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let name = Paragraph::new(app.rename_buffer.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 1. GROUP NAME ")
-            .border_style(name_style),
-    );
-    frame.render_widget(name, chunks[0]);
-
-    let cat_style = if step == 2 {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let cat = Paragraph::new(app.new_group_category.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 2. CATEGORY (e.g. Work, Personal, Research) ")
-            .border_style(cat_style),
-    );
-    frame.render_widget(cat, chunks[1]);
-
-    let hint = Paragraph::new("Tab to switch fields, Enter: next/save, Esc to cancel\n\nGroups help you organize your coding sessions.")
-        .alignment(Alignment::Center);
-    frame.render_widget(hint, chunks[2]);
-    frame.render_widget(block, area);
-}
-
-fn render_new_track_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 30, frame.area());
-    frame.render_widget(Clear, area);
-
-    let step = match app.input_mode {
-        InputMode::NewTrackTitle => 1,
-        InputMode::NewTrackType => 2,
-        _ => 1,
-    };
-
-    let block = Block::default()
-        .title(format!(" NEW TRACK WIZARD (Step {} of 2) ", step))
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(10, 15, 20)));
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3), // Title
-            Constraint::Length(3), // Type
-            Constraint::Min(0),    // Help/Hint
-        ])
-        .split(area);
-
-    let title_style = if step == 1 {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let title = Paragraph::new(app.new_track_title.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 1. TRACK TITLE ")
-            .border_style(title_style),
-    );
-    frame.render_widget(title, chunks[0]);
-
-    let type_style = if step == 2 {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let type_text = if app.new_track_is_master {
-        "[X] Master Track  [ ] Direct Track"
-    } else {
-        "[ ] Master Track  [X] Direct Track"
-    };
-    let track_type = Paragraph::new(type_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" 2. TRACK TYPE (Space to toggle) ")
-            .border_style(type_style),
-    );
-    frame.render_widget(track_type, chunks[1]);
-
-    let hint = Paragraph::new("Press 'Enter' to confirm, 'Esc' to cancel\n\nThis will run /maestro:newTrack in the project.")
-        .alignment(Alignment::Center);
-    frame.render_widget(hint, chunks[2]);
-    frame.render_widget(block, area);
-}
-fn render_input_modal(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 20, frame.area());
-    let block = Block::default()
-        .title(" New Session Wizard ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
-
-    let mut text = vec![Line::from("")];
-
-    // Title Field
-    let title_style = if app.input_mode == InputMode::NewSessionTitle {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    text.push(Line::from(vec![
-        Span::styled("  Session Title: ", title_style),
-        Span::raw(&app.new_session_title),
-        if app.input_mode == InputMode::NewSessionTitle {
-            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK))
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    // Path Field
-    let path_style = if app.input_mode == InputMode::NewSessionPath {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    text.push(Line::from(vec![
-        Span::styled("  Project Path:  ", path_style),
-        Span::raw(&app.new_session_path),
-        if app.input_mode == InputMode::NewSessionPath {
-            Span::styled("_", Style::default().add_modifier(Modifier::SLOW_BLINK))
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    // Tool Field
-    let tool_style = if app.input_mode == InputMode::NewSessionTool {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default()
-    };
-    text.push(Line::from(vec![
-        Span::styled("  Tool (Cycle):  ", tool_style),
-        Span::styled(
-            &app.new_session_tool,
-            Style::default().fg(Color::Cyan).bold(),
-        ),
-        if app.input_mode == InputMode::NewSessionTool {
-            Span::raw(" (Press any key to cycle)")
-        } else {
-            Span::raw("")
-        },
-    ]));
-
-    text.push(Line::from(""));
-    text.push(Line::from("  [Enter] Next/Confirm  [Esc] Cancel"));
-
-    let para = Paragraph::new(text).block(block);
-    frame.render_widget(Clear, area);
-    frame.render_widget(para, area);
-}
-
-fn render_switcher_modal(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(50, 40, frame.area());
-    let theme = app.theme();
-    let block = Block::default()
-        .title(" Quick Session Switcher ")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .style(Style::default().bg(theme.panel_bg));
-
-    if app.sessions.is_empty() {
-        let text = vec![Line::from("  No active sessions.")];
-        let para = Paragraph::new(text).block(block);
-        frame.render_widget(Clear, area);
-        frame.render_widget(para, area);
-    } else {
-        let items: Vec<ListItem> = app
-            .sessions
-            .iter()
-            .map(|s| {
-                let status_color =
-                    if s.status == leindex_core::memory::models::SessionStatus::Running {
-                        Color::Green
-                    } else {
-                        Color::Gray
-                    };
-                ListItem::new(vec![Line::from(vec![
-                    Span::styled(" * ", Style::default().fg(status_color)),
-                    Span::styled(&s.title, Style::default().bold().fg(Color::White)),
-                    Span::styled(
-                        format!(" [{}]", s.tool.as_deref().unwrap_or("?")),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ])])
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(
-                Style::default()
-                    .bg(theme.highlight_bg)
-                    .fg(theme.highlight_fg)
-                    .bold(),
-            )
-            .highlight_symbol(">> ");
-
-        frame.render_widget(Clear, area);
-        frame.render_stateful_widget(list, area, &mut app.switcher_state);
-    }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
 
 fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
@@ -7016,7 +6536,7 @@ fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
         ];
 
         for lsp_name in &missing_lsps {
-            let install_commands = App::get_lsp_install_command(lsp_name);
+            let install_commands = crate::tabs::lsps::get_lsp_install_command(lsp_name);
             missing_lines.push(Line::from(vec![
                 Span::styled(
                     format!("▸ {} ", lsp_name),
@@ -7525,6 +7045,5 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             .wrap(Wrap { trim: false })
             .scroll((app.preview_scroll, 0));
         frame.render_widget(preview, chunks[1]);
->>>>>>> 3ac143d5 (feat(v2.5): Complete Sub-Track 01 - Cockpit TUI Re-Org & Distribution)
     }
 }

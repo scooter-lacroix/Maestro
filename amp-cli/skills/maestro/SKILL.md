@@ -9,7 +9,7 @@ Use this skill whenever you run Maestro inside Amp. Keep it native to Amp and th
 
 - **Commands:** `/maestro`, `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`, `/maestro:orchestrate`, `/maestro:status`, `/maestro:revert`, `/maestro:leindex`, `/maestro:tui`.
 - **Skill install path (user scope):** `~/.config/agents/skills/maestro/` (installed by the Maestro wizard).
-- **MCP:** `amp.mcpServers.leindex` → `{ "command": "maestro", "args": ["mcp", "tool-search"], "type": "stdio" (if required) }`. Do **not** point to any TLDR/legacy endpoints.
+- **MCP:** `amp.mcpServers.leindex` → `{ "command": "maestro", "args": ["mcp", "tool-search"], "type": "stdio" (if required) }` so Amp reaches the Maestro MCP pool through the dynamic broker. Do **not** point to any TLDR/legacy endpoints.
 - **No cross-tool bleed:** Avoid references to `~/.claude`, `~/.gemini`, or OpenCode paths.
 
 ## Quick flow

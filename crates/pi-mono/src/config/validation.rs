@@ -1102,9 +1102,7 @@ mod tests {
             let result = validate_config_ext(&config, &None);
             assert!(result.is_ok());
 
-            let warnings = result.unwrap();
-            // May have warnings about missing path, etc.
-            assert!(warnings.len() >= 0);
+            let _warnings = result.unwrap();
         }
 
         #[test]

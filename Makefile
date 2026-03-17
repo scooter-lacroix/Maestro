@@ -58,9 +58,9 @@ check:
 # Policy checks - enforce architectural rules
 policy-check:
 	@echo "Checking for forbidden maestro.tldr imports outside archive..."
-	@rg -n "maestro\.tldr" --glob '!maestro/archive/**' --glob '!*.txt' --glob '!**/tracks.md' --glob '!**/plan.md' --glob '!Makefile' --glob '!**/SKILL.md' --glob '!**/spec.md' . && echo "❌ ERROR: Found maestro.tldr references outside archive/" && exit 1 || echo "✅ No maestro.tldr imports outside archive/"
+	@rg -n "\bmaestro(?:\.archive)?\.tldr\b|\bfrom\s+maestro(?:\.archive)?(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s+import\s+.*\btldr\b|\bimport\s+maestro\.archive\.tldr\b" --glob '!maestro/archive/**' --glob '!*.md' --glob '!*.txt' --glob '!**/tracks.md' --glob '!**/plan.md' --glob '!Makefile' --glob '!**/SKILL.md' --glob '!**/spec.md' . && echo "❌ ERROR: Found maestro.tldr references outside archive/" && exit 1 || echo "✅ No maestro.tldr imports outside archive/"
 	@echo "Checking for archive/tldr execution paths in runtime code..."
-	@rg -n "from.*archive.*tldr|import.*archive.*tldr" --glob '!*.txt' --glob '!*.md' --glob '!maestro/archive/**' maestro/ && echo "❌ ERROR: Found archive/tldr imports in runtime code" && exit 1 || echo "✅ No archive/tldr execution paths"
+	@rg -n "\bfrom\s+.*archive.*\btldr\b|\bimport\s+.*archive.*\btldr\b|\bmaestro(?:\.archive)?\.tldr\b" --glob '!*.txt' --glob '!*.md' --glob '!maestro/archive/**' maestro/ && echo "❌ ERROR: Found archive/tldr imports in runtime code" && exit 1 || echo "✅ No archive/tldr execution paths"
 
 # Run clippy for linting
 lint:

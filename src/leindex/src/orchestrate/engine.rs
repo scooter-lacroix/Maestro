@@ -4,15 +4,15 @@
 
 use crate::orchestrate::model::*;
 use crate::orchestrate::parser::{parse_plan_md, write_plan_md};
+use crate::orchestrate::prompts::PromptBuilder;
 use crate::orchestrate::runner::{AgentRunner, RunResult};
 use crate::orchestrate::state::{LockGuard, StateManager};
-use crate::orchestrate::prompts::PromptBuilder;
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Orchestrate engine
 pub struct OrchestrateEngine {
@@ -20,7 +20,11 @@ pub struct OrchestrateEngine {
     state_manager: StateManager,
     tracks_dir: PathBuf,
     memory_service: Option<crate::memory::MemoryService>,
-    rate_limit_detector: std::sync::Arc<tokio::sync::Mutex<crate::rate_limit::RateLimitDetector>>,
+    rate_limit_detector: std::sync::Arc<
+        tokio::sync::Mutex<crate::orchestrate::rate_limit_detector::RateLimitDetector>,
+    >,
+    rate_limit_backoff:
+        std::sync::Arc<tokio::sync::Mutex<crate::orchestrate::rate_limit::RateLimitBackoff>>,
 }
 
 impl OrchestrateEngine {
@@ -28,14 +32,14 @@ impl OrchestrateEngine {
     pub fn new(config: OrchestrateConfig, tracks_dir: PathBuf) -> Result<Self> {
         let state_manager = StateManager::new(config.data_dir.clone())
             .context("Failed to initialize state manager")?;
-        
+
         let memory_service = crate::memory::MemoryService::new(None).ok();
 
         let rate_limit_detector = std::sync::Arc::new(tokio::sync::Mutex::new(
-            crate::rate_limit::RateLimitDetector::new(
-                config.rate_limit_max_retries,
-                config.rate_limit_backoff_base_secs,
-            )
+            crate::orchestrate::rate_limit_detector::RateLimitDetector::new(),
+        ));
+        let rate_limit_backoff = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::orchestrate::rate_limit::RateLimitBackoff::new(),
         ));
         Ok(Self {
             config,
@@ -43,6 +47,7 @@ impl OrchestrateEngine {
             tracks_dir,
             memory_service,
             rate_limit_detector,
+            rate_limit_backoff,
         })
     }
 
@@ -85,13 +90,21 @@ impl OrchestrateEngine {
             }
 
             // Select next actionable task
-            let (task_id, task_title, task_description) = match self.select_next_task(&plan, &session)? {
+            let (task_id, task_title, task_description) = match self
+                .select_next_task(&plan, &session)?
+            {
                 Some(t) => (t.id.clone(), t.title.clone(), t.description.clone()),
                 None => {
                     // All tasks marked complete. Perform final Track Verification.
-                    info!("All tasks in track {} marked as complete. Verifying integrity...", track_id);
+                    info!(
+                        "All tasks in track {} marked as complete. Verifying integrity...",
+                        track_id
+                    );
                     if let Err(e) = self.verify_track_integrity(track_id, &plan, &session).await {
-                        warn!("Track verification failed: {}. Re-opening relevant tasks.", e);
+                        warn!(
+                            "Track verification failed: {}. Re-opening relevant tasks.",
+                            e
+                        );
                         // logic to re-open tasks would go here
                         tokio::time::sleep(Duration::from_secs(10)).await;
                         continue;
@@ -106,7 +119,10 @@ impl OrchestrateEngine {
                             track_id,
                             Utc::now().to_rfc3339()
                         );
-                        let _ = svc.store_memory(&content, crate::memory::models::MemoryCategory::Decision);
+                        let _ = svc.store_memory(
+                            &content,
+                            crate::memory::models::MemoryCategory::Decision,
+                        );
                     }
 
                     session.status = SessionStatus::Completed;
@@ -143,68 +159,79 @@ impl OrchestrateEngine {
                 match result {
                     Ok(iter_res) => {
                         // Check for rate limiting
-                        if iter_res.rate_limited && self.config.enable_rate_limit_detection {
-                            let mut detector = self.rate_limit_detector.lock().await;
-                            detector.record_hit();
-                            let detector_state = detector.state.clone();
-                            drop(detector);
+                        if self.config.enable_rate_limit_detection {
+                            let detection = {
+                                let detector = self.rate_limit_detector.lock().await;
+                                detector.detect(
+                                    crate::orchestrate::rate_limit_detector::RateLimitDetectionInput {
+                                        stderr: iter_res.stderr.clone(),
+                                        stdout: iter_res.output.clone(),
+                                        exit_code: iter_res.exit_code,
+                                        agent_id: Some(session.agent_config.tool.clone()),
+                                    },
+                                )
+                            };
 
-                            // Update session with rate limit state for TUI polling
-                            session.rate_limit = Some(detector_state.clone());
-                            session.updated_at = Utc::now().to_rfc3339();
-                            self.state_manager.save_session(&session)?;
+                            if detection.is_rate_limit {
+                                let (detector_state, outcome) = {
+                                    let mut backoff = self.rate_limit_backoff.lock().await;
+                                    let outcome = backoff.record_hit(
+                                        detection.message.clone(),
+                                        detection.retry_after,
+                                        self.config.rate_limit_max_retries,
+                                        self.config.rate_limit_backoff_base_secs,
+                                        self.config.rate_limit_backoff_max_secs,
+                                    );
+                                    (backoff.state.clone(), outcome)
+                                };
 
-                            if detector_state.consecutive_hits > self.config.rate_limit_max_retries {
-                                error!(
-                                    "Rate limit exceeded after {} hits, task {} requires manual intervention",
-                                    detector_state.consecutive_hits, task_id
+                                // Update session with rate limit state for TUI polling
+                                session.rate_limit = Some(detector_state.clone());
+                                session.updated_at = Utc::now().to_rfc3339();
+                                self.state_manager.save_session(&session)?;
+
+                                if outcome.exceeded_max {
+                                    error!(
+                                        "Rate limit exceeded after {} hits, task {} requires manual intervention",
+                                        detector_state.consecutive_hits, task_id
+                                    );
+                                    let task_ref = self.find_task_mut(&mut plan.tasks, &task_id)?;
+                                    task_ref.notes = Some(format!(
+                                        "RATE_LIMITED: Max retries ({}) exceeded. Manual intervention required.",
+                                        self.config.rate_limit_max_retries
+                                    ));
+                                    break Err(anyhow!(
+                                        "Task {} rate-limited after {} hits",
+                                        task_id,
+                                        detector_state.consecutive_hits
+                                    ));
+                                }
+
+                                warn!(
+                                    "Rate limit detected on task {} (hit {}/{}), backing off {}s",
+                                    task_id,
+                                    detector_state.consecutive_hits,
+                                    self.config.rate_limit_max_retries,
+                                    outcome.delay_secs
                                 );
-                                // Mark task as failed with rate limit note
-                                let task_ref = self.find_task_mut(&mut plan.tasks, &task_id)?;
-                                task_ref.notes = Some(format!(
-                                    "RATE_LIMITED: Max retries ({}) exceeded. Manual intervention required.",
-                                    self.config.rate_limit_max_retries
-                                ));
-                                break Err(anyhow!(
-                                    "Task {} rate-limited after {} hits",
-                                    task_id, detector_state.consecutive_hits
-                                ));
+
+                                tokio::time::sleep(Duration::from_secs(outcome.delay_secs)).await;
+
+                                if let Some(s) = self.state_manager.load_session(track_id)? {
+                                    session = s;
+                                }
+
+                                continue;
                             }
-
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs();
-                            
-                            let backoff_secs = detector_state.backoff_until.unwrap_or(now) - now;
-
-                            warn!(
-                                "Rate limit detected on task {} (hit {}/{}), backing off {}s",
-                                task_id,
-                                detector_state.consecutive_hits,
-                                self.config.rate_limit_max_retries,
-                                backoff_secs
-                            );
-
-                            // Sleep for backoff period
-                            tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                            
-                            // Re-load session in case it was modified (e.g. paused)
-                            if let Some(s) = self.state_manager.load_session(track_id)? {
-                                session = s;
-                            }
-                            
-                            // Continue loop to retry
-                            continue;
                         }
 
                         // No rate limit, reset detector and clear rate limit state in session
-                        let mut detector = self.rate_limit_detector.lock().await;
-                        detector.reset();
-                        drop(detector);
-                        
+                        let mut backoff = self.rate_limit_backoff.lock().await;
+                        backoff.reset();
+                        drop(backoff);
+
                         session.rate_limit = None;
-                        
+
                         // Exit with result
                         break Ok(iter_res);
                     }
@@ -234,7 +261,11 @@ impl OrchestrateEngine {
                         );
                     } else {
                         // Handle failure based on error strategy
-                        self.handle_task_failure(&mut plan, &temp_task, &iteration_result.error_message)?;
+                        self.handle_task_failure(
+                            &mut plan,
+                            &temp_task,
+                            &iteration_result.error_message,
+                        )?;
                     }
                 }
                 Err(e) => {
@@ -331,6 +362,8 @@ impl OrchestrateEngine {
                     updated_at: now,
                     status: SessionStatus::Running,
                     rate_limit: None,
+                    retry_counts: std::collections::HashMap::new(),
+                    max_iterations: 10,
                 })
             }
         }
@@ -344,7 +377,11 @@ impl OrchestrateEngine {
         match session.mode {
             LoopMode::Planning => {
                 // In planning mode, select the first pending task
-                Ok(plan.all_tasks().iter().find(|t| t.status == TrackStatus::Pending).copied())
+                Ok(plan
+                    .all_tasks()
+                    .iter()
+                    .find(|t| t.status == TrackStatus::Pending)
+                    .copied())
             }
             LoopMode::Building => {
                 // In building mode, select the highest priority actionable task
@@ -393,7 +430,10 @@ impl OrchestrateEngine {
                 task.status = status;
                 return Ok(());
             }
-            if self.update_task_status_recursive(&mut task.subtasks, task_id, status).is_ok() {
+            if self
+                .update_task_status_recursive(&mut task.subtasks, task_id, status)
+                .is_ok()
+            {
                 return Ok(());
             }
         }
@@ -426,7 +466,12 @@ impl OrchestrateEngine {
             runner.run(&prompt, task),
         )
         .await
-        .map_err(|_| anyhow!("Iteration timeout after {} seconds", self.config.iteration_timeout_secs))??;
+        .map_err(|_| {
+            anyhow!(
+                "Iteration timeout after {} seconds",
+                self.config.iteration_timeout_secs
+            )
+        })??;
 
         // Log iteration
         let completed_at = Utc::now();
@@ -451,7 +496,12 @@ impl OrchestrateEngine {
         Ok(run_result)
     }
 
-    fn build_prompt(&self, task: &Task, session: &SessionState, plan: &TrackPlan) -> Result<String> {
+    fn build_prompt(
+        &self,
+        task: &Task,
+        session: &SessionState,
+        plan: &TrackPlan,
+    ) -> Result<String> {
         let builder = PromptBuilder::new(self.config.context_budget);
 
         // Get recent iterations
@@ -462,17 +512,17 @@ impl OrchestrateEngine {
 
         // Get LeIndex context if enabled
         let leindex_context = if self.config.enable_leindex {
-            let engine = crate::orchestrate::context::ContextEngine::new(self.config.context_budget);
+            let engine =
+                crate::orchestrate::context::ContextEngine::new(self.config.context_budget);
             Some(engine.build_context(&self.tracks_dir, plan)?)
         } else {
             None
         };
 
-        let memory_context = self
-            .memory_service
-            .as_ref()
-            .and_then(|svc| {
-                match svc.list_memories(5) {
+        let memory_context =
+            self.memory_service
+                .as_ref()
+                .and_then(|svc| match svc.list_memories(5) {
                     Ok(memories) if !memories.is_empty() => {
                         let content = memories
                             .iter()
@@ -483,8 +533,7 @@ impl OrchestrateEngine {
                         Some(content)
                     }
                     _ => None,
-                }
-            });
+                });
 
         builder.build_prompt(
             task,
@@ -520,7 +569,8 @@ impl OrchestrateEngine {
         match self.config.error_strategy {
             ErrorStrategy::Retry => {
                 // Parse retry count from task notes (format: "retries: N")
-                let retry_count = task.notes
+                let retry_count = task
+                    .notes
                     .as_ref()
                     .and_then(|n| n.split("retries:").nth(1))
                     .and_then(|s| s.trim().parse::<u32>().ok())
@@ -533,14 +583,19 @@ impl OrchestrateEngine {
                     );
                     return Err(anyhow!(
                         "Task {} failed after {} retries (max: {})",
-                        task.id, retry_count, self.config.max_retries
+                        task.id,
+                        retry_count,
+                        self.config.max_retries
                     ));
                 }
 
                 // Increment retry counter
                 warn!(
                     "Task {} failed (attempt {}/{}), will retry: {:?}",
-                    task.id, retry_count + 1, self.config.max_retries, error
+                    task.id,
+                    retry_count + 1,
+                    self.config.max_retries,
+                    error
                 );
 
                 // Update task notes with incremented retry count
@@ -559,8 +614,11 @@ impl OrchestrateEngine {
             }
             ErrorStrategy::Abort => {
                 error!("Task {} failed, aborting: {:?}", task.id, error);
-                return Err(anyhow!("Task {} failed, aborting track: {}", task.id,
-                    error.as_deref().unwrap_or("unknown")));
+                return Err(anyhow!(
+                    "Task {} failed, aborting track: {}",
+                    task.id,
+                    error.as_deref().unwrap_or("unknown")
+                ));
             }
         }
         Ok(())
@@ -604,7 +662,11 @@ impl OrchestrateEngine {
         Ok(None)
     }
 
-    fn find_subtask_mut<'a>(&'a self, subtasks: &'a mut [Task], task_id: &str) -> Result<Option<&'a mut Task>> {
+    fn find_subtask_mut<'a>(
+        &'a self,
+        subtasks: &'a mut [Task],
+        task_id: &str,
+    ) -> Result<Option<&'a mut Task>> {
         for subtask in subtasks {
             if subtask.id == task_id {
                 return Ok(Some(subtask));
@@ -616,9 +678,17 @@ impl OrchestrateEngine {
         Ok(None)
     }
 
-    async fn verify_track_integrity(&self, track_id: &str, plan: &TrackPlan, session: &SessionState) -> Result<()> {
-        info!("Running final autonomous verification for track: {}", track_id);
-        
+    async fn verify_track_integrity(
+        &self,
+        track_id: &str,
+        plan: &TrackPlan,
+        session: &SessionState,
+    ) -> Result<()> {
+        info!(
+            "Running final autonomous verification for track: {}",
+            track_id
+        );
+
         // Create a verification task
         let verify_task = Task {
             id: "track-verification".to_string(),
@@ -631,13 +701,17 @@ impl OrchestrateEngine {
             line_number: 0,
         };
 
-        let result = self.run_iteration(track_id, &verify_task, session, plan).await?;
-        
+        let result = self
+            .run_iteration(track_id, &verify_task, session, plan)
+            .await?;
+
         if result.success && result.completed {
             Ok(())
         } else {
-            Err(anyhow!("Verification failed: {}", result.error_message.unwrap_or_default()))
+            Err(anyhow!(
+                "Verification failed: {}",
+                result.error_message.unwrap_or_default()
+            ))
         }
     }
 }
-

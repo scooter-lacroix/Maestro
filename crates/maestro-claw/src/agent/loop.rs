@@ -29,7 +29,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             max_turns: 20,
-            turn_timeout_secs: 60,
+            turn_timeout_secs: 300,
             error_strategy: ErrorStrategy::Retry(3),
             summary_prompt:
                 "Please provide a brief 2–3 sentence summary of our conversation so far, \
@@ -414,7 +414,7 @@ mod tests {
     fn test_agent_config_default() {
         let config = AgentConfig::default();
         assert_eq!(config.max_turns, 20);
-        assert_eq!(config.turn_timeout_secs, 60);
+        assert_eq!(config.turn_timeout_secs, 86400);
     }
 
     #[test]

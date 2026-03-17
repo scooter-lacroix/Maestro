@@ -11,7 +11,7 @@ use ratatui::{
 
 use crate::app::App;
 use crate::state::SessionEntry;
-use leindex_analyzers::memory::LspStatus;
+use leindex_core::memory::{models::SessionStatus, turso_backend::LspStatus};
 
 /// Get the tail of a session log file
 pub fn session_log_tail(session_name: &str, lines: usize) -> Option<String> {
@@ -154,12 +154,9 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                     ])]));
                 }
                 SessionEntry::Session(s) => {
-                    let is_running =
-                        s.status == leindex_analyzers::memory::models::SessionStatus::Running;
-                    let is_terminated =
-                        s.status == leindex_analyzers::memory::models::SessionStatus::Terminated;
-                    let is_waiting =
-                        s.status == leindex_analyzers::memory::models::SessionStatus::Waiting;
+                    let is_running = s.status == SessionStatus::Running;
+                    let is_terminated = s.status == SessionStatus::Terminated;
+                    let is_waiting = s.status == SessionStatus::Waiting;
 
                     let (status_icon, status_color) = if is_running {
                         (" * ", Color::Green)
@@ -201,7 +198,7 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                         Span::styled(&s.title, title_style),
                     ];
 
-                    if s.status == leindex_analyzers::memory::models::SessionStatus::Terminated {
+                    if s.status == SessionStatus::Terminated {
                         line_spans.push(Span::styled(
                             " [KILLED]",
                             Style::default().fg(Color::Red).bold(),
@@ -243,14 +240,14 @@ pub fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             if let Some(SessionEntry::Session(s)) = app.session_entries.get(i) {
                 // Header (Replicating Go TUI)
                 let status_icon = match s.status {
-                    leindex_analyzers::memory::models::SessionStatus::Running => "●",
-                    leindex_analyzers::memory::models::SessionStatus::Waiting => "◐",
+                    SessionStatus::Running => "●",
+                    SessionStatus::Waiting => "◐",
                     _ => "○",
                 };
                 let status_color = match s.status {
-                    leindex_analyzers::memory::models::SessionStatus::Running => Color::Green,
-                    leindex_analyzers::memory::models::SessionStatus::Waiting => Color::Yellow,
-                    leindex_analyzers::memory::models::SessionStatus::Terminated => Color::Red,
+                    SessionStatus::Running => Color::Green,
+                    SessionStatus::Waiting => Color::Yellow,
+                    SessionStatus::Terminated => Color::Red,
                     _ => Color::DarkGray,
                 };
 
