@@ -10,6 +10,7 @@ use leindex_core::{
     orchestrate::model::{IterationLog, LoopMode, TaskDependency, TrackStatus},
 };
 use serde::{Deserialize, Serialize};
+use super::normalized_model::ConductorTree;
 
 /// Ralph: RalphStatus → Maestro: ConductorStatus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -149,6 +150,9 @@ pub struct ConductorState {
     pub lsp_diagnostics_warnings: Vec<String>,
     /// Names of currently running LSP servers
     pub running_lsp_servers: Vec<String>,
+    /// Normalized tree model for track/task rendering (not serialized)
+    #[serde(skip)]
+    pub normalized_tree: ConductorTree,
 }
 
 impl Default for ConductorState {
@@ -188,6 +192,7 @@ impl Default for ConductorState {
             lsp_diagnostics_errors: Vec::new(),
             lsp_diagnostics_warnings: Vec::new(),
             running_lsp_servers: Vec::new(),
+            normalized_tree: ConductorTree::new(),
         }
     }
 }

@@ -207,7 +207,7 @@ export async function startTrackLensServer(
           const result = await saveToObsidian({
             vaultPath,
             folder,
-            plan,
+            content: plan,
             filenameFormat,
           });
 
@@ -226,7 +226,7 @@ export async function startTrackLensServer(
       // API: Save to Bear
       if (url.pathname === "/api/bear" && req.method === "POST") {
         try {
-          const result = await saveToBear({ plan });
+          const result = await saveToBear({ content: plan });
           return Response.json(result);
         } catch (error) {
           return Response.json(

@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let ready = server
         .wait_for_client_ready(std::time::Duration::from_secs(15))
         .await;
-    if ready {
+    if ready.is_ok() {
         println!("✓ Client UI reported ready!");
     } else {
         println!("⚠ Client UI did not report ready within 15s");
