@@ -372,6 +372,59 @@ impl TreeBuilder {
             self.tree.add_node(id.clone(), node.clone(), false);
         }
 
+        // Collect all session nodes first (before building tracks)
+        let mut all_session_nodes: Vec<(TreeNodeId, Arc<dyn ConductorNode>)> = Vec::new();
+        let mut sessions_by_track: HashMap<String, Vec<Arc<dyn ConductorNode>>> = HashMap::new();
+
+        // Collect internal sessions
+        for session in &self.sessions {
+            let session_node: Arc<dyn ConductorNode> = Arc::new(ConductorSessionNode {
+                id: session.session_id.clone(),
+                track_id: session.track_id.clone(),
+                task_id: session.current_task_id.clone().unwrap_or_default(),
+                title: format!("Session {} ({:?})", session.session_id, session.status),
+                status: session.status.into(),
+                iteration: session.current_iteration,
+            });
+            let session_id = TreeNodeId::Session {
+                track_id: session.track_id.clone(),
+                task_id: session.current_task_id.clone().unwrap_or_default(),
+                session_id: session.session_id.clone(),
+            };
+            all_session_nodes.push((session_id, session_node.clone()));
+            sessions_by_track
+                .entry(session.track_id.clone())
+                .or_default()
+                .push(session_node);
+        }
+
+        // Collect external sessions
+        for session in &self.external_sessions {
+            let session_node: Arc<dyn ConductorNode> = Arc::new(ConductorSessionNode {
+                id: session.id.clone(),
+                track_id: session.track_id.clone(),
+                task_id: session.task_id.clone(),
+                title: format!("External: {}", session.title),
+                status: session.status,
+                iteration: 0,
+            });
+            let session_id = TreeNodeId::Session {
+                track_id: session.track_id.clone(),
+                task_id: session.task_id.clone(),
+                session_id: session.id.clone(),
+            };
+            all_session_nodes.push((session_id, session_node.clone()));
+            sessions_by_track
+                .entry(session.track_id.clone())
+                .or_default()
+                .push(session_node);
+        }
+
+        // Add all session nodes to tree
+        for (id, node) in all_session_nodes {
+            self.tree.add_node(id, node, false);
+        }
+
         // Build track nodes with their children
         for track in &self.tracks {
             let track_id = TreeNodeId::Track(track.id.clone());
@@ -410,46 +463,9 @@ impl TreeBuilder {
                 }
             }
 
-            // Add session nodes as children if they belong to this track
-            for session in &self.sessions {
-                if session.track_id == track.id {
-                    let session_node = Arc::new(ConductorSessionNode {
-                        id: session.session_id.clone(),
-                        track_id: track.id.clone(),
-                        task_id: session.current_task_id.clone().unwrap_or_default(),
-                        title: format!("Session {} ({:?})", session.session_id, session.status),
-                        status: session.status.into(),
-                        iteration: session.current_iteration,
-                    });
-                    let session_id = TreeNodeId::Session {
-                        track_id: track.id.clone(),
-                        task_id: session.current_task_id.clone().unwrap_or_default(),
-                        session_id: session.session_id.clone(),
-                    };
-                    self.tree.add_node(session_id, session_node.clone(), false);
-                    task_children.push(session_node);
-                }
-            }
-
-            // Add external sessions as children
-            for session in &self.external_sessions {
-                if session.track_id == track.id {
-                    let session_node = Arc::new(ConductorSessionNode {
-                        id: session.id.clone(),
-                        track_id: track.id.clone(),
-                        task_id: session.task_id.clone(),
-                        title: format!("External: {}", session.title),
-                        status: session.status,
-                        iteration: 0,
-                    });
-                    let session_id = TreeNodeId::Session {
-                        track_id: track.id.clone(),
-                        task_id: session.task_id.clone(),
-                        session_id: session.id.clone(),
-                    };
-                    self.tree.add_node(session_id, session_node.clone(), false);
-                    task_children.push(session_node);
-                }
+            // Add session nodes for this track
+            if let Some(sessions) = sessions_by_track.get(&track.id) {
+                task_children.extend(sessions.iter().cloned());
             }
 
             let title = if track.description.is_empty() {

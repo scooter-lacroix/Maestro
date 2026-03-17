@@ -8,13 +8,14 @@ export interface ClientReadyMonitor {
   /** Mark the client as ready */
   markClientReady: () => void;
   /** Wait for client to become ready, with timeout */
-  waitForClientReady: () => Promise<boolean>;
+  waitForClientReady: (timeoutMs?: number) => Promise<boolean>;
 }
 
 /**
  * Create a monitor to track client UI readiness
+ * @param defaultTimeoutMs - Default timeout in milliseconds (defaults to 30000)
  */
-export function createClientReadyMonitor(): ClientReadyMonitor {
+export function createClientReadyMonitor(defaultTimeoutMs: number = 30000): ClientReadyMonitor {
   let isReady = false;
   let resolveReady: (value: boolean) => void;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -35,13 +36,15 @@ export function createClientReadyMonitor(): ClientReadyMonitor {
       }
     },
 
-    waitForClientReady(): Promise<boolean> {
-      // Set a timeout of 30 seconds for client readiness
+    waitForClientReady(timeoutMs?: number): Promise<boolean> {
+      // Use provided timeout or fall back to default
+      const actualTimeout = timeoutMs ?? defaultTimeoutMs;
+
       timeoutId = setTimeout(() => {
         if (!isReady) {
           resolveReady(false);
         }
-      }, 30000);
+      }, actualTimeout);
 
       return readyPromise;
     },
