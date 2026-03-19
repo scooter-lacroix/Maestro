@@ -6,8 +6,8 @@
  */
 
 import { mkdirSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
-import { randomUUID } from "crypto";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { getRepoInfo } from "./repo";
@@ -16,6 +16,11 @@ import {
   createClientReadyMonitor,
   injectTrackLensBootstrap,
 } from "./ui-readiness";
+
+// Resolve paths for asset serving
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = process.env.CLAUDE_PROJECT_DIR || resolve(__dirname, "..", "..", "..");
 
 export interface AnnotateServerOptions {
   /** Markdown content of the file to annotate */
@@ -56,9 +61,6 @@ export async function startAnnotateServer(
     htmlContent,
     origin,
   } = options;
-
-  // Generate authentication token for decision endpoint
-  const authToken = randomUUID();
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -103,11 +105,6 @@ export async function startAnnotateServer(
       }
 
       if (url.pathname === "/api/client-ready" && req.method === "POST") {
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         clientReady.markClientReady();
         return Response.json({ ready: true });
       }
@@ -202,12 +199,6 @@ export async function startAnnotateServer(
 
       // API: Submit decision
       if (url.pathname === "/api/decision" && req.method === "POST") {
-        // Validate authentication token
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         try {
           const body = await req.json();
           const {
@@ -235,9 +226,37 @@ export async function startAnnotateServer(
         }
       }
 
+      // Serve static assets (JS, CSS files)
+      if (url.pathname.startsWith("/assets/")) {
+        const assetPath = url.pathname.slice(1); // Remove leading /
+        const assetCandidates = [
+          resolve(__dirname, "..", assetPath),
+          resolve(__dirname, assetPath),
+          resolve(projectRoot, "apps", "tracklens-hook", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-editor", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-review-editor", "dist", assetPath),
+        ];
+
+        for (const candidate of assetCandidates) {
+          if (existsSync(candidate)) {
+            const file = Bun.file(candidate);
+            const ext = candidate.split(".").pop()?.toLowerCase();
+            const contentType =
+              ext === "js" ? "application/javascript" :
+              ext === "css" ? "text/css" :
+              ext === "svg" ? "image/svg+xml" :
+              "application/octet-stream";
+            return new Response(file, {
+              headers: { "Content-Type": contentType },
+            });
+          }
+        }
+        return new Response("Asset not found", { status: 404 });
+      }
+
       // Serve HTML
-      const htmlWithToken = injectTrackLensBootstrap(htmlContent, authToken);
-      return new Response(htmlWithToken, {
+      const htmlWithBootstrap = injectTrackLensBootstrap(htmlContent);
+      return new Response(htmlWithBootstrap, {
         headers: { "Content-Type": "text/html" },
       });
     },

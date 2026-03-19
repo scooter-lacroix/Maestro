@@ -125,6 +125,12 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # Build TrackLens packages
+echo -e "${C}    Cleaning up old backups...${NC}"
+# Remove old backup directories to prevent accumulation
+rm -rf "$HOME/.maestro/tracklens.old" 2>/dev/null || true
+rm -rf "$HOME/.maestro/tracklens.backup."* 2>/dev/null || true
+rm -rf "$HOME/.claude/plugins/tracklens.old" 2>/dev/null || true
+rm -rf "$HOME/.opencode/skill/maestro.old" 2>/dev/null || true
 echo -e "${C}    Building TrackLens packages...${NC}"
 cd "$INSTALL_DIR"
 if ! command -v bun &> /dev/null; then
@@ -139,13 +145,65 @@ bun run build:tracklens
 
 # Install TrackLens Claude Code Plugin
 echo -e "${C}    Installing TrackLens Claude Code Plugin...${NC}"
+mkdir -p "$HOME/.claude/plugins"
+# Remove existing plugin to ensure no stale files
+rm -rf "$HOME/.claude/plugins/tracklens.old"
+if [[ -d "$HOME/.claude/plugins/tracklens" ]]; then
+    echo -e "${Y}    Backing up existing TrackLens Claude Code Plugin...${NC}"
+    mv "$HOME/.claude/plugins/tracklens" "$HOME/.claude/plugins/tracklens.old"
+fi
 mkdir -p "$HOME/.claude/plugins/tracklens"
 cp -r "$INSTALL_DIR/apps/tracklens-hook/"* "$HOME/.claude/plugins/tracklens/"
+echo -e "${G}    TrackLens Claude Code Plugin installed${NC}"
+
+# Install TrackLens UI Bundle to ~/.maestro/tracklens
+# This is the canonical location that the TrackLens server searches first
+echo -e "${C}    Installing TrackLens UI Bundle...${NC}"
+mkdir -p "$HOME/.maestro"
+# Remove old bundle if exists to ensure we never have stale components
+rm -rf "$HOME/.maestro/tracklens.old"
+# Backup existing bundle if it exists
+if [[ -d "$HOME/.maestro/tracklens" ]]; then
+    echo -e "${Y}    Backing up existing TrackLens UI bundle...${NC}"
+    mv "$HOME/.maestro/tracklens" "$HOME/.maestro/tracklens.old"
+fi
+# Copy the freshly built bundle from apps/tracklens-hook/dist
+cp -r "$INSTALL_DIR/apps/tracklens-hook/dist" "$HOME/.maestro/tracklens"
+echo -e "${G}    TrackLens UI bundle installed to: $HOME/.maestro/tracklens${NC}"
+
+# Verify the bundle was installed correctly
+if [[ ! -f "$HOME/.maestro/tracklens/index.html" ]]; then
+    echo -e "${R}  [!] TrackLens UI bundle installation failed - index.html not found${NC}"
+    exit 1
+fi
+if [[ ! -d "$HOME/.maestro/tracklens/assets" ]]; then
+    echo -e "${R}  [!] TrackLens UI bundle installation failed - assets directory not found${NC}"
+    exit 1
+fi
+# Count assets to ensure bundle is complete
+ASSET_COUNT=$(find "$HOME/.maestro/tracklens/assets" -type f | wc -l)
+if [[ $ASSET_COUNT -lt 10 ]]; then
+    echo -e "${R}  [!] TrackLens UI bundle appears incomplete - only $ASSET_COUNT assets found${NC}"
+    exit 1
+fi
+echo -e "${G}    TrackLens UI bundle verified: $ASSET_COUNT assets${NC}"
 
 # Install OpenCode Skill
 echo -e "${C}    Installing OpenCode Skill...${NC}"
+mkdir -p "$HOME/.opencode/skill"
+# Remove existing skill to ensure no stale files
+rm -rf "$HOME/.opencode/skill/maestro.old"
+if [[ -d "$HOME/.opencode/skill/maestro" ]]; then
+    echo -e "${Y}    Backing up existing OpenCode Skill...${NC}"
+    mv "$HOME/.opencode/skill/maestro" "$HOME/.opencode/skill/maestro.old"
+fi
 mkdir -p "$HOME/.opencode/skill/maestro"
-cp -r "$INSTALL_DIR/opencode/skill/maestro/"* "$HOME/.opencode/skill/maestro/" 2>/dev/null || true
+if [[ -d "$INSTALL_DIR/opencode/skill/maestro" ]]; then
+    cp -r "$INSTALL_DIR/opencode/skill/maestro/"* "$HOME/.opencode/skill/maestro/" 2>/dev/null || true
+    echo -e "${G}    OpenCode Skill installed${NC}"
+else
+    echo -e "${Y}    [!] OpenCode Skill directory not found, skipping...${NC}"
+fi
 
 # Install Claude Hooks
 echo -e "${C}    Installing Claude Hooks...${NC}"
@@ -166,6 +224,10 @@ echo -e "    ${C}Please wait while the orchestra tunes (compiling setup tool)${N
 
 # Change to leindex Rust directory
 cd "$INSTALL_DIR/src/leindex"
+
+# Clean previous build to ensure fresh binary
+echo -e "${C}    Cleaning previous build...${NC}"
+cargo clean -p maestro-setup 2>/dev/null || true
 
 SETUP_SUCCESS=0
 
@@ -237,6 +299,37 @@ if [[ "$INSTALL_DIR" == "$HOME/.maestro/install-temp" ]]; then
     echo -e "${C}    Cleaning up temporary install directory...${NC}"
     rm -rf "$INSTALL_DIR"
 fi
+
+# Final verification - ensure all components are installed
+echo -e "${C}    Verifying installation...${NC}"
+VERIFY_FAILED=0
+
+# Check maestro binary
+if [[ ! -f "$HOME/.local/bin/maestro" ]]; then
+    echo -e "${R}  [!] Maestro binary not found at ~/.local/bin/maestro${NC}"
+    VERIFY_FAILED=1
+fi
+
+# Check TrackLens UI bundle
+if [[ ! -f "$HOME/.maestro/tracklens/index.html" ]]; then
+    echo -e "${R}  [!] TrackLens UI bundle not found at ~/.maestro/tracklens/${NC}"
+    VERIFY_FAILED=1
+fi
+
+# Check TrackLens Claude Code Plugin
+if [[ ! -f "$HOME/.claude/plugins/tracklens/package.json" ]]; then
+    echo -e "${R}  [!] TrackLens Claude Code Plugin not found at ~/.claude/plugins/tracklens/${NC}"
+    VERIFY_FAILED=1
+fi
+
+if [[ $VERIFY_FAILED -eq 1 ]]; then
+    echo -e "${R}  [!] Installation verification failed. Some components are missing.${NC}"
+    exit 1
+fi
+
+echo -e "${G}    ✓ Maestro binary${NC}"
+echo -e "${G}    ✓ TrackLens UI bundle${NC}"
+echo -e "${G}    ✓ TrackLens Claude Code Plugin${NC}"
 
 echo -e "${G}    Installation complete!${NC}"
 echo -e "    Run 'maestro' to get started."

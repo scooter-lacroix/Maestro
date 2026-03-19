@@ -227,3 +227,10 @@ target/
 # Omex metrics (local state)
 .omx/
 **/.omx/
+
+# Developer-only local docs (never push to remote)
+ANALYSIS_SUMMARY.md
+CODEBASE_ANALYSIS.md
+COMPLETE_ANALYSIS_REPORT.md
+ENHANCED_ANALYSIS.md
+docs/MAESTROCLAW_UI_PORT_PLAN.md
