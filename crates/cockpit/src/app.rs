@@ -288,7 +288,7 @@ pub struct App {
 /// startup path cannot slip through undetected.
 fn load_maestroclaw_workspace_dir() -> PathBuf {
     maestro_claw::config::Config::load()
-        .unwrap_or_default()
+        .unwrap_or_else(|_| maestro_claw::config::Config::default())
         .workspace_dir
 }
 
@@ -4142,23 +4142,12 @@ async fn run_app<B: Backend>(
                                     }
                                 }
                             }
-                            (KeyModifiers::NONE, KeyCode::Char('b')) => {
+                            (KeyModifiers::NONE, KeyCode::Char(c @ ('b' | 'w'))) => {
                                 if app.tab_index == tabs::MAESTROCLAW {
                                     let action = app
                                         .maestroclaw_pane
                                         .handle_key_with_session_count(
-                                            KeyCode::Char('b'),
-                                            app.sessions.len(),
-                                        );
-                                    let _ = handle_maestroclaw_action(&mut app, action);
-                                }
-                            }
-                            (KeyModifiers::NONE, KeyCode::Char('w')) => {
-                                if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(
-                                            KeyCode::Char('w'),
+                                            KeyCode::Char(c),
                                             app.sessions.len(),
                                         );
                                     let _ = handle_maestroclaw_action(&mut app, action);

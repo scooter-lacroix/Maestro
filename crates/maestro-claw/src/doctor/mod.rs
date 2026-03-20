@@ -60,24 +60,13 @@ impl DiagItem {
 
 /// Run full diagnostics
 pub fn run(config: &Config) -> Result<()> {
-    let mut items: Vec<DiagItem> = Vec::new();
-
-    check_config(config, &mut items);
-    check_workspace(config, &mut items);
-    check_cli_tools(config, &mut items);
-    check_environment(&mut items);
-    check_repairs(config, &mut items);
+    let items = run_diagnostics(config);
 
     println!("🩺 MaestroClaw Doctor");
     println!();
 
-    let mut current_label = String::new();
     for item in &items {
-        if item.label != current_label {
-            current_label.clone_from(&item.label);
-            println!("  [{}]", current_label);
-        }
-        println!("    {} {}", item.icon(), item.message);
+        println!("  [{}] {} {}", item.label, item.icon(), item.message);
     }
 
     let errors = items

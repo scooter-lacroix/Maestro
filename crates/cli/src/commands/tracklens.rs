@@ -130,6 +130,12 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
         _ => ReviewMode::Review,
     };
 
+    let read_file_content = || async {
+        tokio::fs::read_to_string(&file)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))
+    };
+
     // Get content based on mode
     let content = if review_mode == ReviewMode::CodeReview {
         // For code review mode, generate a git diff for the file
@@ -147,21 +153,22 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
                     .args(["diff", "--staged", "--", file_str])
                     .output()
                     .await?;
-                String::from_utf8_lossy(&output.stdout).to_string()
+                let staged_diff = String::from_utf8_lossy(&output.stdout).to_string();
+                if staged_diff.trim().is_empty() {
+                    read_file_content().await?
+                } else {
+                    staged_diff
+                }
             } else {
                 diff
             }
         } else {
             // If git diff fails, read the file content directly
-            tokio::fs::read_to_string(&file)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))?
+            read_file_content().await?
         }
     } else {
         // For other modes, read the file content directly
-        tokio::fs::read_to_string(&file)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))?
+        read_file_content().await?
     };
 
     // Start TrackLens server
