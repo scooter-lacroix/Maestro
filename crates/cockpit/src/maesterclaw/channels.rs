@@ -13,11 +13,14 @@ use ratatui::{
 };
 
 /// Channel types supported by MaesterClaw
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChannelType {
     Telegram,
     Discord,
     Slack,
+    Matrix,
+    WhatsApp,
+    Mattermost,
 }
 
 impl ChannelType {
@@ -26,6 +29,9 @@ impl ChannelType {
             Self::Telegram => "Telegram",
             Self::Discord => "Discord",
             Self::Slack => "Slack",
+            Self::Matrix => "Matrix",
+            Self::WhatsApp => "WhatsApp",
+            Self::Mattermost => "Mattermost",
         }
     }
 
@@ -34,7 +40,44 @@ impl ChannelType {
             Self::Telegram => "📱",
             Self::Discord => "💬",
             Self::Slack => "💼",
+            Self::Matrix => "\u{1F517}",
+            Self::WhatsApp => "\u{1F4F2}",
+            Self::Mattermost => "\u{1F535}",
         }
+    }
+
+    pub fn setup_instructions(&self) -> &'static str {
+        match self {
+            Self::Telegram => "1. Message @BotFather on Telegram\n2. Send /newbot\n3. Copy the bot token",
+            Self::Discord => "1. Go to discord.com/developers\n2. Create application → Bot\n3. Copy the bot token",
+            Self::Slack => "1. Go to api.slack.com/apps\n2. Create app → OAuth & Permissions\n3. Copy the bot token",
+            Self::Matrix => "1. Create a bot account on your Matrix server\n2. Copy the access token",
+            Self::WhatsApp => "Requires Node.js bridge.\nRun 'maestro claw whatsapp' for guided setup.",
+            Self::Mattermost => "1. Go to Integrations → Bot Accounts\n2. Add Bot Account\n3. Copy the bot token",
+        }
+    }
+
+    pub fn token_env_var(&self) -> &'static str {
+        match self {
+            Self::Telegram => "TELEGRAM_BOT_TOKEN",
+            Self::Discord => "DISCORD_BOT_TOKEN",
+            Self::Slack => "SLACK_BOT_TOKEN",
+            Self::Matrix => "MATRIX_ACCESS_TOKEN",
+            Self::WhatsApp => "WHATSAPP_ENABLED",
+            Self::Mattermost => "MATTERMOST_TOKEN",
+        }
+    }
+
+    /// Returns all channel variants in display order.
+    pub const fn all() -> &'static [ChannelType] {
+        &[
+            ChannelType::Telegram,
+            ChannelType::Discord,
+            ChannelType::Slack,
+            ChannelType::Matrix,
+            ChannelType::WhatsApp,
+            ChannelType::Mattermost,
+        ]
     }
 }
 
@@ -155,12 +198,14 @@ impl Default for ChannelControlPlane {
 
 impl ChannelControlPlane {
     /// Create a new channel control plane
+    ///
+    /// Channel list is derived from [`ChannelType::all()`], the single
+    /// source of truth for the supported set and display order.
     pub fn new() -> Self {
-        let channels = vec![
-            ChannelConfig::new(ChannelType::Telegram),
-            ChannelConfig::new(ChannelType::Discord),
-            ChannelConfig::new(ChannelType::Slack),
-        ];
+        let channels = ChannelType::all()
+            .iter()
+            .map(|&ct| ChannelConfig::new(ct))
+            .collect();
 
         Self {
             channels,
@@ -187,7 +232,7 @@ impl ChannelControlPlane {
 
     /// Move selection down
     pub fn move_down(&mut self) {
-        if self.selected < self.channels.len() - 1 {
+        if !self.channels.is_empty() && self.selected < self.channels.len() - 1 {
             self.selected += 1;
         }
     }
@@ -362,7 +407,7 @@ mod tests {
     #[test]
     fn test_channel_control_plane_default() {
         let plane = ChannelControlPlane::default();
-        assert_eq!(plane.channels.len(), 3);
+        assert_eq!(plane.channels.len(), 6);
         assert_eq!(plane.selected, 0);
     }
 
@@ -377,11 +422,20 @@ mod tests {
         plane.move_down();
         assert_eq!(plane.selected, 2);
 
+        plane.move_down();
+        assert_eq!(plane.selected, 3);
+
+        plane.move_down();
+        assert_eq!(plane.selected, 4);
+
+        plane.move_down();
+        assert_eq!(plane.selected, 5);
+
         plane.move_down(); // Should stay at max
-        assert_eq!(plane.selected, 2);
+        assert_eq!(plane.selected, 5);
 
         plane.move_up();
-        assert_eq!(plane.selected, 1);
+        assert_eq!(plane.selected, 4);
     }
 
     #[test]
@@ -452,6 +506,9 @@ mod tests {
         assert_eq!(ChannelType::Telegram.label(), "Telegram");
         assert_eq!(ChannelType::Discord.label(), "Discord");
         assert_eq!(ChannelType::Slack.label(), "Slack");
+        assert_eq!(ChannelType::Matrix.label(), "Matrix");
+        assert_eq!(ChannelType::WhatsApp.label(), "WhatsApp");
+        assert_eq!(ChannelType::Mattermost.label(), "Mattermost");
     }
 
     #[test]
@@ -483,6 +540,56 @@ mod tests {
 
         let discord = plane.get_channel(&ChannelType::Discord);
         assert!(discord.is_some());
+
+        let matrix = plane.get_channel(&ChannelType::Matrix);
+        assert!(matrix.is_some());
+
+        let whatsapp = plane.get_channel(&ChannelType::WhatsApp);
+        assert!(whatsapp.is_some());
+
+        let mattermost = plane.get_channel(&ChannelType::Mattermost);
+        assert!(mattermost.is_some());
+    }
+
+    #[test]
+    fn test_channel_type_setup_instructions() {
+        // Verify all new types return non-empty instructions
+        assert!(!ChannelType::Matrix.setup_instructions().is_empty());
+        assert!(!ChannelType::WhatsApp.setup_instructions().is_empty());
+        assert!(!ChannelType::Mattermost.setup_instructions().is_empty());
+
+        // Verify known substrings for correctness
+        assert!(ChannelType::Matrix.setup_instructions().contains("Matrix server"));
+        assert!(ChannelType::WhatsApp.setup_instructions().contains("Node.js bridge"));
+        assert!(ChannelType::Mattermost.setup_instructions().contains("Bot Accounts"));
+    }
+
+    #[test]
+    fn test_channel_type_token_env_var() {
+        assert_eq!(ChannelType::Matrix.token_env_var(), "MATRIX_ACCESS_TOKEN");
+        assert_eq!(ChannelType::WhatsApp.token_env_var(), "WHATSAPP_ENABLED");
+        assert_eq!(ChannelType::Mattermost.token_env_var(), "MATTERMOST_TOKEN");
+    }
+
+    #[test]
+    fn test_channel_type_icons() {
+        // Verify icons are non-empty for all types
+        for ct in ChannelType::all() {
+            assert!(!ct.icon().is_empty(), "icon for {:?} should not be empty", ct);
+        }
+    }
+
+    #[test]
+    fn test_channel_type_all() {
+        let all = ChannelType::all();
+        assert_eq!(all, &[
+            ChannelType::Telegram,
+            ChannelType::Discord,
+            ChannelType::Slack,
+            ChannelType::Matrix,
+            ChannelType::WhatsApp,
+            ChannelType::Mattermost,
+        ]);
     }
 
     #[test]
@@ -491,5 +598,16 @@ mod tests {
         let selected = plane.selected_channel();
         assert!(selected.is_some());
         assert_eq!(selected.unwrap().channel_type, ChannelType::Telegram);
+    }
+
+    #[test]
+    fn test_channel_control_plane_order_matches_all() {
+        let plane = ChannelControlPlane::new();
+        let expected: Vec<ChannelType> = ChannelType::all().to_vec();
+        let actual: Vec<ChannelType> = plane.channels.iter().map(|c| c.channel_type).collect();
+        assert_eq!(
+            actual, expected,
+            "ChannelControlPlane channel order must exactly match ChannelType::all()"
+        );
     }
 }

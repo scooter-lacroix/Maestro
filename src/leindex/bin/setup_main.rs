@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
@@ -123,7 +123,7 @@ impl LogEntry {
 
 fn main() -> Result<(), io::Error> {
     // Check for headless mode
-    let headless = std::env::args().any(|arg| arg == "--headless" || arg == "-h")
+    let headless = std::env::args().any(|arg| arg == "--headless")
         || std::env::var("MAESTRO_HEADLESS").map(|v| v == "1" || v == "true").unwrap_or(false);
 
     if headless {
@@ -272,7 +272,7 @@ fn run_headless_install() -> Result<(), io::Error> {
     // In headless mode, install all tools by default unless explicitly disabled
     for (tool_name, env_var) in &all_tools {
         let should_install = match std::env::var(env_var) {
-            Ok(v) => v != "0" && v != "false" && v != "no",
+            Ok(v) => !matches!(v.to_lowercase().as_str(), "0" | "false" | "no"),
             Err(_) => true, // Default to installing if env var not set
         };
         if should_install {
@@ -321,7 +321,7 @@ fn run_headless_install() -> Result<(), io::Error> {
                     SetupEvent::StepStarted { current, total, step } => {
                         current_step = current;
                         print!("[{}/{}] {}... ", current, total, step.name);
-                        io::Write::flush(&mut io::stdout())?;
+                        io::stdout().flush()?;
                     }
                     SetupEvent::StepCompleted { current, total, step_name: _ } => {
                         println!("✓");
@@ -344,7 +344,7 @@ fn run_headless_install() -> Result<(), io::Error> {
                             println!();
                             println!("  → {}", trimmed);
                             print!("[{}/{}] Continuing... ", current_step, total_steps);
-                            io::Write::flush(&mut io::stdout())?;
+                            io::stdout().flush()?;
                         }
                     }
                     SetupEvent::Error { step, message, hint } => {

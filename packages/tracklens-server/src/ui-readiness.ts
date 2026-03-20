@@ -55,37 +55,36 @@ export function createClientReadyMonitor(defaultTimeoutMs: number = 30000): Clie
  * Inject TrackLens bootstrap script into HTML content
  */
 export function injectTrackLensBootstrap(
-  htmlContent: string,
-  authToken: string
+  htmlContent: string
 ): string {
-  // Use JSON.stringify to safely embed the token in JavaScript
-  const safeToken = JSON.stringify(authToken);
   const bootstrapScript = `
 <script>
-  window.__TRACKLENS__ = {
-    authToken: ${safeToken},
-    clientReady: false,
-    markReady: function() {
+  (function() {
+    function markClientReady() {
       fetch('/api/client-ready', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer ' + ${safeToken},
           'Content-Type': 'application/json'
         }
-      }).then(() => {
-        window.__TRACKLENS__.clientReady = true;
+      }).then(response => {
+        if (response.ok) {
+          console.log('TrackLens: Client ready signal sent');
+        } else {
+          console.error('TrackLens: Failed to mark client ready, status:', response.status);
+        }
       }).catch(err => {
-        console.error('TrackLens: Failed to mark client ready:', err);
+        console.error('TrackLens: Failed to send client ready signal:', err);
       });
     }
-  };
-  
-  // Auto-mark ready when DOM is loaded
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', window.__TRACKLENS__.markReady);
-  } else {
-    window.__TRACKLENS__.markReady();
-  }
+
+    // Auto-mark ready when DOM is loaded
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', markClientReady);
+    } else {
+      // DOM is already ready, call immediately
+      markClientReady();
+    }
+  })();
 </script>`;
 
   // Inject before closing </head> tag, or before </body> if no head

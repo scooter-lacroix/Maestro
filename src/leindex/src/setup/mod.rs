@@ -907,12 +907,11 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             
             // Check if ~/.local/bin is in PATH
             if let Ok(path) = std::env::var("PATH") {
-                let local_bin = dst_dir.to_string_lossy();
-                if !path.contains(local_bin.as_ref()) {
+                if !std::env::split_paths(&path).any(|p| p == dst_dir) {
                     logs.push("".to_string());
-                    logs.push(format!("⚠️  Warning: {} is not in your PATH", local_bin));
+                    logs.push(format!("⚠️  Warning: {} is not in your PATH", dst_dir.display()));
                     logs.push("   Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):".to_string());
-                    logs.push(format!("   export PATH=\"{}:$PATH\"", local_bin));
+                    logs.push(format!("   export PATH=\"{}:$PATH\"", dst_dir.display()));
                     logs.push("".to_string());
                     logs.push("   Then reload your profile: source ~/.bashrc (or ~/.zshrc)".to_string());
                 } else {

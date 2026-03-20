@@ -113,6 +113,14 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Self::default_from(&home)
+    }
+}
+
+impl Config {
+    /// Build default config values using an explicit home directory.
+    /// Unlike `Default`, this does not call `dirs::home_dir()`.
+    pub fn default_from(home: &std::path::Path) -> Self {
         let config_dir = home.join(".config").join("maestroclaw");
         Self {
             config_path: config_dir.join("config.toml"),
@@ -136,7 +144,22 @@ impl Default for Config {
 impl Config {
     /// Load config from the default path, falling back to defaults.
     pub fn load() -> Result<Self> {
-        let mut config = Self::default();
+        Self::load_from_dir(
+            dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+        )
+    }
+
+    /// Load config using an explicit home directory instead of `dirs::home_dir()`.
+    ///
+    /// This is the hermetic alternative to `Config::load()` for tests that need
+    /// to control the config root without mutating `HOME`.
+    pub fn load_from_dir(home: PathBuf) -> Result<Self> {
+        let config_dir = home.join(".config").join("maestroclaw");
+        let mut config = Self {
+            config_path: config_dir.join("config.toml"),
+            workspace_dir: config_dir.join("workspace"),
+            ..Self::default_from(&home)
+        };
         if config.config_path.exists() {
             let text = std::fs::read_to_string(&config.config_path)
                 .with_context(|| format!("reading {}", config.config_path.display()))?;

@@ -6,69 +6,67 @@
 use crate::config::Config;
 use anyhow::Result;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Severity {
+pub enum Severity {
     Ok,
-    Warn,
+    Warning,
     Error,
+    Info,
 }
 
-struct DiagItem {
-    severity: Severity,
-    category: &'static str,
-    message: String,
+pub struct DiagItem {
+    pub severity: Severity,
+    pub label: String,
+    pub message: String,
 }
 
 impl DiagItem {
-    fn ok(cat: &'static str, msg: impl Into<String>) -> Self {
+    fn ok(label: impl Into<String>, msg: impl Into<String>) -> Self {
         Self {
             severity: Severity::Ok,
-            category: cat,
+            label: label.into(),
             message: msg.into(),
         }
     }
-    fn warn(cat: &'static str, msg: impl Into<String>) -> Self {
+    fn warn(label: impl Into<String>, msg: impl Into<String>) -> Self {
         Self {
-            severity: Severity::Warn,
-            category: cat,
+            severity: Severity::Warning,
+            label: label.into(),
             message: msg.into(),
         }
     }
-    fn error(cat: &'static str, msg: impl Into<String>) -> Self {
+    fn error(label: impl Into<String>, msg: impl Into<String>) -> Self {
         Self {
             severity: Severity::Error,
-            category: cat,
+            label: label.into(),
+            message: msg.into(),
+        }
+    }
+    fn info(label: impl Into<String>, msg: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Info,
+            label: label.into(),
             message: msg.into(),
         }
     }
     fn icon(&self) -> &'static str {
         match self.severity {
             Severity::Ok => "✅",
-            Severity::Warn => "⚠️ ",
+            Severity::Warning => "⚠️ ",
             Severity::Error => "❌",
+            Severity::Info => "ℹ️ ",
         }
     }
 }
 
 /// Run full diagnostics
 pub fn run(config: &Config) -> Result<()> {
-    let mut items: Vec<DiagItem> = Vec::new();
-
-    check_config(config, &mut items);
-    check_workspace(config, &mut items);
-    check_cli_tools(config, &mut items);
-    check_environment(&mut items);
-    check_repairs(config, &mut items);
+    let items = run_diagnostics(config);
 
     println!("🩺 MaestroClaw Doctor");
     println!();
 
-    let mut current_cat = "";
     for item in &items {
-        if item.category != current_cat {
-            current_cat = item.category;
-            println!("  [{current_cat}]");
-        }
-        println!("    {} {}", item.icon(), item.message);
+        println!("  [{}] {} {}", item.label, item.icon(), item.message);
     }
 
     let errors = items
@@ -77,7 +75,7 @@ pub fn run(config: &Config) -> Result<()> {
         .count();
     let warns = items
         .iter()
-        .filter(|i| i.severity == Severity::Warn)
+        .filter(|i| i.severity == Severity::Warning)
         .count();
     let oks = items.iter().filter(|i| i.severity == Severity::Ok).count();
 
@@ -89,6 +87,78 @@ pub fn run(config: &Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Run all diagnostic checks and return results.
+///
+/// `tool_probe` is called to check primary-tool availability; production code
+/// passes `crate::onboard::probe_tool`, tests can pass a mock.
+pub(crate) fn run_diagnostics_with_probe(
+    config: &Config,
+    tool_probe: impl Fn(&str) -> (bool, Option<String>),
+) -> Vec<DiagItem> {
+    let mut items = Vec::new();
+
+    // Check 1: Primary tool available
+    let (tool_ok, tool_ver) = tool_probe(&config.primary_tool);
+    items.push(DiagItem {
+        severity: if tool_ok { Severity::Ok } else { Severity::Error },
+        label: format!("Primary tool ({})", config.primary_tool),
+        message: if tool_ok {
+            format!("Available: {}", tool_ver.unwrap_or_default())
+        } else {
+            format!("'{}' not found in PATH", config.primary_tool)
+        },
+    });
+
+    // Check 2: Config file exists
+    items.push(DiagItem {
+        severity: if config.config_path.exists() {
+            Severity::Ok
+        } else {
+            Severity::Warning
+        },
+        label: "Config file".into(),
+        message: format!("{}", config.config_path.display()),
+    });
+
+    // Check 3: Workspace directory
+    items.push(DiagItem {
+        severity: if config.workspace_dir.exists() {
+            Severity::Ok
+        } else {
+            Severity::Warning
+        },
+        label: "Workspace".into(),
+        message: format!("{}", config.workspace_dir.display()),
+    });
+
+    // Check 4: Gateway secrets
+    let has_api_key = config.gateway_api_key_is_strong();
+    items.push(DiagItem {
+        label: "Gateway API key".into(),
+        severity: if has_api_key { Severity::Ok } else { Severity::Warning },
+        message: if has_api_key {
+            "Configured (strong)".into()
+        } else {
+            "Not set or weak — run 'maestro claw setup'".into()
+        },
+    });
+
+    // Check 5: Cron directory
+    let cron_dir = config.workspace_dir.join("cron");
+    items.push(DiagItem {
+        label: "Cron directory".into(),
+        severity: if cron_dir.exists() { Severity::Ok } else { Severity::Info },
+        message: format!("{}", cron_dir.display()),
+    });
+
+    items
+}
+
+/// Run all diagnostic checks and return results.
+pub fn run_diagnostics(config: &Config) -> Vec<DiagItem> {
+    run_diagnostics_with_probe(config, crate::onboard::probe_tool)
 }
 
 fn check_config(config: &Config, items: &mut Vec<DiagItem>) {
@@ -386,10 +456,249 @@ fn check_command(cmd: &str, args: &[&str], cat: &'static str, items: &mut Vec<Di
 mod tests {
     use super::*;
 
+    /// Build a Config pointing at a temp dir so filesystem checks are deterministic.
+    fn test_config(dir: &std::path::Path) -> Config {
+        let mut cfg = Config::default_from(dir);
+        cfg.config_path = dir.join("config.toml");
+        cfg.workspace_dir = dir.join("workspace");
+        cfg.primary_tool = "nonexistent_tool_xyz".into();
+        cfg
+    }
+
+    /// Deterministic probe that always reports the tool as missing.
+    fn not_found_probe(_name: &str) -> (bool, Option<String>) {
+        (false, None)
+    }
+
     #[test]
     fn diag_item_icons() {
         assert_eq!(DiagItem::ok("t", "m").icon(), "✅");
         assert_eq!(DiagItem::warn("t", "m").icon(), "⚠️ ");
         assert_eq!(DiagItem::error("t", "m").icon(), "❌");
+        assert_eq!(DiagItem::info("t", "m").icon(), "ℹ️ ");
+    }
+
+    #[test]
+    fn info_constructor_sets_info_severity() {
+        let item = DiagItem::info("cat", "msg");
+        assert_eq!(item.severity, Severity::Info);
+        assert_eq!(item.label, "cat");
+        assert_eq!(item.message, "msg");
+    }
+
+    #[test]
+    fn run_diagnostics_returns_five_items_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = test_config(dir.path());
+        let items = run_diagnostics_with_probe(&cfg, not_found_probe);
+        assert_eq!(items.len(), 5);
+
+        // Check 1: Primary tool (nonexistent → Error)
+        assert_eq!(items[0].label, "Primary tool (nonexistent_tool_xyz)");
+        assert_eq!(items[0].severity, Severity::Error);
+        assert_eq!(
+            items[0].message,
+            "'nonexistent_tool_xyz' not found in PATH"
+        );
+
+        // Check 2: Config file (missing → Warning)
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[1].severity, Severity::Warning);
+        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+
+        // Check 3: Workspace (missing → Warning)
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[2].severity, Severity::Warning);
+        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+
+        // Check 4: Gateway API key (not set → Warning)
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[3].severity, Severity::Warning);
+        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+
+        // Check 5: Cron directory (missing → Info)
+        assert_eq!(items[4].label, "Cron directory");
+        assert_eq!(items[4].severity, Severity::Info);
+        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+    }
+
+    #[test]
+    fn run_diagnostics_primary_tool_available() {
+        // Hermetic: inject a mock probe — no global PATH mutation, no /bin/sh.
+        let mock_probe = |name: &str| -> (bool, Option<String>) {
+            if name == "myfakeclitool99" {
+                (true, Some("myfakeclitool 9.9.9".into()))
+            } else {
+                (false, None)
+            }
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_config(dir.path());
+        cfg.primary_tool = "myfakeclitool99".into();
+        let items = run_diagnostics_with_probe(&cfg, mock_probe);
+
+        assert_eq!(items.len(), 5);
+        // Row 0: Primary tool found
+        assert_eq!(items[0].severity, Severity::Ok);
+        assert_eq!(items[0].label, "Primary tool (myfakeclitool99)");
+        assert_eq!(items[0].message, "Available: myfakeclitool 9.9.9");
+        // Row 1: Config file (missing → Warning)
+        assert_eq!(items[1].severity, Severity::Warning);
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        // Row 2: Workspace (missing → Warning)
+        assert_eq!(items[2].severity, Severity::Warning);
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        // Row 3: Gateway API key (not set → Warning)
+        assert_eq!(items[3].severity, Severity::Warning);
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        // Row 4: Cron directory (missing → Info)
+        assert_eq!(items[4].severity, Severity::Info);
+        assert_eq!(items[4].label, "Cron directory");
+        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+    }
+
+    #[test]
+    fn run_diagnostics_with_existing_cron() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("workspace").join("cron")).unwrap();
+        let cfg = test_config(dir.path());
+        let items = run_diagnostics_with_probe(&cfg, not_found_probe);
+        assert_eq!(items.len(), 5);
+
+        // Row 0: Primary tool (nonexistent → Error)
+        assert_eq!(items[0].severity, Severity::Error);
+        assert_eq!(items[0].label, "Primary tool (nonexistent_tool_xyz)");
+        assert_eq!(items[0].message, "'nonexistent_tool_xyz' not found in PATH");
+        // Row 1: Config file (missing → Warning)
+        assert_eq!(items[1].severity, Severity::Warning);
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        // Row 2: Workspace (exists → Ok)
+        assert_eq!(items[2].severity, Severity::Ok);
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        // Row 3: Gateway API key (not set → Warning)
+        assert_eq!(items[3].severity, Severity::Warning);
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        // Row 4: Cron directory (exists → Ok)
+        assert_eq!(items[4].severity, Severity::Ok);
+        assert_eq!(items[4].label, "Cron directory");
+        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+    }
+
+    #[test]
+    fn run_diagnostics_gateway_key_strong_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_config(dir.path());
+        cfg.gateway.api_key = Some("mcw_abcdefghijklmnopqrstuvwxyz1234567890".into());
+        let items = run_diagnostics_with_probe(&cfg, not_found_probe);
+        assert_eq!(items.len(), 5);
+
+        // Row 0: Primary tool (nonexistent → Error)
+        assert_eq!(items[0].severity, Severity::Error);
+        assert_eq!(items[0].label, "Primary tool (nonexistent_tool_xyz)");
+        assert_eq!(items[0].message, "'nonexistent_tool_xyz' not found in PATH");
+        // Row 1: Config file (missing → Warning)
+        assert_eq!(items[1].severity, Severity::Warning);
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        // Row 2: Workspace (missing → Warning)
+        assert_eq!(items[2].severity, Severity::Warning);
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        // Row 3: Gateway API key (strong → Ok)
+        assert_eq!(items[3].severity, Severity::Ok);
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[3].message, "Configured (strong)");
+        // Row 4: Cron directory (missing → Info)
+        assert_eq!(items[4].severity, Severity::Info);
+        assert_eq!(items[4].label, "Cron directory");
+        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+    }
+
+    #[test]
+    fn run_diagnostics_with_existing_config_and_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("workspace")).unwrap();
+        std::fs::write(dir.path().join("config.toml"), "").unwrap();
+        let cfg = test_config(dir.path());
+        let items = run_diagnostics_with_probe(&cfg, not_found_probe);
+        assert_eq!(items.len(), 5);
+
+        // Row 0: Primary tool (nonexistent → Error)
+        assert_eq!(items[0].severity, Severity::Error);
+        assert_eq!(items[0].label, "Primary tool (nonexistent_tool_xyz)");
+        assert_eq!(items[0].message, "'nonexistent_tool_xyz' not found in PATH");
+        // Row 1: Config file (exists → Ok)
+        assert_eq!(items[1].severity, Severity::Ok);
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        // Row 2: Workspace (exists → Ok)
+        assert_eq!(items[2].severity, Severity::Ok);
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        // Row 3: Gateway API key (not set → Warning)
+        assert_eq!(items[3].severity, Severity::Warning);
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        // Row 4: Cron directory (missing → Info)
+        assert_eq!(items[4].severity, Severity::Info);
+        assert_eq!(items[4].label, "Cron directory");
+        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+    }
+
+    #[test]
+    fn run_diagnostics_gateway_key_weak() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_config(dir.path());
+        // Key set but too short and missing mcw_ prefix → not strong
+        cfg.gateway.api_key = Some("short_key".into());
+        let items = run_diagnostics_with_probe(&cfg, not_found_probe);
+        assert_eq!(items.len(), 5);
+
+        // Row 0: Primary tool (nonexistent → Error)
+        assert_eq!(items[0].severity, Severity::Error);
+        assert_eq!(items[0].label, "Primary tool (nonexistent_tool_xyz)");
+        assert_eq!(items[0].message, "'nonexistent_tool_xyz' not found in PATH");
+        // Row 1: Config file (missing → Warning)
+        assert_eq!(items[1].severity, Severity::Warning);
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        // Row 2: Workspace (missing → Warning)
+        assert_eq!(items[2].severity, Severity::Warning);
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        // Row 3: Gateway API key (weak → Warning)
+        assert_eq!(items[3].severity, Severity::Warning);
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        // Row 4: Cron directory (missing → Info)
+        assert_eq!(items[4].severity, Severity::Info);
+        assert_eq!(items[4].label, "Cron directory");
+        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+    }
+
+    /// Smoke test for the public run_diagnostics wrapper.
+    /// Only asserts structural shape — exact tool-probe behaviour is covered
+    /// by the hermetic `run_diagnostics_with_probe` contract tests above.
+    #[test]
+    fn run_diagnostics_public_wrapper_smoke() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = test_config(dir.path());
+        let items = run_diagnostics(&cfg);
+        assert_eq!(items.len(), 5);
+        // Verify the five expected labels in order.
+        assert_eq!(items[0].label, format!("Primary tool ({})", cfg.primary_tool));
+        assert_eq!(items[1].label, "Config file");
+        assert_eq!(items[2].label, "Workspace");
+        assert_eq!(items[3].label, "Gateway API key");
+        assert_eq!(items[4].label, "Cron directory");
+        // Row 0 must be Ok or Error (depends on ambient PATH).
+        assert!(matches!(items[0].severity, Severity::Ok | Severity::Error));
     }
 }

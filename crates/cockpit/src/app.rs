@@ -282,6 +282,16 @@ pub struct App {
 // DashFocus, SessionEntry, DashSessionEntry, ProjectInfo, MemoryInfo, Stats) are now
 // imported from crate::state module to avoid duplication.
 
+/// Load the maestro-claw config and extract the workspace directory for
+/// `MaestroClawPane::new()`.  This is the single source of truth for the
+/// config-to-pane wiring used by `App::new` so that a regression in the
+/// startup path cannot slip through undetected.
+fn load_maestroclaw_workspace_dir() -> PathBuf {
+    maestro_claw::config::Config::load()
+        .unwrap_or_else(|_| maestro_claw::config::Config::default())
+        .workspace_dir
+}
+
 impl App {
     fn new(
         _service: Option<&MemoryService>,
@@ -394,7 +404,9 @@ impl App {
                 None
             },
             hot_cache: crate::maesterclaw::HotCache::new(),
-            maestroclaw_pane: crate::maesterclaw::MaestroClawPane::new(),
+            maestroclaw_pane: crate::maesterclaw::MaestroClawPane::new(
+                load_maestroclaw_workspace_dir(),
+            ),
             tracklens_pane: TrackLensPane::new(),
         };
 
@@ -1424,6 +1436,70 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
         MaestroClawAction::StartSetup | MaestroClawAction::RepairBootstrap => {
             app.maestroclaw_pane.activate_wizard();
             app.status_message = "Opening MaestroClaw setup walkthrough".to_string();
+            true
+        }
+        MaestroClawAction::OpenSessionBrowser => {
+            // Populate the browser from the app's session list
+            let entries: Vec<crate::maesterclaw::SessionEntry> = app
+                .sessions
+                .iter()
+                .map(|s| {
+                    let last_active = s
+                        .last_accessed_at
+                        .map(|dt| {
+                            let now = chrono::Utc::now();
+                            let diff = now.signed_duration_since(dt);
+                            if diff.num_minutes() < 1 {
+                                "just now".to_string()
+                            } else if diff.num_minutes() < 60 {
+                                format!("{}m ago", diff.num_minutes())
+                            } else if diff.num_hours() < 24 {
+                                format!("{}h ago", diff.num_hours())
+                            } else {
+                                format!("{}d ago", diff.num_days())
+                            }
+                        })
+                        .unwrap_or_else(|| "unknown".to_string());
+                    crate::maesterclaw::SessionEntry {
+                        id: s.session_id.clone(),
+                        title: s.title.clone(),
+                        preview: s
+                            .command
+                            .as_deref()
+                            .unwrap_or("(no command)")
+                            .to_string(),
+                        source: s.tool.as_deref().unwrap_or("unknown").to_string(),
+                        last_active,
+                        turn_count: 0,
+                    }
+                })
+                .collect();
+            app.maestroclaw_pane.load_session_entries(entries);
+            app.maestroclaw_pane.activate_session_browser();
+            true
+        }
+        MaestroClawAction::SessionBrowserSelect => {
+            if let Some(session_id) = app.maestroclaw_pane.selected_browser_session_id() {
+                if let Some(idx) = app.sessions.iter().position(|s| s.session_id == session_id) {
+                    app.maestroclaw_pane.selected_session = Some(idx);
+                    // Reuse the same focus/switch-to-Sessions flow as OpenSelected
+                    if let Some(session) = app.sessions.get(idx).cloned() {
+                        app.refresh_session_entries();
+                        if let Some(entry_idx) = app.session_entries.iter().position(|entry| match entry {
+                            SessionEntry::Session(s) => s.session_id == session.session_id,
+                            _ => false,
+                        }) {
+                            app.session_state.select(Some(entry_idx));
+                            app.tab_index = tabs::SESSIONS;
+                        }
+                        app.status_message = format!("Focused session '{}'", session.title);
+                    }
+                }
+            }
+            true
+        }
+        MaestroClawAction::SessionBrowserClose => {
+            app.maestroclaw_pane.deactivate_session_browser();
             true
         }
         MaestroClawAction::WizardAdvanced
@@ -3490,7 +3566,9 @@ async fn run_app<B: Backend>(
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                     };
-                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                } else if app.tab_index == tabs::MAESTROCLAW
+                                    && !app.maestroclaw_pane.is_session_browser_active()
+                                {
                                     let action = app
                                         .maestroclaw_pane
                                         .handle_key_with_session_count(KeyCode::Tab, app.sessions.len());
@@ -3513,7 +3591,9 @@ async fn run_app<B: Backend>(
                                         DashFocus::Mcp => app.dash_focus = DashFocus::Sessions,
                                         DashFocus::Tabs => app.dash_focus = DashFocus::Mcp,
                                     };
-                                } else if app.tab_index == tabs::MAESTROCLAW {
+                                } else if app.tab_index == tabs::MAESTROCLAW
+                                    && !app.maestroclaw_pane.is_session_browser_active()
+                                {
                                     let action = app
                                         .maestroclaw_pane
                                         .handle_key_with_session_count(KeyCode::BackTab, app.sessions.len());
@@ -4008,6 +4088,21 @@ async fn run_app<B: Backend>(
                                     app.refresh_from_service(&service);
                                 }
                             }
+                            // When session browser is active on MaestroClaw tab, short-circuit
+                            // before app-global handlers (n, p, t, q, r, /, etc.) so
+                            // type-to-filter works end-to-end. Only unmodified keys (no
+                            // CTRL/ALT) are captured; Tab, BackTab, and '?' fall through
+                            // to global handlers. Modified shortcuts like Ctrl+C also
+                            // fall through.
+                            (modifiers, key)
+                                if app.tab_index == tabs::MAESTROCLAW
+                                    && app.maestroclaw_pane.should_route_to_browser(modifiers, key) =>
+                            {
+                                let action = app
+                                    .maestroclaw_pane
+                                    .handle_key_with_session_count(key, app.sessions.len());
+                                let _ = handle_maestroclaw_action(&mut app, action);
+                            }
                             (KeyModifiers::NONE, KeyCode::Char('n')) => {
                                 // Memory tab: Start new memory creation
                                 // Use n to create a memory when Memory tab is focused
@@ -4045,6 +4140,17 @@ async fn run_app<B: Backend>(
                                                 format!("Chat: {}", app.projects[i].name);
                                         }
                                     }
+                                }
+                            }
+                            (KeyModifiers::NONE, KeyCode::Char(c @ ('b' | 'w'))) => {
+                                if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(
+                                            KeyCode::Char(c),
+                                            app.sessions.len(),
+                                        );
+                                    let _ = handle_maestroclaw_action(&mut app, action);
                                 }
                             }
                             (KeyModifiers::ALT, KeyCode::Char('p'))
@@ -4200,7 +4306,12 @@ async fn run_app<B: Backend>(
                             }
                             (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.should_quit = true,
                             (_, KeyCode::Esc) if app.tab_index != tabs::CONDUCTOR => {
-                                if app.project_view_open {
+                                if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Esc, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
+                                } else if app.project_view_open {
                                     app.project_view_open = false;
                                 }
                             }
@@ -4934,7 +5045,12 @@ async fn run_app<B: Backend>(
                                 }
                             }
                             (_, KeyCode::Left) => {
-                                if app.tab_index == tabs::PROJECTS && app.preview_focused {
+                                if app.tab_index == tabs::MAESTROCLAW {
+                                    let action = app
+                                        .maestroclaw_pane
+                                        .handle_key_with_session_count(KeyCode::Left, app.sessions.len());
+                                    let _ = handle_maestroclaw_action(&mut app, action);
+                                } else if app.tab_index == tabs::PROJECTS && app.preview_focused {
                                     if let Some(current) = &app.project_explorer_path {
                                         let path = std::path::PathBuf::from(current);
                                         if let Some(parent) = path.parent() {
@@ -6958,5 +7074,111 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
             .wrap(Wrap { trim: false })
             .scroll((app.preview_scroll, 0));
         frame.render_widget(preview, chunks[1]);
+    }
+}
+
+/// App-local wiring tests — guard against regressions in the startup path.
+#[cfg(test)]
+mod app_wiring_tests {
+    use super::*;
+
+    #[test]
+    fn test_load_maestroclaw_workspace_dir_returns_non_empty() {
+        let dir = load_maestroclaw_workspace_dir();
+        assert!(
+            !dir.as_os_str().is_empty(),
+            "load_maestroclaw_workspace_dir() must return a non-empty path"
+        );
+        assert!(
+            dir.to_string_lossy().contains("workspace"),
+            "workspace_dir should contain 'workspace', got: {}",
+            dir.display()
+        );
+    }
+
+    #[test]
+    fn test_load_maestroclaw_workspace_dir_creates_valid_pane() {
+        let dir = load_maestroclaw_workspace_dir();
+        let pane = crate::maesterclaw::MaestroClawPane::new(dir.clone());
+        assert_eq!(
+            pane.wizard.workspace_dir, dir,
+            "MaestroClawPane wizard must use the same workspace_dir from config"
+        );
+    }
+
+    /// Hermetic test: uses a temp home + real config fixture so the test never
+    /// touches the developer's actual `~/.config/maestroclaw`.  Validates the
+    /// full wiring path  `load_from_dir → workspace_dir → MaestroClawPane::new
+    /// → wizard.workspace_dir`  with exact equality.
+    #[test]
+    fn test_workspace_dir_wiring_hermetic() {
+        let tmp = tempfile::tempdir().expect("create temp dir");
+        let config_dir = tmp.path().join(".config").join("maestroclaw");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        std::fs::create_dir_all(config_dir.join("workspace")).expect("create workspace dir");
+
+        // Write a minimal config so load_from_dir actually parses a file.
+        std::fs::write(config_dir.join("config.toml"), "primary_tool = \"claude\"\n")
+            .expect("write config");
+
+        // Load config via the hermetic path (mirrors load_maestroclaw_workspace_dir
+        // but without touching the real home directory).
+        let config =
+            maestro_claw::config::Config::load_from_dir(tmp.path().to_path_buf())
+                .expect("load config from temp dir");
+        let expected_ws = config.workspace_dir.clone();
+
+        // Create the pane exactly as App::new does.
+        let pane = crate::maesterclaw::MaestroClawPane::new(expected_ws.clone());
+
+        assert_eq!(
+            pane.wizard.workspace_dir, expected_ws,
+            "MaestroClawPane wizard.workspace_dir must exactly match the loaded config workspace_dir"
+        );
+    }
+
+    #[test]
+    fn test_open_session_browser_and_select_switches_to_sessions_tab() {
+        use crate::maesterclaw::MaestroClawAction;
+
+        let mut app = App::new(None, None, None);
+
+        // Seed the app with a test session so the browser has something to load.
+        let session = leindex_core::memory::models::Session {
+            id: 1,
+            session_id: "sess-abc".to_string(),
+            title: "My Test Session".to_string(),
+            project_path: "/tmp/test".to_string(),
+            group_path: None,
+            sort_order: 0,
+            parent_session_id: None,
+            command: Some("echo hello".to_string()),
+            tool: Some("claude".to_string()),
+            status: leindex_core::memory::models::SessionStatus::Running,
+            multiplexer_session: None,
+            started_at: chrono::Utc::now(),
+            last_accessed_at: Some(chrono::Utc::now()),
+            ended_at: None,
+            metadata: None,
+        };
+        app.sessions.push(session);
+
+        // 1. OpenSessionBrowser should populate the browser and activate it.
+        let handled = handle_maestroclaw_action(&mut app, MaestroClawAction::OpenSessionBrowser);
+        assert!(handled);
+        assert!(app.maestroclaw_pane.is_session_browser_active());
+
+        // 2. SessionBrowserSelect should find the session and switch to Sessions tab.
+        let handled =
+            handle_maestroclaw_action(&mut app, MaestroClawAction::SessionBrowserSelect);
+        assert!(handled);
+        assert_eq!(
+            app.tab_index, tabs::SESSIONS,
+            "tab_index must switch to Sessions after SessionBrowserSelect"
+        );
+        assert_eq!(
+            app.status_message,
+            "Focused session 'My Test Session'"
+        );
     }
 }

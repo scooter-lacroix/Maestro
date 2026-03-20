@@ -13,8 +13,8 @@ import {
   writeFileSync,
   readdirSync,
 } from "fs";
-import { join, resolve, normalize } from "path";
-import { randomUUID } from "crypto";
+import { join, resolve, normalize, dirname } from "path";
+import { fileURLToPath } from "url";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { generateSlug, savePlan, saveAnnotations, saveFinalSnapshot } from "./storage";
@@ -27,6 +27,11 @@ import {
   createClientReadyMonitor,
   injectTrackLensBootstrap,
 } from "./ui-readiness";
+
+// Resolve paths for asset serving
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = process.env.CLAUDE_PROJECT_DIR || resolve(__dirname, "..", "..", "..");
 
 export interface ServerOptions {
   /** The plan markdown content */
@@ -114,9 +119,6 @@ export async function startTrackLensServer(
   options: ServerOptions
 ): Promise<ServerResult> {
   const { plan, origin, htmlContent, autonomyMode } = options;
-
-  // Generate authentication token for decision endpoint
-  const authToken = randomUUID();
 
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
@@ -252,11 +254,6 @@ export async function startTrackLensServer(
       }
 
       if (url.pathname === "/api/client-ready" && req.method === "POST") {
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         clientReady.markClientReady();
         return Response.json({ ready: true });
       }
@@ -512,12 +509,6 @@ export async function startTrackLensServer(
 
       // API: Submit decision (approve/deny) - COMPATIBILITY ENDPOINT
       if (url.pathname === "/api/decision" && req.method === "POST") {
-        // Validate authentication token
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         try {
           const body = await req.json();
           const {
@@ -585,9 +576,37 @@ export async function startTrackLensServer(
         }
       }
 
+      // Serve static assets (JS, CSS files)
+      if (url.pathname.startsWith("/assets/")) {
+        const assetPath = url.pathname.slice(1); // Remove leading /
+        const assetCandidates = [
+          resolve(__dirname, "..", assetPath),
+          resolve(__dirname, assetPath),
+          resolve(projectRoot, "apps", "tracklens-hook", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-editor", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-review-editor", "dist", assetPath),
+        ];
+
+        for (const candidate of assetCandidates) {
+          if (existsSync(candidate)) {
+            const file = Bun.file(candidate);
+            const ext = candidate.split(".").pop()?.toLowerCase();
+            const contentType =
+              ext === "js" ? "application/javascript" :
+              ext === "css" ? "text/css" :
+              ext === "svg" ? "image/svg+xml" :
+              "application/octet-stream";
+            return new Response(file, {
+              headers: { "Content-Type": contentType },
+            });
+          }
+        }
+        return new Response("Asset not found", { status: 404 });
+      }
+
       // Serve HTML
-      const htmlWithToken = injectTrackLensBootstrap(htmlContent, authToken);
-      return new Response(htmlWithToken, {
+      const htmlWithBootstrap = injectTrackLensBootstrap(htmlContent);
+      return new Response(htmlWithBootstrap, {
         headers: { "Content-Type": "text/html" },
       });
     },

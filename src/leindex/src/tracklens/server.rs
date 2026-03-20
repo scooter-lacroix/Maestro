@@ -9,7 +9,7 @@
 
 use axum::{
     extract::{Json, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
     Router,
@@ -64,8 +64,6 @@ pub struct ServerState {
     pub client_ready_tx: watch::Sender<bool>,
     /// Client readiness receiver
     pub client_ready_rx: watch::Receiver<bool>,
-    /// Authentication token for decision endpoint
-    pub auth_token: String,
 }
 
 /// Review content
@@ -104,9 +102,6 @@ pub struct TrackLensServer {
 impl TrackLensServer {
     /// Create a new TrackLens server
     pub fn new(config: ServerConfig) -> Self {
-        // Generate a secure random token for decision authentication
-        let auth_token = Self::generate_auth_token();
-
         // Create watch channel for decision updates
         let (decision_tx, decision_rx) = watch::channel(None);
         let (client_ready_tx, client_ready_rx) = watch::channel(false);
@@ -119,27 +114,8 @@ impl TrackLensServer {
                 decision_rx,
                 client_ready_tx,
                 client_ready_rx,
-                auth_token,
             }),
         }
-    }
-
-    /// Generate a cryptographically secure authentication token
-    fn generate_auth_token() -> String {
-        use rand::Rng;
-
-        let mut rng = rand::thread_rng();
-        let bytes: [u8; 32] = rng.gen();
-        // Encode as hex using format loop (hex crate not in dependencies)
-        bytes
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>()
-    }
-
-    /// Get the current auth token (for testing/debugging)
-    pub fn auth_token(&self) -> String {
-        self.state.auth_token.clone()
     }
 
     /// Start the server and return the URL
@@ -177,6 +153,7 @@ impl TrackLensServer {
             .route("/api/client-ready", post(mark_client_ready))
             .route("/api/content", get(get_content))
             .route("/api/plan", get(get_plan))
+            .route("/api/diff", get(get_diff))
             .route("/api/status", get(get_status))
             .route("/api/vaults", get(get_vaults))
             .route("/api/agents", get(get_agents));
@@ -296,6 +273,7 @@ fn find_bundle_dir() -> Option<std::path::PathBuf> {
         if path.join("index.html").exists()
             || path.join("editor.html").exists()
             || path.join("tracklens-editor.html").exists()
+            || path.join("review.html").exists()
         {
             return Some(path);
         }
@@ -305,16 +283,58 @@ fn find_bundle_dir() -> Option<std::path::PathBuf> {
 
 async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
     if let Some(bundle_dir) = find_bundle_dir() {
-        let html_names = ["index.html", "editor.html", "tracklens-editor.html"];
+        // Determine which HTML file to serve based on review mode
+        let html_names = if let Ok(content) = state.content.read() {
+            if let Some(ref c) = *content {
+                match c.mode {
+                    ReviewMode::CodeReview => vec!["review.html", "index.html", "editor.html", "tracklens-editor.html"],
+                    ReviewMode::Annotate => vec!["index.html", "editor.html", "tracklens-editor.html"],
+                    ReviewMode::Review => vec!["index.html", "editor.html", "tracklens-editor.html"],
+                }
+            } else {
+                vec!["index.html", "editor.html", "tracklens-editor.html"]
+            }
+        } else {
+            vec!["index.html", "editor.html", "tracklens-editor.html"]
+        };
+
         for name in html_names {
             let path = bundle_dir.join(name);
             if let Ok(mut content) = tokio::fs::read_to_string(path).await {
-                let token_script = format!(
-                    r#"<script>window.TRACKLENS_AUTH_TOKEN="{}";window.addEventListener("load",()=>{{fetch("/api/client-ready",{{method:"POST",headers:{{Authorization:"Bearer {}"}}}}).catch(()=>{{}});}},{{once:true}});</script>"#,
-                    state.auth_token, state.auth_token
-                );
-                // Inject after <head> tag
-                content = content.replace("<head>", &format!("<head>{}", token_script));
+                let ready_script = r#"<script>
+(function() {
+    function markClientReady() {
+        fetch("/api/client-ready", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            }
+        }).then(response => {
+            if (response.ok) {
+                console.log("TrackLens: Client ready signal sent");
+            } else {
+                console.error("TrackLens: Failed to mark client ready, status:", response.status);
+            }
+        }).catch(error => {
+            console.error("TrackLens: Failed to send client ready signal:", error);
+        });
+    }
+
+    // Wait for page load event to ensure React app has initialized
+    // Module scripts load asynchronously, so we need to wait for 'load' event
+    if (document.readyState === 'complete') {
+        // Page already loaded, wait a bit for React to initialize
+        setTimeout(markClientReady, 100);
+    } else {
+        // Wait for load event, then add a small delay for React
+        window.addEventListener('load', function() {
+            setTimeout(markClientReady, 100);
+        });
+    }
+})();
+</script>"#;
+                // Inject script at the end of body (more reliable than head)
+                content = content.replace("</body>", &format!("{}{}", ready_script, "</body>"));
                 return Html(content);
             }
         }
@@ -328,25 +348,8 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
 
 async fn submit_decision(
     State(state): State<Arc<ServerState>>,
-    headers: HeaderMap,
     Json(decision): Json<TrackLensDecision>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Check Authorization header
-    let auth_header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
-
-    let provided_token = match auth_header {
-        Some(h) if h.starts_with("Bearer ") => &h[7..],
-        Some(h) => h,
-        None => return Err(StatusCode::UNAUTHORIZED),
-    };
-
-    // Validate token
-    if provided_token != state.auth_token {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
     // Send decision via watch channel
     state
         .decision_tx
@@ -358,22 +361,7 @@ async fn submit_decision(
 
 async fn mark_client_ready(
     State(state): State<Arc<ServerState>>,
-    headers: HeaderMap,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let auth_header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
-
-    let provided_token = match auth_header {
-        Some(h) if h.starts_with("Bearer ") => &h[7..],
-        Some(h) => h,
-        None => return Err(StatusCode::UNAUTHORIZED),
-    };
-
-    if provided_token != state.auth_token {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
     state
         .client_ready_tx
         .send(true)
@@ -417,6 +405,33 @@ async fn get_content(
         Ok(Json(c.clone()))
     } else {
         Err(StatusCode::NOT_FOUND)
+    }
+}
+
+/// Get diff content - returns { "rawPatch": string, ... } format for review editor compatibility
+/// This endpoint is used by the React review editor (code review mode)
+async fn get_diff(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
+    let content = state
+        .content
+        .read()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+
+    match content {
+        Ok(content) => {
+            if let Some(c) = content.as_ref() {
+                // Match the format expected by the TypeScript review server
+                Json(serde_json::json!({
+                    "rawPatch": c.content,
+                    "gitRef": "HEAD",
+                    "origin": c.metadata.origin,
+                    "diffType": "uncommitted",
+                    "repoInfo": { "display": "local" }
+                }))
+            } else {
+                Json(serde_json::json!({ "rawPatch": "" }))
+            }
+        }
+        Err(_) => Json(serde_json::json!({ "rawPatch": "" })),
     }
 }
 

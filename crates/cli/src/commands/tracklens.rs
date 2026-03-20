@@ -123,16 +123,52 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
     info!("Mode: {}", mode);
     println!();
 
-    // Read file content
-    let content = tokio::fs::read_to_string(&file)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))?;
-
     // Parse review mode
     let review_mode = match mode.as_str() {
         "code-review" => ReviewMode::CodeReview,
         "annotate" => ReviewMode::Annotate,
         _ => ReviewMode::Review,
+    };
+
+    let read_file_content = || async {
+        tokio::fs::read_to_string(&file)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))
+    };
+
+    // Get content based on mode
+    let content = if review_mode == ReviewMode::CodeReview {
+        // For code review mode, generate a git diff for the file
+        let file_str = file.to_str().ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
+        let output = tokio::process::Command::new("git")
+            .args(["diff", "--", file_str])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let diff = String::from_utf8_lossy(&output.stdout).to_string();
+            if diff.trim().is_empty() {
+                // If no diff, try staged changes
+                let output = tokio::process::Command::new("git")
+                    .args(["diff", "--staged", "--", file_str])
+                    .output()
+                    .await?;
+                let staged_diff = String::from_utf8_lossy(&output.stdout).to_string();
+                if staged_diff.trim().is_empty() {
+                    read_file_content().await?
+                } else {
+                    staged_diff
+                }
+            } else {
+                diff
+            }
+        } else {
+            // If git diff fails, read the file content directly
+            read_file_content().await?
+        }
+    } else {
+        // For other modes, read the file content directly
+        read_file_content().await?
     };
 
     // Start TrackLens server
