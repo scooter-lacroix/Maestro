@@ -67,4 +67,5 @@ cli-clipboard = "0.4"
 dirs = "5.0"
 
 [dev-dependencies]
+serial_test = "3"
 tempfile = "3.10"

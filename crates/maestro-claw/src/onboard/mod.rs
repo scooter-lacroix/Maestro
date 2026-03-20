@@ -58,7 +58,7 @@ pub fn detect_tools() -> Vec<AgentToolConfig> {
     tools
 }
 
-fn probe_tool(name: &str) -> (bool, Option<String>) {
+pub fn probe_tool(name: &str) -> (bool, Option<String>) {
     match std::process::Command::new(name)
         .args(["--version"])
         .stdout(std::process::Stdio::piped())
