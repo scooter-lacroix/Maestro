@@ -19,7 +19,7 @@ If Maestro is useful to you, please [star the repository](https://github.com/sco
 
 Maestro is not just a CLI, a skill pack, or a TUI.
 
-Maestro is the **control plane** that turns AI coding sessions into structured engineering workflows:
+Maestro is the **framework** that turns AI coding sessions into structured engineering workflows:
 
 - spec -> plan -> implement
 - tracked execution instead of chat drift
