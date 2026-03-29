@@ -8,6 +8,8 @@ pub struct Config {
     pub install_path: String,
     pub theme: String,
     pub selected_tools: Vec<String>,
+    pub leindex_install_method: String,
+    pub nexus_install_method: String,
     /// When true, uses terminal's background (transparent) instead of theme's background
     /// while keeping the theme's color scheme for text and accents
     pub transparent: bool,
@@ -20,6 +22,8 @@ impl Default for Config {
             install_path: "~/.maestro".to_string(),
             theme: "catppuccin-mocha".to_string(),
             selected_tools: Vec::new(),
+            leindex_install_method: "cargo".to_string(),
+            nexus_install_method: "git".to_string(),
             transparent: false,
         }
     }

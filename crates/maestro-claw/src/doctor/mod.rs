@@ -102,7 +102,11 @@ pub(crate) fn run_diagnostics_with_probe(
     // Check 1: Primary tool available
     let (tool_ok, tool_ver) = tool_probe(&config.primary_tool);
     items.push(DiagItem {
-        severity: if tool_ok { Severity::Ok } else { Severity::Error },
+        severity: if tool_ok {
+            Severity::Ok
+        } else {
+            Severity::Error
+        },
         label: format!("Primary tool ({})", config.primary_tool),
         message: if tool_ok {
             format!("Available: {}", tool_ver.unwrap_or_default())
@@ -137,7 +141,11 @@ pub(crate) fn run_diagnostics_with_probe(
     let has_api_key = config.gateway_api_key_is_strong();
     items.push(DiagItem {
         label: "Gateway API key".into(),
-        severity: if has_api_key { Severity::Ok } else { Severity::Warning },
+        severity: if has_api_key {
+            Severity::Ok
+        } else {
+            Severity::Warning
+        },
         message: if has_api_key {
             "Configured (strong)".into()
         } else {
@@ -149,7 +157,11 @@ pub(crate) fn run_diagnostics_with_probe(
     let cron_dir = config.workspace_dir.join("cron");
     items.push(DiagItem {
         label: "Cron directory".into(),
-        severity: if cron_dir.exists() { Severity::Ok } else { Severity::Info },
+        severity: if cron_dir.exists() {
+            Severity::Ok
+        } else {
+            Severity::Info
+        },
         message: format!("{}", cron_dir.display()),
     });
 
@@ -496,30 +508,43 @@ mod tests {
         // Check 1: Primary tool (nonexistent → Error)
         assert_eq!(items[0].label, "Primary tool (nonexistent_tool_xyz)");
         assert_eq!(items[0].severity, Severity::Error);
-        assert_eq!(
-            items[0].message,
-            "'nonexistent_tool_xyz' not found in PATH"
-        );
+        assert_eq!(items[0].message, "'nonexistent_tool_xyz' not found in PATH");
 
         // Check 2: Config file (missing → Warning)
         assert_eq!(items[1].label, "Config file");
         assert_eq!(items[1].severity, Severity::Warning);
-        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        assert_eq!(
+            items[1].message,
+            dir.path().join("config.toml").display().to_string()
+        );
 
         // Check 3: Workspace (missing → Warning)
         assert_eq!(items[2].label, "Workspace");
         assert_eq!(items[2].severity, Severity::Warning);
-        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        assert_eq!(
+            items[2].message,
+            dir.path().join("workspace").display().to_string()
+        );
 
         // Check 4: Gateway API key (not set → Warning)
         assert_eq!(items[3].label, "Gateway API key");
         assert_eq!(items[3].severity, Severity::Warning);
-        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        assert_eq!(
+            items[3].message,
+            "Not set or weak — run 'maestro claw setup'"
+        );
 
         // Check 5: Cron directory (missing → Info)
         assert_eq!(items[4].label, "Cron directory");
         assert_eq!(items[4].severity, Severity::Info);
-        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+        assert_eq!(
+            items[4].message,
+            dir.path()
+                .join("workspace")
+                .join("cron")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]
@@ -546,19 +571,35 @@ mod tests {
         // Row 1: Config file (missing → Warning)
         assert_eq!(items[1].severity, Severity::Warning);
         assert_eq!(items[1].label, "Config file");
-        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        assert_eq!(
+            items[1].message,
+            dir.path().join("config.toml").display().to_string()
+        );
         // Row 2: Workspace (missing → Warning)
         assert_eq!(items[2].severity, Severity::Warning);
         assert_eq!(items[2].label, "Workspace");
-        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        assert_eq!(
+            items[2].message,
+            dir.path().join("workspace").display().to_string()
+        );
         // Row 3: Gateway API key (not set → Warning)
         assert_eq!(items[3].severity, Severity::Warning);
         assert_eq!(items[3].label, "Gateway API key");
-        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        assert_eq!(
+            items[3].message,
+            "Not set or weak — run 'maestro claw setup'"
+        );
         // Row 4: Cron directory (missing → Info)
         assert_eq!(items[4].severity, Severity::Info);
         assert_eq!(items[4].label, "Cron directory");
-        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+        assert_eq!(
+            items[4].message,
+            dir.path()
+                .join("workspace")
+                .join("cron")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]
@@ -576,19 +617,35 @@ mod tests {
         // Row 1: Config file (missing → Warning)
         assert_eq!(items[1].severity, Severity::Warning);
         assert_eq!(items[1].label, "Config file");
-        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        assert_eq!(
+            items[1].message,
+            dir.path().join("config.toml").display().to_string()
+        );
         // Row 2: Workspace (exists → Ok)
         assert_eq!(items[2].severity, Severity::Ok);
         assert_eq!(items[2].label, "Workspace");
-        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        assert_eq!(
+            items[2].message,
+            dir.path().join("workspace").display().to_string()
+        );
         // Row 3: Gateway API key (not set → Warning)
         assert_eq!(items[3].severity, Severity::Warning);
         assert_eq!(items[3].label, "Gateway API key");
-        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        assert_eq!(
+            items[3].message,
+            "Not set or weak — run 'maestro claw setup'"
+        );
         // Row 4: Cron directory (exists → Ok)
         assert_eq!(items[4].severity, Severity::Ok);
         assert_eq!(items[4].label, "Cron directory");
-        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+        assert_eq!(
+            items[4].message,
+            dir.path()
+                .join("workspace")
+                .join("cron")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]
@@ -606,11 +663,17 @@ mod tests {
         // Row 1: Config file (missing → Warning)
         assert_eq!(items[1].severity, Severity::Warning);
         assert_eq!(items[1].label, "Config file");
-        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        assert_eq!(
+            items[1].message,
+            dir.path().join("config.toml").display().to_string()
+        );
         // Row 2: Workspace (missing → Warning)
         assert_eq!(items[2].severity, Severity::Warning);
         assert_eq!(items[2].label, "Workspace");
-        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        assert_eq!(
+            items[2].message,
+            dir.path().join("workspace").display().to_string()
+        );
         // Row 3: Gateway API key (strong → Ok)
         assert_eq!(items[3].severity, Severity::Ok);
         assert_eq!(items[3].label, "Gateway API key");
@@ -618,7 +681,14 @@ mod tests {
         // Row 4: Cron directory (missing → Info)
         assert_eq!(items[4].severity, Severity::Info);
         assert_eq!(items[4].label, "Cron directory");
-        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+        assert_eq!(
+            items[4].message,
+            dir.path()
+                .join("workspace")
+                .join("cron")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]
@@ -637,19 +707,35 @@ mod tests {
         // Row 1: Config file (exists → Ok)
         assert_eq!(items[1].severity, Severity::Ok);
         assert_eq!(items[1].label, "Config file");
-        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        assert_eq!(
+            items[1].message,
+            dir.path().join("config.toml").display().to_string()
+        );
         // Row 2: Workspace (exists → Ok)
         assert_eq!(items[2].severity, Severity::Ok);
         assert_eq!(items[2].label, "Workspace");
-        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        assert_eq!(
+            items[2].message,
+            dir.path().join("workspace").display().to_string()
+        );
         // Row 3: Gateway API key (not set → Warning)
         assert_eq!(items[3].severity, Severity::Warning);
         assert_eq!(items[3].label, "Gateway API key");
-        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        assert_eq!(
+            items[3].message,
+            "Not set or weak — run 'maestro claw setup'"
+        );
         // Row 4: Cron directory (missing → Info)
         assert_eq!(items[4].severity, Severity::Info);
         assert_eq!(items[4].label, "Cron directory");
-        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+        assert_eq!(
+            items[4].message,
+            dir.path()
+                .join("workspace")
+                .join("cron")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]
@@ -668,19 +754,35 @@ mod tests {
         // Row 1: Config file (missing → Warning)
         assert_eq!(items[1].severity, Severity::Warning);
         assert_eq!(items[1].label, "Config file");
-        assert_eq!(items[1].message, dir.path().join("config.toml").display().to_string());
+        assert_eq!(
+            items[1].message,
+            dir.path().join("config.toml").display().to_string()
+        );
         // Row 2: Workspace (missing → Warning)
         assert_eq!(items[2].severity, Severity::Warning);
         assert_eq!(items[2].label, "Workspace");
-        assert_eq!(items[2].message, dir.path().join("workspace").display().to_string());
+        assert_eq!(
+            items[2].message,
+            dir.path().join("workspace").display().to_string()
+        );
         // Row 3: Gateway API key (weak → Warning)
         assert_eq!(items[3].severity, Severity::Warning);
         assert_eq!(items[3].label, "Gateway API key");
-        assert_eq!(items[3].message, "Not set or weak — run 'maestro claw setup'");
+        assert_eq!(
+            items[3].message,
+            "Not set or weak — run 'maestro claw setup'"
+        );
         // Row 4: Cron directory (missing → Info)
         assert_eq!(items[4].severity, Severity::Info);
         assert_eq!(items[4].label, "Cron directory");
-        assert_eq!(items[4].message, dir.path().join("workspace").join("cron").display().to_string());
+        assert_eq!(
+            items[4].message,
+            dir.path()
+                .join("workspace")
+                .join("cron")
+                .display()
+                .to_string()
+        );
     }
 
     /// Smoke test for the public run_diagnostics wrapper.
@@ -693,7 +795,10 @@ mod tests {
         let items = run_diagnostics(&cfg);
         assert_eq!(items.len(), 5);
         // Verify the five expected labels in order.
-        assert_eq!(items[0].label, format!("Primary tool ({})", cfg.primary_tool));
+        assert_eq!(
+            items[0].label,
+            format!("Primary tool ({})", cfg.primary_tool)
+        );
         assert_eq!(items[1].label, "Config file");
         assert_eq!(items[2].label, "Workspace");
         assert_eq!(items[3].label, "Gateway API key");

@@ -120,6 +120,9 @@ export default function App() {
   const [origin, setOrigin] = useState<'claude-code' | 'opencode' | 'pi' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
+  // Timeout dropdown state
+  const [showTimeoutControls, setShowTimeoutControls] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number | null>(1800);
 
   // Toast notification
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -224,6 +227,16 @@ export default function App() {
     setFrontmatter(fm);
     setBlocks(parseMarkdownToBlocks(markdown));
   }, [markdown]);
+
+  // Timer logic
+  useEffect(() => {
+    if (timeLeft === null) return;
+    if (timeLeft <= 0) return;
+    const timer = setInterval(() => {
+      setTimeLeft(prev => (prev && prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [timeLeft]);
 
   // Sync sidebar with preferences
   useEffect(() => {
@@ -359,6 +372,27 @@ export default function App() {
     setMode(newMode);
     saveEditorMode(newMode);
   }, []);
+
+  const handleExtendTimeout = async (minutes: number = 30) => {
+    try {
+      const token = (window as any).TRACKLENS_AUTH_TOKEN;
+      const res = await fetch('/api/extend-timeout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ minutes }),
+      });
+
+      if (res.ok) {
+        setTimeLeft(prev => (prev || 0) + (minutes * 60));
+        showToast('success', `Extended timeout by ${minutes} minutes`);
+      }
+    } catch (e) {
+      showToast('error', 'Failed to extend timeout');
+    }
+  };
 
   const handleApprove = async () => {
     setIsSubmitting(true);
@@ -731,6 +765,48 @@ export default function App() {
 
                 <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
               </>
+            )}
+
+            {timeLeft !== null && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowTimeoutControls(!showTimeoutControls)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all ${timeLeft < 300
+                    ? 'bg-red-500/20 text-red-500 border border-red-500/30'
+                    : 'bg-yellow-500/10 text-yellow-600 border border-yellow-500/20'
+                    } hover:scale-105 active:scale-95`}
+                  title="Click to extend timeout"
+                >
+                  <svg className={`w-3.5 h-3.5 ${timeLeft < 300 ? 'animate-pulse' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
+                </button>
+
+                {showTimeoutControls && (
+                  <div className="absolute top-full right-0 mt-2 p-2 bg-popover border border-border rounded-lg shadow-xl z-50 min-w-[140px]">
+                    <div className="text-xs text-muted-foreground mb-2 px-1">Extend timeout:</div>
+                    {[3, 5, 10, 15].map(minutes => (
+                      <button
+                        key={minutes}
+                        onClick={() => {
+                          handleExtendTimeout(minutes);
+                          setShowTimeoutControls(false);
+                        }}
+                        className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-muted transition-colors flex items-center gap-2"
+                      >
+                        <span className="font-medium">+{minutes} min</span>
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setShowTimeoutControls(false)}
+                      className="w-full text-center px-2 py-1 text-xs text-muted-foreground hover:text-foreground mt-1 border-t border-border/50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             <ModeToggle />

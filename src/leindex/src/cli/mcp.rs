@@ -16,9 +16,7 @@ use crate::memory::mcp_installer::ManagedMcpInstaller;
 #[cfg(feature = "rusqlite")]
 use crate::memory::mcp_pool::McpPool;
 #[cfg(feature = "rusqlite")]
-use crate::memory::models::{
-    McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport,
-};
+use crate::memory::models::{McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport};
 #[cfg(feature = "rusqlite")]
 use crate::memory::service::MemoryService;
 
@@ -175,8 +173,8 @@ pub async fn install(args: InstallServerArgs) -> Result<()> {
     let installer = ManagedMcpInstaller::new(service.clone(), None)?;
     let manifest_toml = std::fs::read_to_string(&args.manifest)
         .with_context(|| format!("Failed to read manifest {}", args.manifest.display()))?;
-    let manifest: crate::memory::models::McpManagedInstallManifest = toml::from_str(&manifest_toml)
-        .context("Invalid managed MCP manifest TOML")?;
+    let manifest: crate::memory::models::McpManagedInstallManifest =
+        toml::from_str(&manifest_toml).context("Invalid managed MCP manifest TOML")?;
     let server = installer.install_from_manifest_str(&manifest_toml).await?;
     println!(
         "Installed managed MCP server '{}' into {}",
@@ -324,7 +322,8 @@ struct ToolSearchServer {
     /// Tool metadata cache: server_name → (tools, fetched_at).  TTL = 60 s.
     tool_cache: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, CachedTools>>>,
     /// Cache for server_list results with timestamp.
-    server_list_cache: std::sync::Arc<tokio::sync::Mutex<Option<(Vec<serde_json::Value>, std::time::Instant)>>>,
+    server_list_cache:
+        std::sync::Arc<tokio::sync::Mutex<Option<(Vec<serde_json::Value>, std::time::Instant)>>>,
     /// Reusable initialised MCP client connections.  Evicted after 120 s idle.
     conn_pool: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, CachedClient>>>,
 }
@@ -342,9 +341,13 @@ impl ToolSearchServer {
         service.initialize().ok();
         Ok(Self {
             service,
-            tool_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            tool_cache: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             server_list_cache: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-            conn_pool: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            conn_pool: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         })
     }
 
@@ -386,10 +389,13 @@ impl ToolSearchServer {
     /// Return a client to the pool for reuse.
     async fn return_client(&self, server_name: &str, client: UnixMcpClient) {
         let mut pool = self.conn_pool.lock().await;
-        pool.insert(server_name.to_string(), CachedClient {
-            client,
-            last_used: std::time::Instant::now(),
-        });
+        pool.insert(
+            server_name.to_string(),
+            CachedClient {
+                client,
+                last_used: std::time::Instant::now(),
+            },
+        );
     }
 
     // ── MCP stdio loop ─────────────────────────────────────────────────
@@ -622,11 +628,8 @@ impl ToolSearchServer {
             let q = query_lower.clone();
             join_set.spawn(async move {
                 let per_server_budget = std::time::Duration::from_secs(8);
-                let tools_result = tokio::time::timeout(
-                    per_server_budget,
-                    this.get_tools_for_server(&name),
-                )
-                .await;
+                let tools_result =
+                    tokio::time::timeout(per_server_budget, this.get_tools_for_server(&name)).await;
                 let tools = match tools_result {
                     Ok(Ok(t)) => t,
                     Ok(Err(_)) | Err(_) => vec![],
@@ -900,20 +903,12 @@ impl UnixMcpClient {
 
     /// Connect directly to a running server's socket — no auto-start.
     /// Returns an error immediately if the socket does not exist.
-    async fn connect_direct(
-        server_name: &str,
-        timeouts: &McpTimeouts,
-    ) -> Result<Self> {
+    async fn connect_direct(server_name: &str, timeouts: &McpTimeouts) -> Result<Self> {
         let socket_path = McpPool::socket_path_for(server_name);
         if !socket_path.exists() {
             anyhow::bail!("Server '{}' is not running (socket not found)", server_name);
         }
-        Self::connect_to_socket(
-            server_name,
-            &socket_path.to_string_lossy(),
-            timeouts,
-        )
-        .await
+        Self::connect_to_socket(server_name, &socket_path.to_string_lossy(), timeouts).await
     }
 
     /// Internal: connect to a socket path with a connect timeout.
@@ -1018,7 +1013,8 @@ impl UnixMcpClient {
 
         loop {
             // Each iteration waits for the SHORTER of (idle timeout, remaining hard budget).
-            let remaining_hard = hard_deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining_hard =
+                hard_deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining_hard.is_zero() {
                 anyhow::bail!(
                     "MCP request '{}' exceeded hard timeout of {:?}",
@@ -1034,7 +1030,11 @@ impl UnixMcpClient {
                     anyhow::bail!("MCP server closed connection during '{}'", method);
                 }
                 Ok(Err(e)) => {
-                    anyhow::bail!("IO error reading from MCP server during '{}': {}", method, e);
+                    anyhow::bail!(
+                        "IO error reading from MCP server during '{}': {}",
+                        method,
+                        e
+                    );
                 }
                 Err(_) => {
                     // Timed out — check whether we hit the idle window or the hard ceiling.

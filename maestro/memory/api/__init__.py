@@ -1,11 +1,9 @@
 """
 Maestro Memory API
 
-FastAPI routes for memory operations.
-"""
+Compatibility namespace for the memory dashboard API.
 
-# TODO: Implement API routes in Phase 1, Tasks 14-18
-# Will provide:
-# - POST /api/v1/maestro/memory/store - Store command context
-# - POST /api/v1/maestro/memory/retrieve - Retrieve project/track context
-# - POST /api/v1/maestro/memory/search - Search similar commands
+The canonical REST endpoints now live in `maestro.memory.dashboard`.
+This package remains only so older imports resolve cleanly during the
+provider-boundary migration.
+"""

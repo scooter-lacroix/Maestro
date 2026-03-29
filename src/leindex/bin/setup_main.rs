@@ -1,4 +1,6 @@
+use std::fs::{self, OpenOptions};
 use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
@@ -45,10 +47,13 @@ struct App {
     distro: Distro,
     install_path: String,
     editor: String,
+    leindex_install_method: String,
+    nexus_install_method: String,
     tool_selections: Vec<(String, bool)>,
     config_selection: usize,
     starred: bool,
     password_cache: Arc<PasswordCache>,
+    install_log_path: PathBuf,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -121,10 +126,54 @@ impl LogEntry {
     }
 }
 
+fn resolve_install_log_path() -> PathBuf {
+    resolve_install_log_path_with(|key| std::env::var(key).ok())
+}
+
+fn resolve_install_log_path_with<F>(mut lookup: F) -> PathBuf
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for key in [
+        "MAESTRO_SETUP_LOG_FILE",
+        "MAESTRO_INSTALL_LOG_FILE",
+        "MAESTRO_SETUP_LOG",
+        "MAESTRO_INSTALL_LOG",
+    ] {
+        if let Some(path) = lookup(key) {
+            return PathBuf::from(path);
+        }
+    }
+
+    let mut dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    dir.push(".maestro");
+    dir.push("logs");
+    let _ = fs::create_dir_all(&dir);
+    dir.join(format!(
+        "install-{}.log",
+        chrono::Local::now().format("%Y%m%d_%H%M%S")
+    ))
+}
+
+fn append_install_log(path: &Path, line: impl AsRef<str>) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", line.as_ref());
+    }
+}
+
+fn display_install_log_path(path: &Path) -> String {
+    path.display().to_string()
+}
+
 fn main() -> Result<(), io::Error> {
     // Check for headless mode
     let headless = std::env::args().any(|arg| arg == "--headless")
-        || std::env::var("MAESTRO_HEADLESS").map(|v| v == "1" || v == "true").unwrap_or(false);
+        || std::env::var("MAESTRO_HEADLESS")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
 
     if headless {
         return run_headless_install();
@@ -141,10 +190,22 @@ fn main() -> Result<(), io::Error> {
         eprintln!("  1. Run the installer directly in your terminal (not via a script redirect)");
         eprintln!("  2. Make sure you're not piping input/output");
         eprintln!("  3. Try: bash install.sh (from your terminal)");
-        eprintln!("  4. For headless/CI installs, use: cargo run --bin maestro-setup -- --headless");
+        eprintln!(
+            "  4. For headless/CI installs, use: cargo run --bin maestro-setup -- --headless"
+        );
         eprintln!();
         std::process::exit(1);
     }
+
+    let install_log_path = resolve_install_log_path();
+    append_install_log(
+        &install_log_path,
+        format!(
+            "[{}] Interactive Maestro setup wizard started",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ),
+    );
+    println!("Detailed install log: {}", install_log_path.display());
 
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|e| {
@@ -165,6 +226,13 @@ fn main() -> Result<(), io::Error> {
     })?;
 
     let detected_distro = detect_distro();
+    append_install_log(
+        &install_log_path,
+        format!(
+            "[{}] Maestro setup wizard started",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ),
+    );
     let app = App {
         phase: Phase::Overture,
         frame_count: 0,
@@ -190,6 +258,10 @@ fn main() -> Result<(), io::Error> {
         distro: detected_distro,
         install_path: "~/.maestro".to_string(),
         editor: "hx".to_string(),
+        leindex_install_method: std::env::var("MAESTRO_LEINDEX_INSTALL_METHOD")
+            .unwrap_or_else(|_| "cargo".to_string()),
+        nexus_install_method: std::env::var("MAESTRO_NEXUS_INSTALL_METHOD")
+            .unwrap_or_else(|_| "git".to_string()),
         tool_selections: vec![
             ("Go Language (for Zoekt)".to_string(), true),
             ("Zoekt (Fast Code Search)".to_string(), true),
@@ -208,6 +280,7 @@ fn main() -> Result<(), io::Error> {
         config_selection: 0,
         starred: true,
         password_cache: Arc::new(PasswordCache::new()),
+        install_log_path,
     };
 
     let res = run_app(&mut terminal, app);
@@ -242,14 +315,30 @@ fn run_headless_install() -> Result<(), io::Error> {
     println!();
 
     let detected_distro = detect_distro();
-    println!("Detected environment: {} ({})",
+    println!(
+        "Detected environment: {} ({})",
         detected_distro,
         detected_distro.package_manager_name()
     );
 
+    let install_log_path = resolve_install_log_path();
+    append_install_log(
+        &install_log_path,
+        format!(
+            "[{}] Headless Maestro setup started",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ),
+    );
+    println!("Detailed install log: {}", install_log_path.display());
+
     // Default configuration for headless mode
-    let install_path = std::env::var("MAESTRO_INSTALL_PATH").unwrap_or_else(|_| "~/.maestro".to_string());
+    let install_path =
+        std::env::var("MAESTRO_INSTALL_PATH").unwrap_or_else(|_| "~/.maestro".to_string());
     let editor = std::env::var("MAESTRO_EDITOR").unwrap_or_else(|_| "hx".to_string());
+    let leindex_install_method =
+        std::env::var("MAESTRO_LEINDEX_INSTALL_METHOD").unwrap_or_else(|_| "cargo".to_string());
+    let nexus_install_method =
+        std::env::var("MAESTRO_NEXUS_INSTALL_METHOD").unwrap_or_else(|_| "git".to_string());
 
     // Get tool selections from environment or use defaults
     let mut selected_tools = Vec::new();
@@ -293,6 +382,8 @@ fn run_headless_install() -> Result<(), io::Error> {
         install_path,
         editor,
         selected_tools,
+        leindex_install_method,
+        nexus_install_method,
         password_cache: Arc::new(PasswordCache::new()),
         distro: detected_distro,
     };
@@ -315,15 +406,38 @@ fn run_headless_install() -> Result<(), io::Error> {
                 match event {
                     SetupEvent::PlanReady(plan) => {
                         total_steps = plan.len();
+                        append_install_log(
+                            &install_log_path,
+                            format!("Prepared installation plan with {} step(s)", total_steps),
+                        );
                         println!("Installation plan: {} steps", total_steps);
                         println!();
                     }
-                    SetupEvent::StepStarted { current, total, step } => {
+                    SetupEvent::StepStarted {
+                        current,
+                        total,
+                        step,
+                    } => {
                         current_step = current;
+                        append_install_log(
+                            &install_log_path,
+                            format!(
+                                "START [{}/{}] {} — {}",
+                                current, total, step.name, step.description
+                            ),
+                        );
                         print!("[{}/{}] {}... ", current, total, step.name);
                         io::stdout().flush()?;
                     }
-                    SetupEvent::StepCompleted { current, total, step_name: _ } => {
+                    SetupEvent::StepCompleted {
+                        current,
+                        total,
+                        step_name: _,
+                    } => {
+                        append_install_log(
+                            &install_log_path,
+                            format!("DONE [{}/{}]", current, total),
+                        );
                         println!("✓");
                         if current == total {
                             println!();
@@ -335,20 +449,30 @@ fn run_headless_install() -> Result<(), io::Error> {
                         }
                     }
                     SetupEvent::Log(msg) => {
+                        append_install_log(&install_log_path, msg.trim_end());
                         // Only print important logs in headless mode
                         let trimmed = msg.trim();
-                        if trimmed.starts_with("[ERR]") ||
-                           trimmed.starts_with("[WARN]") ||
-                           trimmed.starts_with("Error:") ||
-                           trimmed.starts_with("Warning:") {
+                        if trimmed.starts_with("[ERR]")
+                            || trimmed.starts_with("[WARN]")
+                            || trimmed.starts_with("Error:")
+                            || trimmed.starts_with("Warning:")
+                        {
                             println!();
                             println!("  → {}", trimmed);
                             print!("[{}/{}] Continuing... ", current_step, total_steps);
                             io::stdout().flush()?;
                         }
                     }
-                    SetupEvent::Error { step, message, hint } => {
+                    SetupEvent::Error {
+                        step,
+                        message,
+                        hint,
+                    } => {
                         failed = true;
+                        append_install_log(
+                            &install_log_path,
+                            format!("ERROR step={:?} message={} hint={:?}", step, message, hint),
+                        );
                         println!();
                         println!();
                         println!("═══════════════════════════════════════════════════════════");
@@ -364,6 +488,7 @@ fn run_headless_install() -> Result<(), io::Error> {
                         println!();
                     }
                     SetupEvent::Finished => {
+                        append_install_log(&install_log_path, "Installation finished");
                         if !failed {
                             println!();
                             println!("═══════════════════════════════════════════════════════════");
@@ -410,6 +535,10 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 
             match event {
                 SetupEvent::PlanReady(plan) => {
+                    append_install_log(
+                        &app.install_log_path,
+                        format!("Prepared installation plan with {} step(s)", plan.len()),
+                    );
                     app.steps = plan
                         .into_iter()
                         .map(|step| InstallStep {
@@ -428,6 +557,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     total,
                     step,
                 } => {
+                    append_install_log(
+                        &app.install_log_path,
+                        format!(
+                            "START [{}/{}] {} — {}",
+                            current, total, step.name, step.description
+                        ),
+                    );
                     app.phase = Phase::Installing;
                     app.current_action = step.description.clone();
                     app.active_step = Some(current.saturating_sub(1));
@@ -447,6 +583,10 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     total,
                     step_name,
                 } => {
+                    append_install_log(
+                        &app.install_log_path,
+                        format!("DONE [{}/{}] {}", current, total, step_name),
+                    );
                     app.completed_steps = current;
                     app.install_progress = if total == 0 {
                         100.0
@@ -475,12 +615,14 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     });
                 }
                 SetupEvent::Log(msg) => {
+                    append_install_log(&app.install_log_path, msg.trim_end());
                     app.logs.push(LogEntry::from_setup_log(msg));
                     if app.logs.len() > 250 {
                         app.logs.remove(0);
                     }
                 }
                 SetupEvent::Finished => {
+                    append_install_log(&app.install_log_path, "Installation finished");
                     app.phase = Phase::Ovation;
                     app.install_progress = 100.0;
                     app.password_state = PasswordState::None;
@@ -497,6 +639,10 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     message,
                     hint,
                 } => {
+                    append_install_log(
+                        &app.install_log_path,
+                        format!("ERROR step={:?} message={} hint={:?}", step, message, hint),
+                    );
                     if let Some(active) = app.active_step {
                         if let Some(step) = app.steps.get_mut(active) {
                             step.state = InstallStepState::Failed;
@@ -558,7 +704,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     KeyCode::Enter => match app.phase {
                         Phase::Overture => app.phase = Phase::Tuning,
                         Phase::Tuning => {
-                            let total_options = 4 + app.tool_selections.len();
+                            let total_options = 6 + app.tool_selections.len();
                             if app.config_selection == total_options - 1 {
                                 let config = Config {
                                     install_path: app.install_path.clone(),
@@ -569,6 +715,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                         .filter(|(_, selected)| *selected)
                                         .map(|(name, _)| name.clone())
                                         .collect(),
+                                    leindex_install_method: app.leindex_install_method.clone(),
+                                    nexus_install_method: app.nexus_install_method.clone(),
                                     password_cache: Arc::clone(&app.password_cache),
                                     distro: app.distro,
                                 };
@@ -592,7 +740,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     },
                     KeyCode::Up => {
                         if app.phase == Phase::Tuning {
-                            let total_options = 4 + app.tool_selections.len();
+                            let total_options = 6 + app.tool_selections.len();
                             app.config_selection = if app.config_selection == 0 {
                                 total_options - 1
                             } else {
@@ -602,7 +750,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     }
                     KeyCode::Down => {
                         if app.phase == Phase::Tuning {
-                            let total_options = 4 + app.tool_selections.len();
+                            let total_options = 6 + app.tool_selections.len();
                             app.config_selection = (app.config_selection + 1) % total_options;
                         }
                     }
@@ -616,12 +764,30 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                                     app.editor =
                                         editors[(current_idx + 1) % editors.len()].to_string();
                                 }
-                                idx if idx >= 2 && idx < 2 + app.tool_selections.len() => {
-                                    let tool_idx = idx - 2;
+                                2 => {
+                                    let methods = ["cargo", "install-script", "pypi", "skip"];
+                                    let current_idx = methods
+                                        .iter()
+                                        .position(|&m| m == app.leindex_install_method)
+                                        .unwrap_or(0);
+                                    app.leindex_install_method =
+                                        methods[(current_idx + 1) % methods.len()].to_string();
+                                }
+                                3 => {
+                                    let methods = ["git", "cargo", "skip"];
+                                    let current_idx = methods
+                                        .iter()
+                                        .position(|&m| m == app.nexus_install_method)
+                                        .unwrap_or(0);
+                                    app.nexus_install_method =
+                                        methods[(current_idx + 1) % methods.len()].to_string();
+                                }
+                                idx if idx >= 4 && idx < 4 + app.tool_selections.len() => {
+                                    let tool_idx = idx - 4;
                                     app.tool_selections[tool_idx].1 =
                                         !app.tool_selections[tool_idx].1;
                                 }
-                                idx if idx == 2 + app.tool_selections.len() => {
+                                idx if idx == 4 + app.tool_selections.len() => {
                                     app.starred = !app.starred;
                                 }
                                 _ => {}
@@ -880,6 +1046,20 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(app.editor.to_uppercase(), Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
+            Span::styled("LeIndex install: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.leindex_install_method.to_uppercase(),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Nexus install: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                app.nexus_install_method.to_uppercase(),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]),
+        Line::from(vec![
             Span::styled("Environment: ", Style::default().fg(Color::Gray)),
             Span::styled(
                 format!("{} ({})", app.distro, app.distro.package_manager_name()),
@@ -955,6 +1135,46 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
                 },
             )),
         ]),
+        ListItem::new(vec![
+            Line::from(Span::styled(
+                "LeIndex install method",
+                if app.config_selection == 2 {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            )),
+            Line::from(Span::styled(
+                format!("  ← {} →", app.leindex_install_method.to_uppercase()),
+                if app.config_selection == 2 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            )),
+        ]),
+        ListItem::new(vec![
+            Line::from(Span::styled(
+                "Nexus install method",
+                if app.config_selection == 3 {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            )),
+            Line::from(Span::styled(
+                format!("  ← {} →", app.nexus_install_method.to_uppercase()),
+                if app.config_selection == 3 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            )),
+        ]),
         ListItem::new(Line::from(Span::styled(
             "Components",
             Style::default()
@@ -965,7 +1185,7 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
 
     for (idx, (name, selected)) in app.tool_selections.iter().enumerate() {
         let is_selected = *selected;
-        let is_active = app.config_selection == idx + 2;
+        let is_active = app.config_selection == idx + 4;
         let marker = if is_selected { "[x]" } else { "[ ]" };
         items.push(ListItem::new(Line::from(vec![
             Span::styled(
@@ -989,7 +1209,7 @@ fn render_tuning(f: &mut Frame, app: &mut App, area: Rect) {
         ])));
     }
 
-    let star_idx = 2 + app.tool_selections.len();
+    let star_idx = 4 + app.tool_selections.len();
     items.push(ListItem::new(Line::from(vec![
         Span::styled(
             if app.starred { "  [★] " } else { "  [ ] " },
@@ -1352,6 +1572,15 @@ fn render_failure(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(hint, Style::default().fg(Color::Gray)),
             ]));
         }
+        // Always show the durable log path so users can debug after exiting the TUI.
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Full log: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                display_install_log_path(&app.install_log_path),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
         lines
     } else {
         vec![Line::from(Span::styled(
@@ -1438,4 +1667,30 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_explicit_setup_log_file_over_legacy_env() {
+        let path = resolve_install_log_path_with(|key| match key {
+            "MAESTRO_SETUP_LOG_FILE" => Some("/tmp/setup.log".to_string()),
+            "MAESTRO_INSTALL_LOG" => Some("/tmp/install.log".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(path, PathBuf::from("/tmp/setup.log"));
+    }
+
+    #[test]
+    fn falls_back_to_install_log_env_when_setup_log_missing() {
+        let path = resolve_install_log_path_with(|key| match key {
+            "MAESTRO_INSTALL_LOG_FILE" => Some("/tmp/install.log".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(path, PathBuf::from("/tmp/install.log"));
+    }
 }

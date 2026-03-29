@@ -22,9 +22,9 @@ use tracing::{info, warn};
 #[cfg(feature = "rusqlite")]
 use super::db::DatabaseManager;
 #[cfg(feature = "rusqlite")]
-use super::mcp_installer::ManagedMcpInstaller;
-#[cfg(feature = "rusqlite")]
 use super::mcp_discovery;
+#[cfg(feature = "rusqlite")]
+use super::mcp_installer::ManagedMcpInstaller;
 #[cfg(feature = "rusqlite")]
 use super::models::*;
 #[cfg(feature = "rusqlite")]
@@ -1448,7 +1448,9 @@ impl MemoryService {
                     server.install_type.to_string(),
                     server.install_state.to_string(),
                     server.install_root,
-                    server.install_recipe.map(|recipe| serde_json::to_string(&recipe).unwrap()),
+                    server
+                        .install_recipe
+                        .map(|recipe| serde_json::to_string(&recipe).unwrap()),
                     server.install_message,
                     server.install_log_path,
                     server.last_install_at.map(|dt| dt.to_rfc3339()),

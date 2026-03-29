@@ -49,6 +49,11 @@ If you want deterministic AI-assisted implementation workflows, start with `maes
 curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash
 ```
 
+The installer is meant to provision the full Maestro system, not just the main CLI. A successful run now validates the runtime binaries, Maestro command/agent/skill assets, Claude plugins, TrackLens assets, standalone provider health, and the shared MCP pool surface before it reports success.
+It also persists the full installer and wizard output to `~/.maestro/logs/install-YYYYMMDD_HHMMSS.log` with a `install-latest.log` symlink for later debugging.
+
+For the exact verification matrix and manual checklist, see [docs/PROVIDER_BOUNDARY_VERIFICATION.md](docs/PROVIDER_BOUNDARY_VERIFICATION.md).
+
 ### Choose your entry point
 
 - `maestro` for spec-driven orchestration and workflow automation
@@ -90,7 +95,7 @@ Transform AI chat interactions into professional software engineering workflows 
 - **Track-based development** where each feature/bug goes through spec → plan → implement
 - **Automatic agent selection** based on task complexity (8+ specialized agents)
 - **TDD workflow enforcement** with test-first development and 80%+ coverage goals
-- **Built-in memory system** via integrated Nexus Memory (no external MCP required)
+- **Built-in memory system** via the Nexus provider bridge and managed-session runtime
 - **Git-aware tracking** for complete history and rollback capability
 - **Web dashboard** for visualizing memory, tracks, and project context
 - **TUI interface** for managing tmux sessions and MCP server connections
@@ -192,7 +197,7 @@ Tracklens is an interactive walkthrough system that guides users through spec-dr
 
 ### Nexus Memory System
 
-Built directly into Maestro - no external MCP required:
+Maestro uses the standalone Nexus provider for memory, retrieval, and cognition:
 
 - **Agent-Specific Namespaces**: Isolated memory per agent type
 - **Semantic Search**: Vector-based similarity search with embeddings

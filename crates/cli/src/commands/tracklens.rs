@@ -139,7 +139,9 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
     // Get content based on mode
     let content = if review_mode == ReviewMode::CodeReview {
         // For code review mode, generate a git diff for the file
-        let file_str = file.to_str().ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
+        let file_str = file
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
         let output = tokio::process::Command::new("git")
             .args(["diff", "--", file_str])
             .output()

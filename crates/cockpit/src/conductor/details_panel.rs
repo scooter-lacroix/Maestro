@@ -1,4 +1,4 @@
-use super::model::DetailsViewMode;
+use super::model::{DetailsViewMode, RuntimeLogEntry, RuntimeLogLevel, SelectableItem};
 use super::pane::ConductorPane;
 use super::theme::ConductorTheme;
 use leindex_core::orchestrate::model::{IterationStatus, SessionStatus};
@@ -41,12 +41,15 @@ fn render_details_view(
     let selected_item = if items.is_empty() {
         None
     } else {
-        Some(&items[pane.selected_index.min(items.len() - 1)])
+        Some(items[pane.selected_index.min(items.len() - 1)].clone())
     };
+
+    let upcoming_tasks = summarize_upcoming_tasks(&items, pane.state.current_task.as_deref(), 4);
+    let recent_notes = summarize_runtime_logs(&pane.state.runtime_logs, 4);
 
     let details_text = if let Some(item) = selected_item {
         match item {
-            super::model::SelectableItem::Track { id, .. } => {
+            SelectableItem::Track { id, .. } => {
                 let tool_name = pane
                     .state
                     .active_agent
@@ -217,6 +220,76 @@ fn render_details_view(
                     ]),
                 ]);
 
+                let progress = if pane.state.total_tasks == 0 {
+                    0.0
+                } else {
+                    pane.state.tasks_completed as f64 / pane.state.total_tasks as f64
+                };
+                let bar_width = 18usize;
+                let filled = ((bar_width as f64) * progress).round() as usize;
+                let progress_bar = format!(
+                    "{}{}",
+                    "█".repeat(filled.min(bar_width)),
+                    "░".repeat(bar_width.saturating_sub(filled.min(bar_width)))
+                );
+                details.extend(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Ralph Loop:",
+                        Style::default()
+                            .fg(conductor_theme.accent_primary)
+                            .underlined(),
+                    )),
+                    Line::from(vec![
+                        Span::styled("  Progress ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(progress_bar, Style::default().fg(theme.accent)),
+                        Span::styled(
+                            format!(" {:>3.0}%", progress * 100.0),
+                            Style::default().fg(conductor_theme.fg_secondary),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  Loops ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(
+                            format!("{}", pane.state.current_iteration),
+                            Style::default().fg(conductor_theme.fg_secondary),
+                        ),
+                        Span::styled(
+                            "  Active Task ",
+                            Style::default().fg(conductor_theme.fg_muted),
+                        ),
+                        Span::styled(
+                            pane.state
+                                .current_task
+                                .clone()
+                                .unwrap_or_else(|| "idle".to_string()),
+                            Style::default().fg(conductor_theme.fg_secondary),
+                        ),
+                    ]),
+                ]);
+
+                if !upcoming_tasks.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Task Queue:",
+                        Style::default()
+                            .fg(conductor_theme.accent_primary)
+                            .underlined(),
+                    )));
+                    details.extend(upcoming_tasks.clone());
+                }
+
+                if !recent_notes.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Recent Loop Notes:",
+                        Style::default()
+                            .fg(conductor_theme.accent_primary)
+                            .underlined(),
+                    )));
+                    details.extend(recent_notes.clone());
+                }
+
                 // Iteration Summary Section
                 if let Some(last_log) = pane.state.iteration_logs.last() {
                     details.push(Line::from(""));
@@ -283,7 +356,7 @@ fn render_details_view(
 
                 details
             }
-            super::model::SelectableItem::Task {
+            SelectableItem::Task {
                 title,
                 id,
                 status,
@@ -311,7 +384,7 @@ fn render_details_view(
                             "ID:    ",
                             Style::default().fg(conductor_theme.accent_secondary),
                         ),
-                        Span::styled(id, Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(id.clone(), Style::default().fg(conductor_theme.fg_muted)),
                     ]),
                     Line::from(vec![
                         Span::styled(
@@ -329,16 +402,16 @@ fn render_details_view(
                             Style::default().fg(conductor_theme.accent_secondary),
                         ),
                         Span::styled(
-                            if *is_actionable {
+                            if is_actionable {
                                 "actionable"
-                            } else if *is_blocked {
+                            } else if is_blocked {
                                 "blocked"
                             } else {
                                 "waiting"
                             },
-                            Style::default().fg(if *is_actionable {
+                            Style::default().fg(if is_actionable {
                                 conductor_theme.status_success
-                            } else if *is_blocked {
+                            } else if is_blocked {
                                 conductor_theme.status_error
                             } else {
                                 conductor_theme.fg_secondary
@@ -397,11 +470,79 @@ fn render_details_view(
                                 Style::default().fg(conductor_theme.fg_secondary),
                             ),
                             Span::styled(
-                                &dep.task_id,
+                                dep.task_id.clone(),
                                 Style::default().fg(conductor_theme.fg_primary),
                             ),
                         ]));
                     }
+                }
+
+                let progress = if pane.state.total_tasks == 0 {
+                    0.0
+                } else {
+                    pane.state.tasks_completed as f64 / pane.state.total_tasks as f64
+                };
+                let bar_width = 18usize;
+                let filled = ((bar_width as f64) * progress).round() as usize;
+                let progress_bar = format!(
+                    "{}{}",
+                    "█".repeat(filled.min(bar_width)),
+                    "░".repeat(bar_width.saturating_sub(filled.min(bar_width)))
+                );
+                details.extend(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Ralph Loop:",
+                        Style::default()
+                            .fg(conductor_theme.accent_primary)
+                            .underlined(),
+                    )),
+                    Line::from(vec![
+                        Span::styled("  Progress ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(progress_bar, Style::default().fg(theme.accent)),
+                        Span::styled(
+                            format!(" {:>3.0}%", progress * 100.0),
+                            Style::default().fg(conductor_theme.fg_secondary),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("  Loops ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(
+                            format!("{}", pane.state.current_iteration),
+                            Style::default().fg(conductor_theme.fg_secondary),
+                        ),
+                        Span::styled("  Active ", Style::default().fg(conductor_theme.fg_muted)),
+                        Span::styled(
+                            if pane.state.current_task.as_deref() == Some(id.as_str()) {
+                                "yes".to_string()
+                            } else {
+                                "no".to_string()
+                            },
+                            Style::default().fg(conductor_theme.fg_secondary),
+                        ),
+                    ]),
+                ]);
+
+                if !upcoming_tasks.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Task Queue:",
+                        Style::default()
+                            .fg(conductor_theme.accent_primary)
+                            .underlined(),
+                    )));
+                    details.extend(upcoming_tasks);
+                }
+
+                if !recent_notes.is_empty() {
+                    details.push(Line::from(""));
+                    details.push(Line::from(Span::styled(
+                        "Recent Loop Notes:",
+                        Style::default()
+                            .fg(conductor_theme.accent_primary)
+                            .underlined(),
+                    )));
+                    details.extend(recent_notes);
                 }
 
                 details
@@ -454,6 +595,60 @@ fn render_output_view(
         .scroll((pane.output_scroll, 0));
 
     frame.render_widget(output, area);
+}
+
+fn summarize_upcoming_tasks(
+    items: &[SelectableItem],
+    current_task: Option<&str>,
+    max_items: usize,
+) -> Vec<Line<'static>> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            SelectableItem::Task {
+                id,
+                title,
+                status,
+                is_actionable,
+                ..
+            } if *status != leindex_core::orchestrate::model::TrackStatus::Completed => {
+                let marker = if current_task == Some(id.as_str()) {
+                    "►"
+                } else if *is_actionable {
+                    "•"
+                } else {
+                    "○"
+                };
+                let text = format!("  {} {} ({:?})", marker, title, status);
+                Some(Line::from(text))
+            }
+            _ => None,
+        })
+        .take(max_items)
+        .collect()
+}
+
+fn summarize_runtime_logs(logs: &[RuntimeLogEntry], max_items: usize) -> Vec<Line<'static>> {
+    logs.iter()
+        .rev()
+        .take(max_items)
+        .rev()
+        .map(|entry| {
+            let prefix = match entry.level {
+                RuntimeLogLevel::Info => "[info]",
+                RuntimeLogLevel::Success => "[ok]",
+                RuntimeLogLevel::Warning => "[warn]",
+                RuntimeLogLevel::Error => "[err]",
+            };
+            let task = entry.task_id.as_deref().unwrap_or("track");
+            let mut summary = entry.summary.replace('\n', " ");
+            if summary.len() > 92 {
+                summary.truncate(89);
+                summary.push_str("...");
+            }
+            Line::from(format!("  {} {} {}", prefix, task, summary))
+        })
+        .collect()
 }
 
 fn render_prompt_view(

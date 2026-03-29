@@ -21,8 +21,7 @@ use std::hash::{Hash, Hasher};
 use std::{
     collections::hash_map::DefaultHasher,
     collections::{HashMap, HashSet},
-    fs,
-    io,
+    fs, io,
     io::Write,
     path::PathBuf,
     sync::Arc,
@@ -39,11 +38,19 @@ use leindex_core::memory::turso_backend::TursoStorageBackend;
 use leindex_core::memory::McpPool;
 use leindex_core::memory::MemoryService;
 use leindex_core::multiplexer::TmuxMultiplexer;
+use leindex_core::provider_boundary::{
+    managed_cli_overlap_matrix_for, managed_cli_overlap_profile, RuntimeDiagnostics,
+};
 
 // Phase 3: Capabilities
 use maestro_core::{CronJob, McpManager, SandboxManager, SecurityPolicy};
 
 use crate::conductor::omp_agent::OmpAgentManager;
+use crate::maesterclaw::claw_loop::ClawLoop;
+use crate::maesterclaw::pty_bridge::PtyLaunchConfig;
+use crate::maesterclaw::{
+    AgentOutputLine, ClawSession, ClawSessionStatus, ClawViewMode, OutputLineType,
+};
 use crate::modals;
 use crate::omp::{is_omp_available, OmpWorkerStatus};
 use crate::state::{
@@ -57,6 +64,8 @@ use crate::tracklens::TrackLensPane;
 // Re-export for use in tabs
 pub use crate::tabs::ktop::{render_ktop, KtopState};
 use crate::theme::{theme_from_name, Theme, THEMES};
+
+const MAX_MAESTROCLAW_OUTPUT_LINES: usize = 2000;
 
 /// Tab identifiers with explicit indices for maintainability
 /// Order: Welcome(0) → MaestroClaw(1) → Sessions(2) → Projects(3) → Conductor(4) → Memory(5) → Analysis(6) → Krustop(7) → LSPs(8) → Settings(9) → TrackLens(10)
@@ -156,6 +165,8 @@ pub struct App {
     pub project_state: ratatui::widgets::ListState,
     pub memories: Vec<MemoryInfo>,
     pub memory_state: ratatui::widgets::ListState,
+    pub memory_graph_enabled: bool,
+    pub memory_graph_selection: usize,
     pub memory_query: String,
     pub new_memory_content: String,
     pub new_memory_category: String,
@@ -274,6 +285,7 @@ pub struct App {
     pub hot_cache: crate::maesterclaw::HotCache,
     // MaestroClaw pane state
     pub maestroclaw_pane: crate::maesterclaw::MaestroClawPane,
+    pub maestroclaw_runtime: Option<ClawLoop>,
     // TrackLens review state
     pub tracklens_pane: TrackLensPane,
 }
@@ -290,6 +302,498 @@ fn load_maestroclaw_workspace_dir() -> PathBuf {
     maestro_claw::config::Config::load()
         .unwrap_or_else(|_| maestro_claw::config::Config::default())
         .workspace_dir
+}
+
+fn parse_memory_stored_by(source: Option<&str>, metadata: Option<&serde_json::Value>) -> String {
+    let Some(metadata) = metadata else {
+        return source
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
+    };
+
+    for key in [
+        "stored_by",
+        "created_by",
+        "agent_id",
+        "agent",
+        "source_agent",
+        "tool_used",
+        "tool",
+    ] {
+        if let Some(value) = metadata.get(key).and_then(|value| value.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    if let Some(source) = source {
+        let trimmed = source.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    "unknown".to_string()
+}
+
+fn parse_memory_access_history(
+    metadata: Option<&serde_json::Value>,
+) -> Vec<crate::state::MemoryAccessEvent> {
+    let Some(events) = metadata.and_then(|metadata| {
+        metadata
+            .get("access_history")
+            .or_else(|| metadata.get("nexus_access_history"))
+            .or_else(|| metadata.get("access_events"))
+            .and_then(|value| value.as_array())
+    }) else {
+        return Vec::new();
+    };
+
+    events
+        .iter()
+        .filter_map(|event| {
+            let agent_id = event
+                .get("agent_id")
+                .or_else(|| event.get("agent"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown")
+                .trim()
+                .to_string();
+            let timestamp = event
+                .get("timestamp")
+                .or_else(|| event.get("at"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let access_type = event
+                .get("access_type")
+                .or_else(|| event.get("type"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("read")
+                .trim()
+                .to_string();
+            let tool_used = event
+                .get("tool_used")
+                .or_else(|| event.get("tool"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+
+            if agent_id.is_empty() && timestamp.is_empty() && tool_used.is_none() {
+                None
+            } else {
+                Some(crate::state::MemoryAccessEvent {
+                    agent_id,
+                    timestamp,
+                    tool_used,
+                    access_type,
+                })
+            }
+        })
+        .collect()
+}
+
+fn parse_memory_related_ids(metadata: Option<&serde_json::Value>) -> Vec<i64> {
+    let Some(metadata) = metadata else {
+        return Vec::new();
+    };
+
+    let mut ids = Vec::new();
+    for key in [
+        "related_memory_ids",
+        "related_memories",
+        "semantic_neighbors",
+        "lineage",
+        "nexus_related_ids",
+    ] {
+        if let Some(value) = metadata.get(key) {
+            match value {
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        if let Some(id) = item.as_i64() {
+                            ids.push(id);
+                            continue;
+                        }
+                        if let Some(id) = item
+                            .get("id")
+                            .or_else(|| item.get("memory_id"))
+                            .and_then(|value| value.as_i64())
+                        {
+                            ids.push(id);
+                        }
+                    }
+                }
+                serde_json::Value::Number(number) => {
+                    if let Some(id) = number.as_i64() {
+                        ids.push(id);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn parse_memory_runtime_state(metadata: Option<&serde_json::Value>) -> Option<String> {
+    let metadata = metadata?;
+    for key in [
+        "nexus_runtime_state",
+        "runtime_state",
+        "subconscious_state",
+        "memory_runtime_state",
+    ] {
+        if let Some(value) = metadata.get(key).and_then(|value| value.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn parse_memory_scope(metadata: Option<&serde_json::Value>) -> Option<String> {
+    let metadata = metadata?;
+    for key in ["nexus_scope", "scope", "namespace", "memory_scope"] {
+        if let Some(value) = metadata.get(key).and_then(|value| value.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn parse_memory_accessed_by(
+    metadata: Option<&serde_json::Value>,
+    access_history: &[crate::state::MemoryAccessEvent],
+) -> Vec<String> {
+    let mut agents: Vec<String> = metadata
+        .and_then(|metadata| metadata.get("accessed_by"))
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(|value| value.trim().to_string()))
+                .filter(|value| !value.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for event in access_history {
+        if !event.agent_id.is_empty() && !agents.iter().any(|agent| agent == &event.agent_id) {
+            agents.push(event.agent_id.clone());
+        }
+    }
+
+    agents
+}
+
+fn parse_memory_access_count(
+    metadata: Option<&serde_json::Value>,
+    access_history: &[crate::state::MemoryAccessEvent],
+) -> usize {
+    metadata
+        .and_then(|metadata| metadata.get("access_count"))
+        .and_then(|value| value.as_u64())
+        .map(|value| value as usize)
+        .unwrap_or(access_history.len())
+}
+
+fn parse_memory_similarity_score(metadata: Option<&serde_json::Value>) -> Option<f32> {
+    metadata
+        .and_then(|metadata| metadata.get("similarity_score"))
+        .and_then(|value| value.as_f64())
+        .map(|value| value as f32)
+}
+
+fn maestroclaw_shell_program() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("SHELL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "bash".to_string())
+    }
+}
+
+fn maestroclaw_shell_args(command: &str) -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    {
+        vec!["/C".to_string(), command.to_string()]
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        vec!["-lc".to_string(), command.to_string()]
+    }
+}
+
+fn fallback_maestroclaw_command(session: &leindex_core::memory::models::Session) -> String {
+    match session
+        .tool
+        .as_deref()
+        .unwrap_or("shell")
+        .to_lowercase()
+        .as_str()
+    {
+        "claude" => "claude".to_string(),
+        "gemini" => "gemini".to_string(),
+        "codex" => "codex".to_string(),
+        "opencode" => "opencode".to_string(),
+        "amp" => "amp".to_string(),
+        "qwen" => "qwen".to_string(),
+        "iflow" => "iflow".to_string(),
+        "droid" => "droid".to_string(),
+        _ => std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string()),
+    }
+}
+
+fn build_maestroclaw_launch(
+    session: &leindex_core::memory::models::Session,
+) -> anyhow::Result<PtyLaunchConfig> {
+    let selected_cli = session.tool.clone().unwrap_or_else(|| "shell".to_string());
+    let overlap_profile = managed_cli_overlap_profile(&selected_cli);
+    let overlap_matrix = managed_cli_overlap_matrix_for(&selected_cli);
+    let suppression = overlap_profile.suppression_policy();
+    let provider_profile = "maestro_runtime".to_string();
+    let analysis_provider = "standalone_leindex".to_string();
+    let memory_provider = "standalone_nexus".to_string();
+    let suppression_policy =
+        serde_json::to_string(&suppression).unwrap_or_else(|_| "{}".to_string());
+    let cli_overlap_profile =
+        serde_json::to_string(&overlap_profile).unwrap_or_else(|_| "{}".to_string());
+
+    // Capture launch-time diagnostics from the overlap matrix
+    let diagnostics = RuntimeDiagnostics {
+        captured_at: chrono::Utc::now(),
+        aggregate_status: leindex_core::provider_boundary::ProviderStatus::Healthy,
+        suppressed_count: suppression.suppressed_tools.len(),
+        analysis_preferred_count: suppression.analysis_preferred_tools.len(),
+        memory_preferred_count: suppression.memory_preferred_tools.len(),
+        retained_count: suppression.retained_maestro_tools.len(),
+        overlap_entry_count: overlap_matrix.entries.len(),
+        provider_details: vec![],
+    };
+    let diagnostics_summary = diagnostics.summary_line();
+
+    let command = session
+        .command
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| fallback_maestroclaw_command(session));
+
+    let cwd = if session.project_path.trim().is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(session.project_path.clone()))
+    };
+
+    Ok(PtyLaunchConfig {
+        program: maestroclaw_shell_program(),
+        args: maestroclaw_shell_args(&command),
+        cwd,
+        env: vec![
+            ("MAESTRO_SESSION_ID".to_string(), session.session_id.clone()),
+            (
+                "MAESTRO_PROJECT_PATH".to_string(),
+                session.project_path.clone(),
+            ),
+            ("MAESTRO_SELECTED_CLI".to_string(), selected_cli),
+            ("MAESTRO_PROVIDER_PROFILE".to_string(), provider_profile),
+            ("MAESTRO_ANALYSIS_PROVIDER".to_string(), analysis_provider),
+            ("MAESTRO_MEMORY_PROVIDER".to_string(), memory_provider),
+            (
+                "MAESTRO_TOOL_SUPPRESSION_POLICY".to_string(),
+                suppression_policy,
+            ),
+            (
+                "MAESTRO_CLI_OVERLAP_PROFILE".to_string(),
+                cli_overlap_profile,
+            ),
+            (
+                "MAESTRO_NEXUS_PROVIDER".to_string(),
+                "standalone".to_string(),
+            ),
+            (
+                "MAESTRO_LAUNCH_DIAGNOSTICS".to_string(),
+                diagnostics_summary,
+            ),
+            (
+                "NEXUS_BIN".to_string(),
+                std::env::var("NEXUS_BIN").unwrap_or_else(|_| "nexus".to_string()),
+            ),
+            (
+                "NEXUS_HOME".to_string(),
+                std::env::var("NEXUS_HOME").unwrap_or_default(),
+            ),
+        ],
+        rows: 48,
+        cols: 160,
+    })
+}
+
+fn push_maestroclaw_lines(app: &mut App, lines: Vec<AgentOutputLine>) {
+    if lines.is_empty() {
+        return;
+    }
+
+    app.maestroclaw_pane.agent_output.extend(lines);
+    if app.maestroclaw_pane.agent_output.len() > MAX_MAESTROCLAW_OUTPUT_LINES {
+        let overflow = app.maestroclaw_pane.agent_output.len() - MAX_MAESTROCLAW_OUTPUT_LINES;
+        app.maestroclaw_pane.agent_output.drain(0..overflow);
+    }
+}
+
+fn sync_maestroclaw_runtime(app: &mut App) {
+    let Some(runtime) = app.maestroclaw_runtime.as_mut() else {
+        return;
+    };
+
+    let lines = runtime.poll();
+    let session = runtime.session.clone();
+    let _ = runtime;
+
+    if !lines.is_empty() {
+        push_maestroclaw_lines(app, lines);
+    }
+    app.maestroclaw_pane.claw_session = Some(session);
+}
+
+fn start_maestroclaw_session(
+    app: &mut App,
+    session: leindex_core::memory::models::Session,
+) -> anyhow::Result<()> {
+    if let Some(runtime) = app.maestroclaw_runtime.as_mut() {
+        let _ = runtime.stop();
+    }
+
+    let launch = build_maestroclaw_launch(&session)?;
+    let command_preview = session
+        .command
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| fallback_maestroclaw_command(&session));
+    let claw_session = ClawSession {
+        id: session.session_id.clone(),
+        tool: session.tool.clone().unwrap_or_else(|| "shell".to_string()),
+        model: None,
+        status: ClawSessionStatus::Starting,
+        iteration: 1,
+        started_at: chrono::Utc::now(),
+        tokens_used: 0,
+        cost_estimate: 0.0,
+        provider_profile: "maestro_runtime".to_string(),
+        analysis_provider: "standalone_leindex".to_string(),
+        memory_provider: "standalone_nexus".to_string(),
+        suppression_policy: serde_json::to_string(
+            &managed_cli_overlap_profile(session.tool.as_deref().unwrap_or("shell"))
+                .suppression_policy(),
+        )
+        .unwrap_or_else(|_| "{}".to_string()),
+        cli_overlap_profile: serde_json::to_string(&managed_cli_overlap_profile(
+            session.tool.as_deref().unwrap_or("shell"),
+        ))
+        .unwrap_or_else(|_| "{}".to_string()),
+    };
+
+    let mut runtime = ClawLoop::launch(claw_session.clone(), launch)?;
+    let (cols, rows) = crossterm::terminal::size().unwrap_or((160, 48));
+    let _ = runtime.resize(rows, cols);
+
+    app.maestroclaw_pane.selected_session = app
+        .sessions
+        .iter()
+        .position(|candidate| candidate.session_id == session.session_id);
+    app.maestroclaw_pane.claw_session = Some(claw_session);
+    app.maestroclaw_pane.agent_output.clear();
+    app.maestroclaw_pane.output_scroll = 0;
+    app.maestroclaw_pane.user_input.clear();
+    app.maestroclaw_pane.input_cursor = 0;
+    app.maestroclaw_pane.view_mode = ClawViewMode::Agent;
+    app.maestroclaw_runtime = Some(runtime);
+
+    push_maestroclaw_lines(
+        app,
+        vec![
+            AgentOutputLine {
+                timestamp: chrono::Utc::now(),
+                content: format!("Attached MaestroClaw to '{}'", session.title),
+                line_type: OutputLineType::SystemMessage,
+            },
+            AgentOutputLine {
+                timestamp: chrono::Utc::now(),
+                content: format!("launch {}", command_preview),
+                line_type: OutputLineType::ToolCall,
+            },
+        ],
+    );
+    app.status_message = format!("MaestroClaw attached to '{}'", session.title);
+    Ok(())
+}
+
+fn submit_maestroclaw_prompt(app: &mut App) {
+    let prompt = app.maestroclaw_pane.user_input.trim().to_string();
+    if prompt.is_empty() {
+        app.status_message = "Type a prompt before sending it to MaestroClaw".to_string();
+        return;
+    }
+
+    if app.maestroclaw_runtime.is_none() {
+        app.status_message = "No live MaestroClaw session is running".to_string();
+        return;
+    }
+
+    push_maestroclaw_lines(
+        app,
+        vec![AgentOutputLine {
+            timestamp: chrono::Utc::now(),
+            content: prompt.clone(),
+            line_type: OutputLineType::UserInput,
+        }],
+    );
+
+    let submit_result = {
+        let runtime = app
+            .maestroclaw_runtime
+            .as_mut()
+            .expect("runtime checked above");
+        runtime.submit(&prompt)
+    };
+
+    match submit_result {
+        Ok(()) => {
+            app.maestroclaw_pane.user_input.clear();
+            app.maestroclaw_pane.input_cursor = 0;
+            app.status_message = "Prompt sent to MaestroClaw session".to_string();
+        }
+        Err(err) => {
+            push_maestroclaw_lines(
+                app,
+                vec![AgentOutputLine {
+                    timestamp: chrono::Utc::now(),
+                    content: format!("submit failed: {}", err),
+                    line_type: OutputLineType::Error,
+                }],
+            );
+            app.status_message = format!("Failed to send prompt: {}", err);
+        }
+    }
 }
 
 impl App {
@@ -309,6 +813,8 @@ impl App {
             project_state: ratatui::widgets::ListState::default(),
             memories: Vec::new(),
             memory_state: ratatui::widgets::ListState::default(),
+            memory_graph_enabled: false,
+            memory_graph_selection: 0,
             memory_query: String::new(),
             new_memory_content: String::new(),
             new_memory_category: String::new(),
@@ -407,6 +913,7 @@ impl App {
             maestroclaw_pane: crate::maesterclaw::MaestroClawPane::new(
                 load_maestroclaw_workspace_dir(),
             ),
+            maestroclaw_runtime: None,
             tracklens_pane: TrackLensPane::new(),
         };
 
@@ -685,24 +1192,43 @@ impl App {
             if let Ok(memories) = memories_res {
                 self.memories = memories
                     .iter()
-                    .map(|m| MemoryInfo {
-                        id: m.id,
-                        content: m.content.clone(),
-                        category: m.category.to_string(),
-                        summary: None,
-                        importance: "normal".to_string(),
-                        source: None,
-                        session_id: None,
-                        project_id: None,
-                        track_id: None,
-                        created_at: m.created_at.to_rfc3339(),
-                        expires_at: None,
-                        last_accessed: None,
-                        access_count: 0,
-                        accessed_by: Vec::new(),
-                        tags: Vec::new(),
-                        is_expanded: false,
-                        similarity_score: None,
+                    .map(|m| {
+                        let access_history = parse_memory_access_history(m.metadata.as_ref());
+                        let accessed_by =
+                            parse_memory_accessed_by(m.metadata.as_ref(), &access_history);
+                        let access_count =
+                            parse_memory_access_count(m.metadata.as_ref(), &access_history);
+                        let related_memory_ids = parse_memory_related_ids(m.metadata.as_ref());
+                        let nexus_runtime_state = parse_memory_runtime_state(m.metadata.as_ref());
+                        let nexus_scope = parse_memory_scope(m.metadata.as_ref());
+
+                        MemoryInfo {
+                            id: m.id,
+                            content: m.content.clone(),
+                            category: m.category.to_string(),
+                            summary: m.summary.clone(),
+                            importance: format!("{:?}", m.importance).to_lowercase(),
+                            source: m.source.clone(),
+                            session_id: m.session_id.clone(),
+                            project_id: m.project_id.map(|id| id.to_string()),
+                            track_id: m.track_id.map(|id| id.to_string()),
+                            created_at: m.created_at.to_rfc3339(),
+                            expires_at: m.expires_at.map(|ts| ts.to_rfc3339()),
+                            last_accessed: m.last_accessed.map(|ts| ts.to_rfc3339()),
+                            access_count,
+                            accessed_by,
+                            tags: m.tags.clone().unwrap_or_default(),
+                            is_expanded: false,
+                            similarity_score: parse_memory_similarity_score(m.metadata.as_ref()),
+                            related_memory_ids,
+                            nexus_runtime_state,
+                            nexus_scope,
+                            stored_by: parse_memory_stored_by(
+                                m.source.as_deref(),
+                                m.metadata.as_ref(),
+                            ),
+                            access_history,
+                        }
                     })
                     .collect();
                 if self.memories.is_empty() {
@@ -1419,15 +1945,12 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
                 .and_then(|idx| app.sessions.get(idx))
                 .cloned()
             {
-                app.refresh_session_entries();
-                if let Some(entry_idx) = app.session_entries.iter().position(|entry| match entry {
-                    SessionEntry::Session(s) => s.session_id == session.session_id,
-                    _ => false,
-                }) {
-                    app.session_state.select(Some(entry_idx));
-                    app.tab_index = tabs::SESSIONS;
+                if let Err(err) = start_maestroclaw_session(app, session.clone()) {
+                    app.status_message = format!(
+                        "Failed to launch MaestroClaw session '{}': {}",
+                        session.title, err
+                    );
                 }
-                app.status_message = format!("Focused MaestroClaw session '{}'", session.title);
             } else {
                 app.status_message = "No MaestroClaw session selected".to_string();
             }
@@ -1463,11 +1986,7 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
                     crate::maesterclaw::SessionEntry {
                         id: s.session_id.clone(),
                         title: s.title.clone(),
-                        preview: s
-                            .command
-                            .as_deref()
-                            .unwrap_or("(no command)")
-                            .to_string(),
+                        preview: s.command.as_deref().unwrap_or("(no command)").to_string(),
                         source: s.tool.as_deref().unwrap_or("unknown").to_string(),
                         last_active,
                         turn_count: 0,
@@ -1482,17 +2001,9 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
             if let Some(session_id) = app.maestroclaw_pane.selected_browser_session_id() {
                 if let Some(idx) = app.sessions.iter().position(|s| s.session_id == session_id) {
                     app.maestroclaw_pane.selected_session = Some(idx);
-                    // Reuse the same focus/switch-to-Sessions flow as OpenSelected
                     if let Some(session) = app.sessions.get(idx).cloned() {
-                        app.refresh_session_entries();
-                        if let Some(entry_idx) = app.session_entries.iter().position(|entry| match entry {
-                            SessionEntry::Session(s) => s.session_id == session.session_id,
-                            _ => false,
-                        }) {
-                            app.session_state.select(Some(entry_idx));
-                            app.tab_index = tabs::SESSIONS;
-                        }
-                        app.status_message = format!("Focused session '{}'", session.title);
+                        app.status_message =
+                            format!("Selected session '{}' in MaestroClaw", session.title);
                     }
                 }
             }
@@ -1506,13 +2017,226 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
         | MaestroClawAction::WizardBack
         | MaestroClawAction::WizardSelection => true,
         MaestroClawAction::WizardComplete => {
-            app.status_message = "MaestroClaw setup complete".to_string();
+            app.status_message = match persist_maestroclaw_setup(&mut app.maestroclaw_pane) {
+                Ok(message) => message,
+                Err(err) => format!("MaestroClaw setup saved with issues: {}", err),
+            };
             true
         }
         MaestroClawAction::WizardDismissed => {
             app.status_message = "MaestroClaw setup dismissed".to_string();
             true
         }
+    }
+}
+
+fn persist_maestroclaw_setup(
+    pane: &mut crate::maesterclaw::MaestroClawPane,
+) -> anyhow::Result<String> {
+    let mut config = maestro_claw::config::Config::load()
+        .unwrap_or_else(|_| maestro_claw::config::Config::default());
+
+    if let Some(primary_idx) = pane.wizard.selected_primary_tool {
+        if let Some((name, version, binary_path)) = pane.wizard.tool_details.get(primary_idx) {
+            config.primary_tool = name.clone();
+            if !config.agent_tools.iter().any(|tool| tool.name == *name) {
+                config
+                    .agent_tools
+                    .push(maestro_claw::config::AgentToolConfig {
+                        name: name.clone(),
+                        binary_path: binary_path.clone(),
+                        available: true,
+                        version: version.clone(),
+                        extra_args: Vec::new(),
+                    });
+            }
+        }
+    }
+
+    for (name, version, binary_path) in &pane.wizard.tool_details {
+        if let Some(existing) = config
+            .agent_tools
+            .iter_mut()
+            .find(|tool| tool.name == *name)
+        {
+            existing.binary_path = binary_path.clone();
+            existing.version = version.clone();
+            existing.available = true;
+        } else {
+            config
+                .agent_tools
+                .push(maestro_claw::config::AgentToolConfig {
+                    name: name.clone(),
+                    binary_path: binary_path.clone(),
+                    available: true,
+                    version: version.clone(),
+                    extra_args: Vec::new(),
+                });
+        }
+    }
+
+    config.cron.enabled = pane.wizard.cron_enabled;
+    config.cron.max_run_history = pane.wizard.cron_max_run_history;
+
+    apply_selected_channels_to_config(&mut config, &pane.wizard.selected_channels);
+
+    let workspace_dir = config.workspace_dir.clone();
+    maestro_claw::onboard::scaffold_workspace(&workspace_dir, &mut config)?;
+    config.ensure_webhook_secret();
+    config.bootstrap.setup_timestamp = Some(chrono::Utc::now().timestamp());
+    config.bootstrap.setup_version = Some(env!("CARGO_PKG_VERSION").to_string());
+    config.setup_status = config.compute_setup_status();
+    config.save()?;
+
+    pane.channel_statuses = pane
+        .wizard
+        .selected_channels
+        .iter()
+        .map(|channel| crate::maesterclaw::ChannelStatusDisplay {
+            channel_type: channel.label().to_string(),
+            connected: channel_has_persisted_credentials(&config, *channel),
+            last_message: None,
+            config_status: if channel_has_persisted_credentials(&config, *channel) {
+                "credentials stored".to_string()
+            } else {
+                "selected without stored credentials".to_string()
+            },
+        })
+        .collect();
+    pane.cron_jobs = vec![crate::maesterclaw::CronJobDisplay {
+        id: "default-scheduler".to_string(),
+        name: "Scheduled automation".to_string(),
+        schedule: if config.cron.enabled {
+            "enabled".to_string()
+        } else {
+            "disabled".to_string()
+        },
+        last_run: None,
+        next_run: None,
+        status: format!("history {}", config.cron.max_run_history),
+    }];
+
+    Ok(format!(
+        "MaestroClaw setup complete and saved to {}",
+        config.config_path.display()
+    ))
+}
+
+fn apply_selected_channels_to_config(
+    config: &mut maestro_claw::config::Config,
+    selected_channels: &std::collections::HashSet<crate::maesterclaw::ChannelType>,
+) {
+    use crate::maesterclaw::ChannelType;
+    use maestro_claw::config::schema::{
+        DiscordConfig, MatrixConfig, MattermostConfig, SlackConfig, TelegramConfig, WhatsAppConfig,
+    };
+
+    fn parse_env_list(name: &str) -> Vec<String> {
+        std::env::var(name)
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|item| item.trim().to_string())
+                    .filter(|item| !item.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    if selected_channels.contains(&ChannelType::Telegram) {
+        if let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") {
+            config.channels.telegram = Some(TelegramConfig {
+                bot_token,
+                allowed_users: parse_env_list("TELEGRAM_ALLOWED_USERS"),
+            });
+        }
+    }
+
+    if selected_channels.contains(&ChannelType::Discord) {
+        if let (Ok(bot_token), Ok(guild_id)) = (
+            std::env::var("DISCORD_BOT_TOKEN"),
+            std::env::var("DISCORD_GUILD_ID"),
+        ) {
+            config.channels.discord = Some(DiscordConfig {
+                bot_token,
+                guild_id,
+                allowed_users: parse_env_list("DISCORD_ALLOWED_USERS"),
+            });
+        }
+    }
+
+    if selected_channels.contains(&ChannelType::Slack) {
+        if let (Ok(bot_token), Ok(app_token)) = (
+            std::env::var("SLACK_BOT_TOKEN"),
+            std::env::var("SLACK_APP_TOKEN"),
+        ) {
+            config.channels.slack = Some(SlackConfig {
+                bot_token,
+                app_token,
+                allowed_users: parse_env_list("SLACK_ALLOWED_USERS"),
+            });
+        }
+    }
+
+    if selected_channels.contains(&ChannelType::Matrix) {
+        if let (Ok(homeserver_url), Ok(access_token)) = (
+            std::env::var("MATRIX_HOMESERVER_URL"),
+            std::env::var("MATRIX_ACCESS_TOKEN"),
+        ) {
+            config.channels.matrix = Some(MatrixConfig {
+                homeserver_url,
+                access_token,
+                bot_user_id: std::env::var("MATRIX_BOT_USER_ID").ok(),
+                allowed_users: parse_env_list("MATRIX_ALLOWED_USERS"),
+                room_ids: parse_env_list("MATRIX_ROOM_IDS"),
+            });
+        }
+    }
+
+    if selected_channels.contains(&ChannelType::WhatsApp) {
+        if let (Ok(bridge_url), Ok(api_token)) = (
+            std::env::var("WHATSAPP_BRIDGE_URL"),
+            std::env::var("WHATSAPP_API_TOKEN"),
+        ) {
+            config.channels.whatsapp = Some(WhatsAppConfig {
+                bridge_url,
+                api_token,
+                phone_number_id: std::env::var("WHATSAPP_PHONE_NUMBER_ID").ok(),
+                allowed_users: parse_env_list("WHATSAPP_ALLOWED_USERS"),
+            });
+        }
+    }
+
+    if selected_channels.contains(&ChannelType::Mattermost) {
+        if let (Ok(server_url), Ok(bot_token)) = (
+            std::env::var("MATTERMOST_SERVER_URL"),
+            std::env::var("MATTERMOST_TOKEN"),
+        ) {
+            config.channels.mattermost = Some(MattermostConfig {
+                server_url,
+                bot_token,
+                team_id: std::env::var("MATTERMOST_TEAM_ID").ok(),
+                channel_id: std::env::var("MATTERMOST_CHANNEL_ID").ok(),
+                allowed_users: parse_env_list("MATTERMOST_ALLOWED_USERS"),
+            });
+        }
+    }
+}
+
+fn channel_has_persisted_credentials(
+    config: &maestro_claw::config::Config,
+    channel: crate::maesterclaw::ChannelType,
+) -> bool {
+    use crate::maesterclaw::ChannelType;
+
+    match channel {
+        ChannelType::Telegram => config.channels.telegram.is_some(),
+        ChannelType::Discord => config.channels.discord.is_some(),
+        ChannelType::Slack => config.channels.slack.is_some(),
+        ChannelType::Matrix => config.channels.matrix.is_some(),
+        ChannelType::WhatsApp => config.channels.whatsapp.is_some(),
+        ChannelType::Mattermost => config.channels.mattermost.is_some(),
     }
 }
 
@@ -1560,7 +2284,10 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
 
 fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
-    path.push(format!("maestro-managed-mcp-{}.toml", server_name.replace('/', "-")));
+    path.push(format!(
+        "maestro-managed-mcp-{}.toml",
+        server_name.replace('/', "-")
+    ));
     path
 }
 
@@ -1594,12 +2321,16 @@ async fn run_app<B: Backend>(
     let mut last_refresh = std::time::Instant::now();
 
     loop {
+        sync_maestroclaw_runtime(&mut app);
         terminal.draw(|frame| ui(frame, &mut app))?;
 
         // Handle MCP refresh task shutdown on quit
         if app.should_quit {
             if let Some(ref task) = app.mcp_refresh_task {
                 task.abort();
+            }
+            if let Some(runtime) = app.maestroclaw_runtime.as_mut() {
+                let _ = runtime.stop();
             }
             break;
         }
@@ -1704,8 +2435,6 @@ async fn run_app<B: Backend>(
                                                     let _ = app.queue_lsp_autostart_for_sessions();
                                                     app.refresh_session_entries();
                                                     app.refresh_dash_session_entries();
-                                                    app.status_message = format!("Session '{}' created. Press Enter on Sessions tab to attach.", session.title);
-                                                    app.tab_index = tabs::SESSIONS;
                                                     let new_idx = app
                                                         .session_entries
                                                         .iter()
@@ -1718,6 +2447,25 @@ async fn run_app<B: Backend>(
                                                         })
                                                         .unwrap_or(0);
                                                     app.session_state.select(Some(new_idx));
+                                                    app.maestroclaw_pane.selected_session =
+                                                        Some(app.sessions.len().saturating_sub(1));
+                                                    if app.tab_index == tabs::MAESTROCLAW {
+                                                        if let Err(err) = start_maestroclaw_session(
+                                                            &mut app,
+                                                            session.clone(),
+                                                        ) {
+                                                            app.status_message = format!(
+                                                                "Session '{}' created but MaestroClaw launch failed: {}",
+                                                                session.title, err
+                                                            );
+                                                        }
+                                                    } else {
+                                                        app.status_message = format!(
+                                                            "Session '{}' created. Press Enter on Sessions tab to attach.",
+                                                            session.title
+                                                        );
+                                                        app.tab_index = tabs::SESSIONS;
+                                                    }
                                                     app.refresh_from_service(&service);
                                                 }
                                                 Err(e) => {
@@ -2199,9 +2947,29 @@ async fn run_app<B: Backend>(
                                         app.input_mode = InputMode::Normal;
                                         app.refresh_from_service(&service);
                                     }
-                                    InputMode::MemoryDetail | InputMode::MemoryDetailFocus => {
-                                        // Exit memory detail view on Enter
+                                    InputMode::MemoryDetail => {
+                                        app.memory_graph_enabled = false;
                                         app.input_mode = InputMode::Normal;
+                                    }
+                                    InputMode::MemoryDetailFocus => {
+                                        let targets =
+                                            crate::tabs::memory::graph_navigation_targets(&app);
+                                        if let Some(target_idx) = targets
+                                            .get(
+                                                app.memory_graph_selection
+                                                    .min(targets.len().saturating_sub(1)),
+                                            )
+                                            .copied()
+                                        {
+                                            app.memory_state.select(Some(target_idx));
+                                            app.input_mode = InputMode::MemoryDetail;
+                                            app.status_message =
+                                                "Opened highlighted memory from relationship graph"
+                                                    .to_string();
+                                        } else {
+                                            app.memory_graph_enabled = false;
+                                            app.input_mode = InputMode::Normal;
+                                        }
                                     }
 
                                     InputMode::NewMemoryContent => {
@@ -2387,20 +3155,19 @@ async fn run_app<B: Backend>(
                                                 }
                                             }
                                             McpOption::Install => {
-                                                let installer =
-                                                    match ManagedMcpInstaller::new(svc.clone(), None)
-                                                    {
-                                                        Ok(installer) => installer,
-                                                        Err(e) => {
-                                                            app.status_message = format!(
-                                                                "Installer init failed: {}",
-                                                                e
-                                                            );
-                                                            app.input_mode = InputMode::Normal;
-                                                            app.target_mcp_name = None;
-                                                            continue;
-                                                        }
-                                                    };
+                                                let installer = match ManagedMcpInstaller::new(
+                                                    svc.clone(),
+                                                    None,
+                                                ) {
+                                                    Ok(installer) => installer,
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Installer init failed: {}", e);
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_mcp_name = None;
+                                                        continue;
+                                                    }
+                                                };
                                                 let template = match installer
                                                     .template(server.as_ref(), Some(&name))
                                                 {
@@ -2447,10 +3214,8 @@ async fn run_app<B: Backend>(
                                                     match toml::from_str(&manifest_toml) {
                                                         Ok(manifest) => manifest,
                                                         Err(e) => {
-                                                            app.status_message = format!(
-                                                                "Invalid manifest: {}",
-                                                                e
-                                                            );
+                                                            app.status_message =
+                                                                format!("Invalid manifest: {}", e);
                                                             app.input_mode = InputMode::Normal;
                                                             app.target_mcp_name = None;
                                                             continue;
@@ -2463,8 +3228,7 @@ async fn run_app<B: Backend>(
                                                 {
                                                     Ok(installed) => {
                                                         if manifest.auto_start {
-                                                            if let Some(pool) =
-                                                                app.mcp_pool.clone()
+                                                            if let Some(pool) = app.mcp_pool.clone()
                                                             {
                                                                 if let Err(error) = pool
                                                                     .start_server_record(&installed)
@@ -2522,20 +3286,19 @@ async fn run_app<B: Backend>(
                                                 if let Some(pool) = app.mcp_pool.clone() {
                                                     let _ = pool.stop_server(&name).await;
                                                 }
-                                                let installer =
-                                                    match ManagedMcpInstaller::new(svc.clone(), None)
-                                                    {
-                                                        Ok(installer) => installer,
-                                                        Err(e) => {
-                                                            app.status_message = format!(
-                                                                "Installer init failed: {}",
-                                                                e
-                                                            );
-                                                            app.input_mode = InputMode::Normal;
-                                                            app.target_mcp_name = None;
-                                                            continue;
-                                                        }
-                                                    };
+                                                let installer = match ManagedMcpInstaller::new(
+                                                    svc.clone(),
+                                                    None,
+                                                ) {
+                                                    Ok(installer) => installer,
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Installer init failed: {}", e);
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_mcp_name = None;
+                                                        continue;
+                                                    }
+                                                };
                                                 match installer.reinstall(&name).await {
                                                     Ok(installed) => {
                                                         if let Some(pool) = app.mcp_pool.clone() {
@@ -2605,20 +3368,19 @@ async fn run_app<B: Backend>(
                                                 if let Some(pool) = app.mcp_pool.clone() {
                                                     let _ = pool.stop_server(&name).await;
                                                 }
-                                                let installer =
-                                                    match ManagedMcpInstaller::new(svc.clone(), None)
-                                                    {
-                                                        Ok(installer) => installer,
-                                                        Err(e) => {
-                                                            app.status_message = format!(
-                                                                "Installer init failed: {}",
-                                                                e
-                                                            );
-                                                            app.input_mode = InputMode::Normal;
-                                                            app.target_mcp_name = None;
-                                                            continue;
-                                                        }
-                                                    };
+                                                let installer = match ManagedMcpInstaller::new(
+                                                    svc.clone(),
+                                                    None,
+                                                ) {
+                                                    Ok(installer) => installer,
+                                                    Err(e) => {
+                                                        app.status_message =
+                                                            format!("Installer init failed: {}", e);
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_mcp_name = None;
+                                                        continue;
+                                                    }
+                                                };
                                                 match installer.uninstall(&name).await {
                                                     Ok(_) => {
                                                         app.status_message = format!(
@@ -3375,21 +4137,40 @@ async fn run_app<B: Backend>(
                                     app.session_state.select(Some(i));
                                 } else if app.tab_index == tabs::MEMORY {
                                     // Memory
-                                    let i = match app.memory_state.selected() {
-                                        Some(i) => {
-                                            if i >= app.memories.len().saturating_sub(1) {
+                                    if app.memory_graph_enabled
+                                        && app.input_mode == InputMode::MemoryDetailFocus
+                                    {
+                                        let targets =
+                                            crate::tabs::memory::graph_navigation_targets(&app);
+                                        if !targets.is_empty() {
+                                            app.memory_graph_selection = if app
+                                                .memory_graph_selection
+                                                >= targets.len().saturating_sub(1)
+                                            {
                                                 0
                                             } else {
-                                                i + 1
-                                            }
+                                                app.memory_graph_selection + 1
+                                            };
                                         }
-                                        None => 0,
-                                    };
-                                    app.memory_state.select(Some(i));
+                                    } else {
+                                        let i = match app.memory_state.selected() {
+                                            Some(i) => {
+                                                if i >= app.memories.len().saturating_sub(1) {
+                                                    0
+                                                } else {
+                                                    i + 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.memory_state.select(Some(i));
+                                    }
                                 } else if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Down, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Down,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
@@ -3503,21 +4284,38 @@ async fn run_app<B: Backend>(
                                     app.session_state.select(Some(i));
                                 } else if app.tab_index == tabs::MEMORY {
                                     // Memory
-                                    let i = match app.memory_state.selected() {
-                                        Some(i) => {
-                                            if i == 0 {
-                                                app.memories.len().saturating_sub(1)
-                                            } else {
-                                                i - 1
-                                            }
+                                    if app.memory_graph_enabled
+                                        && app.input_mode == InputMode::MemoryDetailFocus
+                                    {
+                                        let targets =
+                                            crate::tabs::memory::graph_navigation_targets(&app);
+                                        if !targets.is_empty() {
+                                            app.memory_graph_selection =
+                                                if app.memory_graph_selection == 0 {
+                                                    targets.len().saturating_sub(1)
+                                                } else {
+                                                    app.memory_graph_selection - 1
+                                                };
                                         }
-                                        None => 0,
-                                    };
-                                    app.memory_state.select(Some(i));
+                                    } else {
+                                        let i = match app.memory_state.selected() {
+                                            Some(i) => {
+                                                if i == 0 {
+                                                    app.memories.len().saturating_sub(1)
+                                                } else {
+                                                    i - 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.memory_state.select(Some(i));
+                                    }
                                 } else if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Up, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Up,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
@@ -3566,12 +4364,31 @@ async fn run_app<B: Backend>(
                                             app.dash_focus = DashFocus::Sessions;
                                         }
                                     };
+                                } else if app.tab_index == tabs::MEMORY
+                                    && app.memory_graph_enabled
+                                    && matches!(
+                                        app.input_mode,
+                                        InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+                                    )
+                                {
+                                    app.input_mode = match app.input_mode {
+                                        InputMode::MemoryDetail => InputMode::MemoryDetailFocus,
+                                        _ => InputMode::MemoryDetail,
+                                    };
+                                    app.status_message =
+                                        if app.input_mode == InputMode::MemoryDetailFocus {
+                                            "Memory relationship graph focused".to_string()
+                                        } else {
+                                            "Returned focus to memory list".to_string()
+                                        };
                                 } else if app.tab_index == tabs::MAESTROCLAW
                                     && !app.maestroclaw_pane.is_session_browser_active()
                                 {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Tab, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Tab,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else {
                                     let tab_count = tabs::all_titles().len();
@@ -3594,10 +4411,23 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::MAESTROCLAW
                                     && !app.maestroclaw_pane.is_session_browser_active()
                                 {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::BackTab, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::BackTab,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
+                                } else if app.tab_index == tabs::MEMORY
+                                    && app.memory_graph_enabled
+                                    && matches!(
+                                        app.input_mode,
+                                        InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+                                    )
+                                {
+                                    app.input_mode = match app.input_mode {
+                                        InputMode::MemoryDetail => InputMode::MemoryDetailFocus,
+                                        _ => InputMode::MemoryDetail,
+                                    };
                                 } else {
                                     app.tab_index = if app.tab_index == tabs::DASHBOARD {
                                         tabs::SETTINGS
@@ -4088,6 +4918,27 @@ async fn run_app<B: Backend>(
                                     app.refresh_from_service(&service);
                                 }
                             }
+                            (KeyModifiers::NONE, KeyCode::Char('g')) => {
+                                if app.tab_index == tabs::MEMORY {
+                                    app.memory_graph_enabled = !app.memory_graph_enabled;
+                                    if app.memory_graph_enabled {
+                                        app.input_mode = InputMode::MemoryDetailFocus;
+                                        app.memory_graph_selection = 0;
+                                        app.status_message =
+                                            "Memory relationship graph enabled and focused"
+                                                .to_string();
+                                    } else {
+                                        app.status_message =
+                                            "Memory relationship graph hidden".to_string();
+                                        if matches!(
+                                            app.input_mode,
+                                            InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+                                        ) {
+                                            app.input_mode = InputMode::Normal;
+                                        }
+                                    }
+                                }
+                            }
                             // When session browser is active on MaestroClaw tab, short-circuit
                             // before app-global handlers (n, p, t, q, r, /, etc.) so
                             // type-to-filter works end-to-end. Only unmodified keys (no
@@ -4096,12 +4947,59 @@ async fn run_app<B: Backend>(
                             // fall through.
                             (modifiers, key)
                                 if app.tab_index == tabs::MAESTROCLAW
-                                    && app.maestroclaw_pane.should_route_to_browser(modifiers, key) =>
+                                    && app
+                                        .maestroclaw_pane
+                                        .should_route_to_browser(modifiers, key) =>
                             {
                                 let action = app
                                     .maestroclaw_pane
                                     .handle_key_with_session_count(key, app.sessions.len());
                                 let _ = handle_maestroclaw_action(&mut app, action);
+                            }
+                            (modifiers, key)
+                                if app.tab_index == tabs::MAESTROCLAW
+                                    && app.maestroclaw_runtime.is_some()
+                                    && !app.maestroclaw_pane.is_wizard_active()
+                                    && !app.maestroclaw_pane.is_session_browser_active()
+                                    && !modifiers
+                                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                            {
+                                match key {
+                                    KeyCode::Enter => submit_maestroclaw_prompt(&mut app),
+                                    KeyCode::Backspace => {
+                                        app.maestroclaw_pane.user_input.pop();
+                                        app.maestroclaw_pane.input_cursor =
+                                            app.maestroclaw_pane.user_input.chars().count();
+                                    }
+                                    KeyCode::Esc => {
+                                        app.maestroclaw_pane.user_input.clear();
+                                        app.maestroclaw_pane.input_cursor = 0;
+                                        app.status_message =
+                                            "Cleared MaestroClaw prompt buffer".to_string();
+                                    }
+                                    KeyCode::Up => {
+                                        app.maestroclaw_pane.output_scroll =
+                                            app.maestroclaw_pane.output_scroll.saturating_sub(1);
+                                    }
+                                    KeyCode::Down => {
+                                        app.maestroclaw_pane.output_scroll =
+                                            app.maestroclaw_pane.output_scroll.saturating_add(1);
+                                    }
+                                    KeyCode::PageUp => {
+                                        app.maestroclaw_pane.output_scroll =
+                                            app.maestroclaw_pane.output_scroll.saturating_sub(8);
+                                    }
+                                    KeyCode::PageDown => {
+                                        app.maestroclaw_pane.output_scroll =
+                                            app.maestroclaw_pane.output_scroll.saturating_add(8);
+                                    }
+                                    KeyCode::Char(c) => {
+                                        app.maestroclaw_pane.user_input.push(c);
+                                        app.maestroclaw_pane.input_cursor =
+                                            app.maestroclaw_pane.user_input.chars().count();
+                                    }
+                                    _ => {}
+                                }
                             }
                             (KeyModifiers::NONE, KeyCode::Char('n')) => {
                                 // Memory tab: Start new memory creation
@@ -4113,9 +5011,11 @@ async fn run_app<B: Backend>(
                                     app.status_message =
                                         "Creating new memory - enter content".to_string();
                                 } else if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Char('n'), app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Char('n'),
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                     app.new_session_path = app
                                         .sessions
@@ -4144,9 +5044,8 @@ async fn run_app<B: Backend>(
                             }
                             (KeyModifiers::NONE, KeyCode::Char(c @ ('b' | 'w'))) => {
                                 if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
                                             KeyCode::Char(c),
                                             app.sessions.len(),
                                         );
@@ -4307,9 +5206,11 @@ async fn run_app<B: Backend>(
                             (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.should_quit = true,
                             (_, KeyCode::Esc) if app.tab_index != tabs::CONDUCTOR => {
                                 if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Esc, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Esc,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.project_view_open {
                                     app.project_view_open = false;
@@ -4784,17 +5685,34 @@ async fn run_app<B: Backend>(
                                     app.session_state.select(Some(i));
                                 } else if app.tab_index == tabs::MEMORY {
                                     // Memory
-                                    let i = match app.memory_state.selected() {
-                                        Some(i) => {
-                                            if i >= app.memories.len().saturating_sub(1) {
+                                    if app.memory_graph_enabled
+                                        && app.input_mode == InputMode::MemoryDetailFocus
+                                    {
+                                        let targets =
+                                            crate::tabs::memory::graph_navigation_targets(&app);
+                                        if !targets.is_empty() {
+                                            app.memory_graph_selection = if app
+                                                .memory_graph_selection
+                                                >= targets.len().saturating_sub(1)
+                                            {
                                                 0
                                             } else {
-                                                i + 1
-                                            }
+                                                app.memory_graph_selection + 1
+                                            };
                                         }
-                                        None => 0,
-                                    };
-                                    app.memory_state.select(Some(i));
+                                    } else {
+                                        let i = match app.memory_state.selected() {
+                                            Some(i) => {
+                                                if i >= app.memories.len().saturating_sub(1) {
+                                                    0
+                                                } else {
+                                                    i + 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.memory_state.select(Some(i));
+                                    }
                                 } else if app.tab_index == tabs::LSPS {
                                     // LSPs
                                     let i = match app.lsp_state.selected() {
@@ -4815,9 +5733,11 @@ async fn run_app<B: Backend>(
                                     };
                                     app.lsp_state.select(Some(i));
                                 } else if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Enter, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Enter,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
@@ -4912,17 +5832,32 @@ async fn run_app<B: Backend>(
                                     app.session_state.select(Some(i));
                                 } else if app.tab_index == tabs::MEMORY {
                                     // Memory
-                                    let i = match app.memory_state.selected() {
-                                        Some(i) => {
-                                            if i == 0 {
-                                                app.memories.len().saturating_sub(1)
-                                            } else {
-                                                i - 1
-                                            }
+                                    if app.memory_graph_enabled
+                                        && app.input_mode == InputMode::MemoryDetailFocus
+                                    {
+                                        let targets =
+                                            crate::tabs::memory::graph_navigation_targets(&app);
+                                        if !targets.is_empty() {
+                                            app.memory_graph_selection =
+                                                if app.memory_graph_selection == 0 {
+                                                    targets.len().saturating_sub(1)
+                                                } else {
+                                                    app.memory_graph_selection - 1
+                                                };
                                         }
-                                        None => 0,
-                                    };
-                                    app.memory_state.select(Some(i));
+                                    } else {
+                                        let i = match app.memory_state.selected() {
+                                            Some(i) => {
+                                                if i == 0 {
+                                                    app.memories.len().saturating_sub(1)
+                                                } else {
+                                                    i - 1
+                                                }
+                                            }
+                                            None => 0,
+                                        };
+                                        app.memory_state.select(Some(i));
+                                    }
                                 } else if app.tab_index == tabs::LSPS {
                                     // LSPs
                                     let i = match app.lsp_state.selected() {
@@ -4942,9 +5877,11 @@ async fn run_app<B: Backend>(
                                     };
                                     app.lsp_state.select(Some(i));
                                 } else if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Up, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Up,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::SETTINGS {
                                     // Settings
@@ -5046,9 +5983,11 @@ async fn run_app<B: Backend>(
                             }
                             (_, KeyCode::Left) => {
                                 if app.tab_index == tabs::MAESTROCLAW {
-                                    let action = app
-                                        .maestroclaw_pane
-                                        .handle_key_with_session_count(KeyCode::Left, app.sessions.len());
+                                    let action =
+                                        app.maestroclaw_pane.handle_key_with_session_count(
+                                            KeyCode::Left,
+                                            app.sessions.len(),
+                                        );
                                     let _ = handle_maestroclaw_action(&mut app, action);
                                 } else if app.tab_index == tabs::PROJECTS && app.preview_focused {
                                     if let Some(current) = &app.project_explorer_path {
@@ -5177,6 +6116,10 @@ async fn run_app<B: Backend>(
                                                     .error(format!("Failed to save config: {}", e));
                                             }
                                         },
+                                    }
+                                } else if app.tab_index == tabs::MEMORY {
+                                    if !app.memories.is_empty() {
+                                        app.input_mode = InputMode::MemoryDetail;
                                     }
                                 } else if app.tab_index == tabs::PROJECTS {
                                     // Projects Tab - Launch Yazi via maestro-tab
@@ -7118,14 +8061,16 @@ mod app_wiring_tests {
         std::fs::create_dir_all(config_dir.join("workspace")).expect("create workspace dir");
 
         // Write a minimal config so load_from_dir actually parses a file.
-        std::fs::write(config_dir.join("config.toml"), "primary_tool = \"claude\"\n")
-            .expect("write config");
+        std::fs::write(
+            config_dir.join("config.toml"),
+            "primary_tool = \"claude\"\n",
+        )
+        .expect("write config");
 
         // Load config via the hermetic path (mirrors load_maestroclaw_workspace_dir
         // but without touching the real home directory).
-        let config =
-            maestro_claw::config::Config::load_from_dir(tmp.path().to_path_buf())
-                .expect("load config from temp dir");
+        let config = maestro_claw::config::Config::load_from_dir(tmp.path().to_path_buf())
+            .expect("load config from temp dir");
         let expected_ws = config.workspace_dir.clone();
 
         // Create the pane exactly as App::new does.
@@ -7169,16 +8114,13 @@ mod app_wiring_tests {
         assert!(app.maestroclaw_pane.is_session_browser_active());
 
         // 2. SessionBrowserSelect should find the session and switch to Sessions tab.
-        let handled =
-            handle_maestroclaw_action(&mut app, MaestroClawAction::SessionBrowserSelect);
+        let handled = handle_maestroclaw_action(&mut app, MaestroClawAction::SessionBrowserSelect);
         assert!(handled);
         assert_eq!(
-            app.tab_index, tabs::SESSIONS,
+            app.tab_index,
+            tabs::SESSIONS,
             "tab_index must switch to Sessions after SessionBrowserSelect"
         );
-        assert_eq!(
-            app.status_message,
-            "Focused session 'My Test Session'"
-        );
+        assert_eq!(app.status_message, "Focused session 'My Test Session'");
     }
 }

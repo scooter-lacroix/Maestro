@@ -1,5 +1,7 @@
 /// Quick launcher to test TrackLens UI
-use leindex_core::tracklens::{ReviewContent, ReviewMetadata, ReviewMode, ServerConfig, TrackLensServer};
+use leindex_core::tracklens::{
+    ReviewContent, ReviewMetadata, ReviewMode, ServerConfig, TrackLensServer,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

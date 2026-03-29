@@ -230,4 +230,3 @@ pub fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(missing_para, chunks[2]);
     }
 }
-

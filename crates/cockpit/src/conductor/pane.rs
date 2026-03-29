@@ -19,7 +19,7 @@ use leindex_core::{
 };
 use maestro_pi_mono::agents::mapping::AgentRole;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 use super::model::ConductorState;
 use super::{
     input_modal::InputModal, memory_browser::MemoryBrowser, selector_modal::SelectorModal,
-    ConductorTree, TreeNodeId,
+    TreeNodeId,
 };
 use crate::maestro_paths::MaestroProject;
 
@@ -176,8 +176,12 @@ pub struct ConductorPane {
     pub memory_browser: MemoryBrowser,
     /// Active cancellation token for background execution
     pub cancellation_token: Option<Arc<CancellationToken>>,
-    /// Normalized conductor tree (single source of truth for UI state)
-    pub normalized_tree: ConductorTree,
+    /// Selected row in the iteration history list
+    pub selected_iteration_log: usize,
+    /// Whether the iteration history list is focused
+    pub iteration_history_focused: bool,
+    /// Whether the iteration detail popup is visible
+    pub show_iteration_popup: bool,
 }
 
 impl Default for ConductorPane {
@@ -222,12 +226,109 @@ impl Default for ConductorPane {
             },
             memory_browser: MemoryBrowser::default(),
             cancellation_token: None,
-            normalized_tree: ConductorTree::new(),
+            selected_iteration_log: 0,
+            iteration_history_focused: false,
+            show_iteration_popup: false,
         }
     }
 }
 
 impl ConductorPane {
+    pub fn push_runtime_log(
+        &mut self,
+        level: super::model::RuntimeLogLevel,
+        iteration: Option<u64>,
+        task_id: Option<String>,
+        summary: impl Into<String>,
+        details: Option<String>,
+    ) {
+        self.state.runtime_logs.push(super::model::RuntimeLogEntry {
+            timestamp: chrono::Utc::now(),
+            iteration,
+            task_id,
+            summary: summary.into(),
+            details,
+            level,
+        });
+        if self.state.runtime_logs.len() > 200 {
+            self.state.runtime_logs.remove(0);
+        }
+    }
+
+    pub fn move_iteration_selection(&mut self, delta: i32) {
+        if self.state.iteration_logs.is_empty() {
+            self.selected_iteration_log = 0;
+            return;
+        }
+
+        let max = self.state.iteration_logs.len().saturating_sub(1);
+        if delta > 0 {
+            self.selected_iteration_log = (self.selected_iteration_log + delta as usize).min(max);
+        } else {
+            self.selected_iteration_log = self
+                .selected_iteration_log
+                .saturating_sub(delta.unsigned_abs() as usize);
+        }
+    }
+
+    pub fn selected_iteration_log(&self) -> Option<&IterationLog> {
+        if self.state.iteration_logs.is_empty() {
+            return None;
+        }
+        let reversed_index = self
+            .state
+            .iteration_logs
+            .len()
+            .saturating_sub(1)
+            .saturating_sub(self.selected_iteration_log);
+        self.state.iteration_logs.get(reversed_index)
+    }
+
+    fn load_tracks_from_open_projects(
+        &self,
+        tracks: &mut Vec<Track>,
+        external_ids: &mut std::collections::HashSet<String>,
+    ) {
+        let discovered_projects = crate::maestro_paths::discover_all_projects();
+        let current_tracks_dir = self
+            .tracks_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.tracks_dir.clone());
+
+        for project in discovered_projects {
+            let project_tracks_dir = project
+                .tracks_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project.tracks_dir.clone());
+
+            if project_tracks_dir == current_tracks_dir {
+                continue;
+            }
+
+            let tracks_path = project.tracks_dir.join("tracks.md");
+            let Ok(project_tracks) = parse_tracks_md(&tracks_path) else {
+                continue;
+            };
+
+            for mut track in project_tracks {
+                if tracks.iter().any(|existing| existing.id == track.id) {
+                    continue;
+                }
+
+                track.description = format!("[{}] {}", project.name(), track.description);
+                external_ids.insert(track.id.clone());
+                tracks.push(track);
+            }
+        }
+    }
+
+    fn selected_track_dir(&self, track_idx: usize) -> PathBuf {
+        self.tracks
+            .get(track_idx)
+            .and_then(|track| track.link_path.parent().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| self.tracks_dir.clone())
+    }
+
     /// Create a new conductor pane
     pub fn new(tracks_dir: PathBuf) -> Self {
         let mut pane = Self {
@@ -283,6 +384,7 @@ impl ConductorPane {
 
         // Discover external sessions from ~/.maestro/orchestrate
         let mut external_ids = std::collections::HashSet::new();
+        self.load_tracks_from_open_projects(&mut loaded_tracks, &mut external_ids);
         self.discover_external_sessions(&mut loaded_tracks, &mut external_ids);
 
         self.tracks = loaded_tracks;
@@ -550,6 +652,7 @@ impl ConductorPane {
         };
 
         let mut external_ids = std::collections::HashSet::new();
+        self.load_tracks_from_open_projects(&mut loaded_tracks, &mut external_ids);
         self.discover_external_sessions(&mut loaded_tracks, &mut external_ids);
 
         self.tracks = loaded_tracks;
@@ -741,10 +844,7 @@ impl ConductorPane {
         completed
     }
 
-    fn collect_valid_task_ids(
-        tasks: &[Task],
-        valid_ids: &mut std::collections::HashSet<String>,
-    ) {
+    fn collect_valid_task_ids(tasks: &[Task], valid_ids: &mut std::collections::HashSet<String>) {
         for task in tasks {
             valid_ids.insert(task.id.clone());
             Self::collect_valid_task_ids(&task.subtasks, valid_ids);
@@ -814,12 +914,22 @@ impl ConductorPane {
         let task_node_id = TreeNodeId::task(id);
         let session_node_id = TreeNodeId::session(id);
 
-        if self.normalized_tree.nodes.contains_key(&track_node_id) {
-            self.normalized_tree.toggle_expanded(&track_node_id);
-        } else if self.normalized_tree.nodes.contains_key(&task_node_id) {
-            self.normalized_tree.toggle_expanded(&task_node_id);
-        } else if self.normalized_tree.nodes.contains_key(&session_node_id) {
-            self.normalized_tree.toggle_expanded(&session_node_id);
+        if self
+            .state
+            .normalized_tree
+            .nodes
+            .contains_key(&track_node_id)
+        {
+            self.state.normalized_tree.toggle_expanded(&track_node_id);
+        } else if self.state.normalized_tree.nodes.contains_key(&task_node_id) {
+            self.state.normalized_tree.toggle_expanded(&task_node_id);
+        } else if self
+            .state
+            .normalized_tree
+            .nodes
+            .contains_key(&session_node_id)
+        {
+            self.state.normalized_tree.toggle_expanded(&session_node_id);
         }
     }
 
@@ -833,7 +943,7 @@ impl ConductorPane {
         let items = self.get_selectable_items();
         if items.is_empty() {
             self.selected_index = 0;
-            self.normalized_tree.selected_node = None;
+            self.state.normalized_tree.selected_node = None;
             return;
         }
 
@@ -956,6 +1066,7 @@ impl ConductorPane {
     /// Clear output
     pub fn clear_output(&mut self) {
         self.iteration_output.clear();
+        self.state.runtime_logs.clear();
         self.output_scroll = 0;
     }
 
@@ -1042,7 +1153,7 @@ impl ConductorPane {
         }
 
         cmd.push_arg("--tracks-dir");
-        cmd.push_arg(self.tracks_dir.display().to_string());
+        cmd.push_arg(self.selected_track_dir(track_idx).display().to_string());
 
         Some(cmd)
     }
@@ -1060,7 +1171,7 @@ impl ConductorPane {
         cmd.push_arg("pause");
         cmd.push_arg(track_id);
         cmd.push_arg("--tracks-dir");
-        cmd.push_arg(self.tracks_dir.display().to_string());
+        cmd.push_arg(self.selected_track_dir(track_idx).display().to_string());
         Some(cmd)
     }
 
@@ -1077,7 +1188,7 @@ impl ConductorPane {
         cmd.push_arg("resume");
         cmd.push_arg(track_id);
         cmd.push_arg("--tracks-dir");
-        cmd.push_arg(self.tracks_dir.display().to_string());
+        cmd.push_arg(self.selected_track_dir(track_idx).display().to_string());
         Some(cmd)
     }
 
@@ -1144,10 +1255,13 @@ impl ConductorPane {
         for idx in 0..self.tracks.len() {
             let track_id = self.tracks[idx].id.clone();
             // Try to load metadata
-            if let Ok(meta_content) = std::fs::read_to_string(
-                self.tracks_dir.join(&track_id).join("metadata.json")
-            ) {
-                if let Ok(track_meta) = serde_json::from_str::<leindex_core::orchestrate::model::TrackMetadata>(&meta_content) {
+            if let Ok(meta_content) =
+                std::fs::read_to_string(self.tracks_dir.join(&track_id).join("metadata.json"))
+            {
+                if let Ok(track_meta) = serde_json::from_str::<
+                    leindex_core::orchestrate::model::TrackMetadata,
+                >(&meta_content)
+                {
                     metadata.insert(track_id.clone(), track_meta);
                 }
             }
@@ -1171,37 +1285,41 @@ impl ConductorPane {
             .build()?;
 
         // Preserve expansion state from old tree
-        let old_expanded = std::mem::take(&mut self.normalized_tree.expanded_nodes);
-        let old_selected = self.normalized_tree.selected_node.clone();
+        let old_expanded = std::mem::take(&mut self.state.normalized_tree.expanded_nodes);
+        let old_selected = self.state.normalized_tree.selected_node.clone();
 
         // Update tree
-        self.normalized_tree = tree;
+        self.state.normalized_tree = tree;
 
         // Restore expansion state for nodes that still exist
         for node_id in old_expanded {
-            if self.normalized_tree.nodes.contains_key(&node_id) {
-                self.normalized_tree.expanded_nodes.insert(node_id);
+            if self.state.normalized_tree.nodes.contains_key(&node_id) {
+                self.state.normalized_tree.expanded_nodes.insert(node_id);
             }
         }
 
-        if self.normalized_tree.expanded_nodes.is_empty() {
-            for root_id in self.normalized_tree.root_ids.clone() {
-                self.normalized_tree.expanded_nodes.insert(root_id);
+        if self.state.normalized_tree.expanded_nodes.is_empty() {
+            for root_id in self.state.normalized_tree.root_ids.clone() {
+                self.state.normalized_tree.expanded_nodes.insert(root_id);
             }
         }
 
         // Restore selection if it still exists
         if let Some(selected_id) = old_selected {
-            if self.normalized_tree.nodes.contains_key(&selected_id) {
-                self.normalized_tree.selected_node = Some(selected_id);
+            if self.state.normalized_tree.nodes.contains_key(&selected_id) {
+                self.state.normalized_tree.selected_node = Some(selected_id);
             }
         }
 
-        if self.normalized_tree.selected_node.is_none() {
+        if self.state.normalized_tree.selected_node.is_none() {
             self.sync_selection_from_legacy();
-            if self.normalized_tree.selected_node.is_none() {
-                self.normalized_tree.selected_node =
-                    self.normalized_tree.visible_nodes().first().map(|(node_id, _)| node_id.clone());
+            if self.state.normalized_tree.selected_node.is_none() {
+                self.state.normalized_tree.selected_node = self
+                    .state
+                    .normalized_tree
+                    .visible_nodes()
+                    .first()
+                    .map(|(node_id, _)| node_id.clone());
             }
         }
 
@@ -1253,8 +1371,7 @@ impl ConductorPane {
                         let session_path = entry.path().join("session.json");
                         if session_path.exists() {
                             if let Ok(content) = std::fs::read_to_string(&session_path) {
-                                if let Ok(session) =
-                                    serde_json::from_str::<SessionState>(&content)
+                                if let Ok(session) = serde_json::from_str::<SessionState>(&content)
                                 {
                                     // Skip completed/failed sessions
                                     if matches!(
@@ -1267,15 +1384,15 @@ impl ConductorPane {
                                         continue;
                                     }
 
-                                    external_sessions.push(
-                                        super::tree_builder::ExternalSession {
-                                            id: session.session_id.clone(),
-                                            track_id: track_id.clone(),
-                                            task_id: String::new(),
-                                            title: format!("Session {}", session.session_id),
-                                            status: super::normalized_model::ConductorNodeStatus::from(session.status),
-                                        },
-                                    );
+                                    external_sessions.push(super::tree_builder::ExternalSession {
+                                        id: session.session_id.clone(),
+                                        track_id: track_id.clone(),
+                                        task_id: String::new(),
+                                        title: format!("Session {}", session.session_id),
+                                        status: super::normalized_model::ConductorNodeStatus::from(
+                                            session.status,
+                                        ),
+                                    });
                                 }
                             }
                         }
@@ -1287,28 +1404,33 @@ impl ConductorPane {
 
     /// Toggle expansion using TreeNodeId
     pub fn toggle_node_expansion(&mut self, node_id: &TreeNodeId) {
-        self.normalized_tree.toggle_expanded(node_id);
+        self.state.normalized_tree.toggle_expanded(node_id);
     }
 
     /// Check if a node is expanded using TreeNodeId
     pub fn is_node_expanded(&self, node_id: &TreeNodeId) -> bool {
-        self.normalized_tree.is_expanded(node_id)
+        self.state.normalized_tree.is_expanded(node_id)
     }
 
     /// Get the currently selected node from the normalized tree
     pub fn get_selected_node(&self) -> Option<&Arc<dyn super::ConductorNode>> {
-        self.normalized_tree.selected_node.as_ref()
-            .and_then(|id| self.normalized_tree.nodes.get(id))
+        self.state
+            .normalized_tree
+            .selected_node
+            .as_ref()
+            .and_then(|id| self.state.normalized_tree.nodes.get(id))
     }
 
     /// Set the selected node in the normalized tree
     pub fn set_selected_node(&mut self, node_id: Option<TreeNodeId>) {
-        self.normalized_tree.set_selected(node_id);
+        self.state.normalized_tree.set_selected(node_id);
     }
 
     /// Get all visible nodes from the normalized tree
     pub fn get_visible_nodes(&self) -> Vec<Arc<dyn super::ConductorNode>> {
-        self.normalized_tree.visible_nodes()
+        self.state
+            .normalized_tree
+            .visible_nodes()
             .into_iter()
             .map(|(_, node)| node)
             .collect()
@@ -1316,7 +1438,7 @@ impl ConductorPane {
 
     fn sync_selection_from_legacy(&mut self) {
         let Some(current_id) = self.get_current_selection_id() else {
-            self.normalized_tree.selected_node = None;
+            self.state.normalized_tree.selected_node = None;
             return;
         };
 
@@ -1327,8 +1449,8 @@ impl ConductorPane {
         ];
 
         for node_id in candidate_ids {
-            if self.normalized_tree.nodes.contains_key(&node_id) {
-                self.normalized_tree.selected_node = Some(node_id);
+            if self.state.normalized_tree.nodes.contains_key(&node_id) {
+                self.state.normalized_tree.selected_node = Some(node_id);
                 return;
             }
         }
@@ -1427,6 +1549,10 @@ pub fn render_conductor(
         // Let's stick with the spec: bottom-left is for logs.
     }
 
+    if pane.show_iteration_popup {
+        crate::conductor::iteration_history::render_iteration_popup(frame, area, pane, theme);
+    }
+
     // Render Setup Wizard if open (dominant overlay)
     if pane.setup.show_setup_wizard {
         render_setup_wizard(frame, area, pane, theme);
@@ -1481,28 +1607,39 @@ fn render_logs_pane(
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    // Filter out common metadata lines to keep logs clean
-    let filtered_logs: Vec<&String> = pane
-        .iteration_output
+    let logs_text: Vec<Line> = pane
+        .state
+        .runtime_logs
         .iter()
         .rev()
-        .filter(|line| !line.starts_with("--- Iteration"))
         .take(area.height as usize)
-        .collect();
-
-    let logs_text: Vec<Line> = filtered_logs
         .into_iter()
         .rev()
-        .map(|line| {
-            let line_upper = line.to_uppercase();
-            let style = if line_upper.contains("ERROR") || line_upper.contains("FAIL") {
-                Style::default().fg(Color::Red)
-            } else if line.starts_with("---") {
-                Style::default().fg(theme.accent)
-            } else {
-                Style::default().fg(theme.muted)
+        .map(|entry| {
+            let style = match entry.level {
+                crate::conductor::model::RuntimeLogLevel::Info => Style::default().fg(theme.muted),
+                crate::conductor::model::RuntimeLogLevel::Success => {
+                    Style::default().fg(Color::Green)
+                }
+                crate::conductor::model::RuntimeLogLevel::Warning => {
+                    Style::default().fg(Color::Yellow)
+                }
+                crate::conductor::model::RuntimeLogLevel::Error => Style::default().fg(Color::Red),
             };
-            Line::from(Span::styled(line.as_str(), style))
+
+            let prefix = entry
+                .iteration
+                .map(|iter| format!("#{} ", iter))
+                .unwrap_or_default();
+
+            Line::from(vec![
+                Span::styled(
+                    format!("{} ", entry.timestamp.format("%H:%M:%S")),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(prefix, Style::default().fg(theme.accent)),
+                Span::styled(&entry.summary, style),
+            ])
         })
         .collect();
 
@@ -1517,10 +1654,10 @@ fn render_setup_wizard(
     pane: &mut ConductorPane,
     theme: &crate::theme::Theme,
 ) {
-    // Clear the entire area with a dim background
-    let clear_block = Block::default()
-        .style(Style::default().bg(Color::Black));
-    frame.render_widget(clear_block, area);
+    // Clear the entire area, then paint a dark scrim background
+    frame.render_widget(Clear, area);
+    let scrim = Block::default().style(Style::default().bg(Color::Rgb(15, 15, 20)));
+    frame.render_widget(scrim, area);
 
     // Center the wizard content
     let wizard_width = 60.min(area.width.saturating_sub(4));
@@ -1650,9 +1787,7 @@ fn render_wizard_tool_selection(
 
     let status = pane.setup.status.as_ref();
     let empty_tools = vec![];
-    let available_tools = status
-        .map(|s| &s.available_tools)
-        .unwrap_or(&empty_tools);
+    let available_tools = status.map(|s| &s.available_tools).unwrap_or(&empty_tools);
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -1663,11 +1798,23 @@ fn render_wizard_tool_selection(
     ];
 
     let tools: Vec<(AgentTool, bool)> = vec![
-        (AgentTool::Iflow, available_tools.contains(&AgentTool::Iflow)),
-        (AgentTool::Claude, available_tools.contains(&AgentTool::Claude)),
-        (AgentTool::Gemini, available_tools.contains(&AgentTool::Gemini)),
+        (
+            AgentTool::Iflow,
+            available_tools.contains(&AgentTool::Iflow),
+        ),
+        (
+            AgentTool::Claude,
+            available_tools.contains(&AgentTool::Claude),
+        ),
+        (
+            AgentTool::Gemini,
+            available_tools.contains(&AgentTool::Gemini),
+        ),
         (AgentTool::Qwen, available_tools.contains(&AgentTool::Qwen)),
-        (AgentTool::OpenCode, available_tools.contains(&AgentTool::OpenCode)),
+        (
+            AgentTool::OpenCode,
+            available_tools.contains(&AgentTool::OpenCode),
+        ),
     ];
 
     for (i, (tool, available)) in tools.iter().enumerate() {
@@ -1692,7 +1839,15 @@ fn render_wizard_tool_selection(
             Span::styled(format!("  {} ", i + 1), style),
             Span::styled(status_mark, style),
             Span::styled(
-                format!(" {} - {}", tool.as_str(), if *available { "available" } else { "not installed" }),
+                format!(
+                    " {} - {}",
+                    tool.as_str(),
+                    if *available {
+                        "available"
+                    } else {
+                        "not installed"
+                    }
+                ),
                 style,
             ),
         ]));

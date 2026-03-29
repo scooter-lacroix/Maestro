@@ -9,6 +9,7 @@ Creates a new session record and initializes tracking.
 import json
 import sys
 import os
+import asyncio
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
@@ -87,14 +88,32 @@ def session_register_hook(input_data: dict) -> dict:
             "started_at": session.started_at.isoformat() if session.started_at else None,
         }
 
-        # Capture session start memory
-        manager.capture_memory(
-            content=f"Session started: Agent {agent_name} ({agent_id})",
-            category="session",
-            importance="normal",
-            summary=f"Session {session_id} started",
-            use_buffer=True,
-        )
+        # Capture session start in Nexus-backed truth.
+        try:
+            from maestro.memory.service import MaestroMemoryService
+
+            async def _store_session_start() -> None:
+                service = MaestroMemoryService()
+                await service.initialize()
+                try:
+                    await service.store_command_context(
+                        command="hook:session-start",
+                        project_path=project_path or os.getcwd(),
+                        context={
+                            "session_id": session_id,
+                            "agent_id": agent_id,
+                            "agent_name": agent_name,
+                            "event": "session_start",
+                            "started_at": session.started_at.isoformat() if session.started_at else None,
+                        },
+                    )
+                finally:
+                    await service.close()
+
+            asyncio.run(_store_session_start())
+        except Exception:
+            # Session registration should never fail just because Nexus capture is unavailable.
+            pass
 
         return input_data
 

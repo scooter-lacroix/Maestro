@@ -34,6 +34,7 @@ pub enum WizardStep {
     PrimaryToolSelection,
     ProviderSelection,
     ChannelSetup,
+    CronSetup,
     ToolSummary,
     Complete,
 }
@@ -47,8 +48,9 @@ impl WizardStep {
             WizardStep::PrimaryToolSelection => 3,
             WizardStep::ProviderSelection => 4,
             WizardStep::ChannelSetup => 5,
-            WizardStep::ToolSummary => 6,
-            WizardStep::Complete => 7,
+            WizardStep::CronSetup => 6,
+            WizardStep::ToolSummary => 7,
+            WizardStep::Complete => 8,
         }
     }
 
@@ -60,12 +62,13 @@ impl WizardStep {
             WizardStep::PrimaryToolSelection => "Primary Tool",
             WizardStep::ProviderSelection => "Provider",
             WizardStep::ChannelSetup => "Channels",
+            WizardStep::CronSetup => "Cron",
             WizardStep::ToolSummary => "Summary",
             WizardStep::Complete => "Complete",
         }
     }
 
-    pub const TOTAL_STEPS: usize = 7;
+    pub const TOTAL_STEPS: usize = 8;
 }
 
 /// Setup wizard state for MaestroClaw
@@ -81,6 +84,10 @@ pub struct SetupWizard {
     pub selected_provider: Option<usize>,
     /// Selected channels
     pub selected_channels: HashSet<ChannelType>,
+    /// Whether scheduled cron automation is enabled
+    pub cron_enabled: bool,
+    /// Maximum cron run history to retain
+    pub cron_max_run_history: usize,
     /// Tool details: (name, version, binary_path)
     pub tool_details: Vec<(String, Option<String>, Option<String>)>,
     /// List of available providers
@@ -110,6 +117,8 @@ impl SetupWizard {
             selected_primary_tool: None,
             selected_provider: None,
             selected_channels: HashSet::new(),
+            cron_enabled: true,
+            cron_max_run_history: 50,
             tool_details: Vec::new(),
             provider_list: Vec::new(),
             tool_summary: Vec::new(),
@@ -129,15 +138,12 @@ impl SetupWizard {
     /// Detect available tools on the system with version information
     pub fn detect_tools(&mut self) {
         // Agent tools with version detection
-        let agent_tools = [
-            "claude", "codex", "gemini", "qwen", "amp", "droid", "iflow",
-        ];
+        let agent_tools = ["claude", "codex", "gemini", "qwen", "amp", "droid", "iflow"];
 
         // Supplementary tools (presence only)
         let supplementary_tools = [
-            "git", "gh", "docker", "kubectl", "npm", "yarn", "pnpm",
-            "cargo", "rustc", "python3", "python", "pip", "uv",
-            "node", "bun", "deno", "go",
+            "git", "gh", "docker", "kubectl", "npm", "yarn", "pnpm", "cargo", "rustc", "python3",
+            "python", "pip", "uv", "node", "bun", "deno", "go",
         ];
 
         let mut detected = Vec::new();
@@ -148,7 +154,11 @@ impl SetupWizard {
             if let Ok(path) = which::which(tool) {
                 let version = Self::get_tool_version(tool, &path);
                 detected.push(tool.to_string());
-                details.push((tool.to_string(), version, path.to_str().map(|s| s.to_string())));
+                details.push((
+                    tool.to_string(),
+                    version,
+                    path.to_str().map(|s| s.to_string()),
+                ));
             }
         }
 
@@ -172,9 +182,7 @@ impl SetupWizard {
     fn get_tool_version(_tool: &str, path: &std::path::Path) -> Option<String> {
         use std::process::Command;
 
-        let result = Command::new(path)
-            .arg("--version")
-            .output();
+        let result = Command::new(path).arg("--version").output();
 
         match result {
             Ok(output) => {
@@ -311,7 +319,8 @@ impl SetupWizard {
             WizardStep::ToolDetection => WizardStep::PrimaryToolSelection,
             WizardStep::PrimaryToolSelection => WizardStep::ProviderSelection,
             WizardStep::ProviderSelection => WizardStep::ChannelSetup,
-            WizardStep::ChannelSetup => {
+            WizardStep::ChannelSetup => WizardStep::CronSetup,
+            WizardStep::CronSetup => {
                 self.build_tool_summary();
                 WizardStep::ToolSummary
             }
@@ -331,7 +340,8 @@ impl SetupWizard {
             WizardStep::PrimaryToolSelection => WizardStep::ToolDetection,
             WizardStep::ProviderSelection => WizardStep::PrimaryToolSelection,
             WizardStep::ChannelSetup => WizardStep::ProviderSelection,
-            WizardStep::ToolSummary => WizardStep::ChannelSetup,
+            WizardStep::CronSetup => WizardStep::ChannelSetup,
+            WizardStep::ToolSummary => WizardStep::CronSetup,
             WizardStep::Complete => WizardStep::ToolSummary,
         };
     }
@@ -367,6 +377,8 @@ impl SetupWizard {
         self.selected_primary_tool = None;
         self.selected_provider = None;
         self.selected_channels.clear();
+        self.cron_enabled = true;
+        self.cron_max_run_history = 50;
         self.tool_details.clear();
         self.provider_list.clear();
         self.tool_summary.clear();

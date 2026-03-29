@@ -11,6 +11,8 @@ Hook Phases:
 - post-tool-use: Hooks that run after tool execution
 - pre-compact: Hooks that run before context compaction
 - user-prompt-submit: Hooks that run when user submits a prompt
+- review: Hooks that run when a review transition is reached
+- checkpoint: Hooks that run when a checkpoint transition is reached
 - subagent-stop: Hooks that run when a subagent completes
 - session-end: Hooks that run when a session ends
 """
@@ -24,6 +26,8 @@ from maestro.hooks.executor import (
     execute_post_tool_use,
     execute_pre_compact,
     execute_user_prompt_submit,
+    execute_review,
+    execute_checkpoint,
     execute_subagent_stop,
     execute_session_end,
 )
@@ -79,6 +83,8 @@ __all__ = [
     "execute_post_tool_use",
     "execute_pre_compact",
     "execute_user_prompt_submit",
+    "execute_review",
+    "execute_checkpoint",
     "execute_subagent_stop",
     "execute_session_end",
 ]
@@ -86,15 +92,17 @@ __all__ = [
 # Hook paths by phase
 HOOK_PHASES = {
     "session-start": [
+        "session-start/docs-reader.py",
         "session-start/session-load.py",
         "session-start/session-register.py",
         "session-start/trace-start.py",
     ],
     "pre-tool-use": [
-        "pre-tool-use/tldr-read.py",
+        "pre-tool-use/leindex-enforcer.py",
+        "pre-tool-use/leindex-read.py",
         "pre-tool-use/smart-search.py",
         "pre-tool-use/file-claims.py",
-        "pre-tool-use/tldr-context.py",
+        "pre-tool-use/leindex-context.py",
     ],
     "post-tool-use": [
         "post-tool-use/post-edit.py",
@@ -103,6 +111,13 @@ HOOK_PHASES = {
     ],
     "pre-compact": [
         "pre-compact/continuity.py",
+        "pre-compact/handoff_generator.py",
+    ],
+    "review": [
+        "review/cognition.py",
+    ],
+    "checkpoint": [
+        "checkpoint/cognition.py",
     ],
     "user-prompt-submit": [
         "user-prompt-submit/skill-activation.py",
@@ -110,6 +125,7 @@ HOOK_PHASES = {
     ],
     "subagent-stop": [
         "subagent-stop/agent-report.py",
+        "subagent-stop/continue-enforcer.py",
     ],
     "session-end": [
         "session-end/session-cleanup.py",

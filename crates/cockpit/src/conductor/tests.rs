@@ -40,8 +40,8 @@
 
 use tempfile::TempDir;
 
-use super::pane::ConductorPane;
 use super::model::{ConductorState, ConductorStatus};
+use super::pane::ConductorPane;
 
 // ============================================================================
 // Phase 1: Basic State Management Tests
@@ -51,7 +51,7 @@ use super::model::{ConductorState, ConductorStatus};
 fn test_conductor_pane_creation() {
     let temp_dir = TempDir::new().unwrap();
     let pane = ConductorPane::new(temp_dir.path().to_path_buf());
-    
+
     // Verify initial state
     assert!(pane.tracks.is_empty());
     assert_eq!(pane.selected_index, 0);
@@ -60,7 +60,7 @@ fn test_conductor_pane_creation() {
 #[test]
 fn test_conductor_state_defaults() {
     let state = ConductorState::default();
-    
+
     assert_eq!(state.status, ConductorStatus::Ready);
     assert!(state.session_id.is_none());
     assert_eq!(state.current_iteration, 0);
@@ -75,7 +75,7 @@ fn test_track_discovery_finds_tracks() {
     let temp_dir = TempDir::new().unwrap();
     let tracks_dir = temp_dir.path().join("tracks");
     std::fs::create_dir_all(&tracks_dir).unwrap();
-    
+
     // Create a track file
     let track_content = r###"## [ ] Demo Track
 
@@ -83,10 +83,10 @@ fn test_track_discovery_finds_tracks() {
 **Description**: Demo
 "###;
     std::fs::write(tracks_dir.join("tracks.md"), track_content).unwrap();
-    
+
     let mut pane = ConductorPane::new(temp_dir.path().to_path_buf());
     pane.refresh_tracks_if_needed();
-    
+
     assert!(
         pane.tracks.iter().any(|track| track.id == "demo-track"),
         "planned tracks should remain visible even without a live session"

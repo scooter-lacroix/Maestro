@@ -16,8 +16,15 @@ use leindex_core::orchestrate::model::{SessionState, TrackMetadata, TrackPlan};
 pub enum TreeNodeId {
     Root,
     Track(String),
-    Task { track_id: String, task_id: String },
-    Session { track_id: String, task_id: String, session_id: String },
+    Task {
+        track_id: String,
+        task_id: String,
+    },
+    Session {
+        track_id: String,
+        task_id: String,
+        session_id: String,
+    },
 }
 
 impl TreeNodeId {
@@ -26,7 +33,10 @@ impl TreeNodeId {
     }
 
     pub fn task(id: impl Into<String>) -> Self {
-        Self::Task { track_id: String::new(), task_id: id.into() }
+        Self::Task {
+            track_id: String::new(),
+            task_id: id.into(),
+        }
     }
 
     pub fn session(id: impl Into<String>) -> Self {
@@ -48,7 +58,11 @@ impl TreeNodeId {
                     format!("track:{}/task:{}", track_id, task_id)
                 }
             }
-            TreeNodeId::Session { track_id, task_id, session_id } => {
+            TreeNodeId::Session {
+                track_id,
+                task_id,
+                session_id,
+            } => {
                 format!("track:{}/task:{}/session:{}", track_id, task_id, session_id)
             }
         }
@@ -73,13 +87,21 @@ impl From<leindex_core::orchestrate::model::SessionStatus> for ConductorNodeStat
     fn from(status: leindex_core::orchestrate::model::SessionStatus) -> Self {
         match status {
             leindex_core::orchestrate::model::SessionStatus::Idle => ConductorNodeStatus::Idle,
-            leindex_core::orchestrate::model::SessionStatus::Running => ConductorNodeStatus::Running,
+            leindex_core::orchestrate::model::SessionStatus::Running => {
+                ConductorNodeStatus::Running
+            }
             leindex_core::orchestrate::model::SessionStatus::Pausing => ConductorNodeStatus::Paused,
             leindex_core::orchestrate::model::SessionStatus::Paused => ConductorNodeStatus::Paused,
-            leindex_core::orchestrate::model::SessionStatus::Completed => ConductorNodeStatus::Completed,
+            leindex_core::orchestrate::model::SessionStatus::Completed => {
+                ConductorNodeStatus::Completed
+            }
             leindex_core::orchestrate::model::SessionStatus::Failed => ConductorNodeStatus::Failed,
-            leindex_core::orchestrate::model::SessionStatus::Interrupted => ConductorNodeStatus::Failed,
-            leindex_core::orchestrate::model::SessionStatus::Stopping => ConductorNodeStatus::Running,
+            leindex_core::orchestrate::model::SessionStatus::Interrupted => {
+                ConductorNodeStatus::Failed
+            }
+            leindex_core::orchestrate::model::SessionStatus::Stopping => {
+                ConductorNodeStatus::Running
+            }
         }
     }
 }
@@ -358,11 +380,7 @@ impl TreeBuilder {
         for track in &self.tracks {
             if let Some(plan) = self.plans.get(&track.id) {
                 for task in &plan.tasks {
-                    Self::collect_task_nodes(
-                        &track.id,
-                        task,
-                        &mut all_task_nodes,
-                    );
+                    Self::collect_task_nodes(&track.id, task, &mut all_task_nodes);
                 }
             }
         }
@@ -431,9 +449,15 @@ impl TreeBuilder {
 
             // Determine status from track's status field
             let status = match track.status {
-                leindex_core::orchestrate::model::TrackStatus::Pending => ConductorNodeStatus::Pending,
-                leindex_core::orchestrate::model::TrackStatus::InProgress => ConductorNodeStatus::InProgress,
-                leindex_core::orchestrate::model::TrackStatus::Completed => ConductorNodeStatus::Completed,
+                leindex_core::orchestrate::model::TrackStatus::Pending => {
+                    ConductorNodeStatus::Pending
+                }
+                leindex_core::orchestrate::model::TrackStatus::InProgress => {
+                    ConductorNodeStatus::InProgress
+                }
+                leindex_core::orchestrate::model::TrackStatus::Completed => {
+                    ConductorNodeStatus::Completed
+                }
             };
 
             // Get metadata for additional track info
@@ -502,8 +526,12 @@ impl TreeBuilder {
         // Determine task status
         let status = match task.status {
             leindex_core::orchestrate::model::TrackStatus::Pending => ConductorNodeStatus::Pending,
-            leindex_core::orchestrate::model::TrackStatus::InProgress => ConductorNodeStatus::InProgress,
-            leindex_core::orchestrate::model::TrackStatus::Completed => ConductorNodeStatus::Completed,
+            leindex_core::orchestrate::model::TrackStatus::InProgress => {
+                ConductorNodeStatus::InProgress
+            }
+            leindex_core::orchestrate::model::TrackStatus::Completed => {
+                ConductorNodeStatus::Completed
+            }
         };
 
         // Build subtask children first
@@ -537,4 +565,3 @@ impl TreeBuilder {
         result.push((task_id, node));
     }
 }
-

@@ -150,10 +150,7 @@ impl Checklist {
 
             // Arrow indicator (→ for cursor, spaces otherwise)
             let arrow = if is_cursor { "→ " } else { "  " };
-            spans.push(Span::styled(
-                arrow,
-                Style::default().fg(Color::Green),
-            ));
+            spans.push(Span::styled(arrow, Style::default().fg(Color::Green)));
 
             // Checkbox with color based on selection state
             let checkbox = if is_selected { "[✓]" } else { "[ ]" };
@@ -243,7 +240,8 @@ mod tests {
 
     #[test]
     fn test_toggle_current() {
-        let mut checklist = Checklist::new("Test", vec!["Item 1".to_string(), "Item 2".to_string()]);
+        let mut checklist =
+            Checklist::new("Test", vec!["Item 1".to_string(), "Item 2".to_string()]);
         checklist.toggle_current();
         assert!(checklist.is_selected(0));
         checklist.toggle_current();
@@ -252,7 +250,8 @@ mod tests {
 
     #[test]
     fn test_move_up() {
-        let mut checklist = Checklist::new("Test", vec!["Item 1".to_string(), "Item 2".to_string()]);
+        let mut checklist =
+            Checklist::new("Test", vec!["Item 1".to_string(), "Item 2".to_string()]);
         checklist.move_down();
         checklist.move_down();
         checklist.move_up();
@@ -265,7 +264,8 @@ mod tests {
 
     #[test]
     fn test_move_down() {
-        let mut checklist = Checklist::new("Test", vec!["Item 1".to_string(), "Item 2".to_string()]);
+        let mut checklist =
+            Checklist::new("Test", vec!["Item 1".to_string(), "Item 2".to_string()]);
         checklist.move_down();
         assert_eq!(checklist.cursor, 1);
         checklist.move_down();
@@ -292,11 +292,14 @@ mod tests {
 
     #[test]
     fn test_get_selected_items() {
-        let mut checklist = Checklist::new("Test", vec![
-            "Item 1".to_string(),
-            "Item 2".to_string(),
-            "Item 3".to_string(),
-        ]);
+        let mut checklist = Checklist::new(
+            "Test",
+            vec![
+                "Item 1".to_string(),
+                "Item 2".to_string(),
+                "Item 3".to_string(),
+            ],
+        );
         checklist.selected.insert(0);
         checklist.selected.insert(2);
         let selected = checklist.get_selected_items();

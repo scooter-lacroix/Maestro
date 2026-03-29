@@ -414,7 +414,7 @@ mod tests {
     fn test_agent_config_default() {
         let config = AgentConfig::default();
         assert_eq!(config.max_turns, 20);
-        assert_eq!(config.turn_timeout_secs, 86400);
+        assert_eq!(config.turn_timeout_secs, 300);
     }
 
     #[test]

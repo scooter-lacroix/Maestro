@@ -65,12 +65,16 @@ The wizard configures the following components (depending on which toggles you e
 | Component | Description |
 |-----------|-------------|
 | **Maestro protocols** | Canonical command protocols installed under `~/.maestro/integrations/commands/` (or your chosen install path) |
+| **Runtime binaries** | Installs `maestro`, `maestro-cockpit`, `maestro-gateway`, and `maestro-lsp-mcp-bridge` into `~/.local/bin/` |
+| **Maestro runtime assets** | Installs built-in agents and skills under `~/.maestro/agents/` and `~/.maestro/skills/` |
 | **Tool command packs** | Installs the tool-specific command/prompt pack (Claude Code commands, OpenCode skill, Codex prompts, Gemini/Qwen commands) |
-| **LeIndex MCP wiring** | Registers `leindex` in the Maestro MCP pool and points integrated CLI tools at `maestro mcp tool-search` |
+| **Claude plugins** | Installs both the Maestro Claude plugin bundle and the TrackLens plugin so hooks, skills, and review UI stay connected |
+| **LeIndex provider wiring** | Installs standalone LeIndex and wires managed sessions to use it directly; the Maestro MCP pool keeps `leindex` only as optional shared infrastructure |
+| **Nexus provider wiring** | Installs and initializes standalone Nexus so memory, retrieval, and cognition flow through the dedicated provider bridge |
 | **Pi-Mono integration** | Subagent workflow orchestration via `crates/pi-mono/` |
 | **LSP servers** | Auto-installs lsp-bridge and language servers for supported languages |
 | **Optional search stack** | Go + Zoekt (if enabled) |
-| **Rust CLI** | Installs the Rust `maestro` binary to `~/.local/bin/maestro` (after build) |
+| **Validation pass** | Verifies binaries, command surfaces, command packs, plugins, skills, provider health, and pool/provider boundaries before success |
 
 ---
 
@@ -107,6 +111,9 @@ The wizard configures the following components (depending on which toggles you e
 `install.sh` launches the Rust Conductor Wizard (TUI). In the configuration screen you can:
 
 - Choose the Maestro home directory (default: `~/.maestro`)
+- Choose provider install methods when needed:
+  - LeIndex: cargo, install script, or PyPI bootstrap
+  - Nexus: git clone/build/install or `cargo install nexus-memory`
 - Select which tools to integrate:
   - Claude Code
   - OpenCode
@@ -120,10 +127,13 @@ The wizard configures the following components (depending on which toggles you e
 - Optionally enable Go/Zoekt, tmux tooling, etc
 
 The TUI will display your detected distribution and package manager at startup.
+The installer also writes a durable log to `~/.maestro/logs/install-YYYYMMDD_HHMMSS.log` and updates `~/.maestro/logs/install-latest.log` so failed provider installs can be debugged later.
+You can override the destination with `MAESTRO_INSTALL_LOG`, `MAESTRO_INSTALL_LOG_FILE`, `MAESTRO_SETUP_LOG`, or `MAESTRO_SETUP_LOG_FILE`.
 
 ### Step 2: What "first-class integration" means (per tool)
 
 - **Claude Code**: installs commands to `~/.claude/commands/`, templates to `~/.claude/maestro-templates/`, and upserts `mcpServers.leindex` in `~/.claude/.mcp.json`
+- **Claude Code plugins**: installs `~/.claude/plugins/maestro/` and `~/.claude/plugins/tracklens/` so hooks, skills, templates, and TrackLens review tooling remain connected
 - **OpenCode**: installs the skill to `~/.config/opencode/skill/maestro/`, copies command protocols to `~/.config/opencode/commands/`, and updates `~/.config/opencode/opencode.json` (commands + MCP)
 - **Codex**: installs custom prompts under `${CODEX_HOME:-~/.codex}/prompts/` and upserts `[mcp_servers.leindex]` in `${CODEX_HOME:-~/.codex}/config.toml`
 - **Gemini**: installs TOML commands under `~/.gemini/commands/maestro/` and upserts `mcpServers.leindex` in `~/.gemini/settings.json`
@@ -132,7 +142,32 @@ The TUI will display your detected distribution and package manager at startup.
 - **Amp**: upserts `amp.mcpServers.leindex` in `~/.config/amp/settings.json`
 - **Droid**: upserts `mcpServers.leindex` in `~/.factory/mcp.json` (with `type: "stdio"`)
 
-The installer also registers the external `leindex mcp` server in the Maestro MCP pool, so Cockpit-launched CLI tools can all reach pooled MCP servers through the dynamic broker at `maestro mcp tool-search`.
+The installer keeps the Maestro MCP pool available for shared infrastructure, but managed Maestro sessions consume standalone LeIndex directly and receive Nexus through the provider bridge. The pooled `leindex` server remains available as optional shared infrastructure, not as the default analysis path.
+
+### Provider Boundary Verification
+
+For the canonical verification matrix and manual checklist, see [Provider Boundary Verification](./PROVIDER_BOUNDARY_VERIFICATION.md).
+
+The installer's success criteria now include proof that the standalone providers and the MCP pool are all usable in the right place:
+
+| Surface | Verification | What it proves |
+|---------|--------------|----------------|
+| Maestro runtime | `maestro --help`, `maestro tracklens --help`, `maestro mcp --help` | The full CLI and MCP pool surface are installed |
+| Standalone LeIndex | `leindex --version`, `leindex --help`, `leindex mcp --help` | Analysis provider is installed and exposes the expected command/MCP surface |
+| Standalone Nexus | `nexus --version`, `nexus init --help`, `nexus session --help` | Memory/cognition provider is installed and initialized |
+| Managed-session config | Claude/OpenCode/Codex/Gemini/Qwen/Amp/Droid config files | Direct provider wiring is written to the supported tool configs |
+
+### Manual Validation Checklist
+
+Use this checklist after installation or after a major upgrade:
+
+- Start `maestro tui` and confirm the Sessions, Conductor, Memory, and MaestroClaw tabs all render without errors.
+- Open the MaestroClaw tab and verify the active session surface shows provider metadata, prompt input, and runtime output.
+- Open the Memory tab and confirm entries expand to full content with agent/storage metadata and the relationship graph.
+- Open the Conductor tab and confirm track/task expansion, runtime logs, and iteration history are populated.
+- Run `maestro mcp --help` and confirm the shared pool surface still exposes `serve`, `proxy`, and `tool-search`.
+- Run `leindex --help` and confirm the direct analysis surface is available without going through the Maestro pool.
+- Run `nexus session --help` and confirm the standalone memory provider runtime is available directly.
 
 ---
 
@@ -161,10 +196,26 @@ source ~/.bashrc   # or source ~/.zshrc
 ```bash
 # Canonical Maestro command protocols
 ls ~/.maestro/integrations/commands/
+ls ~/.maestro/agents/
+ls ~/.maestro/skills/
+
+# Runtime binaries
+ls ~/.local/bin/maestro*
+maestro --help
+maestro tracklens --help
+maestro mcp --help
+leindex --version
+leindex --help
+leindex mcp --help
+nexus --version
+nexus init --help
+nexus session --help
 
 # Claude Code (if enabled)
 ls ~/.claude/commands/
 ls ~/.claude/maestro-templates/
+ls ~/.claude/plugins/maestro/
+ls ~/.claude/plugins/tracklens/
 cat ~/.claude/.mcp.json
 
 # OpenCode (if enabled)

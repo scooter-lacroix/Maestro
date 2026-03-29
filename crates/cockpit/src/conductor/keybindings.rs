@@ -57,10 +57,7 @@ impl ConductorAction {
 }
 
 /// Handle setup wizard key events
-fn handle_setup_wizard_key(
-    pane: &mut ConductorPane,
-    key: KeyEvent,
-) -> ConductorAction {
+fn handle_setup_wizard_key(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAction {
     use leindex_core::orchestrate::setup::AgentTool;
 
     match (key.modifiers, key.code) {
@@ -143,6 +140,16 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
     // 0. Handle setup wizard first (dominant overlay)
     if pane.setup.show_setup_wizard {
         return handle_setup_wizard_key(pane, key);
+    }
+
+    if pane.show_iteration_popup {
+        return match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Esc | KeyCode::Enter) => {
+                pane.show_iteration_popup = false;
+                ConductorAction::Handled
+            }
+            _ => ConductorAction::Handled,
+        };
     }
 
     // 1. Handle modals first (they absorb all input when visible)
@@ -328,9 +335,23 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
     }
 
     match (key.modifiers, key.code) {
+        (KeyModifiers::NONE, KeyCode::Esc) if pane.iteration_history_focused => {
+            pane.iteration_history_focused = false;
+            ConductorAction::Handled
+        }
+        (KeyModifiers::SHIFT, KeyCode::Char('I')) => {
+            pane.iteration_history_focused = !pane.iteration_history_focused;
+            if pane.iteration_history_focused {
+                ConductorAction::info("Iteration history focused. Use ↑↓ and Enter.")
+            } else {
+                ConductorAction::info("Iteration history unfocused.")
+            }
+        }
         // Navigation
         (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-            if pane.output_focused
+            if pane.iteration_history_focused {
+                pane.move_iteration_selection(1);
+            } else if pane.output_focused
                 && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
             {
                 pane.scroll_output_up();
@@ -345,7 +366,9 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
             ConductorAction::Handled
         }
         (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-            if pane.output_focused
+            if pane.iteration_history_focused {
+                pane.move_iteration_selection(-1);
+            } else if pane.output_focused
                 && pane.details_mode == crate::conductor::model::DetailsViewMode::Output
             {
                 pane.scroll_output_down();
@@ -405,8 +428,18 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         }
 
         // Task interaction
-        (_, KeyCode::Char(' ')) | (_, KeyCode::Enter) => {
-            if !pane.output_focused {
+        (_, KeyCode::Char(' ')) | (_, KeyCode::Enter) | (KeyModifiers::NONE, KeyCode::Right) => {
+            if pane.iteration_history_focused && matches!(key.code, KeyCode::Enter) {
+                pane.show_iteration_popup = pane.selected_iteration_log().is_some();
+                return ConductorAction::Handled;
+            }
+            if !pane.output_focused && !pane.iteration_history_focused {
+                // Toggle via normalized tree if a node is selected
+                if let Some(node_id) = pane.state.normalized_tree.selected_node.clone() {
+                    pane.toggle_node_expansion(&node_id);
+                    return ConductorAction::Handled;
+                }
+                // Legacy fallback
                 let items = pane.get_selectable_items();
                 if let Some(item) = items.get(pane.selected_index) {
                     let id = match item {
@@ -597,6 +630,7 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
         // Focus toggle
         (KeyModifiers::ALT, KeyCode::Char('p')) => {
             pane.output_focused = !pane.output_focused;
+            pane.iteration_history_focused = false;
             let msg = if pane.output_focused {
                 "Output focused. Scroll with Arrows/PgUp/PgDn."
             } else {
@@ -772,7 +806,10 @@ pub fn handle_key_event(pane: &mut ConductorPane, key: KeyEvent) -> ConductorAct
 /// Execute an orchestrate command using type-safe CommandArgs.
 /// This avoids shell injection vulnerabilities by using proper argument separation.
 fn execute_orchestrate_command(track_id: &str, cmd: &CommandArgs) -> Result<(), String> {
-    use super::launch_service::{LaunchService, LaunchRequest};
+    use super::launch_service::{LaunchProviderContext, LaunchRequest, LaunchService};
+    use leindex_core::provider_boundary::{
+        managed_cli_overlap_matrix_for, managed_cli_overlap_profile,
+    };
 
     // Create launch service
     let service = match LaunchService::new() {
@@ -780,8 +817,14 @@ fn execute_orchestrate_command(track_id: &str, cmd: &CommandArgs) -> Result<(), 
         Err(e) => return Err(format!("Failed to create launch service: {}", e)),
     };
 
-    // Create launch request
-    let request = LaunchRequest::new(track_id, cmd.clone());
+    // Build provider-aware context from the overlap matrix for diagnostics
+    let overlap_profile = managed_cli_overlap_profile("conductor");
+    let overlap_matrix = managed_cli_overlap_matrix_for("conductor");
+    let suppression = overlap_profile.suppression_policy();
+    let provider_ctx = LaunchProviderContext::from_policy_and_matrix(suppression, overlap_matrix);
+
+    // Create launch request with provider context
+    let request = LaunchRequest::new(track_id, cmd.clone()).with_provider_context(provider_ctx);
 
     // Execute launch with verification
     let result = service.launch(request);
@@ -790,9 +833,10 @@ fn execute_orchestrate_command(track_id: &str, cmd: &CommandArgs) -> Result<(), 
         super::launch_service::LaunchResult::Success { .. } => Ok(()),
         super::launch_service::LaunchResult::SpawnFailed { error, .. } => Err(error),
         super::launch_service::LaunchResult::VerificationFailed { reason, .. } => Err(reason),
-        super::launch_service::LaunchResult::Timeout { timeout_secs, .. } => {
-            Err(format!("Launch verification timed out after {}s", timeout_secs))
-        }
+        super::launch_service::LaunchResult::Timeout { timeout_secs, .. } => Err(format!(
+            "Launch verification timed out after {}s",
+            timeout_secs
+        )),
     }
 }
 

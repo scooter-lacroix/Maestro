@@ -27,24 +27,73 @@ pub enum ReviewMode {
 /// User decision from TrackLens review
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackLensDecision {
-    /// Whether to approve or deny
+    /// Whether to approve or deny (accepts 'behavior' or legacy 'approved')
+    #[serde(alias = "approved")]
     pub behavior: DecisionBehavior,
-    /// Optional annotations if denied
+    /// Optional annotations/feedback if denied
+    /// Accepts Vec<Annotation> or String (legacy format)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<Vec<Annotation>>,
+    /// Legacy feedback field (converted to annotations)
+    #[serde(skip_serializing_if = "Option::is_none", alias = "feedback")]
+    pub feedback: Option<String>,
     /// Optional autonomy mode change
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autonomy_mode: Option<AutonomyMode>,
 }
 
 /// Decision behavior - allow or deny
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DecisionBehavior {
     /// Approve and proceed
     Allow,
     /// Deny with annotations for remediation
     Deny,
+}
+
+impl<'de> Deserialize<'de> for DecisionBehavior {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+        use std::fmt;
+
+        struct DecisionBehaviorVisitor;
+
+        impl<'de> Visitor<'de> for DecisionBehaviorVisitor {
+            type Value = DecisionBehavior;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("string 'allow'/'deny' or boolean true/false")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<DecisionBehavior, E>
+            where
+                E: de::Error,
+            {
+                match value.to_lowercase().as_str() {
+                    "allow" => Ok(DecisionBehavior::Allow),
+                    "deny" => Ok(DecisionBehavior::Deny),
+                    _ => Err(de::Error::unknown_variant(value, &["allow", "deny"])),
+                }
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<DecisionBehavior, E>
+            where
+                E: de::Error,
+            {
+                if value {
+                    Ok(DecisionBehavior::Allow)
+                } else {
+                    Ok(DecisionBehavior::Deny)
+                }
+            }
+        }
+
+        deserializer.deserialize_any(DecisionBehaviorVisitor)
+    }
 }
 
 // ─── Annotation ───────────────────────────────────────────────────────────────
@@ -128,6 +177,7 @@ mod tests {
         let decision = TrackLensDecision {
             behavior: DecisionBehavior::Allow,
             annotations: None,
+            feedback: None,
             autonomy_mode: None,
         };
 

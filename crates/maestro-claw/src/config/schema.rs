@@ -178,6 +178,9 @@ pub struct ChannelsConfig {
     pub telegram: Option<TelegramConfig>,
     pub discord: Option<DiscordConfig>,
     pub slack: Option<SlackConfig>,
+    pub matrix: Option<MatrixConfig>,
+    pub whatsapp: Option<WhatsAppConfig>,
+    pub mattermost: Option<MattermostConfig>,
     pub webhook: Option<WebhookConfig>,
 }
 
@@ -200,6 +203,36 @@ pub struct DiscordConfig {
 pub struct SlackConfig {
     pub bot_token: String,
     pub app_token: String,
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatrixConfig {
+    pub homeserver_url: String,
+    pub access_token: String,
+    pub bot_user_id: Option<String>,
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+    #[serde(default)]
+    pub room_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WhatsAppConfig {
+    pub bridge_url: String,
+    pub api_token: String,
+    pub phone_number_id: Option<String>,
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MattermostConfig {
+    pub server_url: String,
+    pub bot_token: String,
+    pub team_id: Option<String>,
+    pub channel_id: Option<String>,
     #[serde(default)]
     pub allowed_users: Vec<String>,
 }

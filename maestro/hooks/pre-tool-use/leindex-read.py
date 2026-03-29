@@ -11,6 +11,8 @@ import importlib
 import json
 import os
 import sys
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,7 @@ if str(maestro_root) not in sys.path:
 
 
 LeIndexCache: Any = None
+LEGACY_READ_FALLBACK_USED = False
 
 
 def _init_cache():
@@ -34,6 +37,45 @@ def _init_cache():
             pass
 
 
+def _run_leindex_read(file_path: str, working_dir: str) -> str:
+    """Read a file through the standalone LeIndex CLI."""
+    leindex_bin = shutil.which("leindex")
+    if not leindex_bin:
+        return ""
+
+    try:
+        result = subprocess.run(
+            [
+                leindex_bin,
+                "tools",
+                "run",
+                "leindex_read_file",
+                "--project",
+                working_dir,
+                "--args",
+                json.dumps(
+                    {
+                        "file_path": file_path,
+                        "project_path": working_dir,
+                        "include_symbol_map": True,
+                        "max_lines": 240,
+                    }
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=working_dir,
+        )
+    except Exception:
+        return ""
+
+    if result.returncode != 0:
+        return ""
+
+    return result.stdout.strip()
+
+
 def leindex_read_hook(input_data: dict) -> dict:
     """
     Pre-tool-use hook that provides LeIndex context for file reads.
@@ -45,6 +87,8 @@ def leindex_read_hook(input_data: dict) -> dict:
         Modified input data with LeIndex context injected
     """
     _init_cache()
+    global LEGACY_READ_FALLBACK_USED
+    LEGACY_READ_FALLBACK_USED = False
 
     try:
         tool_name = input_data.get("tool_name", "")
@@ -77,20 +121,39 @@ def leindex_read_hook(input_data: dict) -> dict:
         if path_obj.suffix.lower() not in code_extensions:
             return input_data
 
-        # Try to get LeIndex analysis
+        working_dir = input_data.get("cwd", os.getcwd())
+        read_output = _run_leindex_read(str(path_obj), working_dir)
+
+        if read_output:
+            # Inject standalone LeIndex context instead of full file contents.
+            input_data["leindex_context"] = {
+                "file_path": str(path_obj),
+                "source": "standalone_leindex",
+                "analysis_backend": "leindex_cli",
+                "raw_output": read_output,
+                "ast_summary": read_output,
+                "call_graph": read_output,
+                "exports": [],
+                "imports": [],
+                "classes": [],
+                "functions": [],
+            }
+            input_data["leindex_enabled"] = True
+            return input_data
+
+        # Compatibility fallback for environments where the standalone CLI is unavailable.
         if LeIndexCache is not None:
             try:
                 cache = LeIndexCache()
-                # Try 'get' method for LeIndex cache
-                if hasattr(cache, 'get'):
+                if hasattr(cache, "get"):
                     analysis_data = cache.get(str(path_obj))
                 else:
                     analysis_data = None
 
                 if analysis_data:
-                    # Inject LeIndex context instead of full file
                     input_data["leindex_context"] = {
                         "file_path": str(path_obj),
+                        "source": "compatibility_legacy_cache",
                         "ast_summary": analysis_data.get("ast", ""),
                         "call_graph": analysis_data.get("call_graph", ""),
                         "exports": analysis_data.get("exports", []),
@@ -98,9 +161,14 @@ def leindex_read_hook(input_data: dict) -> dict:
                         "classes": analysis_data.get("classes", []),
                         "functions": analysis_data.get("functions", []),
                     }
+                    LEGACY_READ_FALLBACK_USED = True
                     input_data["leindex_enabled"] = True
+                    input_data["hook_warning"] = (
+                        "Legacy Maestro LeIndex compatibility cache was used because the standalone CLI path was unavailable. "
+                        "This cache path is compatibility-only and must not be treated as the default managed-session analysis path."
+                    )
+                    input_data["legacy_compatibility_path"] = True
             except Exception:
-                # LeIndex not available, fall through
                 pass
 
         return input_data

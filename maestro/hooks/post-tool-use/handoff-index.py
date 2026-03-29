@@ -10,6 +10,7 @@ import json
 import sys
 import os
 import re
+import asyncio
 from pathlib import Path
 from datetime import datetime, UTC
 from typing import Any
@@ -105,6 +106,38 @@ def handoff_index_hook(input_data: dict) -> dict:
                 "title": handoff_title,
                 "file_path": file_path,
             }
+
+            try:
+                from maestro.memory.service import MaestroMemoryService
+
+                project_path = os.getcwd()
+                if hasattr(manager, "session_manager"):
+                    session = manager.session_manager.get_session_by_id(current_session_id)
+                    if session and getattr(session, "project_path", None):
+                        project_path = session.project_path
+
+                async def _store_handoff_memory() -> None:
+                    service = MaestroMemoryService()
+                    await service.initialize()
+                    try:
+                        await service.store_command_context(
+                            command="hook:handoff-index",
+                            project_path=project_path,
+                            context={
+                                "session_id": current_session_id,
+                                "agent_id": current_agent_id,
+                                "event": "handoff_indexed",
+                                "handoff_id": handoff.id if hasattr(handoff, "id") else None,
+                                "file_path": file_path,
+                                "title": handoff_title,
+                            },
+                        )
+                    finally:
+                        await service.close()
+
+                asyncio.run(_store_handoff_memory())
+            except Exception:
+                pass
 
         return input_data
 

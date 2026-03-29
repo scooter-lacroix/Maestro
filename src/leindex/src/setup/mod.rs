@@ -1,14 +1,145 @@
 use anyhow::{Context, Result};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use walkdir::WalkDir;
 
-use crate::memory::models::{
-    McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport,
-};
+use crate::memory::models::{McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport};
 use crate::memory::service::MemoryService;
+use crate::providers::{StandaloneLeIndexProvider, StandaloneNexusProvider};
+
+// ── Durable setup log ────────────────────────────────────────────────────────
+// All orchestra steps write here so a failed install is debuggable after the fact.
+
+/// Returns the path to the setup log file (timestamped, with a stable symlink).
+fn setup_log_path() -> Result<PathBuf> {
+    setup_log_path_with(|key| std::env::var(key).ok())
+}
+
+fn setup_log_path_with<F>(mut lookup: F) -> Result<PathBuf>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for key in [
+        "MAESTRO_SETUP_LOG_FILE",
+        "MAESTRO_INSTALL_LOG_FILE",
+        "MAESTRO_SETUP_LOG",
+        "MAESTRO_INSTALL_LOG",
+    ] {
+        if let Some(path) = lookup(key) {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    let log_dir = home_dir()?.join(".maestro").join("logs");
+    fs::create_dir_all(&log_dir)?;
+    Ok(log_dir.join(format!(
+        "install-{}.log",
+        chrono::Local::now().format("%Y%m%d_%H%M%S")
+    )))
+}
+
+/// Open (or create) the durable setup log, updating the stable latest-log symlinks.
+/// If `MAESTRO_SETUP_LOG` (or `MAESTRO_INSTALL_LOG`) is set in the environment,
+/// appends to that file so the bash and Rust install phases share a single log.
+fn open_setup_log() -> Result<(File, PathBuf)> {
+    // Check for an externally-provided log path (set by install.sh).
+    let env_path = std::env::var("MAESTRO_SETUP_LOG")
+        .or_else(|_| std::env::var("MAESTRO_INSTALL_LOG"))
+        .ok()
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+
+    let path = match env_path {
+        Some(p) => p,
+        None => {
+            let own = setup_log_path()?;
+            let parent = own.parent().unwrap_or(&own);
+            let install_symlink = parent.join("install-latest.log");
+            let setup_symlink = parent.join("setup-latest.log");
+            // Best-effort symlinks — ignore failure on filesystems that don't support them.
+            #[cfg(unix)]
+            {
+                let _ = std::fs::remove_file(&install_symlink);
+                let _ = std::fs::remove_file(&setup_symlink);
+                let _ = std::os::unix::fs::symlink(&own, &install_symlink);
+                let _ = std::os::unix::fs::symlink(&own, &setup_symlink);
+            }
+            own
+        }
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("Failed to open setup log at {}", path.display()))?;
+    Ok((file, path))
+}
+
+/// Write a timestamped line to the setup log.  Panics if the file cannot be written
+/// (caller should have opened it via `open_setup_log`).
+fn setup_log_write(log: &mut Option<File>, msg: &str) {
+    if let Some(f) = log {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let _ = writeln!(f, "[{}] {}", ts, msg);
+    }
+}
+
+/// Write raw (no timestamp) output — used for command stderr/stdout dumps.
+fn setup_log_raw(log: &mut Option<File>, msg: &str) {
+    if let Some(f) = log {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
+fn prepend_path_once(path: &Path) {
+    let mut segments: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect())
+        .unwrap_or_default();
+    if segments.iter().any(|existing| existing == path) {
+        return;
+    }
+    segments.insert(0, path.to_path_buf());
+    if let Ok(updated) = std::env::join_paths(segments.iter().map(|segment| segment.as_os_str())) {
+        std::env::set_var("PATH", updated);
+    }
+}
+
+fn normalize_standard_tool_paths() {
+    if let Some(home) = dirs::home_dir() {
+        prepend_path_once(&home.join(".cargo").join("bin"));
+        prepend_path_once(&home.join(".local").join("bin"));
+    }
+}
+
+fn latest_setup_log_hint() -> String {
+    let install_log = home_dir()
+        .map(|home| {
+            home.join(".maestro")
+                .join("logs")
+                .join("install-latest.log")
+        })
+        .ok();
+    let setup_log = home_dir()
+        .map(|home| home.join(".maestro").join("logs").join("setup-latest.log"))
+        .ok();
+
+    if install_log.as_ref().is_some_and(|path| path.exists()) {
+        return "~/.maestro/logs/install-latest.log".to_string();
+    }
+
+    if setup_log.as_ref().is_some_and(|path| path.exists()) {
+        return "~/.maestro/logs/setup-latest.log".to_string();
+    }
+
+    "~/.maestro/logs/install-latest.log".to_string()
+}
 
 pub mod distro;
 pub mod package_manager;
@@ -63,6 +194,8 @@ pub struct Config {
     pub install_path: String,
     pub editor: String,
     pub selected_tools: Vec<String>,
+    pub leindex_install_method: String,
+    pub nexus_install_method: String,
     pub password_cache: Arc<PasswordCache>,
     pub distro: Distro,
 }
@@ -72,18 +205,36 @@ pub enum StepAction {
     Internal(Box<dyn Fn() -> Result<Vec<String>> + Send + Sync>),
 }
 
-fn tool_search_json_payload(include_stdio_type: bool) -> serde_json::Value {
-    let mut payload = serde_json::json!({
-        "command": "maestro",
-        "args": ["mcp", "tool-search"]
-    });
-    if include_stdio_type {
-        payload["type"] = serde_json::Value::String("stdio".to_string());
-    }
-    payload
+const CANONICAL_COMMAND_PROTOCOLS: &[&str] = &[
+    "maestro:configure.md",
+    "maestro:implement.md",
+    "maestro:leindex.md",
+    "maestro:memory.md",
+    "maestro:newTrack.md",
+    "maestro:orchestrate.md",
+    "maestro:revert.md",
+    "maestro:setup.md",
+    "maestro:status.md",
+    "maestro:tldr.md",
+    "maestro:tui.md",
+];
+
+const CLI_REQUIRED_SURFACE: &[&str] = &[
+    "orchestrate",
+    "pi-status",
+    "pi-test",
+    "pi-agents",
+    "track-lens",
+    "tui",
+    "mcp",
+    "le-index",
+];
+
+fn direct_leindex_json_payload(include_stdio_type: bool) -> serde_json::Value {
+    StandaloneLeIndexProvider::new().direct_stdio_config(include_stdio_type)
 }
 
-fn upsert_tool_search_json_server(
+fn upsert_direct_leindex_json_server(
     path: &Path,
     root_key: &str,
     include_stdio_type: bool,
@@ -92,7 +243,7 @@ fn upsert_tool_search_json_server(
         path,
         root_key,
         "leindex",
-        tool_search_json_payload(include_stdio_type),
+        direct_leindex_json_payload(include_stdio_type),
     )
 }
 
@@ -111,19 +262,76 @@ fn create_json_mcp_step(
     root_key: &str,
     include_stdio_type: bool,
 ) -> Step {
-    let owned_components: Vec<String> = path_components.iter().map(|part| (*part).to_string()).collect();
+    let owned_components: Vec<String> = path_components
+        .iter()
+        .map(|part| (*part).to_string())
+        .collect();
     let owned_root_key = root_key.to_string();
     Step {
         name: name.to_string(),
         description: description.to_string(),
         action: StepAction::Internal(Box::new(move || {
             let cfg_path = home_join(&owned_components)?;
-            upsert_tool_search_json_server(&cfg_path, &owned_root_key, include_stdio_type)
+            upsert_direct_leindex_json_server(&cfg_path, &owned_root_key, include_stdio_type)
         })),
     }
 }
 
+fn leindex_install_command(method: &str) -> String {
+    match method {
+        "cargo" => "cargo install --force --locked leindex".to_string(),
+        "install-script" => "curl -fsSL https://raw.githubusercontent.com/scooter-lacroix/LeIndex/master/install.sh -o /tmp/install-leindex.sh && bash /tmp/install-leindex.sh".to_string(),
+        "pypi" => "if command -v pip >/dev/null 2>&1; then pip install leindex; elif command -v pip3 >/dev/null 2>&1; then pip3 install leindex; else echo 'pip/pip3 not found for LeIndex PyPI install' >&2; exit 1; fi".to_string(),
+        "skip" => "echo 'Skipping standalone LeIndex install by request'".to_string(),
+        _ => format!("echo 'Unknown LeIndex install method: {}' >&2; exit 1", method),
+    }
+}
+
+fn nexus_install_command(method: &str) -> String {
+    match method {
+        "git" => "mkdir -p \"$HOME/.maestro/providers\" && if [ ! -d \"$HOME/.maestro/providers/Nexus-Memory-System/.git\" ]; then git clone https://github.com/scooter-lacroix/Nexus-Memory-System.git \"$HOME/.maestro/providers/Nexus-Memory-System\"; fi && cd \"$HOME/.maestro/providers/Nexus-Memory-System\" && cargo build --release -p nexus-memory && ./scripts/install.sh --binary ./target/release/nexus && nexus init".to_string(),
+        "cargo" => "cargo install --force --locked nexus-memory && nexus init".to_string(),
+        "skip" => "echo 'Skipping standalone Nexus install by request'".to_string(),
+        _ => format!("echo 'Unknown Nexus install method: {}' >&2; exit 1", method),
+    }
+}
+
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
+    normalize_standard_tool_paths();
+    // Open durable log file for the entire setup run.
+    let mut log_file = match open_setup_log() {
+        Ok((f, path)) => {
+            let _ = tx.send(SetupEvent::Log(format!("Setup log: {}", path.display())));
+            Some(f)
+        }
+        Err(e) => {
+            let _ = tx.send(SetupEvent::Log(format!(
+                "[WARN] Could not open setup log: {}",
+                e
+            )));
+            None
+        }
+    };
+    setup_log_write(
+        &mut log_file,
+        &format!("LeIndex install method: {}", config.leindex_install_method),
+    );
+    setup_log_write(
+        &mut log_file,
+        &format!("Nexus install method: {}", config.nexus_install_method),
+    );
+    setup_log_write(
+        &mut log_file,
+        &format!("Install path: {}", config.install_path),
+    );
+    setup_log_write(
+        &mut log_file,
+        &format!(
+            "PATH after normalization: {}",
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+
     let mut steps = Vec::new();
     // Use the distribution passed in config
     let distro = config.distro;
@@ -175,6 +383,24 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         action: StepAction::Shell(woodwinds_cmd),
     });
 
+    steps.push(Step {
+        name: "LeIndex Provider".to_string(),
+        description: format!(
+            "Installing standalone LeIndex via {}...",
+            config.leindex_install_method
+        ),
+        action: StepAction::Shell(leindex_install_command(&config.leindex_install_method)),
+    });
+
+    steps.push(Step {
+        name: "Nexus Provider".to_string(),
+        description: format!(
+            "Installing standalone Nexus via {}...",
+            config.nexus_install_method
+        ),
+        action: StepAction::Shell(nexus_install_command(&config.nexus_install_method)),
+    });
+
     if config.editor == "fresh" {
         steps.push(Step {
             name: "The Fresh Script".to_string(),
@@ -222,9 +448,30 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         });
     }
 
+    {
+        let install_path = config.install_path.clone();
+        steps.push(Step {
+            name: "Maestro Skills".to_string(),
+            description: "Installing built-in Maestro skills...".to_string(),
+            action: StepAction::Internal(Box::new(move || {
+                let repo_root = find_repo_root()?;
+                let maestro_home = expand_user_path(&install_path)?;
+                let src = repo_root.join("maestro").join("skills");
+                let dst = maestro_home.join("skills");
+                copy_dir_recursive(&src, &dst)?;
+                Ok(vec![format!(
+                    "Installed Maestro skill library to {}",
+                    dst.display()
+                )])
+            })),
+        });
+    }
+
     steps.push(Step {
         name: "MCP Pool".to_string(),
-        description: "Registering LeIndex in the Maestro MCP pool...".to_string(),
+        description:
+            "Registering the optional shared LeIndex MCP pool entry (direct provider remains primary)..."
+                .to_string(),
         action: StepAction::Internal(Box::new(register_leindex_pool)),
     });
 
@@ -356,11 +603,39 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             dst_tpl.display()
                         ));
 
-                        // MCP config (best-effort): route pooled MCP access through Maestro's
-                        // dynamic tool-search broker.
+                        // Full plugin bundle so hooks/skills stay interconnected at runtime.
+                        let plugin_root =
+                            home_dir()?.join(".claude").join("plugins").join("maestro");
+                        std::fs::create_dir_all(&plugin_root)?;
+                        std::fs::copy(
+                            repo_root.join("claude-code").join("plugin.json"),
+                            plugin_root.join("plugin.json"),
+                        )?;
+                        copy_dir_recursive(
+                            &repo_root.join("maestro").join("hooks"),
+                            &plugin_root.join("maestro").join("hooks"),
+                        )?;
+                        copy_dir_recursive(
+                            &repo_root.join("maestro").join("skills"),
+                            &plugin_root.join("maestro").join("skills"),
+                        )?;
+                        copy_dir_recursive(
+                            &repo_root.join("claude-code").join("commands"),
+                            &plugin_root.join("commands"),
+                        )?;
+                        copy_dir_recursive(
+                            &repo_root.join("claude-code").join("templates"),
+                            &plugin_root.join("templates"),
+                        )?;
+                        logs.push(format!(
+                            "Installed Claude Code plugin bundle to {}",
+                            plugin_root.display()
+                        ));
+
+                        // MCP config (best-effort): register direct standalone LeIndex.
                         let mcp_path = home_dir()?.join(".claude").join(".mcp.json");
                         let mut mcp_logs =
-                            upsert_tool_search_json_server(&mcp_path, "mcpServers", true)?;
+                            upsert_direct_leindex_json_server(&mcp_path, "mcpServers", true)?;
                         logs.append(&mut mcp_logs);
 
                         Ok(logs)
@@ -403,7 +678,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // MCP server config in ~/.gemini/settings.json under mcpServers.leindex
                         let cfg_path = home_dir()?.join(".gemini").join("settings.json");
                         let mut cfg_logs =
-                            upsert_tool_search_json_server(&cfg_path, "mcpServers", false)?;
+                            upsert_direct_leindex_json_server(&cfg_path, "mcpServers", false)?;
                         logs.append(&mut cfg_logs);
 
                         Ok(logs)
@@ -446,12 +721,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                         // MCP server config: ~/.codex/config.toml under [mcp_servers.leindex]
                         let cfg_path = codex_home.join("config.toml");
-                        let mut cfg_logs = upsert_toml_mcp_server(
-                            &cfg_path,
-                            "leindex",
-                            "maestro",
-                            &["mcp", "tool-search"],
-                        )?;
+                        let mut cfg_logs =
+                            upsert_toml_mcp_server(&cfg_path, "leindex", "leindex", &["mcp"])?;
                         logs.append(&mut cfg_logs);
 
                         Ok(logs)
@@ -535,7 +806,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // MCP server config in ~/.qwen/settings.json under mcpServers.leindex
                         let cfg_path = home_dir()?.join(".qwen").join("settings.json");
                         let mut cfg_logs =
-                            upsert_tool_search_json_server(&cfg_path, "mcpServers", false)?;
+                            upsert_direct_leindex_json_server(&cfg_path, "mcpServers", false)?;
                         logs.append(&mut cfg_logs);
 
                         Ok(logs)
@@ -564,7 +835,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             .join("amp")
                             .join("settings.json");
                         let mut cfg_logs =
-                            upsert_tool_search_json_server(&cfg_path, "amp.mcpServers", false)?;
+                            upsert_direct_leindex_json_server(&cfg_path, "amp.mcpServers", false)?;
                         logs.append(&mut cfg_logs);
                         Ok(logs)
                     })),
@@ -700,7 +971,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
             // Run cargo build with verbose output capture
             logs.push("Starting cargo build (this may take a few minutes)...".to_string());
-            
+
             let output = std::process::Command::new("cargo")
                 .arg("build")
                 .arg("--release")
@@ -745,7 +1016,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     expected_bin.display()
                 );
             }
-            
+
             // Get binary size for verification
             if let Ok(metadata) = std::fs::metadata(&expected_bin) {
                 let size_mb = metadata.len() as f64 / 1_048_576.0;
@@ -761,7 +1032,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 manifest_path.display()
             ));
             logs.push("Verified build target: crates/cli (not leindex-core shim)".to_string());
-            
+
             Ok(logs)
         })),
     });
@@ -790,7 +1061,8 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let metadata = src_bin.metadata()
+                let metadata = src_bin
+                    .metadata()
                     .with_context(|| format!("Cannot read metadata for {}", src_bin.display()))?;
                 let permissions = metadata.permissions();
                 if permissions.mode() & 0o111 == 0 {
@@ -803,10 +1075,13 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             }
 
             let dst_dir = home_dir()?.join(".local").join("bin");
-            
+
             // Create destination directory if it doesn't exist
             if !dst_dir.exists() {
-                logs.push(format!("Creating destination directory: {}", dst_dir.display()));
+                logs.push(format!(
+                    "Creating destination directory: {}",
+                    dst_dir.display()
+                ));
                 std::fs::create_dir_all(&dst_dir).with_context(|| {
                     format!(
                         "Failed to create destination directory: {}\n\n\
@@ -819,9 +1094,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     )
                 })?;
             }
-            
+
             let dst_bin = dst_dir.join("maestro");
-            
+
             // Remove existing binary if present (to avoid copy errors)
             if dst_bin.exists() {
                 logs.push("Removing existing binary".to_string());
@@ -829,7 +1104,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     format!("Failed to remove existing binary at {}", dst_bin.display())
                 })?;
             }
-            
+
             // Copy the binary
             logs.push(format!("Copying binary to {}", dst_bin.display()));
             std::fs::copy(&src_bin, &dst_bin).with_context(|| {
@@ -892,7 +1167,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     missing_commands.push(required);
                 }
             }
-            
+
             if !missing_commands.is_empty() {
                 anyhow::bail!(
                     "Installed binary missing required commands: {}\n\n\
@@ -904,21 +1179,87 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
             logs.push(format!("Installed Maestro CLI to {}", dst_bin.display()));
             logs.push("Verified command surface includes orchestrate/pi-* commands".to_string());
-            
+
             // Check if ~/.local/bin is in PATH
             if let Ok(path) = std::env::var("PATH") {
                 if !std::env::split_paths(&path).any(|p| p == dst_dir) {
                     logs.push("".to_string());
-                    logs.push(format!("⚠️  Warning: {} is not in your PATH", dst_dir.display()));
-                    logs.push("   Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):".to_string());
+                    logs.push(format!(
+                        "⚠️  Warning: {} is not in your PATH",
+                        dst_dir.display()
+                    ));
+                    logs.push(
+                        "   Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+                            .to_string(),
+                    );
                     logs.push(format!("   export PATH=\"{}:$PATH\"", dst_dir.display()));
                     logs.push("".to_string());
-                    logs.push("   Then reload your profile: source ~/.bashrc (or ~/.zshrc)".to_string());
+                    logs.push(
+                        "   Then reload your profile: source ~/.bashrc (or ~/.zshrc)".to_string(),
+                    );
                 } else {
                     logs.push("✓ ~/.local/bin is in PATH".to_string());
                 }
             }
-            
+
+            Ok(logs)
+        })),
+    });
+
+    steps.push(Step {
+        name: "The Crescendo - Runtime Binaries".to_string(),
+        description: "Compiling Maestro runtime binaries (Cockpit, Gateway, LSP bridge)..."
+            .to_string(),
+        action: StepAction::Internal(Box::new(|| {
+            let repo_root = find_repo_root()?;
+            let runtime_bins = [
+                (
+                    "maestro-cockpit",
+                    repo_root.join("crates").join("cockpit").join("Cargo.toml"),
+                ),
+                (
+                    "maestro-gateway",
+                    repo_root.join("crates").join("gateway").join("Cargo.toml"),
+                ),
+                (
+                    "maestro-lsp-mcp-bridge",
+                    repo_root
+                        .join("crates")
+                        .join("lsp-bridge")
+                        .join("Cargo.toml"),
+                ),
+            ];
+            let mut logs = Vec::new();
+            for (bin_name, manifest_path) in runtime_bins {
+                let mut bin_logs = build_workspace_binary(&repo_root, &manifest_path, bin_name)?;
+                logs.append(&mut bin_logs);
+            }
+            Ok(logs)
+        })),
+    });
+
+    steps.push(Step {
+        name: "The Crescendo - Install Runtime Binaries".to_string(),
+        description: "Installing runtime binaries to ~/.local/bin...".to_string(),
+        action: StepAction::Internal(Box::new(|| {
+            let repo_root = find_repo_root()?;
+            let mut logs = Vec::new();
+            let runtime_bins = [
+                ("maestro-cockpit", Vec::<&str>::new()),
+                (
+                    "maestro-gateway",
+                    vec!["Maestro Web Gateway", "--port", "--workspace"],
+                ),
+                (
+                    "maestro-lsp-mcp-bridge",
+                    vec!["Protocol translation", "--project", "--lsp"],
+                ),
+            ];
+            for (bin_name, help_tokens) in runtime_bins {
+                let mut bin_logs =
+                    install_release_binary(&repo_root, bin_name, help_tokens.as_slice())?;
+                logs.append(&mut bin_logs);
+            }
             Ok(logs)
         })),
     });
@@ -1046,6 +1387,20 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         })),
     });
 
+    {
+        let install_path = config.install_path.clone();
+        let selected_tools = config.selected_tools.clone();
+        steps.push(Step {
+            name: "Finale - System Verification".to_string(),
+            description:
+                "Validating binaries, commands, hooks, skills, and selected integrations..."
+                    .to_string(),
+            action: StepAction::Internal(Box::new(move || {
+                verify_installed_system(&install_path, &selected_tools)
+            })),
+        });
+    }
+
     let total = steps.len();
     let step_plan = steps
         .iter()
@@ -1070,6 +1425,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             "CONDUCTOR: Commencing {}",
             step.name
         )));
+        setup_log_write(
+            &mut log_file,
+            &format!("── Step [{}/{}]: {} ──", i + 1, total, step.name),
+        );
 
         match step.action {
             StepAction::Shell(command) => {
@@ -1085,6 +1444,11 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     || command.contains("npm install")
                     || command.contains("npm run build")
                     || command.contains("make");
+
+                setup_log_raw(
+                    &mut log_file,
+                    &format!("  command: {}", &command[..command.len().min(500)]),
+                );
 
                 // For sudo commands, we need to handle them specially
                 let output = if needs_sudo {
@@ -1117,9 +1481,13 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                 match output {
                     Ok(out) => {
-                        // Send stdout to TUI logs
+                        // Send stdout to TUI logs (truncated for UI)
                         if !out.stdout.is_empty() {
                             let s = String::from_utf8_lossy(&out.stdout);
+                            // Always write FULL stdout to the durable log
+                            setup_log_raw(&mut log_file, "  ── stdout ──");
+                            setup_log_raw(&mut log_file, &s);
+                            // TUI: truncated
                             let max_lines = if is_long_running { 10 } else { 5 };
                             for line in s.lines().take(max_lines) {
                                 let _ = tx.send(SetupEvent::Log(format!("  [OUT] {}", line)));
@@ -1128,6 +1496,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         // Send stderr to TUI logs (but filter password prompts)
                         if !out.stderr.is_empty() {
                             let s = String::from_utf8_lossy(&out.stderr);
+                            // Always write FULL stderr to the durable log
+                            setup_log_raw(&mut log_file, "  ── stderr ──");
+                            setup_log_raw(&mut log_file, &s);
+                            // TUI: truncated
                             let max_lines: usize = 10;
                             for line in s.lines().take(max_lines) {
                                 // Don't send password prompts to logs - they'll be handled separately
@@ -1144,6 +1516,23 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                         if out.status.success() {
                             let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", step.name)));
+                            setup_log_write(&mut log_file, &format!("  [OK] {}", step.name));
+
+                            // ── Post-install validation for provider steps ──
+                            if step.name == "LeIndex Provider" {
+                                validate_leindex_provider(
+                                    &tx,
+                                    &mut log_file,
+                                    &config.leindex_install_method,
+                                );
+                            } else if step.name == "Nexus Provider" {
+                                validate_nexus_provider(
+                                    &tx,
+                                    &mut log_file,
+                                    &config.nexus_install_method,
+                                );
+                            }
+
                             let _ = tx.send(SetupEvent::StepCompleted {
                                 current: i + 1,
                                 total,
@@ -1152,7 +1541,15 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                         } else {
                             // Check if it's a password error
                             let stderr = String::from_utf8_lossy(&out.stderr);
+                            setup_log_write(
+                                &mut log_file,
+                                &format!("  [FAILED] exit code: {:?}", out.status.code()),
+                            );
                             if stderr.contains("Sorry") || stderr.contains("incorrect") {
+                                setup_log_write(
+                                    &mut log_file,
+                                    "  [DIAG] Password authentication failed",
+                                );
                                 let _ = tx.send(SetupEvent::Error {
                                     step: Some(step.name),
                                     message: "Password authentication failed.".to_string(),
@@ -1169,10 +1566,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                                         step.name,
                                         out.status.code()
                                     ),
-                                    hint: Some(
-                                        "Review the live output panel for the failing command and rerun after fixing the environment."
-                                            .to_string(),
-                                    ),
+                                    hint: Some(format!(
+                                        "Full output written to the durable install log. Check {} for details.",
+                                        latest_setup_log_hint()
+                                    )),
                                 });
                             }
                             return;
@@ -1180,6 +1577,10 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                     }
                     Err(e) => {
                         let step_name = step.name.clone();
+                        setup_log_write(
+                            &mut log_file,
+                            &format!("  [FAILED] Could not execute: {}", e),
+                        );
                         let _ = tx.send(SetupEvent::Error {
                             step: Some(step_name.clone()),
                             message: format!("Failed to execute step '{}': {}", step_name, e),
@@ -1194,8 +1595,9 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
             }
             StepAction::Internal(action) => match action() {
                 Ok(lines) => {
-                    for line in lines {
+                    for line in &lines {
                         let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", line)));
+                        setup_log_write(&mut log_file, &format!("  [OK] {}", line));
                     }
                     let _ = tx.send(SetupEvent::StepCompleted {
                         current: i + 1,
@@ -1205,13 +1607,14 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                 }
                 Err(e) => {
                     let step_name = step.name.clone();
+                    setup_log_write(&mut log_file, &format!("  [FAILED] {}", e));
                     let _ = tx.send(SetupEvent::Error {
                         step: Some(step_name.clone()),
                         message: format!("Step '{}' failed: {}", step_name, e),
-                        hint: Some(
-                            "Open the live output panel for the most recent details, then rerun once the failing dependency or file path is fixed."
-                                .to_string(),
-                        ),
+                        hint: Some(format!(
+                            "Check {} for the full error context, then rerun.",
+                            latest_setup_log_hint()
+                        )),
                     });
                     return;
                 }
@@ -1226,21 +1629,153 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
         install_path: config.install_path.clone(),
         theme: crate::config::Config::default().theme,
         selected_tools: config.selected_tools.clone(),
+        leindex_install_method: config.leindex_install_method.clone(),
+        nexus_install_method: config.nexus_install_method.clone(),
         transparent: false,
     };
     if let Err(e) = persistent_config.save() {
+        setup_log_write(
+            &mut log_file,
+            &format!("  [FAILED] Failed to save config: {}", e),
+        );
         let _ = tx.send(SetupEvent::Error {
             step: None,
             message: format!("Failed to save config: {}", e),
-            hint: Some(
-                "The install steps finished, but the configuration file could not be written."
-                    .to_string(),
-            ),
+            hint: Some(format!(
+                "The install steps finished, but the configuration file could not be written. See {}.",
+                latest_setup_log_hint()
+            )),
         });
         return;
     }
 
+    setup_log_write(&mut log_file, "SETUP COMPLETED SUCCESSFULLY");
+    if let Some(path) = setup_log_path().ok() {
+        let _ = tx.send(SetupEvent::Log(format!(
+            "Setup log saved to: {}",
+            path.display()
+        )));
+    }
     let _ = tx.send(SetupEvent::Finished);
+}
+
+/// Post-install validation for the LeIndex provider step.
+/// Checks that `leindex` is on PATH and responds to `--version`.
+/// Writes diagnostics to the durable log.  Does NOT abort the install —
+/// issues are reported as warnings so downstream verification can give the
+/// definitive answer after all steps complete.
+fn validate_leindex_provider(tx: &Sender<SetupEvent>, log: &mut Option<File>, method: &str) {
+    let _ = tx.send(SetupEvent::Log(
+        "Validating LeIndex provider post-install...".to_string(),
+    ));
+    setup_log_write(log, "  [VALIDATE] LeIndex provider post-install");
+
+    if !command_exists_on_path("leindex") {
+        let msg = format!(
+            "LeIndex install via '{}' reported success but 'leindex' is not on PATH. \
+             Downstream verification will catch this.",
+            method
+        );
+        let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+        setup_log_write(log, &format!("  [WARN] {}", msg));
+        setup_log_write(
+            log,
+            &format!(
+                "  [DIAG] PATH={:?}",
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
+        return;
+    }
+
+    match Command::new("leindex").arg("--version").output() {
+        Ok(out) if out.status.success() => {
+            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let msg = format!("LeIndex provider validated (version: {})", ver);
+            let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", msg)));
+            setup_log_write(log, &format!("  [OK] {}", msg));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let msg = format!("leindex --version failed: {}", stderr.trim());
+            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+            setup_log_write(log, &format!("  [WARN] {}", msg));
+        }
+        Err(e) => {
+            let msg = format!("Could not execute leindex --version: {}", e);
+            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+            setup_log_write(log, &format!("  [WARN] {}", msg));
+        }
+    }
+}
+
+/// Post-install validation for the Nexus provider step.
+fn validate_nexus_provider(tx: &Sender<SetupEvent>, log: &mut Option<File>, method: &str) {
+    let _ = tx.send(SetupEvent::Log(
+        "Validating Nexus provider post-install...".to_string(),
+    ));
+    setup_log_write(log, "  [VALIDATE] Nexus provider post-install");
+
+    if !command_exists_on_path("nexus") {
+        let msg = format!(
+            "Nexus install via '{}' reported success but 'nexus' is not on PATH. \
+             Downstream verification will catch this.",
+            method
+        );
+        let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+        setup_log_write(log, &format!("  [WARN] {}", msg));
+        setup_log_write(
+            log,
+            &format!(
+                "  [DIAG] PATH={:?}",
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
+        return;
+    }
+
+    match Command::new("nexus").arg("--version").output() {
+        Ok(out) if out.status.success() => {
+            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let msg = format!("Nexus provider validated (version: {})", ver);
+            let _ = tx.send(SetupEvent::Log(format!("  [OK] {}", msg)));
+            setup_log_write(log, &format!("  [OK] {}", msg));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let msg = format!("nexus --version failed: {}", stderr.trim());
+            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+            setup_log_write(log, &format!("  [WARN] {}", msg));
+        }
+        Err(e) => {
+            let msg = format!("Could not execute nexus --version: {}", e);
+            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+            setup_log_write(log, &format!("  [WARN] {}", msg));
+        }
+    }
+
+    // Validate nexus init (previously silently swallowed)
+    match Command::new("nexus").arg("init").output() {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if out.status.success() {
+                let _ = tx.send(SetupEvent::Log("  [OK] nexus init succeeded".to_string()));
+                setup_log_write(log, "  [OK] nexus init succeeded");
+            } else {
+                let msg = format!(
+                    "nexus init returned non-zero (may already be initialized): {}",
+                    stderr.trim()
+                );
+                let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+                setup_log_write(log, &format!("  [WARN] {}", msg));
+            }
+        }
+        Err(e) => {
+            let msg = format!("Could not execute nexus init: {}", e);
+            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
+            setup_log_write(log, &format!("  [WARN] {}", msg));
+        }
+    }
 }
 
 fn home_dir() -> Result<PathBuf> {
@@ -1345,20 +1880,13 @@ fn install_command_protocols(src: &Path, dst: &Path) -> Result<Vec<String>> {
     std::fs::create_dir_all(dst)?;
     let mut copied = 0usize;
 
-    for entry in std::fs::read_dir(src).with_context(|| format!("Reading {}", src.display()))? {
-        let entry = entry?;
-        let path = entry.path();
+    for name in CANONICAL_COMMAND_PROTOCOLS {
+        let path = src.join(name);
         if !path.is_file() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if !name.ends_with(".md") || name.eq_ignore_ascii_case("README.md") {
-            continue;
-        }
-        if !name.starts_with("maestro:") {
-            continue;
+            anyhow::bail!(
+                "Canonical command protocol is missing from the repository: {}",
+                path.display()
+            );
         }
         std::fs::copy(&path, dst.join(name))?;
         copied += 1;
@@ -1659,7 +2187,7 @@ fn upsert_opencode_mcp(root: &mut serde_json::Map<String, serde_json::Value>) ->
     mcp_map.insert(
         "leindex".to_string(),
         serde_json::json!({
-            "command": ["maestro", "mcp", "tool-search"],
+            "command": ["leindex", "mcp"],
             "environment": {}
         }),
     );
@@ -1722,7 +2250,7 @@ fn register_leindex_pool() -> Result<Vec<String>> {
         Ok(()) => {
             logs.push("Registered MCP pool entry 'leindex' -> `leindex mcp`".to_string());
             logs.push(
-                "Integrated CLI tools will connect through `maestro mcp tool-search`"
+                "Managed Maestro sessions still use direct standalone LeIndex; the pool entry is optional shared infrastructure only."
                     .to_string(),
             );
         }
@@ -1759,6 +2287,527 @@ fn command_exists_on_path(command: &str) -> bool {
     false
 }
 
+fn build_workspace_binary(
+    repo_root: &Path,
+    manifest_path: &Path,
+    bin_name: &str,
+) -> Result<Vec<String>> {
+    if !command_exists_on_path("cargo") {
+        anyhow::bail!(
+            "Cargo (Rust build tool) not found in PATH. Please install Rust: https://rustup.rs/"
+        );
+    }
+    if !manifest_path.exists() {
+        anyhow::bail!(
+            "Manifest not found for {}: {}",
+            bin_name,
+            manifest_path.display()
+        );
+    }
+
+    let mut logs = vec![format!(
+        "Building {} via {}",
+        bin_name,
+        manifest_path.display()
+    )];
+    let output = Command::new("cargo")
+        .arg("build")
+        .arg("--release")
+        .arg("--manifest-path")
+        .arg(manifest_path)
+        .arg("--bin")
+        .arg(bin_name)
+        .current_dir(repo_root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .with_context(|| format!("Failed to launch cargo build for {}", bin_name))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to build {}: {}", bin_name, stderr.trim());
+    }
+
+    let built_binary = release_binary_path(repo_root, bin_name);
+    if !built_binary.exists() {
+        anyhow::bail!(
+            "Build reported success but {} was not produced at {}",
+            bin_name,
+            built_binary.display()
+        );
+    }
+
+    logs.push(format!("Built {} at {}", bin_name, built_binary.display()));
+    Ok(logs)
+}
+
+fn install_release_binary(
+    repo_root: &Path,
+    bin_name: &str,
+    help_tokens: &[&str],
+) -> Result<Vec<String>> {
+    let src_bin = release_binary_path(repo_root, bin_name);
+    if !src_bin.exists() {
+        anyhow::bail!(
+            "Expected built binary for {} at {}",
+            bin_name,
+            src_bin.display()
+        );
+    }
+
+    let dst_dir = home_dir()?.join(".local").join("bin");
+    std::fs::create_dir_all(&dst_dir)?;
+    let dst_bin = dst_dir.join(bin_name);
+    if dst_bin.exists() {
+        std::fs::remove_file(&dst_bin)
+            .with_context(|| format!("Failed removing existing {}", dst_bin.display()))?;
+    }
+    std::fs::copy(&src_bin, &dst_bin).with_context(|| {
+        format!(
+            "Failed copying {} from {} to {}",
+            bin_name,
+            src_bin.display(),
+            dst_bin.display()
+        )
+    })?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&dst_bin)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&dst_bin, perms)?;
+    }
+
+    let mut logs = vec![format!("Installed {} to {}", bin_name, dst_bin.display())];
+    if !help_tokens.is_empty() {
+        let output = Command::new(&dst_bin)
+            .arg("--help")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .with_context(|| format!("Failed running {} --help", dst_bin.display()))?;
+        if !output.status.success() {
+            anyhow::bail!("Installed {} failed `--help` verification", bin_name);
+        }
+        let help_text = String::from_utf8_lossy(&output.stdout);
+        for token in help_tokens {
+            if !help_text.contains(token) {
+                anyhow::bail!(
+                    "Installed {} did not expose expected help token `{}`",
+                    bin_name,
+                    token
+                );
+            }
+        }
+        logs.push(format!("Verified {} help surface", bin_name));
+    }
+
+    Ok(logs)
+}
+
+fn release_binary_path(repo_root: &Path, bin_name: &str) -> PathBuf {
+    let binary_name = if cfg!(windows) {
+        format!("{}.exe", bin_name)
+    } else {
+        bin_name.to_string()
+    };
+    repo_root.join("target").join("release").join(binary_name)
+}
+
+fn verify_installed_system(install_path: &str, selected_tools: &[String]) -> Result<Vec<String>> {
+    let mut logs = Vec::new();
+    let maestro_home = expand_user_path(install_path)?;
+    let local_bin = home_dir()?.join(".local").join("bin");
+
+    require_dir(
+        &maestro_home.join("integrations").join("commands"),
+        "Maestro command protocols",
+    )?;
+    require_dir(&maestro_home.join("agents"), "Maestro agent definitions")?;
+    require_dir(&maestro_home.join("skills"), "Maestro skill library")?;
+    logs.push("Verified Maestro home directories (commands, agents, skills)".to_string());
+
+    for command_file in CANONICAL_COMMAND_PROTOCOLS {
+        require_file(
+            &maestro_home
+                .join("integrations")
+                .join("commands")
+                .join(command_file),
+            "canonical Maestro command protocol",
+        )?;
+    }
+    logs.push(format!(
+        "Verified {} canonical Maestro command protocols",
+        CANONICAL_COMMAND_PROTOCOLS.len()
+    ));
+
+    let maestro_bin = local_bin.join(binary_name_for_platform("maestro"));
+    require_file(&maestro_bin, "maestro CLI binary")?;
+    let help_text = command_output(&maestro_bin, &["--help"])?;
+    for token in CLI_REQUIRED_SURFACE {
+        if !help_text.contains(token) {
+            anyhow::bail!(
+                "Installed maestro CLI is missing expected command surface token `{}`",
+                token
+            );
+        }
+    }
+    logs.push("Verified maestro CLI command surface".to_string());
+
+    let tracklens_help = command_output(&maestro_bin, &["track-lens", "--help"])?;
+    if !tracklens_help.contains("TrackLens") {
+        anyhow::bail!("Installed maestro CLI cannot access the TrackLens command surface");
+    }
+    logs.push("Verified `maestro track-lens --help`".to_string());
+
+    let maestro_mcp_help = command_output(&maestro_bin, &["mcp", "--help"])?;
+    for token in ["serve", "proxy", "tool-search"] {
+        if !maestro_mcp_help.contains(token) {
+            anyhow::bail!(
+                "Installed maestro CLI is missing MCP pool surface token `{}`",
+                token
+            );
+        }
+    }
+    logs.push("Verified Maestro MCP pool surface (serve/proxy/tool-search)".to_string());
+
+    require_file(
+        &local_bin.join(binary_name_for_platform("maestro-cockpit")),
+        "maestro-cockpit binary",
+    )?;
+    logs.push("Verified maestro-cockpit runtime binary".to_string());
+
+    let gateway_help = command_output(
+        &local_bin.join(binary_name_for_platform("maestro-gateway")),
+        &["--help"],
+    )?;
+    if !gateway_help.contains("Maestro Web Gateway") {
+        anyhow::bail!("Installed maestro-gateway binary failed help verification");
+    }
+    logs.push("Verified maestro-gateway binary".to_string());
+
+    let lsp_help = command_output(
+        &local_bin.join(binary_name_for_platform("maestro-lsp-mcp-bridge")),
+        &["--help"],
+    )?;
+    if !lsp_help.contains("Protocol translation") {
+        anyhow::bail!("Installed maestro-lsp-mcp-bridge binary failed help verification");
+    }
+    logs.push("Verified maestro-lsp-mcp-bridge binary".to_string());
+
+    if let Some(leindex) = StandaloneLeIndexProvider::detect()? {
+        let provider_report = leindex.health_report_sync(Path::new("."))?;
+        if !matches!(
+            provider_report.status,
+            crate::provider_boundary::ProviderStatus::Healthy
+        ) {
+            anyhow::bail!(
+                "Standalone LeIndex provider is not healthy enough for managed-session use"
+            );
+        }
+        let leindex_binary = Path::new("leindex");
+        let leindex_help = command_output(leindex_binary, &["--help"])?;
+        for token in ["index", "search", "analyze", "phase", "mcp"] {
+            if !leindex_help.contains(token) {
+                anyhow::bail!(
+                    "Standalone LeIndex help is missing expected command surface token `{}`",
+                    token
+                );
+            }
+        }
+        let leindex_mcp = command_output(leindex_binary, &["mcp", "--help"])?;
+        if !leindex_mcp.contains("Run MCP server in stdio mode") {
+            anyhow::bail!(
+                "Standalone LeIndex MCP surface is missing the expected stdio entrypoint"
+            );
+        }
+        logs.push("Verified standalone LeIndex provider health".to_string());
+        logs.push("Verified standalone LeIndex command/MCP surface".to_string());
+    } else {
+        anyhow::bail!("Standalone LeIndex provider not found. Install LeIndex before using Maestro-managed sessions");
+    }
+
+    if let Some(nexus) = StandaloneNexusProvider::discover() {
+        let provider_report = nexus.health_report_sync(Path::new("."))?;
+        if !matches!(
+            provider_report.status,
+            crate::provider_boundary::ProviderStatus::Healthy
+        ) {
+            anyhow::bail!(
+                "Standalone Nexus provider is not healthy enough for managed-session use"
+            );
+        }
+        let nexus_binary = Path::new("nexus");
+        let nexus_init = command_output(nexus_binary, &["init", "--help"])?;
+        if !nexus_init.contains("init") {
+            anyhow::bail!("Standalone Nexus init surface did not respond as expected");
+        }
+        let nexus_session = command_output(nexus_binary, &["session", "--help"])?;
+        if !nexus_session.contains("session") {
+            anyhow::bail!("Standalone Nexus session surface did not respond as expected");
+        }
+        logs.push("Verified standalone Nexus provider health".to_string());
+        logs.push("Verified standalone Nexus init/session surface".to_string());
+    } else {
+        anyhow::bail!("Standalone Nexus provider not found. Install and initialize Nexus before using Maestro-managed sessions");
+    }
+
+    for tool in selected_tools {
+        verify_selected_tool(tool, &maestro_home, &mut logs)?;
+    }
+
+    Ok(logs)
+}
+
+fn verify_selected_tool(tool: &str, maestro_home: &Path, logs: &mut Vec<String>) -> Result<()> {
+    let home = home_dir()?;
+    match tool {
+        "Claude Code (by Anthropic)" => {
+            require_dir(
+                &home.join(".claude").join("commands"),
+                "Claude commands dir",
+            )?;
+            require_file(
+                &home
+                    .join(".claude")
+                    .join("commands")
+                    .join("maestro:setup.md"),
+                "Claude Maestro setup command",
+            )?;
+            require_file(
+                &home
+                    .join(".claude")
+                    .join("skills")
+                    .join("maestro")
+                    .join("SKILL.md"),
+                "Claude Maestro skill",
+            )?;
+            require_file(
+                &home
+                    .join(".claude")
+                    .join("maestro-templates")
+                    .join("workflow.md"),
+                "Claude workflow template",
+            )?;
+            require_file(
+                &home
+                    .join(".claude")
+                    .join("plugins")
+                    .join("maestro")
+                    .join("plugin.json"),
+                "Claude Maestro plugin manifest",
+            )?;
+            let mcp_text = std::fs::read_to_string(home.join(".claude").join(".mcp.json"))
+                .context("Failed reading ~/.claude/.mcp.json")?;
+            ensure_contains(
+                &mcp_text,
+                "\"leindex\"",
+                "Claude MCP configuration for leindex",
+            )?;
+            ensure_contains(&mcp_text, "\"maestro\"", "Claude MCP configuration command")?;
+            ensure_contains(
+                &mcp_text,
+                "\"leindex\",",
+                "Claude direct standalone LeIndex registration",
+            )?;
+            ensure_contains(&mcp_text, "\"mcp\"", "Claude direct LeIndex MCP args")?;
+            logs.push(
+                "Verified Claude Code commands, skill, plugin, templates, and MCP wiring"
+                    .to_string(),
+            );
+        }
+        "Gemini CLI (by Google)" => {
+            require_file(
+                &home
+                    .join(".gemini")
+                    .join("commands")
+                    .join("maestro")
+                    .join("setup.toml"),
+                "Gemini Maestro setup command",
+            )?;
+            require_file(
+                &home
+                    .join(".gemini")
+                    .join("skills")
+                    .join("maestro")
+                    .join("SKILL.md"),
+                "Gemini Maestro skill",
+            )?;
+            let cfg = std::fs::read_to_string(home.join(".gemini").join("settings.json"))
+                .context("Failed reading ~/.gemini/settings.json")?;
+            ensure_contains(&cfg, "\"leindex\"", "Gemini MCP configuration for leindex")?;
+            ensure_contains(&cfg, "\"mcp\"", "Gemini direct LeIndex MCP routing")?;
+            logs.push("Verified Gemini CLI integration".to_string());
+        }
+        "Qwen Code (QwenLM)" => {
+            require_file(
+                &home
+                    .join(".qwen")
+                    .join("commands")
+                    .join("maestro")
+                    .join("setup.toml"),
+                "Qwen Maestro setup command",
+            )?;
+            let cfg = std::fs::read_to_string(home.join(".qwen").join("settings.json"))
+                .context("Failed reading ~/.qwen/settings.json")?;
+            ensure_contains(&cfg, "\"leindex\"", "Qwen MCP configuration for leindex")?;
+            ensure_contains(&cfg, "\"mcp\"", "Qwen direct LeIndex MCP routing")?;
+            logs.push("Verified Qwen Code integration".to_string());
+        }
+        "Codex CLI (OpenAI)" => {
+            let codex_home = codex_home_dir();
+            require_file(
+                &codex_home.join("prompts").join("maestro_setup.md"),
+                "Codex Maestro setup prompt",
+            )?;
+            let cfg = std::fs::read_to_string(codex_home.join("config.toml"))
+                .context("Failed reading Codex config.toml")?;
+            ensure_contains(
+                &cfg,
+                "[mcp_servers.leindex]",
+                "Codex MCP configuration for leindex",
+            )?;
+            ensure_contains(
+                &cfg,
+                "command = \"leindex\"",
+                "Codex direct LeIndex MCP command",
+            )?;
+            logs.push("Verified Codex CLI integration".to_string());
+        }
+        "OpenCode (Independent)" => {
+            require_file(
+                &home
+                    .join(".config")
+                    .join("opencode")
+                    .join("skill")
+                    .join("maestro")
+                    .join("README.md"),
+                "OpenCode Maestro skill bundle",
+            )?;
+            require_file(
+                &home
+                    .join(".config")
+                    .join("opencode")
+                    .join("commands")
+                    .join("maestro:setup.md"),
+                "OpenCode Maestro setup command",
+            )?;
+            let cfg = std::fs::read_to_string(
+                home.join(".config").join("opencode").join("opencode.json"),
+            )
+            .context("Failed reading ~/.config/opencode/opencode.json")?;
+            ensure_contains(&cfg, "\"maestro:setup\"", "OpenCode command registration")?;
+            ensure_contains(
+                &cfg,
+                "\"leindex\"",
+                "OpenCode MCP configuration for leindex",
+            )?;
+            logs.push("Verified OpenCode integration".to_string());
+        }
+        "Amp CLI (by Sourcegraph)" => {
+            require_file(
+                &home
+                    .join(".config")
+                    .join("agents")
+                    .join("skills")
+                    .join("maestro")
+                    .join("SKILL.md"),
+                "Amp Maestro skill",
+            )?;
+            let cfg =
+                std::fs::read_to_string(home.join(".config").join("amp").join("settings.json"))
+                    .context("Failed reading ~/.config/amp/settings.json")?;
+            ensure_contains(&cfg, "\"leindex\"", "Amp MCP configuration for leindex")?;
+            logs.push("Verified Amp integration".to_string());
+        }
+        "Droid CLI (by Factory)" => {
+            let cfg = std::fs::read_to_string(home.join(".factory").join("mcp.json"))
+                .context("Failed reading ~/.factory/mcp.json")?;
+            ensure_contains(&cfg, "\"leindex\"", "Droid MCP configuration for leindex")?;
+            ensure_contains(&cfg, "\"type\": \"stdio\"", "Droid stdio MCP transport")?;
+            logs.push("Verified Droid integration".to_string());
+        }
+        "iFlow CLI (by iFlow)" => {
+            let cfg = std::fs::read_to_string(home.join(".iflow").join("settings.json"))
+                .context("Failed reading ~/.iflow/settings.json")?;
+            ensure_contains(&cfg, "\"leindex\"", "iFlow MCP configuration for leindex")?;
+            logs.push("Verified iFlow integration".to_string());
+        }
+        "pi-mono (Multi-Model CLI)" => {
+            require_dir(
+                &home.join(".pi").join("extensions"),
+                "pi-mono extensions directory",
+            )?;
+            require_dir(
+                &home.join(".pi").join("extensions").join("pi-maestro"),
+                "pi-maestro extension install",
+            )?;
+            logs.push("Verified pi-mono extension wiring".to_string());
+        }
+        "Go Language (for Zoekt)"
+        | "Zoekt (Fast Code Search)"
+        | "Tmux / Tmux-RS"
+        | "Yazi (Terminal File Manager)" => {
+            logs.push(format!(
+                "Verified {} install step completed during package/runtime phase",
+                tool
+            ));
+        }
+        _ => {
+            let _ = maestro_home;
+        }
+    }
+    Ok(())
+}
+
+fn require_file(path: &Path, label: &str) -> Result<()> {
+    if !path.is_file() {
+        anyhow::bail!("Missing {} at {}", label, path.display());
+    }
+    Ok(())
+}
+
+fn require_dir(path: &Path, label: &str) -> Result<()> {
+    if !path.is_dir() {
+        anyhow::bail!("Missing {} at {}", label, path.display());
+    }
+    Ok(())
+}
+
+fn command_output(binary: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new(binary)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .with_context(|| format!("Failed to execute {}", binary.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "Command `{}` {:?} failed: {}",
+            binary.display(),
+            args,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn ensure_contains(haystack: &str, needle: &str, label: &str) -> Result<()> {
+    if !haystack.contains(needle) {
+        anyhow::bail!("Missing {} (expected to find `{}`)", label, needle);
+    }
+    Ok(())
+}
+
+fn binary_name_for_platform(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{}.exe", name)
+    } else {
+        name.to_string()
+    }
+}
+
 fn ensure_json_object(
     value: &mut serde_json::Value,
 ) -> &mut serde_json::Map<String, serde_json::Value> {
@@ -1777,4 +2826,32 @@ fn ensure_toml_table(value: &mut toml::Value) -> &mut toml::value::Table {
     value
         .as_table_mut()
         .expect("value is table after normalization")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_log_path_prefers_setup_override() {
+        let path = setup_log_path_with(|key| match key {
+            "MAESTRO_SETUP_LOG_FILE" => Some("/tmp/setup.log".to_string()),
+            "MAESTRO_INSTALL_LOG" => Some("/tmp/install.log".to_string()),
+            _ => None,
+        })
+        .expect("log path should resolve");
+
+        assert_eq!(path, PathBuf::from("/tmp/setup.log"));
+    }
+
+    #[test]
+    fn setup_log_path_falls_back_to_install_override() {
+        let path = setup_log_path_with(|key| match key {
+            "MAESTRO_INSTALL_LOG_FILE" => Some("/tmp/install.log".to_string()),
+            _ => None,
+        })
+        .expect("log path should resolve");
+
+        assert_eq!(path, PathBuf::from("/tmp/install.log"));
+    }
 }

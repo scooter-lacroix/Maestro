@@ -64,6 +64,10 @@ pub struct ServerState {
     pub client_ready_tx: watch::Sender<bool>,
     /// Client readiness receiver
     pub client_ready_rx: watch::Receiver<bool>,
+    /// Timeout deadline (Unix timestamp in seconds)
+    pub deadline_tx: watch::Sender<u64>,
+    /// Timeout deadline receiver
+    pub deadline_rx: watch::Receiver<u64>,
 }
 
 /// Review content
@@ -105,6 +109,13 @@ impl TrackLensServer {
         // Create watch channel for decision updates
         let (decision_tx, decision_rx) = watch::channel(None);
         let (client_ready_tx, client_ready_rx) = watch::channel(false);
+        // Initial deadline: 20 seconds from now (default timeout)
+        let initial_deadline = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            + 20;
+        let (deadline_tx, deadline_rx) = watch::channel(initial_deadline);
 
         Self {
             config,
@@ -114,24 +125,45 @@ impl TrackLensServer {
                 decision_rx,
                 client_ready_tx,
                 client_ready_rx,
+                deadline_tx,
+                deadline_rx,
             }),
         }
     }
 
     /// Start the server and return the URL
     pub async fn start(&self) -> anyhow::Result<String> {
-        // Bind to port first to determine the actual port
-        let port = if self.config.port == 0 {
-            // Find available port
-            portpicker::pick_unused_port().unwrap_or(3000)
+        // Try to bind to a port in order of preference:
+        // 1. If config.port is specified (non-zero), use that
+        // 2. Try preferred ports: 3847, 17579, 3000
+        // 3. Fall back to OS-assigned port (port 0)
+        let listener = if self.config.port != 0 {
+            TcpListener::bind(format!("{}:{}", self.config.host, self.config.port)).await
         } else {
-            self.config.port
-        };
+            // Try preferred ports first for predictability
+            let preferred_ports = [3847u16, 17579u16, 3000u16];
+            let mut result = None;
 
-        let addr = format!("{}:{}", self.config.host, port);
-        let listener = TcpListener::bind(&addr).await?;
+            for port in &preferred_ports {
+                match TcpListener::bind(format!("{}:{}", self.config.host, port)).await {
+                    Ok(l) => {
+                        result = Some(l);
+                        break;
+                    }
+                    Err(_) => continue, // Port in use, try next
+                }
+            }
 
-        let url = format!("http://{}", addr);
+            // If all preferred ports are taken, use OS-assigned port
+            match result {
+                Some(l) => Ok(l),
+                None => TcpListener::bind(format!("{}:0", self.config.host)).await,
+            }
+        }?;
+
+        // Get the actual port from the bound socket (eliminates race condition)
+        let port = listener.local_addr()?.port();
+        let url = format!("http://{}:{}", self.config.host, port);
 
         // Build CORS origins with the actual port
         let origin_localhost = format!("http://localhost:{}", port)
@@ -142,8 +174,8 @@ impl TrackLensServer {
             .unwrap();
 
         // Find bundle directory for static assets
-        let bundle_dir = find_bundle_dir()
-            .ok_or_else(|| anyhow::anyhow!("TrackLens UI bundle not found"))?;
+        let bundle_dir =
+            find_bundle_dir().ok_or_else(|| anyhow::anyhow!("TrackLens UI bundle not found"))?;
 
         // Build the router with restrictive CORS and compression
         // Now using the dynamically determined port
@@ -151,6 +183,7 @@ impl TrackLensServer {
             .route("/", get(index))
             .route("/api/decision", post(submit_decision))
             .route("/api/client-ready", post(mark_client_ready))
+            .route("/api/extend-timeout", post(extend_timeout))
             .route("/api/content", get(get_content))
             .route("/api/plan", get(get_plan))
             .route("/api/diff", get(get_diff))
@@ -163,7 +196,10 @@ impl TrackLensServer {
             app = app.nest_service("/assets", ServeDir::new(bundle_dir.join("assets")));
         }
         if bundle_dir.join("favicon.svg").exists() {
-            app = app.route_service("/favicon.svg", ServeFile::new(bundle_dir.join("favicon.svg")));
+            app = app.route_service(
+                "/favicon.svg",
+                ServeFile::new(bundle_dir.join("favicon.svg")),
+            );
         }
 
         let app = app
@@ -180,10 +216,14 @@ impl TrackLensServer {
             .layer(RequestBodyLimitLayer::new(1024 * 100)) // Limit request body to 100KB
             .with_state(self.state.clone());
 
-        // Open browser if configured
+        // Open browser if configured (non-blocking)
         if self.config.open_browser {
-            open::that(&url)
-                .map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
+            let url_clone = url.clone();
+            tokio::spawn(async move {
+                if let Err(e) = open::that(&url_clone) {
+                    eprintln!("[TrackLens] Failed to open browser: {}", e);
+                }
+            });
         }
 
         // Spawn server in background
@@ -287,9 +327,18 @@ async fn index(State(state): State<Arc<ServerState>>) -> Html<String> {
         let html_names = if let Ok(content) = state.content.read() {
             if let Some(ref c) = *content {
                 match c.mode {
-                    ReviewMode::CodeReview => vec!["review.html", "index.html", "editor.html", "tracklens-editor.html"],
-                    ReviewMode::Annotate => vec!["index.html", "editor.html", "tracklens-editor.html"],
-                    ReviewMode::Review => vec!["index.html", "editor.html", "tracklens-editor.html"],
+                    ReviewMode::CodeReview => vec![
+                        "review.html",
+                        "index.html",
+                        "editor.html",
+                        "tracklens-editor.html",
+                    ],
+                    ReviewMode::Annotate => {
+                        vec!["index.html", "editor.html", "tracklens-editor.html"]
+                    }
+                    ReviewMode::Review => {
+                        vec!["index.html", "editor.html", "tracklens-editor.html"]
+                    }
                 }
             } else {
                 vec!["index.html", "editor.html", "tracklens-editor.html"]
@@ -365,6 +414,32 @@ async fn mark_client_ready(
     state
         .client_ready_tx
         .send(true)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
+/// Request to extend the review timeout
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtendTimeoutRequest {
+    /// Additional minutes to add to the timeout
+    pub minutes: u64,
+}
+
+async fn extend_timeout(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<ExtendTimeoutRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    // Calculate new deadline: current time + requested minutes
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let new_deadline = now + (req.minutes * 60);
+
+    state
+        .deadline_tx
+        .send(new_deadline)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
@@ -459,6 +534,7 @@ async fn get_plan(State(state): State<Arc<ServerState>>) -> Json<serde_json::Val
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tracklens::types::DecisionBehavior;
     use reqwest::Client;
 
     #[tokio::test]
@@ -472,10 +548,10 @@ mod tests {
         assert!(server.start().await.is_ok());
     }
 
-    /// Cross-boundary auth integration test
-    /// Validates: Token injection → JS reads → JS sends Bearer → Rust validates
+    /// Cross-boundary decision integration test
+    /// Validates: HTML injection → JS bootstraps → decision POST reaches Rust state
     #[tokio::test]
-    async fn test_auth_flow_integration() {
+    async fn test_decision_flow_integration() {
         let config = ServerConfig {
             port: 0,
             open_browser: false,
@@ -486,86 +562,55 @@ mod tests {
         // Start the server
         let server_url = server.start().await.expect("Server should start");
 
-        // Extract auth token from HTML (simulating JS injection)
+        // Fetch HTML and verify the readiness bootstrap script is injected.
         let client = Client::new();
         let html_response = client.get(&server_url).send().await.unwrap();
         let html = html_response.text().await.unwrap();
 
-        // Extract token from the injected script tag
-        let token = html
-            .find("window.TRACKLENS_AUTH_TOKEN=\"")
-            .and_then(|pos| {
-                let start = pos + "window.TRACKLENS_AUTH_TOKEN=\"".len();
-                html[start..].find('"').map(|end| &html[start..start + end])
-            });
-
-        assert!(token.is_some(), "Auth token should be injected in HTML");
-
-        let token = token.unwrap();
-
-        // Verify token is not a short timestamp-based value
         assert!(
-            token.len() >= 32,
-            "Token should be at least 32 chars (cryptographically secure)"
+            html.contains("markClientReady"),
+            "TrackLens bootstrap script should be injected into the HTML"
         );
 
-        // Test 1: Submit decision with valid token (simulating JS editor behavior)
+        // Submit a decision and verify it flows through to the watch channel state.
         let decision_payload = serde_json::json!({
             "behavior": "allow",
             "annotations": null,
-            "autonomy_mode": null
+            "autonomy_mode": null,
+            "feedback": null
         });
 
         let response = client
             .post(format!("{}/api/decision", server_url))
-            .header("Authorization", format!("Bearer {}", token))
             .json(&decision_payload)
             .send()
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "Valid token should be accepted");
+        assert_eq!(response.status(), 200, "Decision post should be accepted");
 
-        // Test 2: Submit with wrong token should fail
-        let response = client
-            .post(format!("{}/api/decision", server_url))
-            .header("Authorization", "Bearer wrong-token-12345")
-            .json(&decision_payload)
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), 401, "Wrong token should be rejected");
-
-        // Test 3: Submit without token should fail
-        let response = client
-            .post(format!("{}/api/decision", server_url))
-            .json(&decision_payload)
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), 401, "Missing token should be rejected");
+        let decision = server.wait_for_decision().await.unwrap();
+        assert_eq!(decision.behavior, DecisionBehavior::Allow);
     }
 
-    /// Test that tokens are unique across server restarts
+    /// Test that server startup allocates distinct URLs across repeated launches.
     #[tokio::test]
-    async fn test_token_uniqueness() {
+    async fn test_server_urls_are_unique() {
         let config = ServerConfig {
             port: 0,
             open_browser: false,
             ..Default::default()
         };
 
-        let mut tokens = std::collections::HashSet::new();
+        let mut urls = std::collections::HashSet::new();
 
-        // Create multiple servers and verify all tokens are unique
+        // Create multiple servers and verify each launch gets its own reachable URL.
         for _ in 0..5 {
             let server = TrackLensServer::new(config.clone());
-            let token = server.auth_token();
-            tokens.insert(token);
+            let url = server.start().await.expect("Server should start");
+            urls.insert(url);
         }
 
-        assert_eq!(tokens.len(), 5, "All tokens should be unique");
+        assert_eq!(urls.len(), 5, "All server URLs should be unique");
     }
 }

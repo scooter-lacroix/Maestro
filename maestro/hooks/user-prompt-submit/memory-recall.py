@@ -10,6 +10,7 @@ import json
 import sys
 import os
 import re
+import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta, UTC
 from typing import Any
@@ -120,23 +121,49 @@ def memory_recall_hook(input_data: dict) -> dict:
         # Add intent context to query
         query = f"{intent} {query}"
 
-        # Recall relevant memories
-        memories = manager.recall(
-            query=query,
-            category=None,  # Search all categories
-            limit=5,
-        )
+        recalled: list[dict[str, Any]] = []
+        try:
+            from maestro.memory.service import MaestroMemoryService
 
-        # Format memories for response
-        recalled = []
+            async def _search_memories() -> list[dict[str, Any]]:
+                service = MaestroMemoryService()
+                await service.initialize()
+                try:
+                    project_path = os.environ.get("MAESTRO_PROJECT_PATH")
+                    return await service.search_similar_commands(
+                        command=query,
+                        project_path=project_path,
+                        limit=5,
+                    )
+                finally:
+                    await service.close()
+
+            memories = asyncio.run(_search_memories())
+        except Exception:
+            # Compatibility fallback for minimal environments.
+            memories = manager.recall(
+                query=query,
+                category=None,
+                limit=5,
+            )
+
         for memory in memories:
-            recalled.append({
-                "id": memory.id if hasattr(memory, 'id') else None,
-                "content": memory.content if hasattr(memory, 'content') else "",
-                "summary": memory.summary if hasattr(memory, 'summary') else None,
-                "category": memory.category if hasattr(memory, 'category') else None,
-                "importance": memory.importance if hasattr(memory, 'importance') else None,
-            })
+            if isinstance(memory, dict):
+                recalled.append({
+                    "id": memory.get("id"),
+                    "content": memory.get("content", ""),
+                    "summary": memory.get("summary"),
+                    "category": memory.get("category"),
+                    "importance": memory.get("importance"),
+                })
+            else:
+                recalled.append({
+                    "id": memory.id if hasattr(memory, 'id') else None,
+                    "content": memory.content if hasattr(memory, 'content') else "",
+                    "summary": memory.summary if hasattr(memory, 'summary') else None,
+                    "category": memory.category if hasattr(memory, 'category') else None,
+                    "importance": memory.importance if hasattr(memory, 'importance') else None,
+                })
 
         if recalled:
             input_data["recalled_memories"] = recalled
