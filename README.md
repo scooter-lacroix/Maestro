@@ -172,6 +172,7 @@ MaestroClaw is the unified agent execution layer for Maestro, providing comprehe
 - Enhanced tool registry and built-in tools
 - File, memory, and shell tools with proper security
 
+
 ### Tracklens - Walkthrough System
 
 Tracklens is an interactive walkthrough system that guides users through spec-driven development workflows:
@@ -854,6 +855,21 @@ Maestro v2.5 includes comprehensive testing infrastructure:
 - **Integration tests** for memory system, coordination patterns, and TLDR
 - **E2E tests** for complete track workflows (newTrack, implement, status, revert)
 - **Performance benchmarks** for memory operations and semantic search
+
+Validate the finalized build on `main` with:
+
+```bash
+git clone --branch main https://github.com/scooter-lacroix/Maestro.git
+cd Maestro
+bun install
+bun run build:tracklens
+cargo test --workspace
+```
+
+Quick validation:
+- Remote install entrypoint: `curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash`
+- Local install branch safety: `git branch --show-current` before and after `./install.sh`
+- Finalized `main` build: `bun run build:tracklens && cargo test --workspace`
 
 Validate the finalized build on `main` with:
 

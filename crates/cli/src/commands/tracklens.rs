@@ -123,6 +123,7 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
     info!("Mode: {}", mode);
     println!();
 
+
     // Parse review mode
     let review_mode = match mode.as_str() {
         "code-review" => ReviewMode::CodeReview,
