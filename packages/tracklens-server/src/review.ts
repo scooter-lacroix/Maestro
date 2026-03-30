@@ -6,14 +6,23 @@
  */
 
 import { mkdirSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
-import { randomUUID } from "crypto";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { getRepoInfo } from "./repo";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR, sanitizeFileName, getSafeUploadPath } from "./image";
 import type { GitContext, DiffType, DiffResult } from "./git";
 import { runGitDiff } from "./git";
+import {
+  createClientReadyMonitor,
+  injectTrackLensBootstrap,
+} from "./ui-readiness";
+
+// Resolve paths for asset serving
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = process.env.CLAUDE_PROJECT_DIR || resolve(__dirname, "..", "..", "..");
 
 export interface ReviewServerOptions {
   /** Raw git diff patch string */
@@ -57,9 +66,6 @@ export async function startReviewServer(
 ): Promise<ReviewServerResult> {
   const { htmlContent, origin, gitContext, rawPatch, gitRef, error } = options;
 
-  // Generate authentication token for decision endpoint
-  const authToken = randomUUID();
-
   // Mutable state for diff switching
   let currentPatch = options.rawPatch;
   let currentGitRef = options.gitRef;
@@ -78,10 +84,10 @@ export async function startReviewServer(
   // Decision promise
   let resolveDecision:
     | ((result: {
-        feedback: string;
-        annotations: unknown[];
-        agentSwitch?: string;
-      }) => void)
+      feedback: string;
+      annotations: unknown[];
+      agentSwitch?: string;
+    }) => void)
     | undefined;
 
   const decisionPromise = new Promise<{
@@ -91,6 +97,7 @@ export async function startReviewServer(
   }>((resolve) => {
     resolveDecision = resolve;
   });
+  const clientReady = createClientReadyMonitor();
 
   // Start server
   const server = Bun.serve({
@@ -109,6 +116,11 @@ export async function startReviewServer(
           repoInfo,
           ...(currentError && { error: currentError }),
         });
+      }
+
+      if (url.pathname === "/api/client-ready" && req.method === "POST") {
+        clientReady.markClientReady();
+        return Response.json({ ready: true });
       }
 
       // API: Switch diff type
@@ -148,6 +160,62 @@ export async function startReviewServer(
         }
       }
 
+      // API: Save to Obsidian
+      if (url.pathname === "/api/obsidian" && req.method === "POST") {
+        try {
+          const body = await req.json();
+          const { vaultPath, folder, filenameFormat, content } = body as {
+            vaultPath: string;
+            folder: string;
+            filenameFormat?: string;
+            content?: string;
+          };
+
+          const { saveToObsidian: save } = await import("./integrations");
+          const result = await save({
+            vaultPath,
+            folder,
+            content: content || currentPatch,
+            filenameFormat,
+          });
+
+          return Response.json(result);
+        } catch (error) {
+          return Response.json(
+            {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      // API: Save to Bear
+      if (url.pathname === "/api/bear" && req.method === "POST") {
+        try {
+          const body = await req.json().catch(() => ({}));
+          const { content } = body as { content?: string };
+          const { saveToBear: save } = await import("./integrations");
+          const result = await save({ content: content || currentPatch });
+          return Response.json(result);
+        } catch (error) {
+          return Response.json(
+            {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            { status: 500 }
+          );
+        }
+      }
+
+      // API: List Obsidian vaults
+      if (url.pathname === "/api/vaults" && req.method === "GET") {
+        const { detectObsidianVaults } = await import("./integrations");
+        const vaults = detectObsidianVaults();
+        return Response.json({ vaults });
+      }
       // API: Validate image path
       if (url.pathname === "/api/validate-image" && req.method === "POST") {
         try {
@@ -238,12 +306,6 @@ export async function startReviewServer(
 
       // API: Submit decision
       if (url.pathname === "/api/decision" && req.method === "POST") {
-        // Validate authentication token
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         try {
           const body = await req.json();
           const {
@@ -273,11 +335,37 @@ export async function startReviewServer(
         }
       }
 
+      // Serve static assets (JS, CSS files)
+      if (url.pathname.startsWith("/assets/")) {
+        const assetPath = url.pathname.slice(1); // Remove leading /
+        const assetCandidates = [
+          resolve(__dirname, "..", assetPath),
+          resolve(__dirname, assetPath),
+          resolve(projectRoot, "apps", "tracklens-hook", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-editor", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-review-editor", "dist", assetPath),
+        ];
+
+        for (const candidate of assetCandidates) {
+          if (existsSync(candidate)) {
+            const file = Bun.file(candidate);
+            const ext = candidate.split(".").pop()?.toLowerCase();
+            const contentType =
+              ext === "js" ? "application/javascript" :
+              ext === "css" ? "text/css" :
+              ext === "svg" ? "image/svg+xml" :
+              "application/octet-stream";
+            return new Response(file, {
+              headers: { "Content-Type": contentType },
+            });
+          }
+        }
+        return new Response("Asset not found", { status: 404 });
+      }
+
       // Serve HTML
-      // Inject authentication token into HTML for client-side access
-      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
-      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
-      return new Response(htmlWithToken, {
+      const htmlWithBootstrap = injectTrackLensBootstrap(htmlContent);
+      return new Response(htmlWithBootstrap, {
         headers: { "Content-Type": "text/html" },
       });
     },
@@ -293,11 +381,21 @@ export async function startReviewServer(
     port: number
   ): Promise<void> {
     if (!isRemote) {
-      await openBrowser(url);
+      const opened = await openBrowser(url);
+      if (!opened) {
+        throw new Error(`TrackLens review browser open failed for ${url}`);
+      }
     }
   }
 
   await handleReviewServerReady(url, isRemote, port);
+  const ready = await clientReady.waitForClientReady();
+  if (!ready) {
+    server.stop();
+    throw new Error(
+      "TrackLens review UI never became ready. Aborting instead of waiting indefinitely."
+    );
+  }
 
   return {
     port,

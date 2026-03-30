@@ -8,9 +8,11 @@ use chrono::TimeZone;
 use leindex_core::orchestrate::model::{
     IterationLog, IterationStatus, SessionState, SessionStatus,
 };
+use serde_json::json;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 impl ConductorPane {
     /// Poll the orchestrate engine state for all tracks to find active ones
@@ -297,6 +299,30 @@ impl ConductorPane {
             }
         }
 
+        let summary = match log.status {
+            IterationStatus::Running => format!("started {}", log.task_id),
+            IterationStatus::Completed => format!("completed {}", log.task_id),
+            IterationStatus::Failed => format!("failed {}", log.task_id),
+            IterationStatus::Skipped => format!("skipped {}", log.task_id),
+        };
+        let level = match log.status {
+            IterationStatus::Running => crate::conductor::model::RuntimeLogLevel::Info,
+            IterationStatus::Completed => crate::conductor::model::RuntimeLogLevel::Success,
+            IterationStatus::Failed => crate::conductor::model::RuntimeLogLevel::Error,
+            IterationStatus::Skipped => crate::conductor::model::RuntimeLogLevel::Warning,
+        };
+        self.push_runtime_log(
+            level,
+            Some(log.iteration),
+            Some(log.task_id.clone()),
+            summary,
+            if !log.output.is_empty() {
+                Some(log.output.clone())
+            } else {
+                log.error.clone()
+            },
+        );
+
         // Add output to pane if not suppressed
         if !suppress_output {
             self.add_output(format!(
@@ -330,6 +356,20 @@ impl ConductorPane {
                 for out_line in log.output.lines() {
                     self.add_output(out_line.to_string());
                 }
+
+                let summary = log
+                    .output
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .map(|line| line.trim().chars().take(100).collect::<String>())
+                    .unwrap_or_else(|| "agent produced output".to_string());
+                self.push_runtime_log(
+                    crate::conductor::model::RuntimeLogLevel::Info,
+                    Some(log.iteration),
+                    Some(log.task_id.clone()),
+                    summary,
+                    Some(log.output.clone()),
+                );
             }
         }
 
@@ -343,6 +383,13 @@ impl ConductorPane {
                 self.state.transition(&error_event);
                 crate::conductor::telemetry::BUS.broadcast(error_event);
                 self.add_output(format!("ERROR: {}", err));
+                self.push_runtime_log(
+                    crate::conductor::model::RuntimeLogLevel::Error,
+                    Some(log.iteration),
+                    Some(log.task_id.clone()),
+                    format!("error: {}", err),
+                    Some(err.clone()),
+                );
             }
 
             let failed_event = ConductorEvent::IterationFailed {
@@ -365,6 +412,30 @@ impl ConductorPane {
                     if !suppress_output {
                         self.state.transition(&comp_event);
                         crate::conductor::telemetry::BUS.broadcast(comp_event);
+                        self.schedule_cognition_transition(
+                            "loop",
+                            log.iteration,
+                            &log.task_id,
+                            false,
+                            true,
+                            suppress_output,
+                        );
+                        self.schedule_cognition_transition(
+                            "review",
+                            log.iteration,
+                            &log.task_id,
+                            true,
+                            false,
+                            suppress_output,
+                        );
+                        self.schedule_cognition_transition(
+                            "checkpoint",
+                            log.iteration,
+                            &log.task_id,
+                            true,
+                            true,
+                            suppress_output,
+                        );
                     }
                 }
                 IterationStatus::Skipped => {
@@ -382,6 +453,57 @@ impl ConductorPane {
             }
         }
     }
+
+    fn schedule_cognition_transition(
+        &mut self,
+        phase: &str,
+        iteration: u64,
+        task_id: &str,
+        review_point_reached: bool,
+        task_completed: bool,
+        suppress_output: bool,
+    ) {
+        if suppress_output {
+            return;
+        }
+
+        let project_root = self
+            .current_project
+            .as_ref()
+            .map(|project| project.root_dir.clone())
+            .or_else(|| self.tracks_dir.parent().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| self.tracks_dir.clone());
+
+        let payload = json!({
+            "session_id": self.state.session_id.clone().unwrap_or_default(),
+            "track_id": self.state.current_track.clone().unwrap_or_default(),
+            "task_id": task_id,
+            "iteration": iteration,
+            "project_path": project_root.display().to_string(),
+            "cwd": project_root.display().to_string(),
+            "selected_cli": self
+                .state
+                .active_agent
+                .as_ref()
+                .map(|agent| agent.tool.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            "loop_mode": format!("{:?}", self.loop_mode),
+            "review_point_reached": review_point_reached,
+            "checkpoint_interval": self.state.max_iterations,
+            "task_completed": task_completed,
+        });
+
+        if let Some(stdout) = run_hook_executor_phase(phase, &payload, &project_root) {
+            let summary = format!("scheduled {} transition for iteration {}", phase, iteration);
+            self.push_runtime_log(
+                crate::conductor::model::RuntimeLogLevel::Info,
+                Some(iteration),
+                Some(task_id.to_string()),
+                summary,
+                Some(stdout),
+            );
+        }
+    }
 }
 
 fn map_session_status(status: SessionStatus) -> ConductorStatus {
@@ -395,4 +517,58 @@ fn map_session_status(status: SessionStatus) -> ConductorStatus {
         SessionStatus::Failed => ConductorStatus::Failed,
         SessionStatus::Interrupted => ConductorStatus::Stopping,
     }
+}
+
+fn run_hook_executor_phase(
+    phase: &str,
+    payload: &serde_json::Value,
+    project_root: &Path,
+) -> Option<String> {
+    let script = r#"
+import json
+import sys
+from maestro.hooks.executor import execute_checkpoint, execute_review
+
+phase = sys.argv[1]
+payload = json.loads(sys.stdin.read())
+mapping = {
+    "review": execute_review,
+    "checkpoint": execute_checkpoint,
+}
+result = mapping[phase](payload)
+json.dump(result, sys.stdout)
+"#;
+
+    for python in ["python3", "python"] {
+        let mut child = match Command::new(python)
+            .arg("-c")
+            .arg(script)
+            .arg(phase)
+            .current_dir(project_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => continue,
+        };
+
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Ok(json) = serde_json::to_string(payload) {
+                let _ = stdin.write_all(json.as_bytes());
+            }
+        }
+
+        let output = match child.wait_with_output() {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
+
+        if output.status.success() {
+            return Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        }
+    }
+
+    None
 }

@@ -48,7 +48,7 @@ export interface ViewerHandle {
 
 const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }) => {
   return (
-    <div className="mb-6 p-4 bg-muted/30 rounded-lg border border-border">
+    <div className="mb-6 p-4 bg-muted/30 rounded-2xl border border-border">
       <h4 className="text-xs font-semibold text-muted-foreground mb-2">Frontmatter</h4>
       <pre className="text-xs font-mono text-muted-foreground overflow-x-auto">
         {JSON.stringify(frontmatter, null, 2)}
@@ -137,13 +137,13 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         span.id = `highlight-${ann.id}`;
         span.className = 'tracklens-highlight';
         span.style.backgroundColor = ann.type === 'DELETION' ? 'rgba(239, 68, 68, 0.2)' :
-                                   ann.type === 'INSERTION' ? 'rgba(34, 197, 94, 0.2)' :
-                                   ann.type === 'REPLACEMENT' ? 'rgba(59, 130, 246, 0.2)' :
-                                   'rgba(250, 204, 21, 0.3)';
+          ann.type === 'INSERTION' ? 'rgba(34, 197, 94, 0.2)' :
+            ann.type === 'REPLACEMENT' ? 'rgba(59, 130, 246, 0.2)' :
+              'rgba(250, 204, 21, 0.3)';
         span.style.borderBottom = ann.type === 'DELETION' ? '2px solid rgba(239, 68, 68, 0.8)' :
-                                   ann.type === 'INSERTION' ? '2px solid rgba(34, 197, 94, 0.8)' :
-                                   ann.type === 'REPLACEMENT' ? '2px solid rgba(59, 130, 246, 0.8)' :
-                                   '2px solid rgba(250, 204, 21, 0.8)';
+          ann.type === 'INSERTION' ? '2px solid rgba(34, 197, 94, 0.8)' :
+            ann.type === 'REPLACEMENT' ? '2px solid rgba(59, 130, 246, 0.8)' :
+              '2px solid rgba(250, 204, 21, 0.8)';
         span.style.padding = '2px 4px';
         span.style.borderRadius = '3px';
         // For now, we'll just wrap the block content
@@ -165,33 +165,71 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
 
     const rect = range.getBoundingClientRect();
-    setToolbarPosition({
+    const toolbarPos = {
       x: rect.left + rect.width / 2 - 100,
       y: rect.top - 50 + window.scrollY,
-    });
+    };
+
+    setToolbarPosition(toolbarPos);
     setSelectedText(text);
-    setSelectedRange({
+    const capturedRange = {
       startContainer: range.startContainer,
       startOffset: range.startOffset,
       endContainer: range.endContainer,
       endOffset: range.endOffset,
-    });
-    setShowToolbar(true);
+    };
+    setSelectedRange(capturedRange);
+
+    if (mode === 'comment') {
+      executeAddComment(capturedRange, text);
+    } else if (mode === 'redline') {
+      executeAddDeletion(capturedRange, text);
+    } else {
+      setShowToolbar(true);
+    }
   };
 
-  const handleAddComment = () => {
-    if (!selectedRange || !containerRef.current) return;
-    
-    const blockId = blocks.find(b => containerRef.current?.querySelector(`[data-block-id="${b.id}"]`)?.contains(selectedRange.startContainer))?.id || '';
-    
+  const executeAddComment = (range: any, selectedTxt: string) => {
+    if (!range || !containerRef.current) return;
+
+    const blockId = blocks.find(b => containerRef.current?.querySelector(`[data-block-id="${b.id}"]`)?.contains(range.startContainer))?.id || '';
+
     const newAnnotation: Annotation = {
       id: `ann-${Date.now()}`,
       blockId,
-      startOffset: selectedRange.startOffset,
-      endOffset: selectedRange.endOffset,
+      startOffset: range.startOffset,
+      endOffset: range.endOffset,
       type: 'COMMENT' as AnnotationType,
       text: '',
-      originalText: selectedText,
+      originalText: selectedTxt,
+      createdA: Date.now(),
+      author: getIdentity(),
+    };
+
+    onAddAnnotation(newAnnotation);
+    clearSelection();
+  };
+
+  const handleAddComment = () => {
+    executeAddComment(selectedRange, selectedText);
+  };
+
+  const executeAddSuggestion = (range: any, selectedTxt: string) => {
+    if (!range || !containerRef.current) return;
+
+    const blockId = blocks.find(b => containerRef.current?.querySelector(`[data-block-id="${b.id}"]`)?.contains(range.startContainer))?.id || '';
+
+    const suggestion = prompt('Enter your suggestion:');
+    if (!suggestion) return;
+
+    const newAnnotation: Annotation = {
+      id: `ann-${Date.now()}`,
+      blockId,
+      startOffset: range.startOffset,
+      endOffset: range.endOffset,
+      type: 'REPLACEMENT' as AnnotationType,
+      text: suggestion,
+      originalText: selectedTxt,
       createdA: Date.now(),
       author: getIdentity(),
     };
@@ -201,21 +239,22 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   };
 
   const handleAddSuggestion = () => {
-    if (!selectedRange || !containerRef.current) return;
-    
-    const blockId = blocks.find(b => containerRef.current?.querySelector(`[data-block-id="${b.id}"]`)?.contains(selectedRange.startContainer))?.id || '';
-    
-    const suggestion = prompt('Enter your suggestion:');
-    if (!suggestion) return;
+    executeAddSuggestion(selectedRange, selectedText);
+  };
+
+  const executeAddDeletion = (range: any, selectedTxt: string) => {
+    if (!range || !containerRef.current) return;
+
+    const blockId = blocks.find(b => containerRef.current?.querySelector(`[data-block-id="${b.id}"]`)?.contains(range.startContainer))?.id || '';
 
     const newAnnotation: Annotation = {
       id: `ann-${Date.now()}`,
       blockId,
-      startOffset: selectedRange.startOffset,
-      endOffset: selectedRange.endOffset,
-      type: 'REPLACEMENT' as AnnotationType,
-      text: suggestion,
-      originalText: selectedText,
+      startOffset: range.startOffset,
+      endOffset: range.endOffset,
+      type: 'DELETION' as AnnotationType,
+      text: '',
+      originalText: selectedTxt,
       createdA: Date.now(),
       author: getIdentity(),
     };
@@ -225,24 +264,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   };
 
   const handleAddDeletion = () => {
-    if (!selectedRange || !containerRef.current) return;
-    
-    const blockId = blocks.find(b => containerRef.current?.querySelector(`[data-block-id="${b.id}"]`)?.contains(selectedRange.startContainer))?.id || '';
-    
-    const newAnnotation: Annotation = {
-      id: `ann-${Date.now()}`,
-      blockId,
-      startOffset: selectedRange.startOffset,
-      endOffset: selectedRange.endOffset,
-      type: 'DELETION' as AnnotationType,
-      text: '',
-      originalText: selectedText,
-      createdA: Date.now(),
-      author: getIdentity(),
-    };
-
-    onAddAnnotation(newAnnotation);
-    clearSelection();
+    executeAddDeletion(selectedRange, selectedText);
   };
 
   const clearSelection = () => {
@@ -254,45 +276,45 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
 
   const renderBlock = (block: Block): React.ReactNode => {
     const baseClass = 'mb-4';
-    
+
     switch (block.type) {
       case 'heading':
         const level = block.level || 1;
         const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
         return (
-          <Tag key={block.id} data-block-id={block.id} className={`${baseClass} font-semibold`}>
+          <Tag key={block.id} data-block-id={block.id} className={`${baseClass} font-bold font-display`}>
             {block.content}
           </Tag>
         );
-      
+
       case 'code':
         if (block.language === 'mermaid') {
           return <MermaidBlock key={block.id} block={block} />;
         }
         const highlighted = hljs.highlight(block.content, { language: block.language || 'plaintext' }).value;
         return (
-          <pre key={block.id} data-block-id={block.id} className={`${baseClass} bg-muted p-4 rounded-lg overflow-x-auto`}>
+          <pre key={block.id} data-block-id={block.id} className={`${baseClass} bg-muted p-4 rounded-2xl overflow-x-auto`}>
             <code className="text-sm font-mono" dangerouslySetInnerHTML={{ __html: highlighted }} />
           </pre>
         );
-      
+
       case 'blockquote':
         return (
           <blockquote key={block.id} data-block-id={block.id} className={`${baseClass} border-l-4 border-border pl-4 italic text-muted-foreground`}>
             {block.content}
           </blockquote>
         );
-      
+
       case 'list-item':
         return (
           <li key={block.id} data-block-id={block.id} className="ml-6 list-disc">
             {block.content}
           </li>
         );
-      
+
       case 'hr':
         return <hr key={block.id} className="my-6 border-border" />;
-      
+
       case 'table':
         return (
           <div key={block.id} data-block-id={block.id} className={`${baseClass} overflow-x-auto`}>
@@ -301,7 +323,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             </table>
           </div>
         );
-      
+
       default: // paragraph
         return (
           <p key={block.id} data-block-id={block.id} className={baseClass}>
@@ -329,12 +351,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       <div className="flex-1 overflow-y-auto">
         <div
           ref={containerRef}
-          className="max-w-4xl mx-auto p-8"
+          className="max-w-4xl mx-auto p-8 lg:p-12 my-8 bg-card/10 backdrop-blur-md rounded-[32px] shadow-neu-inset-small border border-border/5"
           onMouseUp={handleSelection}
         >
           {/* Linked Doc Info */}
           {linkedDocInfo && (
-            <div className="mb-4 p-3 bg-muted/50 rounded-lg flex items-center justify-between">
+            <div className="mb-4 p-4 bg-muted/50 rounded-2xl flex items-center justify-between border border-border/50">
               <div className="flex items-center gap-2">
                 <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -350,10 +372,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             </div>
           )}
 
-          {/* Mode Switcher */}
-          <div className="mb-6 flex justify-end">
-            <ModeSwitcher mode={mode} onChange={onModeChange} />
-          </div>
 
           {/* Frontmatter */}
           {frontmatter && <FrontmatterCard frontmatter={frontmatter} />}
@@ -364,7 +382,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
           {/* Annotation Toolbar */}
           {showToolbar && (
             <div
-              className="fixed z-50 bg-card border border-border rounded-lg shadow-lg flex items-center gap-1 p-1"
+              className="fixed z-50 bg-card border border-border rounded-2xl shadow-neu-hover flex items-center gap-1 p-1.5"
               style={{ left: toolbarPosition.x, top: toolbarPosition.y }}
             >
               <button
@@ -406,18 +424,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             </div>
           )}
 
-          {/* Attachments Button */}
-          {onAddGlobalAttachment && onRemoveGlobalAttachment && (
-            <div className="fixed bottom-6 right-6">
-              <AttachmentsButton
-                images={globalAttachments}
-                onAdd={onAddGlobalAttachment}
-                onRemove={onRemoveGlobalAttachment}
-                variant="toolbar"
-              />
-            </div>
-          )}
         </div>
+
+        {/* Attachments Button - Moved outside backdrop-blur container to fix positioning */}
+        {onAddGlobalAttachment && onRemoveGlobalAttachment && (
+          <div className="fixed bottom-6 right-6 z-[100] pointer-events-auto">
+            <AttachmentsButton
+              images={globalAttachments}
+              onAdd={onAddGlobalAttachment}
+              onRemove={onRemoveGlobalAttachment}
+              variant="toolbar"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

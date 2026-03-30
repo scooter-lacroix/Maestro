@@ -220,7 +220,7 @@ class HookExecutor:
         """
         hooks = self._discover_hooks(phase)
 
-        if not hooks:
+        if not hooks and phase != "loop":
             return input_data
 
         output_data = input_data.copy()
@@ -236,9 +236,108 @@ class HookExecutor:
                 "success": "hook_error" not in result,
             })
 
+        nexus_result = self._emit_nexus_lifecycle(phase, output_data)
+        if nexus_result is not None:
+            output_data.setdefault("nexus_lifecycle", []).append(nexus_result)
+
+        # Some hook outcomes represent higher-level cognition transitions rather than
+        # the raw phase itself. Emit those as explicit Nexus lifecycle events so the
+        # subconscious runtime sees review/checkpoint boundaries in addition to stop/end.
+        if output_data.get("review_point_reached"):
+            review_result = self._emit_nexus_lifecycle("review", output_data)
+            if review_result is not None:
+                output_data.setdefault("nexus_lifecycle", []).append(review_result)
+        if output_data.get("checkpoint_reached"):
+            checkpoint_result = self._emit_nexus_lifecycle("checkpoint", output_data)
+            if checkpoint_result is not None:
+                output_data.setdefault("nexus_lifecycle", []).append(checkpoint_result)
+
         output_data[f"{phase}_results"] = phase_results
 
         return output_data
+
+    def _emit_nexus_lifecycle(
+        self,
+        phase: str,
+        input_data: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Best-effort transport shim from Maestro hook phases to Nexus session lifecycle."""
+        nexus_bin = os.environ.get("NEXUS_BIN") or shutil.which("nexus")
+        if not nexus_bin:
+            return None
+
+        session_id = str(
+            input_data.get("session_id")
+            or input_data.get("session_key")
+            or os.environ.get("MAESTRO_SESSION_ID", "")
+        ).strip()
+        project_path = str(
+            input_data.get("project_path")
+            or input_data.get("cwd")
+            or os.environ.get("MAESTRO_PROJECT_PATH", "")
+        ).strip()
+        agent = str(
+            input_data.get("tool")
+            or input_data.get("agent_tool")
+            or input_data.get("selected_cli")
+            or os.environ.get("MAESTRO_SELECTED_CLI", "claude-code")
+        ).strip()
+
+        if not session_id or not project_path:
+            return None
+
+        phase_to_command = {
+            "session-start": ["session", "start", "--agent", agent],
+            "pre-compact": ["session", "event", "--agent", agent, "--kind", "compact"],
+            "loop": ["session", "event", "--agent", agent, "--kind", "loop"],
+            "subagent-stop": ["session", "event", "--agent", agent, "--kind", "completion"],
+            "session-end": ["session", "end", "--agent", agent, "--reason", "session-end"],
+            "review": ["session", "event", "--agent", agent, "--kind", "review"],
+            "checkpoint": ["session", "event", "--agent", agent, "--kind", "checkpoint"],
+        }
+
+        args = phase_to_command.get(phase)
+        if args is None:
+            return None
+
+        args = args + ["--session-key", session_id, "--cwd", project_path]
+        env = os.environ.copy()
+        env["MAESTRO_NEXUS_EVENT_PAYLOAD"] = json.dumps({
+            "managed_session": True,
+            "provider_profile": os.environ.get("MAESTRO_PROVIDER_PROFILE", "maestro_runtime"),
+            "session_id": session_id,
+            "project_root": project_path,
+            "track_id": input_data.get("track_id"),
+            "current_task_id": input_data.get("current_task_id") or input_data.get("task_id"),
+            "launch_origin": input_data.get("launch_origin"),
+            "selected_cli": agent,
+            "event_reason": phase,
+        })
+
+        try:
+            result = subprocess.run(
+                [nexus_bin, *args],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                cwd=self.project_root,
+                env=env,
+            )
+            return {
+                "phase": phase,
+                "command": [nexus_bin, *args],
+                "success": result.returncode == 0,
+                "stderr": result.stderr.strip(),
+                "stdout": result.stdout.strip(),
+            }
+        except Exception as exc:
+            return {
+                "phase": phase,
+                "command": [nexus_bin, *args],
+                "success": False,
+                "stderr": str(exc),
+                "stdout": "",
+            }
 
     def execute_chain(
         self,
@@ -311,6 +410,18 @@ def execute_subagent_stop(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """Execute all subagent-stop hooks."""
     executor = get_hook_executor()
     return executor.execute_phase("subagent-stop", input_data)
+
+
+def execute_review(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute all review hooks."""
+    executor = get_hook_executor()
+    return executor.execute_phase("review", input_data)
+
+
+def execute_checkpoint(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute all checkpoint hooks."""
+    executor = get_hook_executor()
+    return executor.execute_phase("checkpoint", input_data)
 
 
 def execute_session_end(input_data: Dict[str, Any]) -> Dict[str, Any]:

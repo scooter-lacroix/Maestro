@@ -756,7 +756,7 @@ mod tests {
     // Default mappings tests
     #[test]
     fn test_default_mappings_count() {
-        assert_eq!(default_mappings().len(), 4);
+        assert_eq!(default_mappings().len(), 9);
     }
 
     #[test]

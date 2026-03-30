@@ -11,6 +11,7 @@ use leindex_core::tracklens::{
     TrackLensServer, WalkthroughConfig, WalkthroughGenerator,
 };
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::info;
 
 /// TrackLens subcommands
@@ -122,16 +123,55 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
     info!("Mode: {}", mode);
     println!();
 
-    // Read file content
-    let content = tokio::fs::read_to_string(&file)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))?;
 
     // Parse review mode
     let review_mode = match mode.as_str() {
         "code-review" => ReviewMode::CodeReview,
         "annotate" => ReviewMode::Annotate,
         _ => ReviewMode::Review,
+    };
+
+    let read_file_content = || async {
+        tokio::fs::read_to_string(&file)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", file.display(), e))
+    };
+
+    // Get content based on mode
+    let content = if review_mode == ReviewMode::CodeReview {
+        // For code review mode, generate a git diff for the file
+        let file_str = file
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid file path"))?;
+        let output = tokio::process::Command::new("git")
+            .args(["diff", "--", file_str])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let diff = String::from_utf8_lossy(&output.stdout).to_string();
+            if diff.trim().is_empty() {
+                // If no diff, try staged changes
+                let output = tokio::process::Command::new("git")
+                    .args(["diff", "--staged", "--", file_str])
+                    .output()
+                    .await?;
+                let staged_diff = String::from_utf8_lossy(&output.stdout).to_string();
+                if staged_diff.trim().is_empty() {
+                    read_file_content().await?
+                } else {
+                    staged_diff
+                }
+            } else {
+                diff
+            }
+        } else {
+            // If git diff fails, read the file content directly
+            read_file_content().await?
+        }
+    } else {
+        // For other modes, read the file content directly
+        read_file_content().await?
     };
 
     // Start TrackLens server
@@ -158,6 +198,8 @@ async fn run_review(file: PathBuf, mode: String, browser: bool) -> Result<()> {
         },
     };
     server.set_content(review_content)?;
+
+    wait_for_tracklens_ready(&server).await?;
 
     // Wait for decision
     info!("Waiting for review decision...");
@@ -246,6 +288,8 @@ async fn run_walkthrough(track_id: String, full_diffs: bool, browser: bool) -> R
         },
     };
     server.set_content(review_content)?;
+
+    wait_for_tracklens_ready(&server).await?;
 
     // Wait for decision
     info!("Waiting for walkthrough review decision...");
@@ -346,6 +390,8 @@ async fn run_code_review(commit: String, browser: bool) -> Result<()> {
     };
     server.set_content(review_content)?;
 
+    wait_for_tracklens_ready(&server).await?;
+
     // Wait for decision
     info!("Waiting for code review decision...");
     let decision = server.wait_for_decision().await?;
@@ -395,6 +441,21 @@ fn print_decision(decision: &TrackLensDecision) {
     }
 
     info!("");
+}
+
+async fn wait_for_tracklens_ready(server: &TrackLensServer) -> Result<()> {
+    let timeout_ms = std::env::var("TRACKLENS_CLIENT_READY_TIMEOUT_MS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|timeout| *timeout > 0)
+        .unwrap_or(20_000);
+    info!(
+        "Waiting for TrackLens UI readiness (timeout: {}ms)...",
+        timeout_ms
+    );
+    server
+        .wait_for_client_ready(Duration::from_millis(timeout_ms))
+        .await
 }
 
 #[cfg(test)]

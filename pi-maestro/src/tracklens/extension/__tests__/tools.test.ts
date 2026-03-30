@@ -26,7 +26,10 @@ const mockPi: ExtensionAPI = {
     // Mock register - store handler for testing
     mockCommands.set(name, config.handler);
   },
-  sendMessage: (message: any, options?: any) => Promise.resolve(),
+  registerTool: (_config: any) => {
+    // Mock tool registration
+  },
+  sendMessage: (_message: any, _options?: any) => {},
   on: (event: string, handler: any) => {
     // Mock event listener
     mockEventHandlers.set(event, handler);
@@ -39,7 +42,7 @@ const mockEventHandlers = new Map<string, any>();
 // Import after mocks are set up
 async function importModule() {
   // Dynamic import to avoid eval-time issues
-  return await import("./command");
+  return await import("../command");
 }
 
 describe("TrackLens Command", () => {
@@ -49,8 +52,8 @@ describe("TrackLens Command", () => {
   });
 
   afterEach(() => {
-    // Reset module state between tests
-    jest.resetModules();
+    mockCommands.clear();
+    mockEventHandlers.clear();
   });
 
   describe("Command Parsing", () => {
@@ -62,7 +65,7 @@ describe("TrackLens Command", () => {
       expect(isTrackLensEnabled()).toBe(false);
 
       // Register command to get handler
-      registerTrackLensCommand(mockPi, "tracklens");
+      registerTrackLensCommand(mockPi);
 
       const handler = mockCommands.get("tracklens");
       expect(handler).toBeDefined();
@@ -82,7 +85,7 @@ describe("TrackLens Command", () => {
       expect(isTrackLensEnabled()).toBe(true);
 
       // Register command
-      registerTrackLensCommand(mockPi, "tracklens");
+      registerTrackLensCommand(mockPi);
 
       const handler = mockCommands.get("tracklens");
       expect(handler).toBeDefined();
@@ -95,10 +98,10 @@ describe("TrackLens Command", () => {
     });
 
     it("should show status when no argument provided", async () => {
-      const { registerTrackLensCommand, setTrackLensEnabled } = await importModule();
+      const { registerTrackLensCommand, setTrackLensEnabled, isTrackLensEnabled } = await importModule();
 
       setTrackLensEnabled(true);
-      registerTrackLensCommand(mockPi, "tracklens");
+      registerTrackLensCommand(mockPi);
 
       const handler = mockCommands.get("tracklens");
       expect(handler).toBeDefined();
@@ -114,7 +117,7 @@ describe("TrackLens Command", () => {
       const { registerTrackLensCommand, setTrackLensEnabled, isTrackLensEnabled } = await importModule();
 
       setTrackLensEnabled(false);
-      registerTrackLensCommand(mockPi, "tracklens");
+      registerTrackLensCommand(mockPi);
 
       const handler = mockCommands.get("tracklens");
 
@@ -132,7 +135,7 @@ describe("TrackLens Command", () => {
       const { registerTrackLensCommand, setTrackLensEnabled, isTrackLensEnabled } = await importModule();
 
       setTrackLensEnabled(false);
-      registerTrackLensCommand(mockPi, "tracklens");
+      registerTrackLensCommand(mockPi);
 
       const handler = mockCommands.get("tracklens");
 

@@ -1,6 +1,6 @@
-//! MaesterClaw tab rendering for Cockpit TUI
+//! MaestroClaw tab rendering for Cockpit TUI
 //!
-//! This tab displays MaesterClaw operational capabilities:
+//! This tab displays MaestroClaw operational capabilities:
 //! - Cron Jobs (scheduled tasks)
 //! - MCP Servers (external tool integrations)
 //! - Sandbox Status (security policies)
@@ -31,7 +31,7 @@ pub fn render_capabilities(frame: &mut Frame, app: &App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" MAESTERCLAW COMMAND CENTER ")
+        .title(" MAESTROCLAW COMMAND CENTER ")
         .border_type(BorderType::Rounded)
         .border_style(ratatui::style::Style::default().fg(theme.accent))
         .style(ratatui::style::Style::default().bg(theme.panel_bg));

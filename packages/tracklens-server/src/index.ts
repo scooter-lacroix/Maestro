@@ -13,8 +13,8 @@ import {
   writeFileSync,
   readdirSync,
 } from "fs";
-import { join, resolve, normalize } from "path";
-import { randomUUID } from "crypto";
+import { join, resolve, normalize, dirname } from "path";
+import { fileURLToPath } from "url";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { generateSlug, savePlan, saveAnnotations, saveFinalSnapshot } from "./storage";
@@ -23,6 +23,15 @@ import { getRepoInfo } from "./repo";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR, sanitizeFileName, getSafeUploadPath } from "./image";
 import { openEditorDiff } from "./ide";
 import { detectProjectName, sanitizeTag } from "./project";
+import {
+  createClientReadyMonitor,
+  injectTrackLensBootstrap,
+} from "./ui-readiness";
+
+// Resolve paths for asset serving
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = process.env.CLAUDE_PROJECT_DIR || resolve(__dirname, "..", "..", "..");
 
 export interface ServerOptions {
   /** The plan markdown content */
@@ -47,6 +56,7 @@ export interface ServerResult {
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
   }>;
@@ -110,9 +120,6 @@ export async function startTrackLensServer(
 ): Promise<ServerResult> {
   const { plan, origin, htmlContent, autonomyMode } = options;
 
-  // Generate authentication token for decision endpoint
-  const authToken = randomUUID();
-
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
 
@@ -131,6 +138,7 @@ export async function startTrackLensServer(
         approved: boolean;
         feedback?: string;
         savedPath?: string;
+        annotations?: unknown[];
         agentSwitch?: string;
         autonomyMode?: string;
       }) => void)
@@ -140,11 +148,13 @@ export async function startTrackLensServer(
     approved: boolean;
     feedback?: string;
     savedPath?: string;
+    annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
+  const clientReady = createClientReadyMonitor();
 
   // Mutable state for auto-close
   let shouldAutoClose = false;
@@ -199,7 +209,7 @@ export async function startTrackLensServer(
           const result = await saveToObsidian({
             vaultPath,
             folder,
-            plan,
+            content: plan,
             filenameFormat,
           });
 
@@ -218,7 +228,7 @@ export async function startTrackLensServer(
       // API: Save to Bear
       if (url.pathname === "/api/bear" && req.method === "POST") {
         try {
-          const result = await saveToBear({ plan });
+          const result = await saveToBear({ content: plan });
           return Response.json(result);
         } catch (error) {
           return Response.json(
@@ -241,6 +251,11 @@ export async function startTrackLensServer(
       if (url.pathname === "/api/project" && req.method === "GET") {
         const projectName = await detectProjectName();
         return Response.json({ projectName });
+      }
+
+      if (url.pathname === "/api/client-ready" && req.method === "POST") {
+        clientReady.markClientReady();
+        return Response.json({ ready: true });
       }
 
       // API: Validate image path
@@ -494,12 +509,6 @@ export async function startTrackLensServer(
 
       // API: Submit decision (approve/deny) - COMPATIBILITY ENDPOINT
       if (url.pathname === "/api/decision" && req.method === "POST") {
-        // Validate authentication token
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         try {
           const body = await req.json();
           const {
@@ -513,19 +522,25 @@ export async function startTrackLensServer(
             approved: boolean;
             feedback?: string;
             customPath?: string;
-            annotations?: string;
+            annotations?: unknown[] | string;
             agentSwitch?: string;
             autonomyMode?: string;
           };
 
           // Save final snapshot
           let savedPath: string | undefined;
+          const annotationSnapshot =
+            typeof annotations === "string"
+              ? annotations
+              : annotations
+                ? JSON.stringify(annotations, null, 2)
+                : "";
           if (feedback) {
             savedPath = saveFinalSnapshot(
               slug,
               approved ? "approved" : "denied",
               plan,
-              annotations || "",
+              annotationSnapshot,
               customPath
             );
           }
@@ -536,6 +551,12 @@ export async function startTrackLensServer(
               approved,
               feedback,
               savedPath,
+              annotations:
+                typeof annotations === "string"
+                  ? annotations
+                    ? [{ id: "tracklens-feedback", text: annotations }]
+                    : undefined
+                  : annotations,
               agentSwitch,
               autonomyMode: newAutonomyMode,
             });
@@ -555,11 +576,37 @@ export async function startTrackLensServer(
         }
       }
 
+      // Serve static assets (JS, CSS files)
+      if (url.pathname.startsWith("/assets/")) {
+        const assetPath = url.pathname.slice(1); // Remove leading /
+        const assetCandidates = [
+          resolve(__dirname, "..", assetPath),
+          resolve(__dirname, assetPath),
+          resolve(projectRoot, "apps", "tracklens-hook", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-editor", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-review-editor", "dist", assetPath),
+        ];
+
+        for (const candidate of assetCandidates) {
+          if (existsSync(candidate)) {
+            const file = Bun.file(candidate);
+            const ext = candidate.split(".").pop()?.toLowerCase();
+            const contentType =
+              ext === "js" ? "application/javascript" :
+              ext === "css" ? "text/css" :
+              ext === "svg" ? "image/svg+xml" :
+              "application/octet-stream";
+            return new Response(file, {
+              headers: { "Content-Type": contentType },
+            });
+          }
+        }
+        return new Response("Asset not found", { status: 404 });
+      }
+
       // Serve HTML
-      // Inject authentication token into HTML for client-side access
-      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
-      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
-      return new Response(htmlWithToken, {
+      const htmlWithBootstrap = injectTrackLensBootstrap(htmlContent);
+      return new Response(htmlWithBootstrap, {
         headers: { "Content-Type": "text/html" },
       });
     },
@@ -575,11 +622,21 @@ export async function startTrackLensServer(
     port: number
   ): Promise<void> {
     if (!isRemote) {
-      await openBrowser(url);
+      const opened = await openBrowser(url);
+      if (!opened) {
+        throw new Error(`TrackLens could not open a browser for ${url}`);
+      }
     }
   }
 
   await handleServerReady(url, isRemote, port);
+  const ready = await clientReady.waitForClientReady();
+  if (!ready) {
+    server.stop();
+    throw new Error(
+      "TrackLens UI never reported readiness. Review aborted instead of assuming approval."
+    );
+  }
 
   return {
     port,

@@ -6,13 +6,15 @@ Injects LeIndex code analysis context into prompts based on intent analysis.
 Adds relevant code structure context to improve Task execution using
 the LeIndex (pure Rust) system for 90%+ token reduction.
 
-Note: /maestro:tldr is a compatibility alias that delegates to LeIndex.
-All analysis uses the Rust LeIndex core; no Python TLDR at runtime.
+Note: the default path now shells out to the standalone `leindex` binary.
+Maestro-local compatibility modules are retained only as a fallback path.
 """
 
 import json
 import os
 import sys
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +32,43 @@ def _optional_attr(module_name: str, attr: str) -> Any:
         return getattr(module, attr)
     except Exception:
         return None
+
+
+def _run_leindex_tool(tool_name: str, args: Dict[str, Any], working_dir: str) -> str:
+    """Run a standalone LeIndex tool and return stdout on success."""
+    leindex_bin = shutil.which("leindex")
+    if not leindex_bin:
+        return ""
+
+    cmd = [
+        leindex_bin,
+        "tools",
+        "run",
+        tool_name,
+        "--project",
+        working_dir,
+        "--args",
+        json.dumps(args),
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=working_dir,
+        )
+    except Exception:
+        return ""
+
+    if result.returncode != 0:
+        return ""
+
+    return result.stdout.strip()
+
+
+LEGACY_CONTEXT_FALLBACK_USED = False
 
 
 def analyze_intent(prompt: str) -> str:
@@ -68,8 +107,11 @@ def extract_file_references(prompt: str, working_dir: str) -> List[str]:
 
     files = []
 
-    # Match patterns like "path/to/file.py" or "./file.py"
-    file_pattern = r'[\w\-./]+\.py[\w\-./]*'
+    # Match common source file extensions across the Maestro codebase.
+    file_pattern = (
+        r'[\w\-./]+\.(?:py|rs|ts|tsx|js|jsx|go|java|c|cpp|h|hpp|cs|rb|php|swift|'
+        r'kt|scala|lua|zig|nim|cr|ex|exs|hs|ml|fs|clj|vue|svelte|astro)[\w\-./]*'
+    )
     matches = re.findall(file_pattern, prompt)
 
     for match in matches:
@@ -114,37 +156,71 @@ def get_relevant_code_context(
     Returns:
         Formatted context string
     """
-    context_parts = []
+    context_parts: List[str] = []
+    files = extract_file_references(prompt, working_dir)
 
-    # Use LeIndex context extractor
-    try:
-        # Try LeIndex first (consolidated system)
-        context_func = _optional_attr("maestro.leindex.context_extraction", "get_context_for_prompt")
-        if not callable(context_func):
-            # Fall back to main module
-            context_func = _optional_attr("maestro.leindex", "get_context_for_prompt")
+    if files:
+        for file_path in files[:3]:
+            file_context = _run_leindex_tool(
+                "leindex_read_file",
+                {
+                    "file_path": file_path,
+                    "project_path": working_dir,
+                    "include_symbol_map": True,
+                    "max_lines": 220,
+                },
+                working_dir,
+            )
+            if file_context:
+                context_parts.append(
+                    f"## Standalone LeIndex File Context: {Path(file_path).name}\n{file_context}"
+                )
 
-        if callable(context_func):
-            ctx = context_func(working_dir, prompt, max_files=3)
-            if ctx and "No specific files identified" not in ctx:
-                context_parts.append(ctx)
-    except Exception:
-        pass
+    project_map = _run_leindex_tool(
+        "leindex_project_map",
+        {
+            "project_path": working_dir,
+            "path": ".",
+            "depth": 2,
+            "include_symbols": True,
+            "token_budget": 1400,
+        },
+        working_dir,
+    )
+    if project_map:
+        context_parts.append(f"## Standalone LeIndex Project Map\n{project_map}")
 
-    # Fallback: Use the context extractor directly
+    if not context_parts:
+        deep_context = _run_leindex_tool(
+            "leindex_deep_analyze",
+            {
+                "project_path": working_dir,
+                "query": prompt[:600],
+                "token_budget": 2000,
+            },
+            working_dir,
+        )
+        if deep_context:
+            context_parts.append(f"## Standalone LeIndex Deep Analysis\n{deep_context}")
+
+    # Compatibility fallback only if the standalone CLI is unavailable or failed.
+    global LEGACY_CONTEXT_FALLBACK_USED
+    LEGACY_CONTEXT_FALLBACK_USED = False
+
     if not context_parts:
         try:
-            ContextExtractor = _optional_attr("maestro.leindex.context_extraction", "ContextExtractor")
-            if ContextExtractor is not None:
-                extractor = ContextExtractor()
+            context_func = _optional_attr(
+                "maestro.leindex.context_extraction",
+                "get_context_for_prompt",
+            )
+            if not callable(context_func):
+                context_func = _optional_attr("maestro.leindex", "get_context_for_prompt")
 
-                # Extract file references
-                files = extract_file_references(prompt, working_dir)
-
-                for file_path in files[:3]:
-                    result = extractor.extract_for_file(file_path)
-                    if result and result.context:
-                        context_parts.append(result.context.to_llm_string())
+            if callable(context_func):
+                ctx = context_func(working_dir, prompt, max_files=3)
+                if ctx and "No specific files identified" not in ctx:
+                    context_parts.append(ctx)
+                    LEGACY_CONTEXT_FALLBACK_USED = True
         except Exception:
             pass
 
@@ -223,7 +299,9 @@ def leindex_context_hook(input_data: dict) -> dict:
             "context_injected": False,
             "code_context": "",
             "memories": [],
-            "source": "leindex",  # Indicate we're using LeIndex
+            "source": "standalone_leindex",
+            "analysis_backend": "leindex_cli",
+            "compatibility_mode": False,
         }
 
         # Get relevant code context
@@ -232,6 +310,9 @@ def leindex_context_hook(input_data: dict) -> dict:
         if code_context:
             context_info["code_context"] = code_context
             context_info["context_injected"] = True
+        if LEGACY_CONTEXT_FALLBACK_USED:
+            context_info["source"] = "compatibility_legacy_fallback"
+            context_info["compatibility_mode"] = True
 
         # Recall relevant memories from LeIndex analysis
         search_query = f"{intent} {prompt[:100]}"
@@ -247,6 +328,8 @@ def leindex_context_hook(input_data: dict) -> dict:
                 for m in memories
             ]
             context_info["context_injected"] = True
+            if LEGACY_CONTEXT_FALLBACK_USED:
+                context_info["compatibility_mode"] = True
 
         # Add context to tool input for Edit operations
         if tool_name == "Edit" and context_info["context_injected"]:
@@ -266,6 +349,13 @@ def leindex_context_hook(input_data: dict) -> dict:
                 tool_input["original_prompt"] = prompt
                 tool_input["prompt"] = f"{context_prefix}{prompt}"
                 input_data["tool_input"] = tool_input
+
+        if context_info.get("compatibility_mode"):
+            input_data["hook_warning"] = (
+                "Legacy Maestro LeIndex compatibility fallback was used because the standalone CLI path was unavailable. "
+                "This path is compatibility-only and must not be treated as the default managed-session analysis path."
+            )
+            input_data["legacy_compatibility_path"] = True
 
         input_data["maestro_leindex_context"] = context_info
 

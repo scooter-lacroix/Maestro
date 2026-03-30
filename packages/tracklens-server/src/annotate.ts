@@ -6,12 +6,21 @@
  */
 
 import { mkdirSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
-import { randomUUID } from "crypto";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { openBrowser } from "./browser";
 import { getServerPort, isRemoteSession } from "./remote";
 import { getRepoInfo } from "./repo";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR, sanitizeFileName, getSafeUploadPath } from "./image";
+import {
+  createClientReadyMonitor,
+  injectTrackLensBootstrap,
+} from "./ui-readiness";
+
+// Resolve paths for asset serving
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = process.env.CLAUDE_PROJECT_DIR || resolve(__dirname, "..", "..", "..");
 
 export interface AnnotateServerOptions {
   /** Markdown content of the file to annotate */
@@ -53,9 +62,6 @@ export async function startAnnotateServer(
     origin,
   } = options;
 
-  // Generate authentication token for decision endpoint
-  const authToken = randomUUID();
-
   const isRemote = isRemoteSession();
   const configuredPort = getServerPort();
 
@@ -79,6 +85,7 @@ export async function startAnnotateServer(
   }>((resolve) => {
     resolveDecision = resolve;
   });
+  const clientReady = createClientReadyMonitor();
 
   // Start server
   const server = Bun.serve({
@@ -95,6 +102,11 @@ export async function startAnnotateServer(
           filePath,
           repoInfo,
         });
+      }
+
+      if (url.pathname === "/api/client-ready" && req.method === "POST") {
+        clientReady.markClientReady();
+        return Response.json({ ready: true });
       }
 
       // API: Validate image path
@@ -187,12 +199,6 @@ export async function startAnnotateServer(
 
       // API: Submit decision
       if (url.pathname === "/api/decision" && req.method === "POST") {
-        // Validate authentication token
-        const authHeader = req.headers.get("authorization");
-        if (authHeader !== `Bearer ${authToken}`) {
-          return Response.json({ error: "Unauthorized" }, { status: 401 });
-        }
-
         try {
           const body = await req.json();
           const {
@@ -220,11 +226,37 @@ export async function startAnnotateServer(
         }
       }
 
+      // Serve static assets (JS, CSS files)
+      if (url.pathname.startsWith("/assets/")) {
+        const assetPath = url.pathname.slice(1); // Remove leading /
+        const assetCandidates = [
+          resolve(__dirname, "..", assetPath),
+          resolve(__dirname, assetPath),
+          resolve(projectRoot, "apps", "tracklens-hook", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-editor", "dist", assetPath),
+          resolve(projectRoot, "packages", "tracklens-review-editor", "dist", assetPath),
+        ];
+
+        for (const candidate of assetCandidates) {
+          if (existsSync(candidate)) {
+            const file = Bun.file(candidate);
+            const ext = candidate.split(".").pop()?.toLowerCase();
+            const contentType =
+              ext === "js" ? "application/javascript" :
+              ext === "css" ? "text/css" :
+              ext === "svg" ? "image/svg+xml" :
+              "application/octet-stream";
+            return new Response(file, {
+              headers: { "Content-Type": contentType },
+            });
+          }
+        }
+        return new Response("Asset not found", { status: 404 });
+      }
+
       // Serve HTML
-      // Inject authentication token into HTML for client-side access
-      const tokenScript = `<script>window.TRACKLENS_AUTH_TOKEN = "${authToken}";</script>`;
-      const htmlWithToken = htmlContent.replace("<head>", `<head>${tokenScript}`);
-      return new Response(htmlWithToken, {
+      const htmlWithBootstrap = injectTrackLensBootstrap(htmlContent);
+      return new Response(htmlWithBootstrap, {
         headers: { "Content-Type": "text/html" },
       });
     },
@@ -240,11 +272,21 @@ export async function startAnnotateServer(
     port: number
   ): Promise<void> {
     if (!isRemote) {
-      await openBrowser(url);
+      const opened = await openBrowser(url);
+      if (!opened) {
+        throw new Error(`TrackLens annotate browser open failed for ${url}`);
+      }
     }
   }
 
   await handleAnnotateServerReady(url, isRemote, port);
+  const ready = await clientReady.waitForClientReady();
+  if (!ready) {
+    server.stop();
+    throw new Error(
+      "TrackLens annotate UI never became ready. Aborting instead of waiting indefinitely."
+    );
+  }
 
   return {
     port,

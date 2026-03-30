@@ -106,7 +106,6 @@ impl ChunkType {
     }
 }
 
-
 /// Index-level metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexMetadata {

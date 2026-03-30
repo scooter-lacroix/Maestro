@@ -11,7 +11,7 @@
     "build": "bun build:tsc && bun build:ui && bun copy:html",
     "build:tsc": "tsc",
     "build:ui": "bun run --cwd ../../packages/tracklens-editor build && bun run --cwd ../../packages/tracklens-review-editor build",
-    "copy:html": "mkdir -p dist && cp ../../packages/tracklens-editor/dist/index.html dist/index.html && cp ../../packages/tracklens-review-editor/dist/index.html dist/review.html",
+    "copy:html": "mkdir -p dist/assets && cp ../../packages/tracklens-editor/dist/index.html dist/index.html && cp ../../packages/tracklens-review-editor/dist/index.html dist/review.html && cp -r ../../packages/tracklens-editor/dist/assets/* dist/assets/ && cp -r ../../packages/tracklens-review-editor/dist/assets/* dist/assets/",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build"
   },

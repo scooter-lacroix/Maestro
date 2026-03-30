@@ -19,7 +19,7 @@ If Maestro is useful to you, please [star the repository](https://github.com/sco
 
 Maestro is not just a CLI, a skill pack, or a TUI.
 
-Maestro is the **framework** that turns AI coding sessions into structured engineering workflows:
+Maestro is the **control plane** that turns AI coding sessions into structured engineering workflows:
 
 - spec -> plan -> implement
 - tracked execution instead of chat drift
@@ -49,6 +49,11 @@ If you want deterministic AI-assisted implementation workflows, start with `maes
 curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash
 ```
 
+The installer is meant to provision the full Maestro system, not just the main CLI. A successful run now validates the runtime binaries, Maestro command/agent/skill assets, Claude plugins, TrackLens assets, standalone provider health, and the shared MCP pool surface before it reports success.
+It also persists the full installer and wizard output to `~/.maestro/logs/install-YYYYMMDD_HHMMSS.log` with a `install-latest.log` symlink for later debugging.
+
+For the exact verification matrix and manual checklist, see [docs/PROVIDER_BOUNDARY_VERIFICATION.md](docs/PROVIDER_BOUNDARY_VERIFICATION.md).
+
 ### Choose your entry point
 
 - `maestro` for spec-driven orchestration and workflow automation
@@ -72,7 +77,7 @@ Maestro v2.5 is a major architectural evolution that unifies powerful systems in
 - **MaestroClaw** - Unified agent execution framework with multi-provider support and streaming
 - **Tracklens** - Interactive walkthrough system for spec-driven development
 - **Unified Memory System** - Built-in project context with semantic search and coordination patterns
-- **109 Repurposed Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
+- **109 Skills** - Complete workflow, analysis, research, and quality skills from Maestro namespace
 - **28 Specialized Agents** - Orchestrators, planners, explorers, implementers, debuggers, and more
 - **16 Integrated Hooks** - Session start, tool use, coordination, and session end hooks
 - **LeIndex Code Analysis** - 5-layer code analysis with semantic indexing (TLDR compatibility alias)
@@ -90,7 +95,7 @@ Transform AI chat interactions into professional software engineering workflows 
 - **Track-based development** where each feature/bug goes through spec → plan → implement
 - **Automatic agent selection** based on task complexity (8+ specialized agents)
 - **TDD workflow enforcement** with test-first development and 80%+ coverage goals
-- **Built-in memory system** via integrated Nexus Memory (no external MCP required)
+- **Built-in memory system** via the Nexus provider bridge and managed-session runtime
 - **Git-aware tracking** for complete history and rollback capability
 - **Web dashboard** for visualizing memory, tracks, and project context
 - **TUI interface** for managing tmux sessions and MCP server connections
@@ -193,7 +198,7 @@ Tracklens is an interactive walkthrough system that guides users through spec-dr
 
 ### Nexus Memory System
 
-Built directly into Maestro - no external MCP required:
+Maestro uses the standalone Nexus provider for memory, retrieval, and cognition:
 
 - **Agent-Specific Namespaces**: Isolated memory per agent type
 - **Semantic Search**: Vector-based similarity search with embeddings
@@ -672,7 +677,6 @@ These commands run in your terminal and require the full installation:
 - [Memory Integration Guide](maestro/memory/docs/memory_integration.md) - Current CLI memory command surface and architecture
 - [Memory Quick Start](maestro/memory/docs/quick_start.md) - 5-minute validation flow for memory commands
 - [TUI Configuration](maestro/tui/docs/CONFIG_FORMAT.md) - TUI setup guide
-- [Testing](maestro/tracks/maestro-unified_20250101/TESTING_COVERAGE_ANALYSIS.md) - Test coverage details
 
 ## Dependencies
 
@@ -851,9 +855,21 @@ Maestro v2.5 includes comprehensive testing infrastructure:
 - **Integration tests** for memory system, coordination patterns, and TLDR
 - **E2E tests** for complete track workflows (newTrack, implement, status, revert)
 - **Performance benchmarks** for memory operations and semantic search
-- **CI/CD ready** with pytest, coverage, and automated regression detection
 
-See [Maestro v2 Track](maestro/tracks/maestro-v2_20260110/) for implementation details.
+Validate the finalized build on `main` with:
+
+```bash
+git clone --branch main https://github.com/scooter-lacroix/Maestro.git
+cd Maestro
+bun install
+bun run build:tracklens
+cargo test --workspace
+```
+
+Quick validation:
+- Remote install entrypoint: `curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash`
+- Local install branch safety: `git branch --show-current` before and after `./install.sh`
+- Finalized `main` build: `bun run build:tracklens && cargo test --workspace`
 
 Validate the finalized build on `main` with:
 
@@ -898,7 +914,7 @@ The Conductor module in Maestro Cockpit implements concepts from Ralph TUI, prov
 
 <div align="center">
 
-**Transform your AI-assisted development today**
+**Transform your AI-assisted development workflows today**
 
 [Get Started](docs/CLAUDE-CODE.md) · [Features](#key-features) · [Documentation](docs/) · [Web Dashboard](#nexus-memory-system)
 

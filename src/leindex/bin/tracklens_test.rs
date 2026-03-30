@@ -1,5 +1,7 @@
 /// Quick launcher to test TrackLens UI
-use leindex_core::tracklens::{ReviewContent, ReviewMetadata, ReviewMode, ServerConfig, TrackLensServer};
+use leindex_core::tracklens::{
+    ReviewContent, ReviewMetadata, ReviewMode, ServerConfig, TrackLensServer,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -12,7 +14,6 @@ async fn main() -> anyhow::Result<()> {
     let url = server.start().await?;
 
     println!("TrackLens running at: {url}");
-    println!("Auth token: {}", server.auth_token());
 
     // Set sample content
     server.set_content(ReviewContent {
@@ -29,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     let ready = server
         .wait_for_client_ready(std::time::Duration::from_secs(15))
         .await;
-    if ready {
+    if ready.is_ok() {
         println!("✓ Client UI reported ready!");
     } else {
         println!("⚠ Client UI did not report ready within 15s");

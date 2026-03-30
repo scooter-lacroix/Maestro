@@ -94,10 +94,10 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
 }) => {
   return (
     <aside
-      className="hidden lg:flex flex-col sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0 bg-card/50 backdrop-blur-sm border-r border-border"
+      className="hidden lg:flex flex-col sticky top-12 h-[calc(100vh-3rem)] flex-shrink-0 bg-background backdrop-blur-md border-r border-border/50 shadow-neu-extruded-small"
       style={{ width }}
     >
-      <div className="flex items-center border-b border-border/50 px-1 py-1 gap-0.5 flex-shrink-0">
+      <div className="flex items-center border-b border-border/50 px-2 py-2 gap-1.5 flex-shrink-0">
         <TabButton
           active={activeTab === "toc"}
           onClick={() => onTabChange("toc")}
@@ -219,9 +219,9 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
             error={vaultBrowser.error}
             expandedFolders={vaultBrowser.expandedFolders}
             onToggleFolder={vaultBrowser.toggleFolder}
-            onSelectFile={onVaultSelectFile ?? (() => {})}
+            onSelectFile={onVaultSelectFile ?? (() => { })}
             activeFile={vaultBrowser.activeFile}
-            onFetchTree={onVaultFetchTree ?? (() => {})}
+            onFetchTree={onVaultFetchTree ?? (() => { })}
           />
         )}
       </div>
@@ -237,11 +237,10 @@ const TabButton: React.FC<{
 }> = ({ active, onClick, icon, label }) => (
   <button
     onClick={onClick}
-    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-      active
-        ? "bg-primary/10 text-primary"
-        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-    }`}
+    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-medium transition-all duration-300 ${active
+        ? "bg-background shadow-neu-inset-small text-primary"
+        : "text-muted-foreground shadow-neu-extruded hover:text-foreground hover:-translate-y-px hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset"
+      }`}
   >
     {icon}
     {label}

@@ -45,6 +45,7 @@ async-trait = "0.1"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 
 # Error handling
 anyhow = "1.0"
@@ -57,9 +58,15 @@ chrono = { version = "0.4", features = ["serde"] }
 unicode-width = "0.2"
 lazy_static = "1.4"
 which = "6.0"
+# NOTE: cli-clipboard 0.4.0 depends on wl-clipboard-rs 0.7.0 which has a Rust
+# future incompatibility warning. This cannot be resolved until cli-clipboard
+# publishes a new version that depends on wl-clipboard-rs 0.8+.
+# See: https://github.com/actuallyallie/cli-clipboard/issues
+# Blocked by: upstream cli-clipboard dependency on wl-clipboard-rs ^0.7.0
 cli-clipboard = "0.4"
 dirs = "5.0"
-toml = "0.8"
+portable-pty = "0.8"
 
 [dev-dependencies]
+serial_test = "3"
 tempfile = "3.10"

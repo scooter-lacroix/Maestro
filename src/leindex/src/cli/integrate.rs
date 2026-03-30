@@ -18,6 +18,11 @@ use std::path::Path;
 use std::time::SystemTime;
 use toml::{map::Map as TomlMap, Value as TomlValue};
 
+use crate::provider_boundary::managed_cli_overlap_profile;
+use crate::providers::{
+    LeIndexInstallMethod, NexusInstallMethod, StandaloneLeIndexProvider, StandaloneNexusProvider,
+};
+
 /// Available integration targets
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum IntegrationTool {
@@ -132,9 +137,9 @@ impl IntegrationTool {
     /// Get the LeIndex MCP server config
     pub fn leindex_mcp_config(&self) -> Value {
         let command = if cfg!(target_os = "windows") {
-            "maestro.exe"
+            "leindex.exe"
         } else {
-            "maestro"
+            "leindex"
         };
 
         match self {
@@ -145,27 +150,27 @@ impl IntegrationTool {
             | IntegrationTool::Omp
             | IntegrationTool::Iflow => json!({
                 "command": command,
-                "args": ["mcp", "proxy", "leindex"]
+                "args": ["mcp"]
             }),
             IntegrationTool::OpenCode => json!({
                 "type": "local",
-                "command": [command, "mcp", "proxy", "leindex"]
+                "command": [command, "mcp"]
             }),
             IntegrationTool::Amp => json!({
                 "command": command,
-                "args": ["mcp", "proxy", "leindex"],
+                "args": ["mcp"],
                 "env": {}
             }),
             IntegrationTool::Droid => json!({
                 "type": "stdio",
                 "command": command,
-                "args": ["mcp", "proxy", "leindex"]
+                "args": ["mcp"]
             }),
             IntegrationTool::Codex => {
                 // Codex uses TOML, represented as JSON here for consistency
                 json!({
                     "command": command,
-                    "args": ["mcp", "proxy", "leindex"]
+                    "args": ["mcp"]
                 })
             }
         }
@@ -680,7 +685,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                 "mcp": {
                     "leindex": {
                         "type": "local",
-                        "command": ["maestro", "mcp", "proxy", "leindex"]
+                        "command": ["leindex", "mcp"]
                     }
                 }
             });
@@ -884,6 +889,33 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             report.passed = false;
         }
 
+        // Check 4b: Standalone LeIndex provider is available and healthy enough
+        let check = self.check_standalone_leindex_provider();
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
+        let check = self.check_standalone_nexus_provider();
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
+        // Check 4d: Managed session provider profile reflects the boundary model.
+        let check = self.check_managed_session_profile(tool);
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
+        // Check 4e: Maestro MCP pool surface remains available for shared servers.
+        let check = self.check_maestro_mcp_pool_surface();
+        report.checks.push(check);
+        if !report.checks.last().unwrap().passed {
+            report.passed = false;
+        }
+
         // Check 5: No forbidden cross-tool references
         let check = self.check_no_cross_tool_refs(tool);
         report.checks.push(check);
@@ -969,7 +1001,7 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         }
     }
 
-    /// Check if LeIndex is registered in MCP config
+    /// Check if standalone LeIndex is registered as a direct provider entry in MCP config
     fn check_leindex_registered(&self, tool: IntegrationTool) -> CheckResult {
         let mcp_config = tool.mcp_config_path();
         let server_name = tool.mcp_server_name();
@@ -1006,9 +1038,15 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                         (
                                             registered,
                                             if registered {
-                                                format!("LeIndex registered as '{}'", server_name)
+                                                format!(
+                                                    "Standalone LeIndex registered as direct provider '{}'",
+                                                    server_name
+                                                )
                                             } else {
-                                                format!("LeIndex not found in {}", key)
+                                                format!(
+                                                    "Standalone LeIndex direct provider not found in {}",
+                                                    key
+                                                )
                                             },
                                         )
                                     } else {
@@ -1035,9 +1073,13 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
                                 (
                                     registered,
                                     if registered {
-                                        format!("LeIndex registered as '{}'", server_name)
+                                        format!(
+                                            "Standalone LeIndex registered as direct provider '{}'",
+                                            server_name
+                                        )
                                     } else {
-                                        "LeIndex not found in mcp_servers".to_string()
+                                        "Standalone LeIndex direct provider not found in mcp_servers"
+                                            .to_string()
                                     },
                                 )
                             }
@@ -1051,9 +1093,221 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
         };
 
         CheckResult {
-            name: "LeIndex MCP server registered".to_string(),
+            name: "Standalone LeIndex direct provider entry".to_string(),
             passed: exists,
             message,
+        }
+    }
+
+    fn check_standalone_leindex_provider(&self) -> CheckResult {
+        let provider = StandaloneLeIndexProvider::new();
+        let project_root =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        match provider.health_report_sync(&project_root) {
+            Ok(report) => {
+                let methods = StandaloneLeIndexProvider::supported_install_methods()
+                    .into_iter()
+                    .map(LeIndexInstallMethod::install_hint)
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                CheckResult {
+                    name: "Standalone LeIndex provider health".to_string(),
+                    passed: matches!(
+                        report.status,
+                        crate::provider_boundary::ProviderStatus::Healthy
+                    ),
+                    message: if matches!(
+                        report.status,
+                        crate::provider_boundary::ProviderStatus::Healthy
+                    ) {
+                        let summary = provider
+                            .capability_snapshot()
+                            .ok()
+                            .map(|snapshot| {
+                                snapshot
+                                    .into_iter()
+                                    .map(|(k, v)| format!("{k}={v}"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .unwrap_or_else(|| "provider healthy".to_string());
+                        format!(
+                            "Standalone LeIndex detected as the authoritative analysis provider: {}",
+                            summary
+                        )
+                    } else {
+                        format!(
+                            "Standalone LeIndex not healthy. Maestro-managed analysis should use the standalone provider. Install via: {}",
+                            methods
+                        )
+                    },
+                }
+            }
+            Err(err) => CheckResult {
+                name: "Standalone LeIndex provider health".to_string(),
+                passed: false,
+                message: format!("Failed to validate standalone LeIndex: {}", err),
+            },
+        }
+    }
+
+    fn check_standalone_nexus_provider(&self) -> CheckResult {
+        let project_root =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        match StandaloneNexusProvider::discover() {
+            Some(provider) => match provider.health_report_sync(&project_root) {
+                Ok(report) => {
+                    let methods = StandaloneNexusProvider::supported_install_methods()
+                        .into_iter()
+                        .map(NexusInstallMethod::install_hint)
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    CheckResult {
+                        name: "Standalone Nexus provider health".to_string(),
+                        passed: matches!(
+                            report.status,
+                            crate::provider_boundary::ProviderStatus::Healthy
+                        ),
+                        message: if matches!(
+                            report.status,
+                            crate::provider_boundary::ProviderStatus::Healthy
+                        ) {
+                            let location = provider.installation().executable.display();
+                            let state_root = provider
+                                .state_root
+                                .as_ref()
+                                .map(|path| path.display().to_string())
+                                .unwrap_or_else(|| "<unknown>".to_string());
+                            format!(
+                                "Standalone Nexus detected at {} with state root {}",
+                                location, state_root
+                            )
+                        } else {
+                            format!("Standalone Nexus not healthy. Install via: {}", methods)
+                        },
+                    }
+                }
+                Err(err) => CheckResult {
+                    name: "Standalone Nexus provider health".to_string(),
+                    passed: false,
+                    message: format!("Failed to validate standalone Nexus: {}", err),
+                },
+            },
+            None => CheckResult {
+                name: "Standalone Nexus provider health".to_string(),
+                passed: false,
+                message: StandaloneNexusProvider::supported_install_methods()
+                    .into_iter()
+                    .map(NexusInstallMethod::install_hint)
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            },
+        }
+    }
+
+    fn managed_cli_name(tool: IntegrationTool) -> &'static str {
+        match tool {
+            IntegrationTool::Claude => "claude",
+            IntegrationTool::OpenCode => "opencode",
+            IntegrationTool::Codex => "codex",
+            IntegrationTool::Gemini => "gemini",
+            IntegrationTool::Qwen => "qwen",
+            IntegrationTool::Amp => "amp",
+            IntegrationTool::Droid => "droid",
+            IntegrationTool::Pi => "pi",
+            IntegrationTool::Omp => "omp",
+            IntegrationTool::Iflow => "iflow",
+        }
+    }
+
+    fn check_managed_session_profile(&self, tool: IntegrationTool) -> CheckResult {
+        let profile = managed_cli_overlap_profile(Self::managed_cli_name(tool));
+        let analysis = profile
+            .analysis_preferred_tools
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let memory = profile
+            .memory_preferred_tools
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let suppressed = profile
+            .suppressed_pool_entries
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let retained = profile
+            .retained_maestro_tools
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        CheckResult {
+            name: "Managed session provider profile".to_string(),
+            passed: !analysis.is_empty() && !memory.is_empty(),
+            message: format!(
+                "cli={} launch_surface={} analysis=[{}] memory=[{}] suppressed_pool=[{}] retained=[{}]",
+                profile.cli,
+                profile.launch_surface,
+                analysis,
+                memory,
+                suppressed,
+                retained
+            ),
+        }
+    }
+
+    fn check_maestro_mcp_pool_surface(&self) -> CheckResult {
+        match std::process::Command::new("maestro")
+            .arg("mcp")
+            .arg("--help")
+            .output()
+        {
+            Ok(output) => {
+                if !output.status.success() {
+                    return CheckResult {
+                        name: "Maestro MCP pool surface".to_string(),
+                        passed: false,
+                        message: "maestro mcp --help returned a non-zero exit code".to_string(),
+                    };
+                }
+
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let tokens = ["serve", "proxy", "tool-search"];
+                let missing = tokens
+                    .iter()
+                    .copied()
+                    .filter(|token| !stdout.contains(token))
+                    .collect::<Vec<_>>();
+
+                if missing.is_empty() {
+                    CheckResult {
+                        name: "Maestro MCP pool surface".to_string(),
+                        passed: true,
+                        message: "maestro mcp exposes serve/proxy/tool-search for the shared pool"
+                            .to_string(),
+                    }
+                } else {
+                    CheckResult {
+                        name: "Maestro MCP pool surface".to_string(),
+                        passed: false,
+                        message: format!(
+                            "maestro mcp --help is missing expected tokens: {}",
+                            missing.join(", ")
+                        ),
+                    }
+                }
+            }
+            Err(e) => CheckResult {
+                name: "Maestro MCP pool surface".to_string(),
+                passed: false,
+                message: format!("Failed to execute maestro mcp --help: {}", e),
+            },
         }
     }
 
@@ -1339,30 +1593,30 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
 
     /// Check MCP server connectivity
     fn check_mcp_connectivity(&self, _tool: IntegrationTool) -> CheckResult {
-        // Check if maestro binary exists (can test connectivity)
-        match std::process::Command::new("maestro")
-            .arg("--version")
+        match std::process::Command::new("leindex")
+            .arg("mcp")
+            .arg("--help")
             .output()
         {
             Ok(output) => {
                 if output.status.success() {
                     CheckResult {
-                        name: "LeIndex MCP connectivity".to_string(),
+                        name: "Standalone LeIndex MCP connectivity".to_string(),
                         passed: true,
-                        message: "maestro binary found (MCP proxy available)".to_string(),
+                        message: "leindex mcp entrypoint is callable".to_string(),
                     }
                 } else {
                     CheckResult {
-                        name: "LeIndex MCP connectivity".to_string(),
+                        name: "Standalone LeIndex MCP connectivity".to_string(),
                         passed: false,
-                        message: "maestro binary found but not executable".to_string(),
+                        message: "leindex binary found but mcp entrypoint failed".to_string(),
                     }
                 }
             }
             Err(_) => CheckResult {
-                name: "LeIndex MCP connectivity".to_string(),
-                passed: true, // Don't fail overall - may be using different install method
-                message: "maestro binary not found in PATH (may need PATH adjustment)".to_string(),
+                name: "Standalone LeIndex MCP connectivity".to_string(),
+                passed: false,
+                message: "leindex binary not found in PATH".to_string(),
             },
         }
     }

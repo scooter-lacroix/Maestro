@@ -7,6 +7,7 @@ Each command (setup, newTrack, implement, status) has a context extractor.
 
 import re
 import json
+import os
 from pathlib import Path
 from typing import Callable, Awaitable, Optional, Dict, Any
 from loguru import logger
@@ -78,10 +79,14 @@ class MaestroCommandHook:
             # Store extracted context if memory service is available
             if self.memory_service and context:
                 try:
+                    session_id = result.get("session_id") or os.environ.get("MAESTRO_SESSION_ID")
+                    if session_id:
+                        context["session_id"] = session_id
+                    context["project_path"] = project_path
                     memory_id = await self.memory_service.store_command_context(
                         command=command,
                         project_path=project_path,
-                        context=context
+                        context=context,
                     )
                     logger.info(f"Stored command context for {command}: memory_id={memory_id}")
                 except Exception as e:

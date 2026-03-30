@@ -9,6 +9,7 @@ Integrates with the UnifiedHookManager to restore previous session state.
 import json
 import sys
 import os
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -57,21 +58,38 @@ def session_load_hook(input_data: dict) -> dict:
         if manager is None:
             return input_data
 
-        # Recall previous session context
-        memories = manager.recall(
-            query=f"session {session_id} agent {agent_id}",
-            category="context",
-            limit=10,
-        )
+        memories = []
+        try:
+            from maestro.memory.service import MaestroMemoryService
 
-        # Load recent session data
-        if project_path:
-            project_memories = manager.recall(
-                query=f"project {project_path} recent context",
+            async def _load_session_memories() -> list[dict[str, Any]]:
+                service = MaestroMemoryService()
+                await service.initialize()
+                try:
+                    session_memories = await service.retrieve_session_context(session_id=session_id, limit=10)
+                    if project_path:
+                        project_memories = await service.retrieve_project_context(project_path=project_path, limit=5)
+                        session_memories.extend(project_memories)
+                    return session_memories
+                finally:
+                    await service.close()
+
+            memories = asyncio.run(_load_session_memories())
+        except Exception:
+            # Fallback to compatibility recall if the direct Nexus bridge is unavailable.
+            memories = manager.recall(
+                query=f"session {session_id} agent {agent_id}",
                 category="context",
-                limit=5,
+                limit=10,
             )
-            memories.extend(project_memories)
+            if project_path:
+                memories.extend(
+                    manager.recall(
+                        query=f"project {project_path} recent context",
+                        category="context",
+                        limit=5,
+                    )
+                )
 
         # Inject context into input
         if memories:

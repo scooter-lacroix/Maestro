@@ -9,6 +9,7 @@ Preserves important context that should survive compaction.
 import json
 import sys
 import os
+import asyncio
 from pathlib import Path
 from datetime import datetime, UTC
 from typing import Any
@@ -54,37 +55,40 @@ def continuity_hook(input_data: dict) -> dict:
 
         session_id = current_session_id
 
-        # Capture important memories before compact
+        # Capture recent memories before compaction from Nexus-backed truth.
         important_memories: list[dict[str, Any]] = []
+        try:
+            from maestro.memory.service import MaestroMemoryService
 
-        if manager.session_manager:
-            # Get recent high-importance memories for this session
-            recent_memories = manager.memory_manager.get_memories_by_session(
-                session_id=session_id,
-                limit=20,
-            )
+            async def _load_session_memories() -> list[dict[str, Any]]:
+                service = MaestroMemoryService()
+                await service.initialize()
+                try:
+                    return await service.retrieve_session_context(session_id=session_id, limit=20)
+                finally:
+                    await service.close()
 
-            # Filter for high importance
-            for mem in recent_memories:
-                importance = getattr(mem, "importance", None)
-                if importance in ("high", "critical"):
-                    important_memories.append({
-                        "id": getattr(mem, "id", None),
-                        "content": getattr(mem, "content", ""),
-                        "category": getattr(mem, "category", None),
-                        "summary": getattr(mem, "summary", None),
-                    })
+            recent_memories = asyncio.run(_load_session_memories())
+            important_memories = recent_memories[:10]
+        except Exception:
+            important_memories = []
 
         # Create continuity ledger entry
+        # Uses "observation" entry type (valid ledger type) with pre_compact tag
         if important_memories:
             continuity_entry = manager.create_ledger_entry(
-                entry_type="pre_compact_continuity",
-                title=f"Pre-Compact Continuity: {session_id}",
-                content=f"Preserving {len(important_memories)} important memories",
+                entry_type="observation",
+                title=f"[PRE-COMPACT CONTINUITY] {session_id}",
+                content=f"Preserving {len(important_memories)} important memories before context compaction",
                 metadata={
                     "session_id": session_id,
                     "preserved_count": len(important_memories),
                     "timestamp": datetime.now(UTC).isoformat(),
+                    "hook_type": "pre_compact_continuity",
+                    "important_summaries": [
+                        m.get("summary") or m.get("content", "")[:200]
+                        for m in important_memories[:10]
+                    ],
                 },
             )
 
@@ -95,6 +99,34 @@ def continuity_hook(input_data: dict) -> dict:
                 "important_summaries": [m.get("summary") or m.get("content", "")[:100]
                                         for m in important_memories[:5]],
             }
+
+            try:
+                from maestro.memory.service import MaestroMemoryService
+
+                async def _store_continuity_memory() -> None:
+                    service = MaestroMemoryService()
+                    await service.initialize()
+                    try:
+                        await service.store_command_context(
+                            command="hook:pre-compact",
+                            project_path=getattr(manager.session_manager.get_session_by_id(session_id), "project_path", None) or os.getcwd(),
+                            context={
+                                "session_id": session_id,
+                                "current_task_id": input_data.get("current_task_id", ""),
+                                "hook_type": "pre_compact_continuity",
+                                "preserved_count": len(important_memories),
+                                "important_summaries": [
+                                    m.get("summary") or m.get("content", "")[:200]
+                                    for m in important_memories[:10]
+                                ],
+                            },
+                        )
+                    finally:
+                        await service.close()
+
+                asyncio.run(_store_continuity_memory())
+            except Exception:
+                pass
 
         return input_data
 

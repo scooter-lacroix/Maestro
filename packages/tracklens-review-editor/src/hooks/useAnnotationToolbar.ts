@@ -113,6 +113,8 @@ export function useAnnotationToolbar({ patch, filePath, onLineSelection, onAddAn
     saveDraft();
     setEditingAnnotationId(null);
 
+    console.log('[TrackLens] handleLineSelectionEnd', range);
+
     // Restore draft for new range or start fresh
     const draft = draftStore.get(draftKey(filePath, range));
     if (draft) {
@@ -126,6 +128,7 @@ export function useAnnotationToolbar({ patch, filePath, onLineSelection, onAddAn
     }
 
     const mousePos = lastMousePosition.current;
+    console.log('[TrackLens] setting toolbarState at', mousePos);
     setToolbarState({
       position: {
         top: mousePos.y + 10,

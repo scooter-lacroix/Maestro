@@ -183,6 +183,13 @@ enum McpCommands {
     /// Register an MCP server directly in the Maestro pool
     #[command(visible_alias = "install")]
     Add(mcp::AddServerArgs),
+    /// Install a managed MCP server from a Maestro manifest
+    ManagedInstall(mcp::InstallServerArgs),
+    /// Uninstall a managed MCP server and remove its pool-local artifacts
+    Uninstall {
+        /// MCP server name
+        name: String,
+    },
     /// Bridge stdio to a pooled UNIX socket server
     Proxy {
         /// MCP server name
@@ -418,6 +425,8 @@ async fn main() -> Result<()> {
         Commands::Mcp { command } => match command {
             McpCommands::Serve => mcp::serve().await,
             McpCommands::Add(args) => mcp::add(args).await,
+            McpCommands::ManagedInstall(args) => mcp::install(args).await,
+            McpCommands::Uninstall { name } => mcp::uninstall(name).await,
             McpCommands::Proxy { name } => mcp::proxy(name).await,
             McpCommands::ToolSearch => mcp::tool_search().await,
         },

@@ -23,8 +23,8 @@ use crate::config::Config;
 
 #[cfg(feature = "rusqlite")]
 use super::models::{
-    McpInstallKind, McpInstallState, McpManagedInstallManifest, McpManagedInstallRecipe,
-    McpServer, McpStatus, McpTransport,
+    McpInstallKind, McpInstallState, McpManagedInstallManifest, McpManagedInstallRecipe, McpServer,
+    McpStatus, McpTransport,
 };
 #[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
@@ -50,7 +50,11 @@ impl ManagedMcpInstaller {
         })
     }
 
-    pub fn template(&self, existing: Option<&McpServer>, suggested_name: Option<&str>) -> Result<String> {
+    pub fn template(
+        &self,
+        existing: Option<&McpServer>,
+        suggested_name: Option<&str>,
+    ) -> Result<String> {
         let manifest = if let Some(server) = existing {
             manifest_from_server(server)?
         } else {
@@ -80,7 +84,9 @@ impl ManagedMcpInstaller {
                     cwd: None,
                     source_subdir: None,
                     post_install_command: None,
-                    description: Some("Replace this template with your managed MCP recipe".to_string()),
+                    description: Some(
+                        "Replace this template with your managed MCP recipe".to_string(),
+                    ),
                 },
             }
         };
@@ -252,8 +258,7 @@ impl ManagedMcpInstaller {
                     .await?;
                 }
 
-                let bin =
-                    resolve_npm_bin(&workspace, &package, recipe.binary.as_deref())?;
+                let bin = resolve_npm_bin(&workspace, &package, recipe.binary.as_deref())?;
                 ManagedExec::Direct {
                     command: workspace.join("node_modules").join(".bin").join(bin),
                     args: recipe.start_args.clone(),
@@ -278,8 +283,14 @@ impl ManagedMcpInstaller {
                     .with_context(|| "UVX installs require a package name")?;
                 let mut pip_args = vec!["install".to_string(), package.clone()];
                 pip_args.extend(recipe.install_commands.clone());
-                run_process(pip.to_string_lossy().as_ref(), &pip_args, &workspace, &env_map, log_path)
-                    .await?;
+                run_process(
+                    pip.to_string_lossy().as_ref(),
+                    &pip_args,
+                    &workspace,
+                    &env_map,
+                    log_path,
+                )
+                .await?;
                 if let Some(command) = recipe.post_install_command.as_ref() {
                     run_shell_group(
                         std::slice::from_ref(command),
@@ -310,7 +321,11 @@ impl ManagedMcpInstaller {
                     .unwrap_or_else(|| "python3".to_string());
                 run_process(
                     &python_cmd,
-                    &["-m".to_string(), "venv".to_string(), venv.to_string_lossy().to_string()],
+                    &[
+                        "-m".to_string(),
+                        "venv".to_string(),
+                        venv.to_string_lossy().to_string(),
+                    ],
                     &workspace,
                     &env_map,
                     log_path,
@@ -324,8 +339,14 @@ impl ManagedMcpInstaller {
                     .with_context(|| "PIPX installs require a package name")?;
                 let mut pip_args = vec!["install".to_string(), package.clone()];
                 pip_args.extend(recipe.install_commands.clone());
-                run_process(pip.to_string_lossy().as_ref(), &pip_args, &workspace, &env_map, log_path)
-                    .await?;
+                run_process(
+                    pip.to_string_lossy().as_ref(),
+                    &pip_args,
+                    &workspace,
+                    &env_map,
+                    log_path,
+                )
+                .await?;
                 if let Some(command) = recipe.post_install_command.as_ref() {
                     run_shell_group(
                         std::slice::from_ref(command),
@@ -354,7 +375,11 @@ impl ManagedMcpInstaller {
                 let source_dir = workspace.join("source");
                 run_process(
                     "git",
-                    &["clone".to_string(), repository, source_dir.to_string_lossy().to_string()],
+                    &[
+                        "clone".to_string(),
+                        repository,
+                        source_dir.to_string_lossy().to_string(),
+                    ],
                     &workspace,
                     &env_map,
                     log_path,
@@ -423,16 +448,15 @@ impl ManagedMcpInstaller {
                     cwd: working_dir,
                 }
             }
-            McpInstallKind::Unmanaged => anyhow::bail!("Managed install recipe cannot be unmanaged"),
+            McpInstallKind::Unmanaged => {
+                anyhow::bail!("Managed install recipe cannot be unmanaged")
+            }
         };
 
         let wrapper_path = runtime_dir.join("launch.sh");
         write_wrapper_script(&wrapper_path, &run_spec, &env_map)?;
-        fs::write(
-            server_root.join("manifest.toml"),
-            manifest_toml.as_bytes(),
-        )
-        .with_context(|| format!("Failed to write manifest for {}", manifest.name))?;
+        fs::write(server_root.join("manifest.toml"), manifest_toml.as_bytes())
+            .with_context(|| format!("Failed to write manifest for {}", manifest.name))?;
 
         let recipe_json = serde_json::to_value(&manifest.recipe)?;
         let now = Utc::now();
@@ -479,7 +503,7 @@ impl ManagedMcpInstaller {
             name: manifest.name.clone(),
             transport: manifest.transport,
             command: self
-            .managed_root_for(&manifest.name)
+                .managed_root_for(&manifest.name)
                 .join("runtime")
                 .join("launch.sh")
                 .to_string_lossy()
@@ -540,7 +564,9 @@ enum ManagedExec {
 #[cfg(feature = "rusqlite")]
 fn default_managed_root() -> Result<PathBuf> {
     let config = Config::load();
-    let root = expand_user_path(&config.install_path)?.join("mcp").join("managed");
+    let root = expand_user_path(&config.install_path)?
+        .join("mcp")
+        .join("managed");
     Ok(root)
 }
 
@@ -554,7 +580,9 @@ fn manifest_from_server(server: &McpServer) -> Result<McpManagedInstallManifest>
         .install_recipe
         .clone()
         .with_context(|| format!("Managed MCP '{}' has no stored recipe", server.name))
-        .and_then(|value| serde_json::from_value(value).context("Invalid stored managed MCP recipe"))?;
+        .and_then(|value| {
+            serde_json::from_value(value).context("Invalid stored managed MCP recipe")
+        })?;
 
     Ok(McpManagedInstallManifest {
         name: server.name.clone(),
@@ -741,13 +769,20 @@ fn initialize_npm_workspace(workspace: &Path) -> Result<()> {
 }
 
 #[cfg(feature = "rusqlite")]
-fn resolve_npm_bin(workspace: &Path, package_spec: &str, explicit_bin: Option<&str>) -> Result<String> {
+fn resolve_npm_bin(
+    workspace: &Path,
+    package_spec: &str,
+    explicit_bin: Option<&str>,
+) -> Result<String> {
     if let Some(bin) = explicit_bin {
         return Ok(bin.to_string());
     }
 
     let package_name = normalize_npm_package_name(package_spec);
-    let package_json = workspace.join("node_modules").join(package_name).join("package.json");
+    let package_json = workspace
+        .join("node_modules")
+        .join(package_name)
+        .join("package.json");
     let package_text = fs::read_to_string(&package_json)
         .with_context(|| format!("Failed to read {}", package_json.display()))?;
     let package_value: serde_json::Value =
@@ -760,13 +795,11 @@ fn resolve_npm_bin(workspace: &Path, package_spec: &str, explicit_bin: Option<&s
                 .next()
                 .unwrap_or(package_name)
                 .to_string();
-            return Ok(
-                Path::new(single)
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or(&fallback)
-                    .to_string(),
-            );
+            return Ok(Path::new(single)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(&fallback)
+                .to_string());
         }
         if let Some(map) = bin.as_object() {
             if let Some((name, _)) = map.iter().next() {
@@ -790,7 +823,10 @@ fn normalize_npm_package_name(package_spec: &str) -> &str {
         }
         package_spec
     } else {
-        package_spec.split_once('@').map(|(name, _)| name).unwrap_or(package_spec)
+        package_spec
+            .split_once('@')
+            .map(|(name, _)| name)
+            .unwrap_or(package_spec)
     }
 }
 
@@ -836,13 +872,18 @@ fn write_wrapper_script(
             }
             script.push('\n');
         }
-        ManagedExec::Shell { script: shell, args, cwd } => {
+        ManagedExec::Shell {
+            script: shell,
+            args,
+            cwd,
+        } => {
             script.push_str(&format!("cd {}\n", shell_quote(&cwd.to_string_lossy())));
             let mut rendered = shell.clone();
             if !args.is_empty() {
                 rendered.push(' ');
                 rendered.push_str(
-                    &args.iter()
+                    &args
+                        .iter()
                         .map(|arg| shell_quote(arg))
                         .collect::<Vec<_>>()
                         .join(" "),
@@ -895,7 +936,14 @@ async fn run_shell_group(
     log_path: &Path,
 ) -> Result<()> {
     for command in commands {
-        run_process("bash", &["-lc".to_string(), command.clone()], cwd, env, log_path).await?;
+        run_process(
+            "bash",
+            &["-lc".to_string(), command.clone()],
+            cwd,
+            env,
+            log_path,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -927,11 +975,7 @@ async fn run_process(
     writeln!(log).ok();
 
     if !output.status.success() {
-        anyhow::bail!(
-            "Command '{}' failed with status {}",
-            program,
-            output.status
-        );
+        anyhow::bail!("Command '{}' failed with status {}", program, output.status);
     }
 
     Ok(())

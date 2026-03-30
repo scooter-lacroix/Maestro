@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ThemeProvider, useTheme } from '@maestro/tracklens-ui/components/ThemeProvider';
 import { ModeToggle } from '@maestro/tracklens-ui/components/ModeToggle';
-import { ConfirmDialog } from '@maestro/tracklens-ui/components/ConfirmDialog';
 import { Settings } from '@maestro/tracklens-ui/components/Settings';
 import { storage } from '@maestro/tracklens-ui/utils/storage';
 import { CompletionOverlay } from '@maestro/tracklens-ui/components/CompletionOverlay';
@@ -9,12 +8,16 @@ import { getIdentity } from '@maestro/tracklens-ui/utils/identity';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@maestro/tracklens-ui/utils/agentSwitch';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, DiffAnnotationMetadata } from '@maestro/tracklens-ui/types';
 import { useResizablePanel } from '@maestro/tracklens-ui/hooks/useResizablePanel';
-import { ResizeHandle } from '@maestro/tracklens-ui/components/ResizeHandle';
+import {
+  ModeSwitcher,
+  ExportModal,
+  ConfirmDialog,
+  ResizeHandle,
+} from '@maestro/tracklens-ui';
 import { DiffViewer } from './components/DiffViewer';
 import { ReviewPanel } from './components/ReviewPanel';
 import { FileTree } from './components/FileTree';
 import { DEMO_DIFF } from './demoData';
-
 declare const __APP_VERSION__: string;
 
 interface DiffFile {
@@ -135,12 +138,14 @@ const ReviewApp: React.FC = () => {
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [initialExportTab, setInitialExportTab] = useState<'export' | 'settings'>('export');
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [diffStyle, setDiffStyle] = useState<'split' | 'unified'>(() => {
     return (storage.getItem('review-diff-style') as 'split' | 'unified') || 'split';
   });
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set());
   const [hideViewedFiles, setHideViewedFiles] = useState(false);
@@ -184,7 +189,7 @@ const ReviewApp: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showExportModal]);
 
   // Get annotations for active file
@@ -342,7 +347,7 @@ const ReviewApp: React.FC = () => {
 
     setIsLoadingDiff(true);
     try {
-      const res = await fetch('/api/diff/switch', {
+      const res = await fetch('/api/switch-diff', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ diffType: newDiffType }),
@@ -441,7 +446,9 @@ const ReviewApp: React.FC = () => {
 
       const res = await fetch('/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           feedback,
           annotations,
@@ -465,10 +472,13 @@ const ReviewApp: React.FC = () => {
   const handleApprove = useCallback(async () => {
     setIsApproving(true);
     try {
-      const res = await fetch('/api/feedback', {
+      const res = await fetch('/api/decision', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
+          approved: true,
           feedback: 'LGTM - no changes requested.',
           annotations: [],
         }),
@@ -533,35 +543,35 @@ const ReviewApp: React.FC = () => {
 
   return (
     <ThemeProvider defaultTheme="dark">
-      <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
         {/* Header */}
-        <header className="h-12 flex items-center justify-between px-2 md:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50">
+        <header className="h-12 flex items-center justify-between px-2 md:px-4 fabric-border-b bg-surface-glass z-50">
           <div className="flex items-center gap-2 md:gap-3">
-            <a
-              href="https://github.com/backnotprop/tracklens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 md:gap-2 hover:opacity-80 transition-opacity"
+            <button
+              onClick={() => setIsFileTreeOpen(!isFileTreeOpen)}
+              className={`p-1.5 rounded-md transition-all ${isFileTreeOpen ? 'bg-primary/10 text-primary shadow-neu-inset-small' : 'text-muted-foreground hover:text-foreground hover:bg-muted shadow-neu-small'}`}
+              title={isFileTreeOpen ? 'Close file tree' : 'Open file tree'}
             >
-              <span className="text-sm font-semibold tracking-tight">TrackLens</span>
-            </a>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
+              </svg>
+            </button>
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-secondary/15 text-secondary hidden md:inline">
+              Code Review
+            </span>
             <a
-              href="https://github.com/backnotprop/tracklens/releases"
+              href="https://github.com/scooter-lacroix/Maestro/releases"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-muted-foreground font-mono opacity-60 hidden md:inline hover:opacity-100 transition-opacity"
             >
               v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}
             </a>
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-secondary/15 text-secondary hidden md:inline">
-              Code Review
-            </span>
             {origin && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
-                origin === 'claude-code'
-                  ? 'bg-orange-500/15 text-orange-400'
-                  : 'bg-zinc-500/20 text-zinc-400'
-              }`}>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${origin === 'claude-code'
+                ? 'bg-orange-500/15 text-orange-400'
+                : 'bg-zinc-500/20 text-zinc-400'
+                }`}>
                 {origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
               </span>
             )}
@@ -575,26 +585,37 @@ const ReviewApp: React.FC = () => {
             )}
           </div>
 
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <a
+              href="https://github.com/scooter-lacroix/Maestro.git"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-2xl bg-background border border-border/10 shadow-neu-extruded hover:-translate-y-0.5 hover:shadow-neu-hover active:translate-y-[0.5px] active:shadow-neu-inset transition-all animate-brand-pulse"
+            >
+              <h1 className="text-sm font-bold font-display tracking-tight text-foreground/90 group-hover:text-primary transition-colors">
+                TrackLens
+              </h1>
+            </a>
+          </div>
+
           <div className="flex items-center gap-1 md:gap-2">
             {/* Diff style toggle */}
             <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
               <button
                 onClick={() => handleDiffStyleChange('split')}
-                className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                  diffStyle === 'split'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
+                className={`px-2 py-1 text-xs rounded-md transition-colors ${diffStyle === 'split'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+                  }`}
               >
                 Split
               </button>
               <button
                 onClick={() => handleDiffStyleChange('unified')}
-                className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                  diffStyle === 'unified'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
+                className={`px-2 py-1 text-xs rounded-md transition-colors ${diffStyle === 'unified'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+                  }`}
               >
                 Unified
               </button>
@@ -629,13 +650,12 @@ const ReviewApp: React.FC = () => {
                 <button
                   onClick={handleSendFeedback}
                   disabled={isSendingFeedback || isApproving || annotations.length === 0}
-                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${
-                    isSendingFeedback || isApproving
-                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                      : annotations.length === 0
-                        ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
-                        : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
-                  }`}
+                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${isSendingFeedback || isApproving
+                    ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                    : annotations.length === 0
+                      ? 'opacity-50 cursor-not-allowed bg-accent/10 text-accent/50'
+                      : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
+                    }`}
                   title={annotations.length === 0 ? "Add annotations to send feedback" : "Send feedback"}
                 >
                   <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -655,13 +675,12 @@ const ReviewApp: React.FC = () => {
                       }
                     }}
                     disabled={isSendingFeedback || isApproving}
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${
-                      isSendingFeedback || isApproving
-                        ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
-                        : annotations.length > 0
-                          ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
-                          : 'bg-success text-success-foreground hover:opacity-90'
-                    }`}
+                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${isSendingFeedback || isApproving
+                      ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                      : annotations.length > 0
+                        ? 'bg-success/50 text-success-foreground/70 hover:bg-success hover:text-success-foreground'
+                        : 'bg-success text-success-foreground hover:opacity-90'
+                      }`}
                     title="Approve - no changes needed"
                   >
                     <span className="md:hidden">{isApproving ? '...' : 'OK'}</span>
@@ -713,11 +732,10 @@ const ReviewApp: React.FC = () => {
             {/* Panel toggle */}
             <button
               onClick={() => setIsPanelOpen(!isPanelOpen)}
-              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
-                isPanelOpen
-                  ? 'bg-primary/15 text-primary'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              }`}
+              className={`p-1.5 rounded-md transition-all ml-1 ${isPanelOpen
+                ? 'bg-primary/10 text-primary shadow-neu-inset-small'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted shadow-neu-small'
+                }`}
               title={isPanelOpen ? 'Hide annotations' : 'Show annotations'}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -740,26 +758,27 @@ const ReviewApp: React.FC = () => {
         </header>
 
         {/* Main content */}
-        <div className={`flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
+        <div className={`flex-1 flex overflow-hidden bg-complex relative ${isResizing ? 'select-none' : ''}`}>
           {/* File tree sidebar - show when multiple files OR diff options available */}
-          {(files.length > 1 || gitContext?.diffOptions) && (
+          {isFileTreeOpen && (files.length > 1 || gitContext?.diffOptions) && (
             <>
-              <FileTree
-                files={files}
-                activeFileIndex={activeFileIndex}
-                onSelectFile={handleFileSwitch}
-                annotations={annotations}
-                viewedFiles={viewedFiles}
-                onToggleViewed={handleToggleViewed}
-                hideViewedFiles={hideViewedFiles}
-                onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
-                enableKeyboardNav={!showExportModal}
-                diffOptions={gitContext?.diffOptions}
-                activeDiffType={diffType}
-                onSelectDiff={handleDiffSwitch}
-                isLoadingDiff={isLoadingDiff}
-                width={fileTreeResize.width}
-              />
+              <div className="h-full flex flex-col" style={{ width: fileTreeResize.width }}>
+                <FileTree
+                  files={files}
+                  activeFileIndex={activeFileIndex}
+                  onSelectFile={handleFileSwitch}
+                  annotations={annotations}
+                  viewedFiles={viewedFiles}
+                  onToggleViewed={handleToggleViewed}
+                  hideViewedFiles={hideViewedFiles}
+                  onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
+                  enableKeyboardNav={!showExportModal}
+                  diffOptions={gitContext?.diffOptions}
+                  activeDiffType={diffType}
+                  onSelectDiff={handleDiffSwitch}
+                  isLoadingDiff={isLoadingDiff}
+                />
+              </div>
               <ResizeHandle {...fileTreeResize.handleProps} />
             </>
           )}
@@ -829,56 +848,30 @@ const ReviewApp: React.FC = () => {
           {isPanelOpen && <ResizeHandle {...panelResize.handleProps} />}
 
           {/* Annotations panel */}
-          <ReviewPanel
-            isOpen={isPanelOpen}
-            onToggle={() => setIsPanelOpen(!isPanelOpen)}
-            annotations={annotations}
-            files={files}
-            selectedAnnotationId={selectedAnnotationId}
-            onSelectAnnotation={handleSelectAnnotation}
-            onDeleteAnnotation={handleDeleteAnnotation}
-            feedbackMarkdown={feedbackMarkdown}
-            width={panelResize.width}
-          />
+          <div className="flex flex-col" style={{ width: panelResize.width }}>
+            <ReviewPanel
+              isOpen={isPanelOpen}
+              onToggle={() => setIsPanelOpen(!isPanelOpen)}
+              annotations={annotations}
+              files={files}
+              selectedAnnotationId={selectedAnnotationId}
+              onSelectAnnotation={handleSelectAnnotation}
+              onDeleteAnnotation={handleDeleteAnnotation}
+              feedbackMarkdown={feedbackMarkdown}
+            />
+          </div>
         </div>
 
         {/* Export Modal */}
-        {showExportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-            <div className="bg-card border border-border rounded-xl w-full max-w-2xl flex flex-col max-h-[80vh] shadow-2xl">
-              <div className="p-4 border-b border-border flex justify-between items-center">
-                <h3 className="font-semibold text-sm">Export Review Feedback</h3>
-                <button
-                  onClick={() => setShowExportModal(false)}
-                  className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div className="flex-1 overflow-auto p-4">
-                <div className="text-xs text-muted-foreground mb-2">
-                  {annotations.length} annotation{annotations.length !== 1 ? 's' : ''}
-                </div>
-                <pre className="export-code-block whitespace-pre-wrap">
-                  {feedbackMarkdown}
-                </pre>
-              </div>
-              <div className="p-4 border-t border-border flex justify-end gap-2">
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(feedbackMarkdown);
-                  }}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-colors"
-                >
-                  Copy to Clipboard
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
+        <ExportModal
+          isOpen={showExportModal}
+          onClose={() => { setShowExportModal(false); setInitialExportTab('export'); }}
+          annotationsOutput={feedbackMarkdown}
+          annotationCount={annotations.length}
+          markdown={diffData?.rawPatch}
+          isApiMode={origin !== null}
+          initialTab={initialExportTab}
+        />
         {/* No annotations dialog */}
         <ConfirmDialog
           isOpen={showNoAnnotationsDialog}
@@ -917,8 +910,8 @@ const ReviewApp: React.FC = () => {
           agentLabel={origin === 'claude-code' ? 'Claude Code' : 'OpenCode'}
         />
 
-      </div>
-    </ThemeProvider>
+      </div >
+    </ThemeProvider >
   );
 };
 

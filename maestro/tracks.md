@@ -446,3 +446,76 @@ Cleanup (parallel, no dependencies)
 - [x] No regressions in existing functionality (934 total tests pass)
 
 **Execution**: `/maestro:orchestrate maesterclaw-rebuild_20260223`
+---
+
+## [x] Track: Cockpit MaestroClaw + Conductor Reconstruction (MASTER TRACK)
+*Link: [./maestro/tracks/cockpit-maestroclaw-conductor-reconstruction_20260312/](./maestro/tracks/cockpit-maestroclaw-conductor-reconstruction_20260312/)*
+
+**Description**: Reconstruct both cockpit panels (MaestroClaw and Conductor) with proper architecture, normalized data models, metadata hydration, verified launch/control flows, and regression prevention. Based on comprehensive LeIndex analysis.
+
+**Type**: Reconstruction (Master Track with 9 Subtracks)
+
+**Status**: COMPLETE ✅ - All 9 subtracks finished
+
+**Subtracks**:
+1. **maestroclaw-pane-replacement** - Replace capabilities-backed tab with dedicated pane ✅
+2. **maestroclaw-setup-walkthrough** - Embed bootstrap/onboarding UX ✅
+3. **conductor-normalized-model** - Normalized project/session/track/task tree ✅
+4. **conductor-metadata-hydration** - Parser + metadata loading fixes ✅
+5. **conductor-tree-and-status-rebuild** - Tree structure, status layering, expansion persistence ✅
+6. **conductor-launch-verification** - Spawn + verify + error reporting ✅
+7. **conductor-setup-wizard** - Wire latent setup state into visible flow ✅
+8. **cockpit-panel-regression-tests** - Enforce render routing and behavior invariants ✅
+9. **tracklens-pipeline-integrity** - Restore tool-agnostic review/walkthrough reliability ✅
+
+**Dependencies**:
+```
+maestroclaw-pane-replacement → maestroclaw-setup-walkthrough
+conductor-normalized-model ────────┐
+conductor-metadata-hydration ──────┤→ conductor-tree-and-status-rebuild → conductor-setup-wizard → cockpit-panel-regression-tests
+                                   │
+conductor-launch-verification ──────┘ (parallel)
+tracklens-pipeline-integrity ───────┘ (parallel)
+```
+
+**Key Deliverables**:
+- [x] MaestroClaw tab routes to dedicated pane (not capabilities)
+- [x] MaestroClaw setup wizard with 6-step flow
+- [x] Conductor normalized tree model with TreeNodeId
+- [x] Metadata hydration in parser with status precedence
+- [x] Launch service with verification and error reporting
+- [x] Conductor setup wizard integration
+- [x] 286 tests passing (285 library + 8 integration + 17 regression)
+- [x] TrackLens pipeline integrity analysis
+
+**Execution**: `/maestro:orchestrate cockpit-maestroclaw-conductor-reconstruction_20260312`
+
+**Progress Summary (2026-03-12):**
+- **All 9 subtracks: COMPLETE ✅**
+- **Total tests: 286 passing** (100%)
+- **ADR 004 created**: MaestroClaw naming normalization
+- **Terminology freeze document created**
+
+---
+
+## [x] Track: MaestroClaw UI Reconstruction Port
+*Link: [./maestro/tracks/maestroclaw-ui-port_20260318/](./maestro/tracks/maestroclaw-ui-port_20260318/)*
+
+**Description**: Port interactive UI elements (setup wizard, session browser, provider selection, channel management, checklist widget) into MaestroClaw's Rust/ratatui TUI per docs/MAESTROCLAW_UI_PORT_PLAN.md
+
+**Type**: Feature
+
+**Status**: COMPLETE - All 9 phases finished, 26 tasks completed, 250 tests passing
+
+**Phases**:
+- Phase 1: Enhanced Setup Wizard (6 tasks) - COMPLETE
+- Phase 2: Provider Selection Widget (2 tasks) - COMPLETE
+- Phase 3: Session Browser (2 tasks) - COMPLETE
+- Phase 4: Checklist Widget (2 tasks) - COMPLETE
+- Phase 5: Tool Summary Panel (1 task) - COMPLETE
+- Phase 6: Gateway Platform Setup (3 tasks) - COMPLETE
+- Phase 7: Main App Loop Wiring (5 tasks) - COMPLETE
+- Phase 8: Doctor Enhancement (1 task) - COMPLETE
+- Phase 9: Compilation & Verification (4 tasks) - COMPLETE
+
+**Total Tasks**: 26 - All Complete

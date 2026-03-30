@@ -113,6 +113,14 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Self::default_from(&home)
+    }
+}
+
+impl Config {
+    /// Build default config values using an explicit home directory.
+    /// Unlike `Default`, this does not call `dirs::home_dir()`.
+    pub fn default_from(home: &std::path::Path) -> Self {
         let config_dir = home.join(".config").join("maestroclaw");
         Self {
             config_path: config_dir.join("config.toml"),
@@ -136,7 +144,20 @@ impl Default for Config {
 impl Config {
     /// Load config from the default path, falling back to defaults.
     pub fn load() -> Result<Self> {
-        let mut config = Self::default();
+        Self::load_from_dir(dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+    }
+
+    /// Load config using an explicit home directory instead of `dirs::home_dir()`.
+    ///
+    /// This is the hermetic alternative to `Config::load()` for tests that need
+    /// to control the config root without mutating `HOME`.
+    pub fn load_from_dir(home: PathBuf) -> Result<Self> {
+        let config_dir = home.join(".config").join("maestroclaw");
+        let mut config = Self {
+            config_path: config_dir.join("config.toml"),
+            workspace_dir: config_dir.join("workspace"),
+            ..Self::default_from(&home)
+        };
         if config.config_path.exists() {
             let text = std::fs::read_to_string(&config.config_path)
                 .with_context(|| format!("reading {}", config.config_path.display()))?;
@@ -624,5 +645,75 @@ mod tests {
         assert!(!config.gateway_api_key_is_strong());
         assert!(!config.webhook_secret_is_strong());
         assert!(!config.are_secrets_configured());
+    }
+
+    #[test]
+    fn config_roundtrips_extended_channel_backends() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+
+        let mut config = Config::default_from(&home);
+        config.channels.telegram = Some(schema::TelegramConfig {
+            bot_token: "telegram-token".to_string(),
+            allowed_users: vec!["alice".to_string()],
+        });
+        config.channels.discord = Some(schema::DiscordConfig {
+            bot_token: "discord-token".to_string(),
+            guild_id: "guild-1".to_string(),
+            allowed_users: vec!["bob".to_string()],
+        });
+        config.channels.slack = Some(schema::SlackConfig {
+            bot_token: "slack-bot".to_string(),
+            app_token: "slack-app".to_string(),
+            allowed_users: vec!["carol".to_string()],
+        });
+        config.channels.matrix = Some(schema::MatrixConfig {
+            homeserver_url: "https://matrix.example.com".to_string(),
+            access_token: "matrix-token".to_string(),
+            bot_user_id: Some("@maestro:example.com".to_string()),
+            allowed_users: vec!["dave".to_string()],
+            room_ids: vec!["!room:example.com".to_string()],
+        });
+        config.channels.whatsapp = Some(schema::WhatsAppConfig {
+            bridge_url: "https://wa.example.com".to_string(),
+            api_token: "wa-token".to_string(),
+            phone_number_id: Some("15551234567".to_string()),
+            allowed_users: vec!["erin".to_string()],
+        });
+        config.channels.mattermost = Some(schema::MattermostConfig {
+            server_url: "https://mm.example.com".to_string(),
+            bot_token: "mm-token".to_string(),
+            team_id: Some("team-1".to_string()),
+            channel_id: Some("channel-1".to_string()),
+            allowed_users: vec!["frank".to_string()],
+        });
+
+        config.save().unwrap();
+        let loaded = Config::load_from_dir(home).unwrap();
+
+        assert_eq!(
+            loaded.channels.matrix.as_ref().unwrap().homeserver_url,
+            "https://matrix.example.com"
+        );
+        assert_eq!(
+            loaded.channels.whatsapp.as_ref().unwrap().bridge_url,
+            "https://wa.example.com"
+        );
+        assert_eq!(
+            loaded.channels.mattermost.as_ref().unwrap().server_url,
+            "https://mm.example.com"
+        );
+        assert_eq!(
+            loaded.channels.telegram.as_ref().unwrap().allowed_users,
+            vec!["alice".to_string()]
+        );
+        assert_eq!(
+            loaded.channels.discord.as_ref().unwrap().guild_id,
+            "guild-1".to_string()
+        );
+        assert_eq!(
+            loaded.channels.slack.as_ref().unwrap().app_token,
+            "slack-app".to_string()
+        );
     }
 }

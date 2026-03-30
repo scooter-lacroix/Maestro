@@ -146,7 +146,11 @@ impl McpPool {
         }
 
         if !failed.is_empty() {
-            warn!("Failed to start {} MCP server(s): {:?}", failed.len(), failed);
+            warn!(
+                "Failed to start {} MCP server(s): {:?}",
+                failed.len(),
+                failed
+            );
         }
 
         // One more reconciliation after attempting starts to persist any failures.

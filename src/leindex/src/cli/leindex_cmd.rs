@@ -252,7 +252,7 @@ pub async fn run(cmd: LeIndexCommand) -> Result<()> {
 async fn run_init(path: PathBuf, _force: bool) -> Result<()> {
     println!("Initializing LeIndex for: {}", path.display());
     println!(
-        "Note: Full indexing not yet implemented - use `maestro analyze` for file-level analysis"
+        "Note: Full indexing not yet implemented - use `leindex analyze` for file-level analysis"
     );
     Ok(())
 }
@@ -262,7 +262,7 @@ async fn run_status() -> Result<()> {
     println!("=============");
     println!("Index location: ~/.config/maestro/leindex/");
     println!("Supported languages: Python, TypeScript, JavaScript, Rust, Go, Java, C, C++");
-    println!("\nUse `maestro leindex init .` to initialize a project index");
+    println!("\nUse `leindex init .` to initialize a project index");
     Ok(())
 }
 
@@ -273,7 +273,9 @@ async fn run_search(
     _format: String,
 ) -> Result<()> {
     println!("LeIndex Search: '{}'", query);
-    println!("Note: Full-text search not yet implemented - use `maestro analyze` for file-level analysis");
+    println!(
+        "Note: Full-text search not yet implemented - use `leindex analyze` for file-level analysis"
+    );
     Ok(())
 }
 

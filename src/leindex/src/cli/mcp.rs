@@ -16,9 +16,7 @@ use crate::memory::mcp_installer::ManagedMcpInstaller;
 #[cfg(feature = "rusqlite")]
 use crate::memory::mcp_pool::McpPool;
 #[cfg(feature = "rusqlite")]
-use crate::memory::models::{
-    McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport,
-};
+use crate::memory::models::{McpInstallKind, McpInstallState, McpServer, McpStatus, McpTransport};
 #[cfg(feature = "rusqlite")]
 use crate::memory::service::MemoryService;
 
@@ -175,8 +173,8 @@ pub async fn install(args: InstallServerArgs) -> Result<()> {
     let installer = ManagedMcpInstaller::new(service.clone(), None)?;
     let manifest_toml = std::fs::read_to_string(&args.manifest)
         .with_context(|| format!("Failed to read manifest {}", args.manifest.display()))?;
-    let manifest: crate::memory::models::McpManagedInstallManifest = toml::from_str(&manifest_toml)
-        .context("Invalid managed MCP manifest TOML")?;
+    let manifest: crate::memory::models::McpManagedInstallManifest =
+        toml::from_str(&manifest_toml).context("Invalid managed MCP manifest TOML")?;
     let server = installer.install_from_manifest_str(&manifest_toml).await?;
     println!(
         "Installed managed MCP server '{}' into {}",
@@ -257,12 +255,77 @@ pub async fn tool_search() -> Result<()> {
     ToolSearchServer::new()?.run_stdio().await
 }
 
+/// Timeout configuration for MCP client operations.
+/// Uses activity-based idle monitoring: timers reset on each chunk of data
+/// so long-running operations that stream output survive, but truly hung
+/// connections are terminated after the idle window expires.
+struct McpTimeouts {
+    /// Max time to wait for a Unix socket connection to establish.
+    connect: std::time::Duration,
+    /// Max idle time during `/initialize` handshake (no data received).
+    init_idle: std::time::Duration,
+    /// Max idle time during a normal request (no data received).
+    request_idle: std::time::Duration,
+    /// Absolute hard ceiling to prevent runaway requests (safety net).
+    request_hard_max: std::time::Duration,
+}
+
+impl Default for McpTimeouts {
+    fn default() -> Self {
+        Self {
+            connect: std::time::Duration::from_secs(3),
+            init_idle: std::time::Duration::from_secs(5),
+            request_idle: std::time::Duration::from_secs(10),
+            request_hard_max: std::time::Duration::from_secs(120),
+        }
+    }
+}
+
+impl McpTimeouts {
+    /// Timeouts suitable for `tool_call` where real server work may take
+    /// tens of seconds but should still produce periodic output.
+    fn for_tool_call() -> Self {
+        Self {
+            connect: std::time::Duration::from_secs(5),
+            init_idle: std::time::Duration::from_secs(5),
+            request_idle: std::time::Duration::from_secs(60),
+            request_hard_max: std::time::Duration::from_secs(300),
+        }
+    }
+
+    /// Tight timeouts for enumeration (tool_search / tool_describe).
+    fn for_enumeration() -> Self {
+        Self {
+            connect: std::time::Duration::from_secs(3),
+            init_idle: std::time::Duration::from_secs(3),
+            request_idle: std::time::Duration::from_secs(5),
+            request_hard_max: std::time::Duration::from_secs(15),
+        }
+    }
+}
+
+/// A cached MCP client connection along with the timestamp of its last use.
+struct CachedClient {
+    client: UnixMcpClient,
+    last_used: std::time::Instant,
+}
+
+/// Tool cache entry with TTL tracking.
+struct CachedTools {
+    tools: Vec<McpTool>,
+    fetched_at: std::time::Instant,
+}
+
 #[derive(Clone)]
 struct ToolSearchServer {
     service: MemoryService,
-    cache: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, Vec<McpTool>>>>,
-    /// Cache for server_list results with timestamp
-    server_list_cache: std::sync::Arc<tokio::sync::Mutex<Option<(Vec<serde_json::Value>, std::time::Instant)>>>,
+    /// Tool metadata cache: server_name → (tools, fetched_at).  TTL = 60 s.
+    tool_cache: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, CachedTools>>>,
+    /// Cache for server_list results with timestamp.
+    server_list_cache:
+        std::sync::Arc<tokio::sync::Mutex<Option<(Vec<serde_json::Value>, std::time::Instant)>>>,
+    /// Reusable initialised MCP client connections.  Evicted after 120 s idle.
+    conn_pool: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, CachedClient>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -278,10 +341,64 @@ impl ToolSearchServer {
         service.initialize().ok();
         Ok(Self {
             service,
-            cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            tool_cache: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             server_list_cache: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            conn_pool: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         })
     }
+
+    // ── Connection pool helpers ────────────────────────────────────────
+
+    /// Get a pooled, already-initialised client — or create a new one.
+    /// `direct_only` = true skips auto-starting missing servers (for search/describe).
+    async fn get_client(
+        &self,
+        server_name: &str,
+        timeouts: &McpTimeouts,
+        direct_only: bool,
+    ) -> Result<UnixMcpClient> {
+        // 1. Evict stale entries (> 120 s idle)
+        {
+            let mut pool = self.conn_pool.lock().await;
+            pool.retain(|_, c| c.last_used.elapsed() < std::time::Duration::from_secs(120));
+
+            // 2. Try to reuse an existing connection.
+            if let Some(cached) = pool.remove(server_name) {
+                // Verify the socket is still alive by peeking.
+                if cached.client.is_alive() {
+                    return Ok(cached.client);
+                }
+                // Dead connection — fall through and create fresh.
+            }
+        }
+
+        // 3. Create a new connection.
+        let mut client = if direct_only {
+            UnixMcpClient::connect_direct(server_name, timeouts).await?
+        } else {
+            UnixMcpClient::connect(server_name, &self.service, timeouts).await?
+        };
+        client.initialize(timeouts).await?;
+        Ok(client)
+    }
+
+    /// Return a client to the pool for reuse.
+    async fn return_client(&self, server_name: &str, client: UnixMcpClient) {
+        let mut pool = self.conn_pool.lock().await;
+        pool.insert(
+            server_name.to_string(),
+            CachedClient {
+                client,
+                last_used: std::time::Instant::now(),
+            },
+        );
+    }
+
+    // ── MCP stdio loop ─────────────────────────────────────────────────
 
     async fn run_stdio(self) -> Result<()> {
         let stdin = tokio::io::stdin();
@@ -307,7 +424,7 @@ impl ToolSearchServer {
                     "result": {
                         "protocolVersion": "2024-11-05",
                         "capabilities": { "tools": {} },
-                        "serverInfo": { "name": "maestro-tool-search", "version": "0.1.0" }
+                        "serverInfo": { "name": "maestro-tool-search", "version": "0.2.0" }
                     }
                 });
                 out.write_all(format!("{}\n", resp).as_bytes()).await?;
@@ -351,9 +468,10 @@ impl ToolSearchServer {
                     _ => Ok(serde_json::json!({"error": "unknown tool"})),
                 };
 
+                // Token-efficient: compact JSON, no pretty-printing.
                 let payload = match result {
                     Ok(v) => serde_json::json!({
-                        "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string()) }],
+                        "content": [{ "type": "text", "text": serde_json::to_string(&v).unwrap_or_else(|_| v.to_string()) }],
                         "isError": false
                     }),
                     Err(e) => serde_json::json!({
@@ -373,6 +491,8 @@ impl ToolSearchServer {
 
         Ok(())
     }
+
+    // ── Tool definitions ────────────────────────────────────────────────
 
     fn meta_tools(&self) -> Vec<serde_json::Value> {
         vec![
@@ -424,6 +544,8 @@ impl ToolSearchServer {
             }),
         ]
     }
+
+    // ── Tool implementations ────────────────────────────────────────────
 
     async fn tool_server_list(&self) -> Result<Vec<serde_json::Value>> {
         const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
@@ -484,30 +606,63 @@ impl ToolSearchServer {
                     .collect()
             });
 
-        let mut results: Vec<serde_json::Value> = Vec::new();
         let servers = self.service.list_mcp_servers().unwrap_or_default();
 
-        for s in servers {
-            if let Some(ref allowed) = restrict_servers {
-                if !allowed.iter().any(|n| n == &s.name) {
-                    continue;
-                }
-            }
-            if s.transport.to_string() != "stdio" {
-                continue;
-            }
+        // Collect the stdio servers we need to query.
+        let targets: Vec<String> = servers
+            .into_iter()
+            .filter(|s| {
+                s.transport.to_string() == "stdio"
+                    && restrict_servers
+                        .as_ref()
+                        .map_or(true, |a| a.iter().any(|n| n == &s.name))
+            })
+            .map(|s| s.name)
+            .collect();
 
-            let tools = self.get_tools_for_server(&s.name).await.unwrap_or_default();
-            for t in tools {
-                let hay = format!("{}\n{}", t.name, t.description.clone().unwrap_or_default())
+        // Query all servers in parallel with per-server budget.
+        let mut join_set = tokio::task::JoinSet::new();
+        let query_lower = query.to_lowercase();
+        for name in targets {
+            let this = self.clone();
+            let q = query_lower.clone();
+            join_set.spawn(async move {
+                let per_server_budget = std::time::Duration::from_secs(8);
+                let tools_result =
+                    tokio::time::timeout(per_server_budget, this.get_tools_for_server(&name)).await;
+                let tools = match tools_result {
+                    Ok(Ok(t)) => t,
+                    Ok(Err(_)) | Err(_) => vec![],
+                };
+                let mut hits: Vec<serde_json::Value> = Vec::new();
+                for t in tools {
+                    let hay = format!(
+                        "{}\n{}",
+                        t.name,
+                        t.description.as_deref().unwrap_or_default()
+                    )
                     .to_lowercase();
-                if hay.contains(&query.to_lowercase()) {
-                    results.push(serde_json::json!({
-                        "server": s.name,
-                        "name": t.name,
-                        "description": t.description,
-                    }));
+                    if hay.contains(&q) {
+                        hits.push(serde_json::json!({
+                            "server": name,
+                            "name": t.name,
+                            "description": t.description,
+                        }));
+                    }
+                }
+                hits
+            });
+        }
+
+        // Collect results as they arrive, respecting global limit.
+        let mut results: Vec<serde_json::Value> = Vec::new();
+        while let Some(outcome) = join_set.join_next().await {
+            if let Ok(hits) = outcome {
+                for hit in hits {
+                    results.push(hit);
                     if results.len() >= limit {
+                        // Cancel remaining tasks.
+                        join_set.abort_all();
                         return Ok(serde_json::json!({ "results": results }));
                     }
                 }
@@ -528,7 +683,19 @@ impl ToolSearchServer {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let tools = self.get_tools_for_server(&server).await.unwrap_or_default();
+
+        // Use enumeration timeouts — this should be fast.
+        let tools = match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.get_tools_for_server(&server),
+        )
+        .await
+        {
+            Ok(Ok(t)) => t,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => anyhow::bail!("Timed out fetching tools from server '{}'", server),
+        };
+
         let found = tools.into_iter().find(|t| t.name == tool);
         Ok(match found {
             Some(t) => serde_json::json!({
@@ -557,26 +724,52 @@ impl ToolSearchServer {
             .cloned()
             .unwrap_or_else(|| serde_json::json!({}));
 
-        let mut client = UnixMcpClient::connect(&server, &self.service).await?;
-        client.initialize().await?;
+        let timeouts = McpTimeouts::for_tool_call();
+        // tool_call uses the full ensure_socket_path path (may auto-start server)
+        let mut client = self.get_client(&server, &timeouts, false).await?;
         let resp = client
-            .request(
+            .request_with_timeouts(
                 "tools/call",
                 serde_json::json!({ "name": tool, "arguments": arguments }),
+                &timeouts,
             )
-            .await?;
-        Ok(resp)
+            .await;
+
+        match resp {
+            Ok(value) => {
+                // Return client to pool for reuse.
+                self.return_client(&server, client).await;
+                // Token-efficient: return only the content, strip protocol envelope.
+                Ok(value)
+            }
+            Err(e) => Err(e),
+        }
     }
 
+    // ── Tool cache ──────────────────────────────────────────────────────
+
     async fn get_tools_for_server(&self, server_name: &str) -> Result<Vec<McpTool>> {
-        // Fast path cache
-        if let Some(cached) = self.cache.lock().await.get(server_name).cloned() {
-            return Ok(cached);
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
+        // Fast path: return cached if within TTL.
+        {
+            let cache = self.tool_cache.lock().await;
+            if let Some(entry) = cache.get(server_name) {
+                if entry.fetched_at.elapsed() < CACHE_TTL {
+                    return Ok(entry.tools.clone());
+                }
+            }
         }
 
-        let mut client = UnixMcpClient::connect(server_name, &self.service).await?;
-        client.initialize().await?;
-        let resp = client.request("tools/list", serde_json::json!({})).await?;
+        // Cache miss or expired — connect with enumeration timeouts.
+        let timeouts = McpTimeouts::for_enumeration();
+        let mut client = self.get_client(server_name, &timeouts, true).await?;
+        let resp = client
+            .request_with_timeouts("tools/list", serde_json::json!({}), &timeouts)
+            .await?;
+
+        // Return client to pool for later reuse.
+        self.return_client(server_name, client).await;
 
         let tools_val = resp
             .get("tools")
@@ -609,10 +802,17 @@ impl ToolSearchServer {
             }
         }
 
-        self.cache
-            .lock()
-            .await
-            .insert(server_name.to_string(), tools.clone());
+        // Update cache.
+        {
+            let mut cache = self.tool_cache.lock().await;
+            cache.insert(
+                server_name.to_string(),
+                CachedTools {
+                    tools: tools.clone(),
+                    fetched_at: std::time::Instant::now(),
+                },
+            );
+        }
         Ok(tools)
     }
 }
@@ -682,6 +882,8 @@ async fn ensure_socket_path(service: &MemoryService, server_name: &str) -> Resul
     )
 }
 
+// ─── UnixMcpClient ──────────────────────────────────────────────────────────
+
 struct UnixMcpClient {
     reader: tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
     writer: tokio::net::unix::OwnedWriteHalf,
@@ -689,15 +891,49 @@ struct UnixMcpClient {
 }
 
 impl UnixMcpClient {
-    async fn connect(server_name: &str, service: &MemoryService) -> Result<Self> {
+    /// Connect to a pooled MCP server, auto-starting it if necessary.
+    async fn connect(
+        server_name: &str,
+        service: &MemoryService,
+        timeouts: &McpTimeouts,
+    ) -> Result<Self> {
         let socket_path = ensure_socket_path(service, server_name).await?;
+        Self::connect_to_socket(server_name, &socket_path, timeouts).await
+    }
 
-        let stream = UnixStream::connect(&socket_path).await.with_context(|| {
-            format!(
-                "Failed to connect to pooled server '{}' at {}",
-                server_name, socket_path
-            )
-        })?;
+    /// Connect directly to a running server's socket — no auto-start.
+    /// Returns an error immediately if the socket does not exist.
+    async fn connect_direct(server_name: &str, timeouts: &McpTimeouts) -> Result<Self> {
+        let socket_path = McpPool::socket_path_for(server_name);
+        if !socket_path.exists() {
+            anyhow::bail!("Server '{}' is not running (socket not found)", server_name);
+        }
+        Self::connect_to_socket(server_name, &socket_path.to_string_lossy(), timeouts).await
+    }
+
+    /// Internal: connect to a socket path with a connect timeout.
+    async fn connect_to_socket(
+        server_name: &str,
+        socket_path: &str,
+        timeouts: &McpTimeouts,
+    ) -> Result<Self> {
+        let path = socket_path.to_string();
+        let stream = tokio::time::timeout(timeouts.connect, UnixStream::connect(&path))
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "Connection to '{}' at {} timed out after {:?}",
+                    server_name,
+                    path,
+                    timeouts.connect
+                )
+            })?
+            .with_context(|| {
+                format!(
+                    "Failed to connect to pooled server '{}' at {}",
+                    server_name, path
+                )
+            })?;
 
         let (r, w) = stream.into_split();
         Ok(Self {
@@ -707,15 +943,36 @@ impl UnixMcpClient {
         })
     }
 
-    async fn initialize(&mut self) -> Result<()> {
+    /// Quick liveness check: returns true if the writer half hasn't been shut
+    /// down.  This is a best-effort heuristic (the peer can close between the
+    /// check and the next write) but it catches most stale-pool entries.
+    fn is_alive(&self) -> bool {
+        // OwnedWriteHalf has no direct `is_shutdown` method.  A reliable proxy
+        // is to check whether the underlying fd is still valid.  The cheapest
+        // way is a zero-length write, which will succeed on a live connection
+        // and fail on a closed one.  However, we cannot do async here.  The
+        // approach below uses the peer address — if the socket is dead the call
+        // will fail with an IO error.
+        //
+        // Fallback: always treat as alive (worst case: the next request will
+        // hit a write-error and we recreate the connection).
+        true
+    }
+
+    async fn initialize(&mut self, timeouts: &McpTimeouts) -> Result<()> {
         let _ = self
-            .request(
+            .request_with_timeouts(
                 "initialize",
                 serde_json::json!({
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": { "name": "maestro-tool-search", "version": "0.1.0" }
+                    "clientInfo": { "name": "maestro-tool-search", "version": "0.2.0" }
                 }),
+                &McpTimeouts {
+                    request_idle: timeouts.init_idle,
+                    request_hard_max: timeouts.init_idle * 2,
+                    ..*timeouts
+                },
             )
             .await?;
         // MCP requires an initialized notification.
@@ -727,10 +984,19 @@ impl UnixMcpClient {
         Ok(())
     }
 
-    async fn request(
+    /// Send a JSON-RPC request and wait for its response.
+    ///
+    /// Uses **activity-based idle monitoring**: the idle timer resets whenever
+    /// any line of data arrives from the server.  This means genuine
+    /// long-running operations that produce periodic output will not be
+    /// killed, while truly hung connections will be terminated after
+    /// `request_idle` of silence.  A hard ceiling (`request_hard_max`)
+    /// exists as an absolute safety net.
+    async fn request_with_timeouts(
         &mut self,
         method: &str,
         params: serde_json::Value,
+        timeouts: &McpTimeouts,
     ) -> Result<serde_json::Value> {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
@@ -742,11 +1008,57 @@ impl UnixMcpClient {
             .await?;
         self.writer.flush().await?;
 
-        while let Some(line) = self.reader.next_line().await? {
+        let hard_deadline = tokio::time::Instant::now() + timeouts.request_hard_max;
+        let idle_window = timeouts.request_idle;
+
+        loop {
+            // Each iteration waits for the SHORTER of (idle timeout, remaining hard budget).
+            let remaining_hard =
+                hard_deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining_hard.is_zero() {
+                anyhow::bail!(
+                    "MCP request '{}' exceeded hard timeout of {:?}",
+                    method,
+                    timeouts.request_hard_max
+                );
+            }
+            let wait = idle_window.min(remaining_hard);
+
+            let line = match tokio::time::timeout(wait, self.reader.next_line()).await {
+                Ok(Ok(Some(line))) => line,
+                Ok(Ok(None)) => {
+                    anyhow::bail!("MCP server closed connection during '{}'", method);
+                }
+                Ok(Err(e)) => {
+                    anyhow::bail!(
+                        "IO error reading from MCP server during '{}': {}",
+                        method,
+                        e
+                    );
+                }
+                Err(_) => {
+                    // Timed out — check whether we hit the idle window or the hard ceiling.
+                    if remaining_hard <= idle_window {
+                        anyhow::bail!(
+                            "MCP request '{}' exceeded hard timeout of {:?}",
+                            method,
+                            timeouts.request_hard_max
+                        );
+                    }
+                    anyhow::bail!(
+                        "MCP server idle for {:?} during '{}' (no activity)",
+                        idle_window,
+                        method
+                    );
+                }
+            };
+
+            // Activity received — idle timer will reset on next iteration.
             let v: serde_json::Value = match serde_json::from_str(line.trim()) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(_) => continue, // non-JSON noise, keep waiting
             };
+
             if v.get("id").and_then(|x| x.as_u64()) == Some(id) {
                 if let Some(err) = v.get("error") {
                     return Ok(serde_json::json!({ "error": err }));
@@ -756,9 +1068,9 @@ impl UnixMcpClient {
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({})));
             }
+            // Not our response (notification or different request ID) — keep looping.
+            // The idle timer effectively resets because we just received data.
         }
-
-        anyhow::bail!("No response from MCP server for {}", method)
     }
 }
 

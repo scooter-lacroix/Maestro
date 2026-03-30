@@ -159,8 +159,7 @@ pub struct VariableElement {
 }
 
 /// Visibility/access modifier
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Visibility {
     #[default]
     Public,
@@ -168,7 +167,6 @@ pub enum Visibility {
     Protected,
     Package, // Go package-level, Java package-private
 }
-
 
 /// Multi-language parser using tree-sitter
 pub struct MultiLanguageParser {

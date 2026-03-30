@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "build:watch": "vite build --watch",
     "preview": "vite preview",
-    "copy-to-apps": "cp dist/index.html ../../apps/tracklens-opencode/tracklens.html",
+    "copy-to-apps": "cp dist/index.html ../../apps/tracklens-opencode/tracklens.html && cp dist/favicon.svg ../../apps/tracklens-opencode/favicon.svg",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

@@ -9,6 +9,7 @@ Stores final results and creates a session summary memory.
 import json
 import sys
 import os
+import asyncio
 from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any, Optional
@@ -77,11 +78,23 @@ def session_outcome_hook(input_data: dict) -> dict:
                 duration = (session.ended_at - session.started_at).total_seconds()
                 outcome["duration_seconds"] = duration
 
-        # Get memory count for this session
+        # Get memory count for this session from Nexus-backed truth.
         memory_count = 0
-        if manager.memory_manager:
-            memories = manager.memory_manager.get_memories_by_session(session_id)
-            memory_count = len(memories) if memories else 0
+        try:
+            from maestro.memory.service import MaestroMemoryService
+
+            async def _load_session_memories() -> list[dict[str, Any]]:
+                service = MaestroMemoryService()
+                await service.initialize()
+                try:
+                    return await service.retrieve_session_context(session_id=session_id, limit=500)
+                finally:
+                    await service.close()
+
+            memories = asyncio.run(_load_session_memories())
+            memory_count = len(memories)
+        except Exception:
+            memory_count = 0
 
         outcome["memory_count"] = memory_count
 
@@ -99,14 +112,30 @@ def session_outcome_hook(input_data: dict) -> dict:
         current_session_id = getattr(manager, '_current_session_id', None)
         if current_session_id or session_id:
             try:
-                manager.capture_memory(
-                    content=summary,
-                    category="session_outcome",
-                    importance="normal",
-                    summary=summary,
-                    metadata=outcome,
-                    use_buffer=False,  # Don't buffer - session is ending
-                )
+                from maestro.memory.service import MaestroMemoryService
+
+                async def _store_session_outcome() -> None:
+                    service = MaestroMemoryService()
+                    await service.initialize()
+                    try:
+                        await service.store_command_context(
+                            command="hook:session-end",
+                            project_path=session.project_path if session and session.project_path else os.getcwd(),
+                            context={
+                                "session_id": session_id,
+                                "agent_id": agent_id,
+                                "agent_name": agent_name,
+                                "current_task_id": input_data.get("current_task_id", ""),
+                                "event": "session_end",
+                                "summary": summary,
+                                "memory_count": memory_count,
+                                "outcome": outcome,
+                            },
+                        )
+                    finally:
+                        await service.close()
+
+                asyncio.run(_store_session_outcome())
             except Exception:
                 # Session might already be closed
                 pass

@@ -82,12 +82,18 @@ impl McpOption {
     ];
 
     pub fn next(self) -> Self {
-        let idx = Self::ALL.iter().position(|option| *option == self).unwrap_or(0);
+        let idx = Self::ALL
+            .iter()
+            .position(|option| *option == self)
+            .unwrap_or(0);
         Self::ALL[(idx + 1) % Self::ALL.len()]
     }
 
     pub fn previous(self) -> Self {
-        let idx = Self::ALL.iter().position(|option| *option == self).unwrap_or(0);
+        let idx = Self::ALL
+            .iter()
+            .position(|option| *option == self)
+            .unwrap_or(0);
         if idx == 0 {
             Self::ALL[Self::ALL.len() - 1]
         } else {
@@ -145,6 +151,15 @@ pub struct ProjectInfo {
     pub _track_count: usize,
 }
 
+/// A single access event for a memory entry.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryAccessEvent {
+    pub agent_id: String,
+    pub timestamp: String,
+    pub tool_used: Option<String>,
+    pub access_type: String,
+}
+
 /// Memory information
 #[derive(Clone)]
 pub struct MemoryInfo {
@@ -165,6 +180,16 @@ pub struct MemoryInfo {
     pub tags: Vec<String>,
     pub is_expanded: bool,
     pub similarity_score: Option<f32>,
+    /// Memory ids linked by Nexus lineage/semantic relations.
+    pub related_memory_ids: Vec<i64>,
+    /// Nexus runtime/subconscious state attached to this memory.
+    pub nexus_runtime_state: Option<String>,
+    /// Nexus scope or namespace that produced the memory.
+    pub nexus_scope: Option<String>,
+    /// Agent/tool that stored this memory
+    pub stored_by: String,
+    /// Detailed access history
+    pub access_history: Vec<MemoryAccessEvent>,
 }
 
 /// Dashboard statistics

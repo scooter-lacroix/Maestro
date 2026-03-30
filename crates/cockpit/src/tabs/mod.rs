@@ -20,7 +20,7 @@ pub use analysis::render_analysis;
 pub use capabilities::{render_capabilities, CapabilitiesSection};
 pub use dashboard::render_dashboard;
 pub use ktop::{handle_ktop_input, KtopState};
-pub use lsps::{generate_agent_prompt, render_lsps};
+pub use lsps::render_lsps;
 pub use memory::render_memory;
 pub use projects::render_projects;
 pub use sessions::{render_sessions, session_log_tail};

@@ -241,14 +241,14 @@ pub fn default_presets() -> Vec<WorkflowPreset> {
             ],
             retry_policy: Some(RetryPolicy::default()),
         },
-        // /parallel-review-with-final-gate: parallel critics -> warden
+        // /parallel-review-with-final-gate: critic -> critic -> warden
         WorkflowPreset {
             name: "parallel-review-with-final-gate".to_string(),
-            description: "Parallel review with skeptical final gate: parallel critics -> warden".to_string(),
+            description: "Sequential review with skeptical final gate: critic -> critic -> warden".to_string(),
             mode: WorkflowMode::Chain,
             steps: vec![
-                WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer),
-                WorkflowStep::independent(AgentRole::Critic, PiAgentType::Reviewer),
+                WorkflowStep::chained(AgentRole::Critic, PiAgentType::Reviewer),
+                WorkflowStep::chained(AgentRole::Critic, PiAgentType::Reviewer),
                 WorkflowStep::chained(AgentRole::Warden, PiAgentType::FinalReviewer),
             ],
             retry_policy: None,
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn test_default_presets_count() {
         let presets = default_presets();
-        assert_eq!(presets.len(), 3);
+        assert_eq!(presets.len(), 7);
     }
 
     #[test]
