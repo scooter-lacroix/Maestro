@@ -1,40 +1,39 @@
-# Recall - Semantic Memory Retrieval
+---
+name: recall
+description: "Semantic memory retrieval that queries stored learnings from past sessions using PostgreSQL and BGE embeddings. Use when the user wants to search previous learnings, recall past solutions, find what worked before, or retrieve context from earlier sessions."
+user-invocable: true
+arguments: "<query> [--k N] [--vector-only | --text-only]"
+---
 
-Query the memory system for relevant learnings from past sessions.
+# Recall
 
-## Usage
+Query the memory system for relevant learnings from past sessions using semantic search.
 
-```
-/recall <query>
-```
+## Workflow
 
-## Examples
-
-```
-/recall hook development patterns
-/recall wizard installation
-/recall TypeScript errors
-```
-
-## What It Does
-
-1. Runs semantic search against stored learnings (PostgreSQL + BGE embeddings)
-2. Returns top 5 results with full content
-3. Shows learning type, confidence, and session context
+1. Parse the user's query and any flags (`--k`, `--vector-only`, `--text-only`)
+2. Execute the recall script against the PostgreSQL-backed memory store
+3. Present the top results with learning type, confidence, and session context
 
 ## Execution
 
-When this skill is invoked, run:
+Run the following command, replacing `<QUERY>` with the user's search terms:
 
 ```bash
-cd $CLAUDE_PROJECT_DIR/opc && PYTHONPATH=. uv run python scripts/recall_learnings.py --query "<ARGS>" --k 5
+cd $CLAUDE_PROJECT_DIR/opc && PYTHONPATH=. uv run python scripts/recall_learnings.py --query "<QUERY>" --k 5
 ```
 
-Where `<ARGS>` is the query provided by the user.
+### Options
+
+| Flag | Effect |
+|------|--------|
+| `--k N` | Return N results instead of the default 5 |
+| `--vector-only` | Use pure vector search for higher precision |
+| `--text-only` | Use text search only for faster results |
 
 ## Output Format
 
-Present results as:
+Present results as a numbered list:
 
 ```
 ## Memory Recall: "<query>"
@@ -46,12 +45,9 @@ Present results as:
 <full content>
 ```
 
-## Options
+## Examples
 
-The user can specify options after the query:
-
-- `--k N` - Return N results (default: 5)
-- `--vector-only` - Use pure vector search (higher precision)
-- `--text-only` - Use text search only (faster)
-
-Example: `/maestro:recall hook patterns --k 10 --vector-only`
+```
+/recall hook development patterns
+/recall TypeScript errors --k 10 --vector-only
+```

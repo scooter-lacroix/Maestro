@@ -1,61 +1,56 @@
-# Tour: What Can I Do?
+---
+name: tour
+description: "Guided onboarding that introduces Maestro's capabilities with a warm, practical overview. Use when the user asks what you can do, wants to get started, asks for help navigating features, says show me around, or needs an overview of available capabilities."
+user-invocable: false
+---
 
-Friendly onboarding when users ask about capabilities.
+# Tour
 
-## Triggers
+Provide a friendly onboarding experience when users ask about Maestro's capabilities.
 
-Activate when user says things like:
+## Trigger Conditions
+
+Activate when the user's message matches phrases like:
 - "what can you do?"
-- "what can I do?"
 - "help me get started"
 - "show me around"
 - "what features are available?"
-- "how does this work?"
+
+## Workflow
+
+1. Detect onboarding intent from the user's message
+2. Present a warm, categorized overview of capabilities
+3. End with an invitation to start working
 
 ## Response Template
 
-Give a warm, practical overview:
-
----
-
-## What I Can Do
-
-I'm Maestro with persistent memory and specialized capabilities. Here's what makes me useful:
+Present the following overview, adapting tone to be welcoming and practical:
 
 ### Code & Development
-- **Write & edit code** - any language, any framework
-- **Debug issues** - trace errors, find root causes
-- **Refactor** - improve structure without breaking things
-- **Test** - write and run tests, validate changes
+- **Write & edit code** across any language or framework
+- **Debug issues** by tracing errors and finding root causes
+- **Refactor** to improve structure without breaking behavior
+- **Test** by writing and running tests to validate changes
 
 ### Memory & Context
-- **Remember across sessions** - learnings persist to SQLite/PostgreSQL
-- **Recall past work** - search what worked/failed before
-- **Handoffs** - create snapshots to resume complex work
+- **Remember across sessions** with learnings persisted to PostgreSQL
+- **Recall past work** by searching what worked or failed before
+- **Handoffs** to create snapshots for resuming complex work later
 
 ### Research & Planning
-- **Explore codebases** - understand unfamiliar projects fast
-- **Plan implementations** - architect before coding
-- **Search the web** - find docs, solutions, best practices
+- **Explore codebases** to understand unfamiliar projects quickly
+- **Plan implementations** by architecting before coding
+- **Search the web** for docs, solutions, and best practices
 
 ### Specialized Agents
-I can spawn sub-agents for complex tasks:
-- `explorer` - map codebase structure
-- `implementer` - implement with TDD workflow
-- `debug` - investigate issues systematically
+Spawn sub-agents for complex tasks:
+- `explorer` — map codebase structure
+- `implementer` — implement with TDD workflow
+- `debug` — investigate issues systematically
 
-### Quick Tips
-- Ask naturally - I'll figure out which tools to use
-- Say "create a handoff" before ending sessions
-- Say "what worked for X before?" to recall past learnings
-
-**What would you like to work on?**
-
----
-
-## Style Notes
+## Style Guidelines
 
 - Be welcoming, not overwhelming
-- Focus on practical value, not feature lists
-- End with an invitation to start working
-- Don't list every skill - highlight categories
+- Focus on practical value over exhaustive feature lists
+- End with an open invitation: "What would you like to work on?"
+- Highlight categories rather than listing every individual skill

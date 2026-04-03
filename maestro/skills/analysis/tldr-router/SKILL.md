@@ -1,132 +1,75 @@
-# LeIndex Smart Router
+---
+name: tldr-router
+description: "Route user questions to the optimal LeIndex analysis command based on intent detection. Use when the user asks about code structure, function calls, complexity, data flow, dependencies, or needs to search a codebase using LeIndex."
+user-invocable: false
+---
 
-Maps questions to the optimal LeIndex command. Use this to pick the right layer.
+# TL;DR Router
 
-## Question → Command Mapping
+Map user questions to the correct LeIndex command by detecting intent from keywords and question patterns.
 
-### "What files/functions exist?"
+## Workflow
+
+1. Parse the user's question for intent keywords
+2. Match intent to the appropriate LeIndex layer using the routing table
+3. Execute the matched command or delegate to automatic hooks
+
+## Intent Routing Table
+
+| Intent | Keywords | Command |
+|--------|----------|---------|
+| Navigation | "what", "where", "find", "exists" | `leindex tree` / `leindex structure` / `leindex search` |
+| Architecture | "calls", "uses", "connects", "depends" | `leindex context` / `leindex calls` |
+| Complexity | "complex", "refactor", "branches", "paths" | `leindex cfg` |
+| Data Flow | "variable", "value", "assigned", "comes from" | `leindex dfg` |
+| Impact | "affects", "changes", "slice", "dependencies" | `leindex slice` |
+| Debug | "bug", "error", "investigate", "broken" | `leindex cfg` + `dfg` + `context` |
+| Semantic | "describe", "what does", "how works" | `leindex semantic` |
+
+## Command Reference
+
+### File and structure overview
 ```bash
-leindex tree . --ext .py          # File overview
-leindex structure src/ --lang python  # Function/class overview
+leindex tree . --ext .py
+leindex structure src/ --lang python
 ```
-**Use:** Starting exploration, orientation
 
-### "What does X call / who calls X?"
+### Call graph and architecture
 ```bash
 leindex context <function> --project . --depth 2
 leindex calls src/
 ```
-**Use:** Understanding architecture, finding entry points
 
-### "How complex is X?"
+### Complexity analysis
 ```bash
 leindex cfg <file> <function>
 ```
-**Use:** Identifying refactoring candidates, understanding difficulty
 
-### "Where does variable Y come from?"
+### Data flow analysis
 ```bash
 leindex dfg <file> <function>
 ```
-**Use:** Debugging, understanding data flow
 
-### "What affects line Z?"
+### Impact and slicing
 ```bash
 leindex slice <file> <function> <line>
 ```
-**Use:** Impact analysis, safe refactoring
 
-### "Search for pattern P"
+### Code search
 ```bash
 leindex search "pattern" src/
-```
-**Use:** Finding code, structural search
-
-### "Natural language search"
-```bash
 leindex semantic "authentication flow"
-```
-**Use:** Semantic code search using embeddings
-
-## Decision Tree
-
-```
-START
-  │
-  ├─► "What exists?" ──► tree / structure
-  │
-  ├─► "How does X connect?" ──► context / calls
-  │
-  ├─► "Why is X complex?" ──► cfg
-  │
-  ├─► "Where does Y flow?" ──► dfg
-  │
-  ├─► "What depends on Z?" ──► slice
-  │
-  ├─► "Find something" ──► search
-  │
-  └─► "Describe X in plain English" ──► semantic
-```
-
-## Intent Detection Keywords
-
-| Intent | Keywords | Layer |
-|--------|----------|-------|
-| Navigation | "what", "where", "find", "exists" | tree, structure, search |
-| Architecture | "calls", "uses", "connects", "depends" | context, calls |
-| Complexity | "complex", "refactor", "branches", "paths" | cfg |
-| Data Flow | "variable", "value", "assigned", "comes from" | dfg |
-| Impact | "affects", "changes", "slice", "dependencies" | slice/pdg |
-| Debug | "bug", "error", "investigate", "broken" | cfg + dfg + context |
-| Semantic | "describe", "what does", "how works" | semantic search |
-
-## Python API
-
-```python
-from maestro.leindex import (
-    get_relevant_context,
-    semantic_search,
-    ContextExtractor,
-)
-
-# Get context for an entry point
-context = get_relevant_context("/path/to/project", "main")
-
-# Semantic search
-results = semantic_search("how does authentication work?", "/path/to/project")
-
-# Full analysis with token savings
-extractor = ContextExtractor()
-result = extractor.extract_for_file("src/api.py")
-print(f"Token savings: {result.savings_percent:.1f}%")
 ```
 
 ## Automatic Hook Integration
 
-The `leindex-context` and `leindex-read` hooks automatically:
-1. Detect intent from your messages
-2. Route to appropriate layers
-3. Inject context into tool calls
+The `leindex-context` and `leindex-read` hooks automatically detect intent, route to appropriate layers, and inject context into tool calls. Manual commands are only needed when hooks do not provide the specific layer required.
 
-You don't need to manually run these commands - the hooks do it for you.
-
-## Manual Override
-
-If you need a specific layer the hooks didn't provide:
+## Python API
 
 ```python
-from maestro.leindex import (
-    CFGAnalyzer,
-    DFGAnalyzer,
-    SlicingAnalyzer,
-)
+from maestro.leindex import get_relevant_context, semantic_search
 
-cfg_analyzer = CFGAnalyzer()
-dfg_analyzer = DFGAnalyzer()
-slicing_analyzer = SlicingAnalyzer()
-
-# Analyze specific function
-cfg = cfg_analyzer.analyze(source, "function_name", "file.py")
-dfg = dfg_analyzer.analyze_function(source, "function_name", "file.py")
-slice_result = slicing_analyzer.slice_backward(source, "function_name", 42, "file.py")
+context = get_relevant_context("/path/to/project", "main")
+results = semantic_search("how does authentication work?", "/path/to/project")
 ```

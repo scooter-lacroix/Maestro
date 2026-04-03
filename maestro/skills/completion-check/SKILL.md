@@ -1,68 +1,57 @@
 ---
 name: completion-check
-description: Completion Check: Verify Infrastructure Is Wired
+description: "Verify that newly built infrastructure is actually wired into the system before marking it complete. Use when finishing infrastructure work, checking if hooks are registered, validating database connections, tracing execution paths, or searching for dead code and orphaned implementations."
 user-invocable: false
 ---
 
-# Completion Check: Verify Infrastructure Is Wired
+# Completion Check
 
-When building infrastructure, verify it's actually connected to the system before marking as complete.
+Verify that infrastructure is connected to the system and actively used before marking work as complete. Infrastructure is not done when the code is written — it is done when it is wired in and exercised end-to-end.
 
-## Pattern
+## Workflow
 
-Infrastructure is not done when the code is written - it's done when it's wired into the system and actively used. Dead code (built but never called) is wasted effort.
+1. **Trace the execution path** from user intent to the new infrastructure code
+2. **Verify registrations** (hooks, settings, config) point to the new code
+3. **Confirm backends** match the intended architecture
+4. **Run end-to-end validation** to prove the infrastructure is invoked
+5. **Search for orphaned code** or parallel implementations
 
-## DO
+## Verification Steps
 
-1. **Trace the execution path** - Follow from user intent to actual code execution:
-   ```bash
-   # Example: Verify Task tool spawns correctly
-   grep -r "claude -p" src/
-   grep -r "Task(" src/
-   ```
+### Trace Execution Path
 
-2. **Check hooks are registered**, not just implemented:
-   ```bash
-   # Hook exists?
-   ls -la .maestro/hooks/my-hook.sh
+```bash
+grep -r "claude -p" src/
+grep -r "Task(" src/
+```
 
-   # Hook registered in settings?
-   grep "my-hook" .maestro/settings.json
-   ```
+### Check Hook Registration
 
-3. **Verify database connections** - Ensure infrastructure uses the right backend:
-   ```bash
-   # Check connection strings
-   grep -r "sqlite:///" src/
-   grep -r "duckdb" src/
-   ```
+```bash
+ls -la .maestro/hooks/my-hook.sh
+grep "my-hook" .maestro/settings.json
+```
 
-4. **Test end-to-end** - Run the feature and verify infrastructure is invoked:
-   ```bash
-   # Add debug logging
-   echo "DEBUG: UnifiedStorageBackend initialized" >> /tmp/debug.log
+### Verify Database Backend
 
-   # Trigger feature
-   uv run python -m my_feature
+```bash
+grep -r "sqlite:///" src/
+grep -r "duckdb" src/
+```
 
-   # Verify infrastructure was called
-   cat /tmp/debug.log
-   ```
+### End-to-End Test
 
-5. **Search for orphaned implementations**:
-   ```bash
-   # Find functions defined but never called
-   ast-grep --pattern 'async function $NAME() { $$$ }' | \
-     xargs -I {} grep -r "{}" src/
-   ```
+```bash
+uv run python -m my_feature
+cat /tmp/debug.log
+```
 
-## DON'T
+### Find Orphaned Implementations
 
-- Mark infrastructure "complete" without testing execution path
-- Assume code is wired just because it exists
-- Build parallel systems (Task tool vs claude -p spawn)
-- Use wrong backends (SQLite when PostgreSQL is architected)
-- Skip end-to-end testing ("it compiles" ≠ "it runs")
+```bash
+ast-grep --pattern 'async function $NAME() { $$$ }' | \
+  xargs -I {} grep -r "{}" src/
+```
 
 ## Completion Checklist
 
@@ -75,27 +64,9 @@ Before declaring infrastructure complete:
 - [ ] Searched for dead code or parallel implementations
 - [ ] Checked configuration files match implementation
 
-## Example: DAG Task Graph
+## Anti-Patterns
 
-**Wrong approach:**
-```
-✓ Built BeadsTaskGraph class
-✓ Implemented DAG dependencies
-✓ Added spawn logic
-✗ Never wired - Task tool still runs instead
-✗ Used SQLite instead of PostgreSQL
-```
-
-**Right approach:**
-```
-✓ Built BeadsTaskGraph class
-✓ Wired into Task tool execution path
-✓ Verified claude -p spawn is called
-✓ Confirmed PostgreSQL backend in use
-✓ Tested: user calls Task() → DAG spawns → beads execute
-✓ No parallel implementations found
-```
-
-## Source Sessions
-
-- This session: Architecture gap discovery - DAG built but not wired, Task tool runs instead of spawn, SQLite used instead of PostgreSQL
+- Marking infrastructure "complete" without testing the execution path
+- Assuming code is wired just because it compiles
+- Building parallel systems (e.g., Task tool vs claude -p spawn)
+- Using the wrong backend (SQLite when PostgreSQL is architected)
