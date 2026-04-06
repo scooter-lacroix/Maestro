@@ -457,10 +457,24 @@ pub async fn handle_cron_create(
         return error.into_response();
     }
 
-    // TODO: Implement cron job creation
+    let job: maestro_core::CronJob = match serde_json::from_value(_job) {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid cron job definition: {}", e)})),
+            )
+            .into_response();
+        }
+    };
+
+    // TODO: Route parsed job to a full async CronService writer once established in GatewayState
     (
         StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({"error": "Not yet implemented"})),
+        Json(serde_json::json!({
+            "error": "Job storage not yet fully integrated",
+            "parsed_job_id": job.id
+        })),
     )
         .into_response()
 }
@@ -520,6 +534,8 @@ pub async fn handle_dashboard_jobs(
         return error.into_response();
     }
 
+    let now = chrono::Utc::now();
+
     // Return cron jobs with additional monitoring info
     let jobs: Vec<serde_json::Value> = state
         .cron_jobs
@@ -540,8 +556,8 @@ pub async fn handle_dashboard_jobs(
                     maestro_core::JobType::Shell => "shell",
                     maestro_core::JobType::Agent => "agent",
                 },
-                "last_run": null,  // TODO: Track actual runs
-                "next_run": null,  // TODO: Calculate next run
+                "last_run": null,  // TODO: Map to actual runs from CronService when integrated
+                "next_run": job.schedule.next_run(&now).map(|dt| dt.to_rfc3339()),
                 "status": if job.enabled { "scheduled" } else { "paused" },
             })
         })

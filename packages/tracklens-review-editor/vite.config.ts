@@ -10,6 +10,14 @@ const copyToApps = () => ({
   closeBundle() {
     const source = path.resolve(__dirname, 'dist/index.html');
     const target = path.resolve(__dirname, '../../apps/tracklens-opencode/tracklens-review.html');
+    const sourceFavicon = path.resolve(__dirname, '../../maestro/brand/logos/favicon.svg');
+    const distFavicon = path.resolve(__dirname, 'dist/favicon.svg');
+
+    if (fs.existsSync(sourceFavicon)) {
+      fs.mkdirSync(path.dirname(distFavicon), { recursive: true });
+      fs.copyFileSync(sourceFavicon, distFavicon);
+      console.log(`Copied favicon: ${sourceFavicon} -> ${distFavicon}`);
+    }
 
     if (fs.existsSync(source)) {
       fs.mkdirSync(path.dirname(target), { recursive: true });
