@@ -32,7 +32,7 @@ def check_should_continue(input_data: dict) -> dict:
 
         input_data["hook_block"] = True
         input_data["hook_message"] = (
-            "⚠️ WORKFLOW VIOLATION: You attempted to stop before the track is complete "
+            "[WARNING] WORKFLOW VIOLATION: You attempted to stop before the track is complete "
             "and no manual review point has been reached.\n\n"
             "You MUST continue working until either:\n"
             "1. The current track is COMPLETE (all tasks done, all tests passing)\n"

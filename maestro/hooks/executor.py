@@ -17,6 +17,9 @@ from typing import Optional, Dict, Any, List
 try:
     from loguru import logger
     LOGURU_AVAILABLE = True
+    # Ensure loguru only prints to stderr to avoid polluting stdout (which Claude needs for JSON)
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
 except ImportError:
     LOGURU_AVAILABLE = False
     # Create a simple fallback logger
@@ -24,13 +27,13 @@ except ImportError:
         def debug(self, msg, *args, **kwargs):
             pass
         def info(self, msg, *args, **kwargs):
-            print(f"INFO: {msg}")
+            print(f"INFO: {msg}", file=sys.stderr)
         def warning(self, msg, *args, **kwargs):
-            print(f"WARNING: {msg}")
+            print(f"WARNING: {msg}", file=sys.stderr)
         def error(self, msg, *args, **kwargs):
-            print(f"ERROR: {msg}")
+            print(f"ERROR: {msg}", file=sys.stderr)
         def critical(self, msg, *args, **kwargs):
-            print(f"CRITICAL: {msg}")
+            print(f"CRITICAL: {msg}", file=sys.stderr)
 
     logger = LoggerStub()
 
@@ -229,7 +232,11 @@ class HookExecutor:
         for hook_path in hooks:
             hook_name = hook_path.stem
             result = self.execute_hook(phase, hook_name, output_data)
-            output_data = result
+            # Merge result into output_data to preserve state even if the hook returns a fresh dict
+            if isinstance(result, dict):
+                output_data.update(result)
+            else:
+                output_data = result
 
             phase_results.append({
                 "hook": hook_name,

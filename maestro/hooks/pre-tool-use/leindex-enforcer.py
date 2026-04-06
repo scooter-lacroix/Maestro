@@ -28,7 +28,7 @@ TOOL_SUBSTITUTIONS = {
 }
 
 REPRIMAND = (
-    "\n⚠️ WORKFLOW VIOLATION: LeIndex is available but you used a standard tool.\n\n"
+    "\n[WARNING] WORKFLOW VIOLATION: LeIndex is available but you used a standard tool.\n\n"
     "YOU MUST use LeIndex tools for source code analysis. This is NOT optional.\n"
     "LeIndex provides structural awareness, token efficiency, and better results.\n\n"
 )

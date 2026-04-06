@@ -2399,7 +2399,7 @@ async fn run_app<B: Backend>(
                                         // let _ = terminal.draw(|frame| ui(frame, \u0026mut app));
 
                                         if let Some(svc) = service.as_ref() {
-                                            let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
+                                            let mut manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                 Ok(m) => m,
                                                 Err(e) => {
                                                     app.status_message = format!("Failed to create session manager: {}", e);
@@ -2407,6 +2407,12 @@ async fn run_app<B: Backend>(
                                                     continue;
                                                 }
                                             };
+
+                                            // Inject pre-initialized LspManager to avoid lazy-init block_on panic
+                                            if let Some(storage) = app.storage_backend.as_ref() {
+                                                manager = manager.with_lsp_manager(leindex_core::memory::lsp_manager::LspManager::new((**storage).clone()));
+                                            }
+
                                             match manager.create_session(
                                                 &app.new_session_title,
                                                 &app.new_session_path,
@@ -2673,7 +2679,7 @@ async fn run_app<B: Backend>(
                                                 if let Some(orig) =
                                                     app.sessions.iter().find(|s| s.session_id == id)
                                                 {
-                                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                    let mut manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                         Ok(m) => m,
                                                         Err(e) => {
                                                             app.status_message = format!("Failed to create session manager: {}", e);
@@ -2681,6 +2687,12 @@ async fn run_app<B: Backend>(
                                                             continue;
                                                         }
                                                     };
+
+                                                    // Inject pre-initialized LspManager to avoid lazy-init block_on panic
+                                                    if let Some(storage) = app.storage_backend.as_ref() {
+                                                        manager = manager.with_lsp_manager(leindex_core::memory::lsp_manager::LspManager::new((**storage).clone()));
+                                                    }
+
                                                     let _ = manager.fork_session(
                                                         &id,
                                                         &app.rename_buffer,
@@ -2703,13 +2715,19 @@ async fn run_app<B: Backend>(
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
-                                                let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
+                                                let mut manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
                                                     Ok(m) => m,
                                                     Err(e) => {
                                                         app.status_message = format!("Failed to create session manager: {}", e);
                                                         continue;
                                                     }
                                                 };
+
+                                                // Inject pre-initialized LspManager to avoid lazy-init block_on panic
+                                                if let Some(storage) = app.storage_backend.as_ref() {
+                                                    manager = manager.with_lsp_manager(leindex_core::memory::lsp_manager::LspManager::new((**storage).clone()));
+                                                }
+
                                                 match manager.kill_session(&id) {
                                                     Ok(()) => {
                                                         if app.input_mode
@@ -6505,7 +6523,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
         .split(frame.area());
 
     // Header with tabs
-    let is_focused = app.tab_index == tabs::DASHBOARD && app.dash_focus == DashFocus::Tabs;
+    let is_focused = (app.tab_index == tabs::DASHBOARD && app.dash_focus == DashFocus::Tabs)
+        || (app.tab_index == tabs::MAESTROCLAW && app.maestroclaw_pane.is_session_browser_active());
     let tabs = Tabs::new(tabs::all_titles())
         .block(
             Block::default()
@@ -6516,7 +6535,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                     BorderType::Rounded
                 })
                 .border_style(if is_focused {
-                    Style::default().fg(theme.warning).bold()
+                    Style::default().fg(Color::Magenta).bold()
                 } else {
                     Style::default().fg(theme.muted)
                 })

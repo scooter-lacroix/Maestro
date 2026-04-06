@@ -83,6 +83,7 @@ class SkillDefinition:
     category: str
     path: Path
     frontmatter: Dict[str, Any] = field(default_factory=dict)
+    user_invocable: bool = True  # False = internal-only; not shown in /help
 
     @classmethod
     def from_dict(cls, name: str, data: Dict[str, Any], skills_dir: Path) -> "SkillDefinition":
@@ -309,6 +310,7 @@ class SkillRegistry:
 
 # Global registry instance
 _registry: Optional[SkillRegistry] = None
+_registry_skills_dir: Optional[Path] = None
 
 
 def get_registry(skills_dir: Optional[Path] = None) -> SkillRegistry:
@@ -317,17 +319,41 @@ def get_registry(skills_dir: Optional[Path] = None) -> SkillRegistry:
 
     Args:
         skills_dir: Path to skills directory. Only used on first call.
+                    Subsequent calls with a *different* path will log a warning
+                    and return the already-initialised singleton.
 
     Returns:
         The global SkillRegistry instance.
     """
-    global _registry
+    global _registry, _registry_skills_dir
 
     if _registry is None:
         _registry = SkillRegistry(skills_dir)
+        _registry_skills_dir = skills_dir
         _registry.load_rules()
+    elif skills_dir is not None and skills_dir != _registry_skills_dir:
+        import warnings
+        warnings.warn(
+            f"get_registry() called with skills_dir={skills_dir!r} but the "
+            f"singleton was already created with skills_dir={_registry_skills_dir!r}. "
+            "The existing singleton is returned unchanged. Call reset_registry() first "
+            "if you need a different skills directory.",
+            stacklevel=2,
+        )
 
     return _registry
+
+
+def reset_registry() -> None:
+    """
+    Reset the global skill registry singleton.
+
+    Useful in tests and when skills_dir needs to change at runtime.
+    The next call to get_registry() will create a fresh instance.
+    """
+    global _registry, _registry_skills_dir
+    _registry = None
+    _registry_skills_dir = None
 
 
 def load_skill(name: str) -> Optional[SkillDefinition]:

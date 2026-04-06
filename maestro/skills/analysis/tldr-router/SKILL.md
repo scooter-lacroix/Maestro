@@ -1,3 +1,9 @@
+---
+name: tldr-router
+description: "Maps questions to the optimal LeIndex command"
+user-invocable: false
+---
+
 # LeIndex Smart Router
 
 Maps questions to the optimal LeIndex command. Use this to pick the right layer.
