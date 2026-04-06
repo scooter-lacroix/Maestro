@@ -6535,7 +6535,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                     BorderType::Rounded
                 })
                 .border_style(if is_focused {
-                    Style::default().fg(Color::Magenta).bold()
+                    Style::default().fg(theme.focus_border).bold()
                 } else {
                     Style::default().fg(theme.muted)
                 })
