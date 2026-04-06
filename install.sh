@@ -404,10 +404,10 @@ if ! command -v cargo &> /dev/null; then
     log "[!] Rust not found. Installing Rust via rustup..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>>"$INSTALL_LOG"
     source $HOME/.cargo/env
-    if command -v cargo &> /dev/null; then
+    if cargo --version &> /dev/null; then
         log "[OK] Rust installed successfully"
     else
-        log "[ERROR] Rust install completed but 'cargo' not found on PATH"
+        log "[ERROR] Rust installation failed. 'cargo' could not execute natively."
         log "[DIAG] Try: source \$HOME/.cargo/env"
         exit 1
     fi
@@ -633,6 +633,7 @@ else
                 SETUP_SUCCESS=1
             elif is_invocation_failure_output "$setup_output"; then
                 log "[WARN] bare script pseudo-terminal fallback is unavailable on this system"
+                SETUP_EXIT_CODE=1
             else
                 SETUP_LAUNCHED=1
                 SETUP_EXIT_CODE=$setup_rc
@@ -653,6 +654,7 @@ else
             SETUP_SUCCESS=1
         elif is_invocation_failure_output "$setup_output"; then
             log "[WARN] expect pseudo-terminal fallback could not launch the setup wizard"
+            SETUP_EXIT_CODE=1
         else
             SETUP_LAUNCHED=1
             SETUP_EXIT_CODE=$setup_rc
@@ -741,10 +743,10 @@ check_output_contains() {
     fi
 }
 
-check_file "$HOME/.local/bin/maestro" "Maestro CLI binary"
-check_file "$HOME/.local/bin/maestro-cockpit" "Maestro Cockpit binary"
-check_file "$HOME/.local/bin/maestro-gateway" "Maestro Gateway binary"
-check_file "$HOME/.local/bin/maestro-lsp-mcp-bridge" "Maestro LSP bridge binary"
+check_command_surface "Maestro CLI binary" "$HOME/.local/bin/maestro" --help
+check_command_surface "Maestro Cockpit binary" "$HOME/.local/bin/maestro-cockpit" --help
+check_command_surface "Maestro Gateway binary" "$HOME/.local/bin/maestro-gateway" --help
+check_command_surface "Maestro LSP bridge binary" "$HOME/.local/bin/maestro-lsp-mcp-bridge" --help
 
 check_dir "$HOME/.maestro/integrations/commands" "Maestro command protocols"
 check_dir "$HOME/.maestro/agents" "Maestro agent definitions"

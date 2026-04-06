@@ -13,11 +13,7 @@ import os
 import io
 from pathlib import Path
 
-# Hijack stdout/stderr IMMEDIATELY to prevent pollution from imports
-original_stdout = sys.stdout
-original_stderr = sys.stderr
-sys.stdout = io.StringIO()
-sys.stderr = io.StringIO()
+
 
 from typing import Dict, Any, List
 
@@ -28,6 +24,12 @@ if str(maestro_root) not in sys.path:
 
 def run_hook(phase: str, event_name: str):
     from maestro.hooks.executor import get_hook_executor
+    
+    # Delay stream hijacking until after imports
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    sys.stdout = io.StringIO()
+    sys.stderr = io.StringIO()
     
     # Capture input from stdin
     try:

@@ -58,16 +58,19 @@ def get_python_executable() -> str:
         Path to Python executable
     """
     # Priority 1: Current Python executable (best for venvs)
-    if sys.executable:
-        return sys.executable
+    exe = sys.executable
+    if exe is not None and exe.strip() != "":
+        return exe
 
     # Try python3 next (Unix-like systems)
-    if shutil.which("python3"):
-        return "python3"
+    exe3 = shutil.which("python3")
+    if exe3 is not None:
+        return exe3
 
     # Try python last (Windows, some Unix systems)
-    if shutil.which("python"):
-        return "python"
+    exe_fallback = shutil.which("python")
+    if exe_fallback is not None:
+        return exe_fallback
 
     return "python"
 
@@ -173,8 +176,15 @@ class HookExecutor:
             return input_data.copy()
 
         try:
+            # Validate and sanitize input data format
+            if not isinstance(input_data, dict):
+                input_data = {}
+            
             # Run the hook as a subprocess with cross-platform Python executable
             python_exe = get_python_executable()
+            if not python_exe:
+                python_exe = "python"
+                
             result = subprocess.run(
                 [python_exe, str(hook_path)],
                 input=json.dumps(input_data),
@@ -196,6 +206,10 @@ class HookExecutor:
         except subprocess.TimeoutExpired:
             logger.error(f"Hook {phase}/{hook_name} timed out")
             input_data["hook_error"] = "Timeout"
+            return input_data
+        except FileNotFoundError:
+            logger.error(f"Python executable not found for hook {phase}/{hook_name}")
+            input_data["hook_error"] = "Python Executable Missing"
             return input_data
         except json.JSONDecodeError as e:
             logger.error(f"Hook {phase}/{hook_name} returned invalid JSON: {e}")
@@ -337,12 +351,28 @@ class HookExecutor:
                 "stderr": result.stderr.strip(),
                 "stdout": result.stdout.strip(),
             }
+        except subprocess.TimeoutExpired:
+            return {
+                "phase": phase,
+                "command": [nexus_bin, *args],
+                "success": False,
+                "stderr": "Nexus connection or execution timed out.",
+                "stdout": "",
+            }
+        except FileNotFoundError:
+            return {
+                "phase": phase,
+                "command": [nexus_bin, *args],
+                "success": False,
+                "stderr": "Nexus executable not found.",
+                "stdout": "",
+            }
         except Exception as exc:
             return {
                 "phase": phase,
                 "command": [nexus_bin, *args],
                 "success": False,
-                "stderr": str(exc),
+                "stderr": f"Network or execution failure: {str(exc)}",
                 "stdout": "",
             }
 
