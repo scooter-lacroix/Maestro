@@ -589,58 +589,34 @@ else
     setup_cmd=("${setup_env[@]}" "$SETUP_BIN")
     setup_script_cmd="$(printf '%q ' "${setup_cmd[@]}")"
 
-    # Try different methods to provide a pseudo-TTY
-    if command -v script &> /dev/null; then
-        # Try script command with different options
-        setup_output="$(script -q -c "$setup_script_cmd" /dev/null 2>&1)"
+    try_script_command() {
+        local script_args="$1"
+        if [[ $SETUP_SUCCESS -eq 1 || $SETUP_LAUNCHED -eq 1 ]]; then
+            return
+        fi
+
+        log "Trying 'script ${script_args}'..."
+        setup_output="$(script ${script_args} "$setup_script_cmd" /dev/null 2>&1)"
         setup_rc=$?
         echo "$setup_output" >> "$INSTALL_LOG"
         if [[ $setup_rc -eq 0 ]]; then
             SETUP_LAUNCHED=1
             SETUP_SUCCESS=1
+            log "[OK] Setup wizard launched successfully with 'script ${script_args}'"
         elif is_invocation_failure_output "$setup_output"; then
-            log "[WARN] script -q -c pseudo-terminal fallback is unavailable on this system"
+            log "[WARN] 'script ${script_args}' pseudo-terminal fallback is unavailable on this system"
         else
             SETUP_LAUNCHED=1
             SETUP_EXIT_CODE=$setup_rc
-            log "[ERROR] Setup wizard failed while running under script -q -c (exit $SETUP_EXIT_CODE)"
+            log "[ERROR] Setup wizard failed while running under 'script ${script_args}' (exit $SETUP_EXIT_CODE)"
             exit "$SETUP_EXIT_CODE"
         fi
+    }
 
-        if [[ $SETUP_SUCCESS -eq 0 && $SETUP_LAUNCHED -eq 0 ]]; then
-            setup_output="$(script -qec "$setup_script_cmd" /dev/null 2>&1)"
-            setup_rc=$?
-            echo "$setup_output" >> "$INSTALL_LOG"
-            if [[ $setup_rc -eq 0 ]]; then
-                SETUP_LAUNCHED=1
-                SETUP_SUCCESS=1
-            elif is_invocation_failure_output "$setup_output"; then
-                log "[WARN] script -qec pseudo-terminal fallback is unavailable on this system"
-            else
-                SETUP_LAUNCHED=1
-                SETUP_EXIT_CODE=$setup_rc
-                log "[ERROR] Setup wizard failed while running under script -qec (exit $SETUP_EXIT_CODE)"
-                exit "$SETUP_EXIT_CODE"
-            fi
-        fi
-
-        if [[ $SETUP_SUCCESS -eq 0 && $SETUP_LAUNCHED -eq 0 ]]; then
-            setup_output="$(script "$setup_script_cmd" /dev/null 2>&1)"
-            setup_rc=$?
-            echo "$setup_output" >> "$INSTALL_LOG"
-            if [[ $setup_rc -eq 0 ]]; then
-                SETUP_LAUNCHED=1
-                SETUP_SUCCESS=1
-            elif is_invocation_failure_output "$setup_output"; then
-                log "[WARN] bare script pseudo-terminal fallback is unavailable on this system"
-                SETUP_EXIT_CODE=1
-            else
-                SETUP_LAUNCHED=1
-                SETUP_EXIT_CODE=$setup_rc
-                log "[ERROR] Setup wizard failed while running under script (exit $SETUP_EXIT_CODE)"
-                exit "$SETUP_EXIT_CODE"
-            fi
-        fi
+    if command -v script &> /dev/null; then
+        try_script_command "-q -c"
+        try_script_command "-qec"
+        try_script_command ""
     fi
 
     # If script command failed to launch the setup wizard, try expect

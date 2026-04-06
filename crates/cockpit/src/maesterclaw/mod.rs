@@ -149,6 +149,24 @@ impl Default for FocusedPane {
     }
 }
 
+impl FocusedPane {
+    pub fn next(self) -> Self {
+        match self {
+            Self::SessionRail => Self::AgentPanel,
+            Self::AgentPanel => Self::CommandPalette,
+            Self::CommandPalette => Self::SessionRail,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::SessionRail => Self::CommandPalette,
+            Self::AgentPanel => Self::SessionRail,
+            Self::CommandPalette => Self::AgentPanel,
+        }
+    }
+}
+
 /// MaestroClaw pane state for the TUI
 #[derive(Debug, Clone)]
 pub struct MaestroClawPane {
@@ -334,13 +352,16 @@ impl MaestroClawPane {
             ])
             .split(main_chunks[2]);
 
+        let agent_panel_focused = self.focused_pane == FocusedPane::AgentPanel;
+        let command_palette_focused = self.focused_pane == FocusedPane::CommandPalette;
+
         self.render_session_rail(frame, main_chunks[0], app);
-        self.render_agent_summary(frame, center_chunks[0], self.focused_pane == FocusedPane::AgentPanel);
-        self.render_agent_output(frame, center_chunks[1], self.focused_pane == FocusedPane::AgentPanel);
-        self.render_input_box(frame, center_chunks[2], self.focused_pane == FocusedPane::AgentPanel);
-        self.render_command_palette(frame, right_chunks[0], self.focused_pane == FocusedPane::CommandPalette);
-        self.render_status_sidebar(frame, right_chunks[1], self.focused_pane == FocusedPane::CommandPalette);
-        self.render_setup_sidebar(frame, right_chunks[2], self.focused_pane == FocusedPane::CommandPalette);
+        self.render_agent_summary(frame, center_chunks[0], agent_panel_focused);
+        self.render_agent_output(frame, center_chunks[1], agent_panel_focused);
+        self.render_input_box(frame, center_chunks[2], agent_panel_focused);
+        self.render_command_palette(frame, right_chunks[0], command_palette_focused);
+        self.render_status_sidebar(frame, right_chunks[1], command_palette_focused);
+        self.render_setup_sidebar(frame, right_chunks[2], command_palette_focused);
     }
 
     fn render_session_rail(&self, frame: &mut Frame, area: Rect, app: Option<&crate::app::App>) {
@@ -1588,19 +1609,11 @@ impl MaestroClawPane {
                     MaestroClawAction::Navigate
                 }
                 crossterm::event::KeyCode::Tab => {
-                    self.focused_pane = match self.focused_pane {
-                        FocusedPane::SessionRail => FocusedPane::AgentPanel,
-                        FocusedPane::AgentPanel => FocusedPane::CommandPalette,
-                        FocusedPane::CommandPalette => FocusedPane::SessionRail,
-                    };
+                    self.focused_pane = self.focused_pane.next();
                     MaestroClawAction::FocusChanged
                 }
                 crossterm::event::KeyCode::BackTab => {
-                    self.focused_pane = match self.focused_pane {
-                        FocusedPane::SessionRail => FocusedPane::CommandPalette,
-                        FocusedPane::AgentPanel => FocusedPane::SessionRail,
-                        FocusedPane::CommandPalette => FocusedPane::AgentPanel,
-                    };
+                    self.focused_pane = self.focused_pane.prev();
                     MaestroClawAction::FocusChanged
                 }
                 _ => MaestroClawAction::None,
