@@ -33,7 +33,7 @@ def run_hook(phase: str, event_name: str):
     try:
         raw_input = sys.stdin.read()
         data = json.loads(raw_input) if raw_input.strip() else {}
-    except:
+    except json.JSONDecodeError:
         data = {}
 
     try:
