@@ -106,9 +106,15 @@ def run_hook(phase: str, event_name: str):
         original_stderr.write(f"FATAL HOOK ERROR ({phase}): {str(e)}\n")
         original_stdout.write("{}")
     finally:
-        # Restore original streams (mostly for cleanup, though we are exiting)
+        # Capture and flush hijacked stderr to the real stream for debugging
+        captured_stderr = sys.stderr.getvalue()
+
+        # Restore original streams
         sys.stdout = original_stdout
         sys.stderr = original_stderr
+
+        if captured_stderr:
+            sys.stderr.write(captured_stderr)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
