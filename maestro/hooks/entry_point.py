@@ -38,9 +38,12 @@ def run_hook(phase: str, event_name: str):
     except json.JSONDecodeError:
         data = {}
 
+    if not isinstance(data, dict):
+        data = {}
+
     try:
         # Ensure project_path is set
-        data.setdefault("project_path", data.get("cwd") or str(maestro_root))
+        data.setdefault("project_path", data.get("cwd") or os.getcwd())
         
         # Execute hooks for the phase
         executor = get_hook_executor()

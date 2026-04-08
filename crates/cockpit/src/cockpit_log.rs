@@ -209,38 +209,48 @@ pub fn init() -> Result<CockpitLogGuard> {
 
     tracing::info!("Cockpit logging initialized — PID {} (global={})", pid, global_ok);
 
+    // When the global subscriber is already set (e.g. the maestro CLI installed one),
+    // we cannot replace it. The thread-local fallback below covers the main TUI event
+    // loop thread but NOT spawned tasks, which inherit the pre-existing global subscriber.
+    // This is acceptable because the critical logging path is the main TUI thread;
+    // background tasks (McpPool, etc.) will use whatever global subscriber was already set.
+
+    let _thread_local_guard = if !global_ok {
+        // Install as thread-local default for the main event loop thread.
+        // This requires a fresh subscriber since the first one was consumed by
+        // set_global_default(). Spawned tokio tasks will NOT be captured by this —
+        // they use the pre-existing global subscriber.
+        let make_writer2 = CockpitMakeWriter {
+            shared: shared.clone(),
+        };
+        let sub2 = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| {
+                        tracing_subscriber::EnvFilter::new(
+                            "maestro=info,maestro_cockpit=info,leindex=info",
+                        )
+                    }),
+            )
+            .with_writer(make_writer2)
+            .with_ansi(false)
+            .compact()
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_file(false)
+            .with_line_number(false)
+            .finish();
+        Some(tracing::subscriber::set_default(sub2))
+    } else {
+        None
+    };
+
     Ok(CockpitLogGuard {
         log_path,
         manifest_path,
         started: now.with_timezone(&Utc),
         shared: shared.clone(),
-        _thread_local_guard: if !global_ok {
-            // Install as thread-local default for the main event loop.
-            // This requires a fresh subscriber since the first one was consumed.
-            let make_writer2 = CockpitMakeWriter {
-                shared,
-            };
-            let sub2 = tracing_subscriber::fmt()
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| {
-                            tracing_subscriber::EnvFilter::new(
-                                "maestro=info,maestro_cockpit=info,leindex=info",
-                            )
-                        }),
-                )
-                .with_writer(make_writer2)
-                .with_ansi(false)
-                .compact()
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_file(false)
-                .with_line_number(false)
-                .finish();
-            Some(tracing::subscriber::set_default(sub2))
-        } else {
-            None
-        },
+        _thread_local_guard,
     })
 }
 
