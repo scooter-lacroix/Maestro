@@ -102,7 +102,14 @@ pub mod tabs {
 
 pub async fn run() -> Result<()> {
     // Initialize file logging (before anything else so all operations are captured)
-    let _log_guard = crate::cockpit_log::init()?;
+    // Non-fatal: if logging can't start (disk full, unwritable path), continue without it
+    let _log_guard = match crate::cockpit_log::init() {
+        Ok(guard) => Some(guard),
+        Err(err) => {
+            eprintln!("Warning: failed to initialize cockpit logging: {err}");
+            None
+        }
+    };
 
     // Setup terminal
     enable_raw_mode()?;
@@ -812,7 +819,9 @@ impl App {
             }
         };
 
-        if let Some(storage) = self.storage_backend.as_ref() {
+        if let Some(lsp_manager) = self.lsp_manager.clone() {
+            manager = manager.with_lsp_manager(lsp_manager);
+        } else if let Some(storage) = self.storage_backend.as_ref() {
             manager = manager.with_lsp_manager(leindex_core::memory::lsp_manager::LspManager::new((**storage).clone()));
         }
         Some(manager)

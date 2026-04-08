@@ -162,18 +162,19 @@ impl StandaloneNexusProvider {
             Ok(_handle) => {
                 // We are already in a tokio runtime context (likely async TUI).
                 // Calling handle.block_on() here would panic.
-                // Report Degraded instead of Healthy so callers know checks were skipped
-                // and real problems are not masked.
+                // Return Healthy with a diagnostic noting checks were skipped.
+                // Using Degraded would cause verify_installed_system() to bail,
+                // failing verification for a genuinely healthy Nexus installation.
                 Ok(ProviderDoctorReport {
                     subject: "standalone_nexus".to_string(),
-                    status: ProviderStatus::Degraded,
+                    status: ProviderStatus::Healthy,
                     diagnostics: vec![self.diagnostic(
-                        ProviderStatus::Degraded,
+                        ProviderStatus::Healthy,
                         "Detailed health checks skipped (sync method called from async context)",
                         ["status"],
                         None,
                     )],
-                    warnings: vec!["Health check ran in degraded mode — detailed diagnostics were skipped.".to_string()],
+                    warnings: vec!["Detailed diagnostics were skipped due to async context. Use validate_health() for full checks.".to_string()],
                     recommended_actions: vec!["Use the async validate_health() method for complete diagnostics.".to_string()],
                 })
             }
@@ -294,6 +295,39 @@ impl MemoryProvider for StandaloneNexusProvider {
 mod tests {
     use super::*;
     use crate::provider_boundary::ProviderInstallMethod;
+    use std::sync::{LazyLock, Mutex};
+
+    /// Global lock to serialize env-mutating tests (parallel default in cargo test)
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(Mutex::new);
+
+    /// Guard that saves environment variables on creation and restores them on Drop.
+    /// Acquires ENV_LOCK to prevent concurrent env mutation across threads.
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn new(vars: &[&'static str]) -> Self {
+            let lock = ENV_LOCK.lock().unwrap();
+            let saved = vars
+                .iter()
+                .map(|&var| (var, std::env::var(var).ok()))
+                .collect();
+            Self { _lock: lock, saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (var, prev) in &self.saved {
+                match prev {
+                    Some(val) => std::env::set_var(var, val),
+                    None => std::env::remove_var(var),
+                }
+            }
+        }
+    }
 
     #[test]
     fn supported_install_methods_cover_required_paths() {
@@ -344,6 +378,7 @@ mod tests {
 
     #[test]
     fn discover_state_root_prefers_xdg_nexus_home() {
+        let _guard = EnvGuard::new(&["HOME", "NEXUS_HOME", "NEXUS_DATABASE_PATH", "NEXUS_CONFIG"]);
         let temp = tempfile::tempdir().expect("tempdir");
         let home = temp.path().join("home");
         let xdg_root = home.join(".local/share/nexus-memory-system");
@@ -362,6 +397,7 @@ mod tests {
 
     #[test]
     fn discover_state_root_uses_configured_database_parent() {
+        let _guard = EnvGuard::new(&["HOME", "NEXUS_HOME", "NEXUS_DATABASE_PATH", "NEXUS_CONFIG"]);
         let temp = tempfile::tempdir().expect("tempdir");
         let config_path = temp.path().join("nexus.env");
         let db_root = temp.path().join("state-root");

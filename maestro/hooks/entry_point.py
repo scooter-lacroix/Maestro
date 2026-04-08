@@ -122,8 +122,8 @@ def run_hook(phase: str, event_name: str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        # Use original_stderr because sys.stderr is currently hijacked
-        original_stderr.write("Usage: entry_point.py <phase> <event_name>\n")
+        # sys.stderr is not hijacked yet at this point
+        sys.stderr.write("Usage: entry_point.py <phase> <event_name>\n")
         sys.exit(1)
         
     run_hook(sys.argv[1], sys.argv[2])

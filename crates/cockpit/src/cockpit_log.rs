@@ -109,7 +109,11 @@ fn prune_old_logs(log_dir: &Path) {
         })
         .map(String::from)
         .collect();
-    let _ = fs::write(&manifest_path, kept.join("\n") + "\n");
+    // Use atomic write via temp file + rename to avoid clobbering concurrent updates
+    let tmp_path = manifest_path.with_extension("jsonl.tmp");
+    if fs::write(&tmp_path, kept.join("\n") + "\n").is_ok() {
+        let _ = fs::rename(&tmp_path, &manifest_path);
+    }
 }
 
 /// Atomically append a session entry to the manifest as a single write.
@@ -284,7 +288,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CockpitMakeWriter {
 
     fn make_writer(&'a self) -> Self::Writer {
         CockpitWriteGuard {
-            lock: self.shared.lock().unwrap(),
+            lock: self.shared.lock().unwrap_or_else(|e| e.into_inner()),
         }
     }
 }
