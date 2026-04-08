@@ -162,20 +162,19 @@ impl StandaloneNexusProvider {
             Ok(_handle) => {
                 // We are already in a tokio runtime context (likely async TUI).
                 // Calling handle.block_on() here would panic.
-                // Since this is a sync fallback for health checks, and we're already async,
-                // we should ideally use the async version. But for this sync method,
-                // we'll return a placeholder report indicating the provider is active.
+                // Report Degraded instead of Healthy so callers know checks were skipped
+                // and real problems are not masked.
                 Ok(ProviderDoctorReport {
                     subject: "standalone_nexus".to_string(),
-                    status: ProviderStatus::Healthy,
+                    status: ProviderStatus::Degraded,
                     diagnostics: vec![self.diagnostic(
-                        ProviderStatus::Healthy,
-                        "Nexus provider is active (skipping detailed check in async context)",
+                        ProviderStatus::Degraded,
+                        "Detailed health checks skipped (sync method called from async context)",
                         ["status"],
                         None,
                     )],
-                    warnings: Vec::new(),
-                    recommended_actions: Vec::new(),
+                    warnings: vec!["Health check ran in degraded mode — detailed diagnostics were skipped.".to_string()],
+                    recommended_actions: vec!["Use the async validate_health() method for complete diagnostics.".to_string()],
                 })
             }
             Err(_) => {

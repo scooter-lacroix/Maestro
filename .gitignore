@@ -234,3 +234,18 @@ CODEBASE_ANALYSIS.md
 COMPLETE_ANALYSIS_REPORT.md
 ENHANCED_ANALYSIS.md
 docs/MAESTROCLAW_UI_PORT_PLAN.md
+
+# CodeRabbit review artifacts
+pr_comments*.json
+fix_summary.md
+logic_evaluation_report.md
+gemini_prompt*.txt
+
+# AI tooling probe files
+.claude_io_probe
+
+# Debug/test output artifacts
+err.txt
+out.txt
+re
+test_tracklens_fix.sh

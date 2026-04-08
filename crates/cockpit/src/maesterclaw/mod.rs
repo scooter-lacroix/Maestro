@@ -395,7 +395,10 @@ impl MaestroClawPane {
                 "No sessions discovered yet.",
                 Style::default().fg(Color::DarkGray),
             )));
-        } else if let Some(app) = app {
+        } else {
+            // SAFETY: app is guaranteed Some here — the if-branch covers both
+            // None and Some(empty-sessions), so else means Some(non-empty).
+            let app = app.unwrap();
             for (idx, session) in app
                 .sessions
                 .iter()

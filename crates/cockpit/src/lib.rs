@@ -4,6 +4,7 @@
 //! separating UI state, rendering, and actions.
 
 pub mod app;
+pub mod cockpit_log;
 pub mod command_palette;
 pub mod conductor;
 pub mod maesterclaw; // Legacy module for backward compatibility

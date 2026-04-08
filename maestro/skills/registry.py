@@ -350,10 +350,19 @@ def reset_registry() -> None:
 
     Useful in tests and when skills_dir needs to change at runtime.
     The next call to get_registry() will create a fresh instance.
+    Also resets the cached SkillActivator so it does not hold a stale
+    reference to the previous registry.
     """
     global _registry, _registry_skills_dir
     _registry = None
     _registry_skills_dir = None
+
+    # Late import to avoid circular dependency at module load time.
+    # activation.py imports from this module, so we cannot import it at the
+    # top level — but at runtime reset_registry() is called infrequently
+    # and the import is cheap.
+    from . import activation as _activation  # noqa: WPS433
+    _activation.reset_activator()
 
 
 def load_skill(name: str) -> Optional[SkillDefinition]:

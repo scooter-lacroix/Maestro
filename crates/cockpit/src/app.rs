@@ -101,6 +101,9 @@ pub mod tabs {
 }
 
 pub async fn run() -> Result<()> {
+    // Initialize file logging (before anything else so all operations are captured)
+    let _log_guard = crate::cockpit_log::init()?;
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();

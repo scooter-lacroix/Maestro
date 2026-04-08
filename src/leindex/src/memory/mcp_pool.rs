@@ -26,11 +26,16 @@ use super::models::{McpServer, McpStatus, McpTransport};
 #[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
 
+/// Maximum consecutive startup failures before a server is skipped for the session.
+const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
 #[cfg(feature = "rusqlite")]
 #[derive(Clone)]
 pub struct McpPool {
     proxies: Arc<RwLock<HashMap<String, Arc<SocketProxy>>>>,
     service: MemoryService,
+    /// Tracks consecutive startup failures per server name (in-memory, resets on pool restart).
+    failure_counts: Arc<RwLock<HashMap<String, u32>>>,
 }
 
 #[cfg(feature = "rusqlite")]
@@ -39,6 +44,7 @@ impl McpPool {
         Self {
             proxies: Arc::new(RwLock::new(HashMap::new())),
             service,
+            failure_counts: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -93,7 +99,18 @@ impl McpPool {
 
         // Check which servers are already running.
         let mut to_start = Vec::new();
+        let failure_counts = self.failure_counts.read().await;
         for s in &stdio_servers {
+            // Circuit breaker: skip servers that have failed too many times this session.
+            if let Some(&count) = failure_counts.get(&s.name) {
+                if count >= MAX_CONSECUTIVE_FAILURES {
+                    info!(
+                        "MCP server '{}' skipped: {} consecutive startup failures this session",
+                        s.name, count
+                    );
+                    continue;
+                }
+            }
             let proxies = self.proxies.read().await;
             if let Some(proxy) = proxies.get(&s.name) {
                 if proxy.is_running().await {
@@ -103,6 +120,7 @@ impl McpPool {
             }
             to_start.push(s.clone());
         }
+        drop(failure_counts);
 
         if to_start.is_empty() {
             return Ok(0);
@@ -219,10 +237,19 @@ impl McpPool {
         let status = match &startup_result {
             Ok(_) => {
                 info!("MCP pool '{}' startup confirmed", server.name);
+                // Reset failure counter on success
+                self.failure_counts.write().await.remove(&server.name);
                 McpStatus::Running
             }
             Err(e) => {
                 error!("MCP pool '{}' failed to start: {}", server.name, e);
+                // Increment failure counter
+                *self
+                    .failure_counts
+                    .write()
+                    .await
+                    .entry(server.name.clone())
+                    .or_insert(0) += 1;
                 McpStatus::Stopped
             }
         };
@@ -326,6 +353,41 @@ impl McpPool {
 
         Ok(())
     }
+}
+
+/// Strip ANSI CSI escape sequences (e.g. `\x1b[31m`, `\x1b[2m`, `\x1b[0m`) from a string.
+/// Handles CSI sequences: ESC [ ... <final byte>, where intermediate bytes are
+/// in the range 0x20..=0x3F and the final byte is in 0x40..=0x7E.
+fn strip_ansi_codes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                // Consume parameter bytes (0x30..=0x3F) and intermediate bytes (0x20..=0x2F)
+                while let Some(&next) = chars.peek() {
+                    if ('\x20'..='\x2f').contains(&next) || ('\x30'..='\x3f').contains(&next) {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                // Consume the final byte (0x40..=0x7E)
+                if let Some(&next) = chars.peek() {
+                    if ('\x40'..='\x7e').contains(&next) {
+                        chars.next();
+                    }
+                }
+            } else {
+                // Not a CSI sequence; keep the ESC and whatever follows
+                out.push(c);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn json_env_to_hashmap(v: &serde_json::Value) -> HashMap<String, String> {
@@ -508,6 +570,7 @@ impl SocketProxy {
                         Ok(0) => break,
                         Ok(_) => {
                             let msg = line.trim_end();
+                            let msg = strip_ansi_codes(msg);
                             if !msg.is_empty() {
                                 warn!("mcp[{}] {}", name, msg);
                                 if let Some(f) = log_file.as_mut() {

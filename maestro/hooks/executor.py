@@ -250,7 +250,11 @@ class HookExecutor:
             if isinstance(result, dict):
                 output_data.update(result)
             else:
-                output_data = result
+                logger.warning(
+                    "Hook '%s' returned non-dict type %s; skipping merge to preserve pipeline state",
+                    hook_name,
+                    type(result).__name__,
+                )
 
             phase_results.append({
                 "hook": hook_name,

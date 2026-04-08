@@ -307,6 +307,18 @@ class SkillActivator:
 _activator: Optional["SkillActivator"] = None
 
 
+def reset_activator() -> None:
+    """
+    Reset the cached activator singleton.
+
+    Called by registry.reset_registry() so that a stale activator (holding a
+    reference to a previous registry instance) is not reused after the
+    registry is rebuilt.
+    """
+    global _activator
+    _activator = None
+
+
 def activate_skills_for_prompt(
     prompt: str,
     context: Optional[Dict[str, Any]] = None

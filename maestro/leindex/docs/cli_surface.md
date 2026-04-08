@@ -278,8 +278,8 @@ LeIndex supports 8 programming languages via tree-sitter:
 | Language | Extensions | CLI Value |
 |----------|-----------|-----------|
 | Python | `.py` | `python`, `py` |
-| TypeScript | `.ts`, `.tsx` | `typescript`, `ts` |
-| JavaScript | `.js`, `.jsx` | `javascript`, `js` |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | `typescript`, `ts` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | `javascript`, `js` |
 | Rust | `.rs` | `rust`, `rs` |
 | Go | `.go` | `go` |
 | Java | `.java` | `java` |
