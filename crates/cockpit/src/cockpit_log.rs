@@ -9,7 +9,7 @@ use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::collections::{HashMap, HashSet};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -380,9 +380,27 @@ pub fn find_log(pid: u32, started: &DateTime<Utc>) -> Option<PathBuf> {
 }
 
 /// Read the last N lines from a session's log file.
+///
+/// Uses a bounded seek window (128 KiB) to avoid loading the entire file
+/// into memory, which is important for large log files.
 pub fn tail_log(log_path: &Path, n: usize) -> Result<Vec<String>> {
-    let content = fs::read_to_string(log_path)?;
-    let lines: Vec<String> = content
+    let mut file = File::open(log_path)
+        .with_context(|| format!("Failed to open log file: {}", log_path.display()))?;
+    let len = file.metadata()
+        .with_context(|| format!("Failed to read metadata for: {}", log_path.display()))?
+        .len();
+
+    // Read only the tail window (128 KiB) instead of the entire file.
+    let window: u64 = 128 * 1024;
+    let start = len.saturating_sub(window);
+    file.seek(SeekFrom::Start(start))
+        .with_context(|| format!("Failed to seek in log file: {}", log_path.display()))?;
+
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)
+        .with_context(|| format!("Failed to read log file: {}", log_path.display()))?;
+
+    let lines: Vec<String> = buf
         .lines()
         .filter(|l| !l.starts_with('#') && *l != "---")
         .rev()

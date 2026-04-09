@@ -439,6 +439,29 @@ impl SessionManager {
         session_id: &str,
         project_path: &str,
     ) -> Result<SessionProviderProfile> {
+        // Run the async variant via a blocking adapter to remain callable
+        // from synchronous contexts (CLI, setup wizard, etc.).
+        self.run_profile_future(self.build_session_provider_profile_inner(session_id, project_path))
+    }
+
+    /// Async variant for callers already inside a Tokio runtime (e.g.
+    /// `write_mcp_config_with_lsps_async`). Avoids blocking the runtime
+    /// with the synchronous `health_report_sync` wrapper.
+    async fn build_session_provider_profile_async(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<SessionProviderProfile> {
+        self.build_session_provider_profile_inner(session_id, project_path).await
+    }
+
+    /// Shared core that builds the profile. Uses async health checks
+    /// directly so callers decide whether to block or await.
+    async fn build_session_provider_profile_inner(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<SessionProviderProfile> {
         let leindex_provider = StandaloneLeIndexProvider::detect()?
             .context("Standalone LeIndex provider not found. Install LeIndex before launching managed Maestro sessions.")?;
         let nexus_provider = StandaloneNexusProvider::discover()
@@ -478,6 +501,45 @@ impl SessionManager {
             })
             .unwrap_or_default();
 
+        // Use the async validate_health directly instead of the blocking
+        // health_report_sync wrapper to avoid freezing the Tokio runtime.
+        let nexus_diagnostic = match nexus_provider
+            .validate_health(std::path::Path::new(project_path))
+            .await
+        {
+            Ok(report) => report.diagnostics.into_iter().next().unwrap_or_else(|| {
+                ProviderDiagnostic {
+                    provider_name: "nexus".to_string(),
+                    provider_kind: "memory".to_string(),
+                    status: ProviderStatus::Degraded,
+                    executable: Some("nexus".to_string()),
+                    version: None,
+                    source: Some("standalone".to_string()),
+                    detail: "Nexus health check returned no diagnostics".to_string(),
+                    capabilities: ["memory", "runtime", "digests"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    checked_at: Utc::now(),
+                }
+            }),
+            Err(_) => ProviderDiagnostic {
+                provider_name: "nexus".to_string(),
+                provider_kind: "memory".to_string(),
+                status: ProviderStatus::Degraded,
+                executable: Some("nexus".to_string()),
+                version: None,
+                source: Some("standalone".to_string()),
+                detail: "Standalone Nexus provider detected but diagnostics could not be collected"
+                    .to_string(),
+                capabilities: ["memory", "runtime", "digests"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                checked_at: Utc::now(),
+            },
+        };
+
         Ok(SessionProviderProfile {
             profile_name: "maestro_runtime".to_string(),
             launch_origin: LaunchOrigin::Sessions,
@@ -506,27 +568,26 @@ impl SessionManager {
                         capabilities: ["mcp"].into_iter().map(str::to_string).collect(),
                         checked_at: Utc::now(),
                     }),
-                nexus_provider
-                    .health_report_sync(std::path::Path::new(project_path))
-                    .ok()
-                    .and_then(|report| report.diagnostics.into_iter().next())
-                    .unwrap_or_else(|| ProviderDiagnostic {
-                        provider_name: "nexus".to_string(),
-                        provider_kind: "memory".to_string(),
-                        status: ProviderStatus::Degraded,
-                        executable: Some("nexus".to_string()),
-                        version: None,
-                        source: Some("standalone".to_string()),
-                        detail: "Standalone Nexus provider detected but diagnostics could not be collected"
-                            .to_string(),
-                        capabilities: ["memory", "runtime", "digests"]
-                            .into_iter()
-                            .map(str::to_string)
-                            .collect(),
-                        checked_at: Utc::now(),
-                    }),
+                nexus_diagnostic,
             ],
         })
+    }
+
+    /// Run an async profile-building future through a blocking adapter,
+    /// mirroring the pattern used by `run_memory_provider_future`.
+    fn run_profile_future<F>(&self, future: F) -> Result<SessionProviderProfile>
+    where
+        F: std::future::Future<Output = Result<SessionProviderProfile>> + Send,
+    {
+        if let Ok(handle) = Handle::try_current() {
+            std::thread::scope(|s| {
+                s.spawn(|| handle.block_on(future))
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("Profile build thread panicked"))?
+            })
+        } else {
+            tokio::runtime::Runtime::new()?.block_on(future)
+        }
     }
 
     fn build_provider_diagnostics_json(
@@ -970,7 +1031,7 @@ impl SessionManager {
                     .unwrap_or(".".to_string())
             });
 
-        let profile = self.build_session_provider_profile(session_id, &project_path)?;
+        let profile = self.build_session_provider_profile_async(session_id, &project_path).await?;
         let provider_mcp = self.build_provider_mcp_config(session_id, &project_path, true)?;
         let mcp_servers =
             self.build_mcp_servers_config_with_stdio_type(session_id, &project_path, true)?;
