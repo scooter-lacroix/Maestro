@@ -24,24 +24,27 @@ if str(maestro_root) not in sys.path:
 
 def run_hook(phase: str, event_name: str):
     from maestro.hooks.executor import get_hook_executor
-    
+
     # Delay stream hijacking until after imports
     original_stdout = sys.stdout
     original_stderr = sys.stderr
     sys.stdout = io.StringIO()
     sys.stderr = io.StringIO()
-    
-    # Capture input from stdin
-    try:
-        raw_input = sys.stdin.read()
-        data = json.loads(raw_input) if raw_input.strip() else {}
-    except json.JSONDecodeError:
-        data = {}
-
-    if not isinstance(data, dict):
-        data = {}
 
     try:
+        # Capture input from stdin
+        try:
+            raw_input = sys.stdin.read()
+            data = json.loads(raw_input) if raw_input.strip() else {}
+        except json.JSONDecodeError:
+            data = {}
+        except Exception as e:
+            data = {}
+            sys.stderr.write(f"Failed to read hook stdin: {e}\n")
+
+        if not isinstance(data, dict):
+            data = {}
+
         # Ensure project_path is set
         data.setdefault("project_path", data.get("cwd") or os.getcwd())
         

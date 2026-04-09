@@ -157,25 +157,15 @@ impl StandaloneNexusProvider {
     }
 
     pub fn health_report_sync(&self, _project_root: &Path) -> Result<ProviderDoctorReport> {
-        // Use Handle::try_current() to avoid creating a new runtime when already inside one
         match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We are already in a tokio runtime context (likely async TUI).
-                // Calling handle.block_on() here would panic.
-                // Return Healthy with a diagnostic noting checks were skipped.
-                // Using Degraded would cause verify_installed_system() to bail,
-                // failing verification for a genuinely healthy Nexus installation.
-                Ok(ProviderDoctorReport {
-                    subject: "standalone_nexus".to_string(),
-                    status: ProviderStatus::Healthy,
-                    diagnostics: vec![self.diagnostic(
-                        ProviderStatus::Healthy,
-                        "Detailed health checks skipped (sync method called from async context)",
-                        ["status"],
-                        None,
-                    )],
-                    warnings: vec!["Detailed diagnostics were skipped due to async context. Use validate_health() for full checks.".to_string()],
-                    recommended_actions: vec!["Use the async validate_health() method for complete diagnostics.".to_string()],
+            Ok(handle) => {
+                // We are in a tokio runtime context. Calling handle.block_on()
+                // directly would panic, so spawn a separate OS thread that can
+                // safely block_on the async health check.
+                std::thread::scope(|s| {
+                    s.spawn(|| handle.block_on(self.validate_health(Path::new("."))))
+                        .join()
+                        .map_err(|_| anyhow::anyhow!("Health check thread panicked"))?
                 })
             }
             Err(_) => {

@@ -71,7 +71,11 @@ fn prune_old_logs(log_dir: &Path) {
     let cutoff = Local::now() - chrono::Duration::days(MAX_LOG_AGE_DAYS as i64);
     let cutoff_str = cutoff.format("%Y%m%d").to_string();
 
-    // Load active session filenames (ended == None) to protect from deletion
+    // Load active session filenames (ended == None) to protect from deletion.
+    // Only treat as active if started within the retention window — sessions
+    // with ended == None that are older than MAX_LOG_AGE_DAYS are stale orphans
+    // (crashed without Drop) and should be pruned.
+    let cutoff_utc = cutoff.with_timezone(&Utc);
     let manifest_path = log_dir.join(MANIFEST_FILE);
     let active_log_files: HashSet<String> = if manifest_path.exists() {
         fs::read_to_string(&manifest_path)
@@ -80,7 +84,7 @@ fn prune_old_logs(log_dir: &Path) {
             .filter_map(|line| {
                 serde_json::from_str::<SessionEntry>(line)
                     .ok()
-                    .filter(|e| e.ended.is_none())
+                    .filter(|e| e.ended.is_none() && e.started > cutoff_utc)
                     .map(|e| e.log_file)
             })
             .collect()
@@ -112,11 +116,9 @@ fn prune_old_logs(log_dir: &Path) {
     }
 
     // Prune manifest entries
-    let manifest_path = log_dir.join(MANIFEST_FILE);
     if !manifest_path.exists() {
         return;
     }
-    let cutoff_utc = cutoff.with_timezone(&Utc);
     let content = match fs::read_to_string(&manifest_path) {
         Ok(c) => c,
         Err(_) => return,
