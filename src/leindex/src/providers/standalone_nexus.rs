@@ -87,10 +87,13 @@ impl StandaloneNexusProvider {
                 continue;
             }
             let line = line.strip_prefix("export ").unwrap_or(line);
-            let Some(value) = line.strip_prefix("NEXUS_DATABASE_PATH=") else {
+            let mut parts = line.splitn(2, '=');
+            let key = parts.next().unwrap_or("").trim();
+            let value = parts.next().unwrap_or("").trim();
+            if key != "NEXUS_DATABASE_PATH" || value.is_empty() {
                 continue;
-            };
-            let value = value.trim().trim_matches('"').trim_matches('\'');
+            }
+            let value = value.trim_matches('"').trim_matches('\'');
             if value.is_empty() {
                 continue;
             }

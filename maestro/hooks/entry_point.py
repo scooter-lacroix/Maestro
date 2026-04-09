@@ -127,9 +127,10 @@ def run_hook(phase: str, event_name: str):
                 pass
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    if len(sys.argv) != 3:
         # sys.stderr is not hijacked yet at this point
         sys.stderr.write("Usage: entry_point.py <phase> <event_name>\n")
+        sys.stdout.write("{}")
         sys.exit(1)
 
     try:

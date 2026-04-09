@@ -279,10 +279,9 @@ pub fn init() -> Result<CockpitLogGuard> {
 
 impl Drop for CockpitLogGuard {
     fn drop(&mut self) {
-        // Flush the shared writer
-        if let Ok(mut guard) = self.shared.lock() {
-            let _ = guard.writer.flush();
-        }
+        // Flush the shared writer (recover from poisoned mutex)
+        let mut guard = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = guard.writer.flush();
 
         // Write completion entry to manifest
         let ended = Utc::now();
@@ -385,7 +384,7 @@ pub fn tail_log(log_path: &Path, n: usize) -> Result<Vec<String>> {
     let content = fs::read_to_string(log_path)?;
     let lines: Vec<String> = content
         .lines()
-        .filter(|l| !l.starts_with('#') && !l.starts_with('-'))
+        .filter(|l| !l.starts_with('#') && *l != "---")
         .rev()
         .take(n)
         .map(String::from)
