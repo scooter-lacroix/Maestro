@@ -56,7 +56,7 @@ struct App {
     install_log_path: PathBuf,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum Phase {
     Overture,
     Tuning,
@@ -280,14 +280,25 @@ fn main() -> Result<(), io::Error> {
         config_selection: 0,
         starred: true,
         password_cache: Arc::new(PasswordCache::new()),
-        install_log_path,
+        install_log_path: install_log_path.clone(),
     };
 
     let res = run_app(&mut terminal, app);
     cleanup_terminal(&mut terminal)?;
 
-    if let Err(err) = res {
-        println!("{:?}", err);
+    match res {
+        Ok(Phase::Ovation) => {}
+        Ok(phase) => {
+            append_install_log(
+                &install_log_path,
+                format!("Setup wizard exited before successful completion (phase: {:?})", phase),
+            );
+            std::process::exit(1);
+        }
+        Err(err) => {
+            println!("{:?}", err);
+            return Err(err);
+        }
     }
 
     Ok(())
@@ -516,7 +527,7 @@ fn run_headless_install() -> Result<(), io::Error> {
     Ok(())
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<Phase> {
     let tick_rate = Duration::from_millis(50);
     let mut last_tick = Instant::now();
 
@@ -820,7 +831,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
         }
 
         if app.should_quit {
-            return Ok(());
+            return Ok(app.phase);
         }
     }
 }

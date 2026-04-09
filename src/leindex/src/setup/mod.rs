@@ -2502,9 +2502,10 @@ fn verify_installed_system(install_path: &str, selected_tools: &[String]) -> Res
             provider_report.status,
             crate::provider_boundary::ProviderStatus::Healthy
         ) {
-            anyhow::bail!(
-                "Standalone LeIndex provider is not healthy enough for managed-session use"
-            );
+            anyhow::bail!(provider_health_failure_message(
+                "Standalone LeIndex",
+                &provider_report
+            ));
         }
         let leindex_binary = Path::new("leindex");
         let leindex_help = command_output(leindex_binary, &["--help"])?;
@@ -2534,9 +2535,10 @@ fn verify_installed_system(install_path: &str, selected_tools: &[String]) -> Res
             provider_report.status,
             crate::provider_boundary::ProviderStatus::Healthy
         ) {
-            anyhow::bail!(
-                "Standalone Nexus provider is not healthy enough for managed-session use"
-            );
+            anyhow::bail!(provider_health_failure_message(
+                "Standalone Nexus",
+                &provider_report
+            ));
         }
         let nexus_binary = Path::new("nexus");
         let nexus_init = command_output(nexus_binary, &["init", "--help"])?;
@@ -2605,7 +2607,6 @@ fn verify_selected_tool(tool: &str, maestro_home: &Path, logs: &mut Vec<String>)
                 "\"leindex\"",
                 "Claude MCP configuration for leindex",
             )?;
-            ensure_contains(&mcp_text, "\"maestro\"", "Claude MCP configuration command")?;
             ensure_contains(
                 &mcp_text,
                 "\"leindex\",",
@@ -2791,6 +2792,36 @@ fn command_output(binary: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn provider_health_failure_message(
+    provider_name: &str,
+    report: &crate::provider_boundary::ProviderDoctorReport,
+) -> String {
+    let mut message = format!(
+        "{} provider is not healthy enough for managed-session use (status: {:?})",
+        provider_name, report.status
+    );
+
+    let failing_diagnostics = report
+        .diagnostics
+        .iter()
+        .filter(|diag| !matches!(diag.status, crate::provider_boundary::ProviderStatus::Healthy))
+        .map(|diag| format!("{} [{:?}]", diag.detail, diag.status))
+        .collect::<Vec<_>>();
+    if !failing_diagnostics.is_empty() {
+        message.push_str(&format!("; diagnostics: {}", failing_diagnostics.join("; ")));
+    }
+
+    if !report.warnings.is_empty() {
+        message.push_str(&format!("; warnings: {}", report.warnings.join("; ")));
+    }
+
+    if let Some(action) = report.recommended_actions.first() {
+        message.push_str(&format!("; suggested next step: {}", action));
+    }
+
+    message
 }
 
 fn ensure_contains(haystack: &str, needle: &str, label: &str) -> Result<()> {

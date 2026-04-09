@@ -404,10 +404,10 @@ if ! command -v cargo &> /dev/null; then
     log "[!] Rust not found. Installing Rust via rustup..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y 2>>"$INSTALL_LOG"
     source $HOME/.cargo/env
-    if command -v cargo &> /dev/null; then
+    if cargo --version &> /dev/null; then
         log "[OK] Rust installed successfully"
     else
-        log "[ERROR] Rust install completed but 'cargo' not found on PATH"
+        log "[ERROR] Rust installation failed. 'cargo' could not execute natively."
         log "[DIAG] Try: source \$HOME/.cargo/env"
         exit 1
     fi
@@ -540,22 +540,42 @@ SETUP_BIN="$INSTALL_DIR/target/release/maestro-setup"
 log "[OK] Built setup binary at $SETUP_BIN"
 
 SETUP_SUCCESS=0
+SETUP_EXIT_CODE=0
+SETUP_LAUNCHED=0
+
+is_invocation_failure_output() {
+    local output="$1"
+    [[ "$output" == *"invalid option"* ]] \
+        || [[ "$output" == *"unknown option"* ]] \
+        || [[ "$output" == *"illegal option"* ]] \
+        || [[ "$output" == *"usage: script"* ]] \
+        || [[ "$output" == *"script: unexpected number of arguments"* ]] \
+        || [[ "$output" == *"failed to create pseudo-terminal"* ]] \
+        || [[ "$output" == *"openpty"* ]]
+}
 
 # Check for headless mode (non-interactive install)
 if [[ "${MAESTRO_HEADLESS:-}" == "1" || "${MAESTRO_HEADLESS:-}" == "true" ]]; then
     log "Running in headless mode (skipping interactive TUI)..."
+    SETUP_LAUNCHED=1
     if MAESTRO_HEADLESS=1 "$SETUP_BIN" --headless; then
         SETUP_SUCCESS=1
     else
-        log "[ERROR] Headless installation failed"
-        exit 1
+        SETUP_EXIT_CODE=$?
+        log "[ERROR] Headless installation failed (exit $SETUP_EXIT_CODE)"
+        exit "$SETUP_EXIT_CODE"
     fi
 # Check if we have a TTY for the TUI (need both stdin and stdout)
 elif [[ -t 0 && -t 1 ]]; then
     # Both stdin and stdout are TTYs, run directly
     log "Launching interactive setup wizard..."
+    SETUP_LAUNCHED=1
     if "$SETUP_BIN"; then
         SETUP_SUCCESS=1
+    else
+        SETUP_EXIT_CODE=$?
+        log "[ERROR] Interactive setup wizard failed (exit $SETUP_EXIT_CODE)"
+        exit "$SETUP_EXIT_CODE"
     fi
 else
     log "[WARN] No TTY detected. Attempting pseudo-terminal fallbacks..."
@@ -569,31 +589,61 @@ else
     setup_cmd=("${setup_env[@]}" "$SETUP_BIN")
     setup_script_cmd="$(printf '%q ' "${setup_cmd[@]}")"
 
-    # Try different methods to provide a pseudo-TTY
-    if command -v script &> /dev/null; then
-        # Try script command with different options
-        if script -q -c "$setup_script_cmd" /dev/null 2>/dev/null; then
-            SETUP_SUCCESS=1
-        elif script -qec "$setup_script_cmd" /dev/null 2>/dev/null; then
-            SETUP_SUCCESS=1
-        elif script "$setup_script_cmd" /dev/null 2>/dev/null; then
-            SETUP_SUCCESS=1
+    try_script_command() {
+        local script_args="$1"
+        if [[ $SETUP_SUCCESS -eq 1 || $SETUP_LAUNCHED -eq 1 ]]; then
+            return
         fi
+
+        log "Trying 'script ${script_args}'..."
+        setup_output="$(script ${script_args} "$setup_script_cmd" /dev/null 2>&1)"
+        setup_rc=$?
+        echo "$setup_output" >> "$INSTALL_LOG"
+        if [[ $setup_rc -eq 0 ]]; then
+            SETUP_LAUNCHED=1
+            SETUP_SUCCESS=1
+            log "[OK] Setup wizard launched successfully with 'script ${script_args}'"
+        elif is_invocation_failure_output "$setup_output"; then
+            log "[WARN] 'script ${script_args}' pseudo-terminal fallback is unavailable on this system"
+        else
+            SETUP_LAUNCHED=1
+            SETUP_EXIT_CODE=$setup_rc
+            log "[ERROR] Setup wizard failed while running under 'script ${script_args}' (exit $SETUP_EXIT_CODE)"
+            exit "$SETUP_EXIT_CODE"
+        fi
+    }
+
+    if command -v script &> /dev/null; then
+        try_script_command "-q -c"
+        try_script_command "-qec"
+        try_script_command ""
     fi
 
-    # If script command failed or isn't available, try expect
-    if [[ $SETUP_SUCCESS -eq 0 ]] && command -v expect &> /dev/null; then
+    # If script command failed to launch the setup wizard, try expect
+    if [[ $SETUP_SUCCESS -eq 0 && $SETUP_LAUNCHED -eq 0 ]] && command -v expect &> /dev/null; then
         log "Trying expect for pseudo-terminal..."
-        if expect -c "set timeout -1; spawn ${setup_script_cmd}; interact"; then
+        setup_output="$(expect -c "set timeout -1; spawn ${setup_script_cmd}; interact" 2>&1)"
+        setup_rc=$?
+        echo "$setup_output" >> "$INSTALL_LOG"
+        if [[ $setup_rc -eq 0 ]]; then
+            SETUP_LAUNCHED=1
             SETUP_SUCCESS=1
+        elif is_invocation_failure_output "$setup_output"; then
+            log "[WARN] expect pseudo-terminal fallback could not launch the setup wizard"
+            SETUP_EXIT_CODE=1
+        else
+            SETUP_LAUNCHED=1
+            SETUP_EXIT_CODE=$setup_rc
+            log "[ERROR] Setup wizard failed while running under expect (exit $SETUP_EXIT_CODE)"
+            exit "$SETUP_EXIT_CODE"
         fi
     fi
 fi
 
-# If all TTY methods failed, provide helpful error message
+# If all TTY methods failed to launch the wizard, provide helpful error message
 if [[ $SETUP_SUCCESS -eq 0 ]]; then
-    log "[ERROR] Setup wizard failed to run — no TTY available"
-    log "[DIAG] All pseudo-TTY fallbacks exhausted"
+    log "[ERROR] Setup wizard could not be launched because no working TTY path was available"
+    log "[DIAG] All pseudo-TTY fallbacks exhausted without starting the setup wizard"
     echo ""
     echo -e "${R}  [!] Setup wizard failed to run.${NC}"
     echo -e "${Y}      This installer requires an interactive terminal.${NC}"
@@ -620,7 +670,7 @@ if [[ "$INSTALL_DIR" == "$HOME/.maestro/install-temp" ]]; then
 fi
 
 # Final verification - ensure all components are installed
-log_section "Verifying installation..."
+log_section "Cross-checking installed artifacts..."
 VERIFY_FAILED=0
 
 check_file() {
@@ -669,10 +719,10 @@ check_output_contains() {
     fi
 }
 
-check_file "$HOME/.local/bin/maestro" "Maestro CLI binary"
-check_file "$HOME/.local/bin/maestro-cockpit" "Maestro Cockpit binary"
-check_file "$HOME/.local/bin/maestro-gateway" "Maestro Gateway binary"
-check_file "$HOME/.local/bin/maestro-lsp-mcp-bridge" "Maestro LSP bridge binary"
+check_command_surface "Maestro CLI binary" "$HOME/.local/bin/maestro" --help
+check_command_surface "Maestro Cockpit binary" "$HOME/.local/bin/maestro-cockpit" --help
+check_command_surface "Maestro Gateway binary" "$HOME/.local/bin/maestro-gateway" --help
+check_command_surface "Maestro LSP bridge binary" "$HOME/.local/bin/maestro-lsp-mcp-bridge" --help
 
 check_dir "$HOME/.maestro/integrations/commands" "Maestro command protocols"
 check_dir "$HOME/.maestro/agents" "Maestro agent definitions"

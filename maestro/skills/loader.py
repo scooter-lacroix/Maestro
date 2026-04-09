@@ -4,7 +4,7 @@ Maestro Skill Loader
 Handles loading and parsing of skill definitions from the filesystem.
 """
 
-import re
+import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,12 +21,21 @@ class SkillLoadError(Exception):
     """Error loading a skill."""
 
 
+# Directories inside skills/ that are NOT skill directories themselves.
+# We detect skill dirs by the presence of SKILL.md, so this list is used only
+# to skip non-skill infrastructure folders at the root of skills/.
+_INFRA_DIRS = frozenset(
+    {"__pycache__", "tests", "_sandbox", "agents", "hooks", "developer"}
+)
+
+
 class SkillLoader:
     """
     Loads skill definitions from the filesystem.
 
     Skills are stored as directories containing SKILL.md files
-    with YAML frontmatter.
+    with YAML frontmatter.  The loader supports arbitrary nesting depth
+    (e.g. math/math/linear-algebra/matrices/SKILL.md).
     """
 
     def __init__(self, skills_dir: Optional[Path] = None):
@@ -40,6 +49,10 @@ class SkillLoader:
             skills_dir = Path(__file__).parent
 
         self.skills_dir = skills_dir
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def load_skill(self, skill_path: Path) -> Optional[SkillDefinition]:
         """
@@ -73,150 +86,64 @@ class SkillLoader:
             if not frontmatter:
                 return None
 
-            # Extract skill name from directory
-            name = skill_path.name
+            # Determine category from relative directory structure
+            rel = skill_path.relative_to(self.skills_dir)
+            parts = list(rel.parts)
+            # The skill name is always the leaf directory name
+            name = parts[-1]
+            # Category is the first ancestor under skills_dir, if any
+            category = parts[0] if len(parts) > 1 else ""
 
-            # Determine category
-            category = ""
-            if skill_path.parent != self.skills_dir:
-                category = skill_path.parent.name
-
-            # Create skill definition
             return self._create_definition(name, frontmatter, skill_path, category, body)
 
         except Exception as e:
             raise SkillLoadError(f"Failed to load skill from {skill_path}: {e}")
 
-    def _parse_frontmatter(self, content: str) -> Tuple[Dict[str, Any], str]:
-        """
-        Parse YAML frontmatter from markdown content.
-
-        Args:
-            content: The markdown content with frontmatter.
-
-        Returns:
-            Tuple of (frontmatter_dict, body_content).
-        """
-        # Check for YAML frontmatter
-        frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
-
-        if not frontmatter_match:
-            return {}, content
-
-        frontmatter_str = frontmatter_match.group(1)
-        body = frontmatter_match.group(2)
-
-        # Simple YAML parsing for common keys
-        frontmatter = {}
-        for line in frontmatter_str.split("\n"):
-            if ":" in line:
-                key, value = line.split(":", 1)
-                frontmatter[key.strip()] = value.strip()
-
-        return frontmatter, body
-
-    def _create_definition(
-        self,
-        name: str,
-        frontmatter: Dict[str, Any],
-        path: Path,
-        category: str,
-        body: str
-    ) -> SkillDefinition:
-        """Create a SkillDefinition from parsed data."""
-
-        # Map type string to enum
-        type_map = {
-            "workflow": SkillType.WORKFLOW,
-            "domain": SkillType.DOMAIN,
-            "meta": SkillType.META,
-            "context": SkillType.CONTEXT,
-            "analysis": SkillType.ANALYSIS,
-            "research": SkillType.RESEARCH,
-            "quality": SkillType.QUALITY,
-            "planning": SkillType.PLANNING,
-            "math": SkillType.MATH,
-        }
-
-        # Determine type from frontmatter or category
-        type_str = frontmatter.get("type", category)
-        skill_type = type_map.get(type_str, SkillType.DOMAIN)
-
-        # Map priority
-        priority_map = {
-            "critical": Priority.CRITICAL,
-            "high": Priority.HIGH,
-            "medium": Priority.MEDIUM,
-            "low": Priority.LOW,
-        }
-        priority_str = frontmatter.get("priority", "medium").lower()
-        skill_priority = priority_map.get(priority_str, Priority.MEDIUM)
-
-        # Create empty triggers (will be loaded from skill-rules.json)
-        triggers = SkillTrigger()
-
-        # Map enforcement
-        enforcement_map = {
-            "suggest": Enforcement.SUGGEST,
-            "require": Enforcement.REQUIRE,
-            "block": Enforcement.BLOCK,
-        }
-        enforcement_str = frontmatter.get("enforcement", "suggest").lower()
-        skill_enforcement = enforcement_map.get(enforcement_str, Enforcement.SUGGEST)
-
-        return SkillDefinition(
-            name=name,
-            description=frontmatter.get("description", ""),
-            type=skill_type,
-            enforcement=skill_enforcement,
-            priority=skill_priority,
-            triggers=triggers,
-            category=category,
-            path=path,
-            frontmatter=frontmatter,
-        )
-
     def load_all_skills(self) -> Dict[str, SkillDefinition]:
         """
         Load all skills from the skills directory.
 
+        Uses recursive rglob so skills at any nesting depth are discovered:
+          skills_dir/skill-name/SKILL.md
+          skills_dir/category/skill-name/SKILL.md
+          skills_dir/category/subcategory/skill-name/SKILL.md   ← previously missed
+          skills_dir/math/math/linear-algebra/matrices/SKILL.md ← previously missed
+
         Returns:
             Dictionary mapping skill names to SkillDefinitions.
         """
-        skills = {}
+        skills: Dict[str, SkillDefinition] = {}
 
-        # Load from category directories
-        for category_dir in self.skills_dir.iterdir():
-            if not category_dir.is_dir():
+        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
+            skill_path = skill_file.parent
+
+            # Skip infrastructure directories at root of skills dir
+            rel_parts = skill_path.relative_to(self.skills_dir).parts
+            if rel_parts and rel_parts[0] in _INFRA_DIRS:
                 continue
 
-            # Skip non-category directories
-            if category_dir.name.startswith("_"):
+            try:
+                skill = self.load_skill(skill_path)
+            except SkillLoadError as e:
+                import warnings
+                warnings.warn(str(e), stacklevel=2)
                 continue
 
-            for skill_dir in category_dir.iterdir():
-                if not skill_dir.is_dir():
-                    continue
-
-                skill = self.load_skill(skill_dir)
-                if skill:
-                    skills[skill.name] = skill
-
-        # Load from root level
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
+            if skill is None:
                 continue
 
-            # Skip directories that are categories or special
-            if skill_dir.name in [
-                "meta", "context", "analysis", "research", "quality", "planning", "math",
-                "agents", "workflow", "hooks", "developer", "__pycache__"
-            ]:
-                continue
+            # Warn on name collision instead of silently overwriting
+            if skill.name in skills:
+                existing = skills[skill.name]
+                import warnings
+                warnings.warn(
+                    f"Skill name collision: '{skill.name}' loaded from both "
+                    f"'{existing.path}' and '{skill.path}'. "
+                    "The later one (alphabetically) will take precedence.",
+                    stacklevel=2,
+                )
 
-            skill = self.load_skill(skill_dir)
-            if skill:
-                skills[skill.name] = skill
+            skills[skill.name] = skill
 
         return skills
 
@@ -230,7 +157,6 @@ class SkillLoader:
         Returns:
             The skill content or None if not found.
         """
-        # Try to find the skill
         skill_path = self._find_skill_path(skill_name)
 
         if not skill_path:
@@ -250,69 +176,128 @@ class SkillLoader:
         with open(skill_file, "r", encoding="utf-8") as f:
             return f.read()
 
-    def _find_skill_path(self, skill_name: str) -> Optional[Path]:
-        """Find the path to a skill directory."""
-        # Check in categories first
-        for category_dir in self.skills_dir.iterdir():
-            if not category_dir.is_dir():
-                continue
-
-            skill_path = category_dir / skill_name
-            if skill_path.exists() and skill_path.is_dir():
-                return skill_path
-
-        # Check root level
-        skill_path = self.skills_dir / skill_name
-        if skill_path.exists() and skill_path.is_dir():
-            return skill_path
-
-        return None
-
     def list_skills(self) -> List[str]:
         """List all available skill names."""
-        skills = set()
-
-        for category_dir in self.skills_dir.iterdir():
-            if not category_dir.is_dir():
-                continue
-
-            if category_dir.name.startswith("_"):
-                continue
-
-            for skill_dir in category_dir.iterdir():
-                if skill_dir.is_dir():
-                    skills.add(skill_dir.name)
-
-        # Root level skills
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
-                continue
-
-            if skill_dir.name in [
-                "meta", "context", "analysis", "research", "quality", "planning", "math",
-                "agents", "workflow", "hooks", "developer", "__pycache__"
-            ]:
-                continue
-
-            skills.add(skill_dir.name)
-
-        return sorted(skills)
+        return sorted(self.load_all_skills().keys())
 
     def get_categories(self) -> List[str]:
         """Get all skill categories."""
-        categories = []
-
-        for item in self.skills_dir.iterdir():
-            if item.is_dir() and not item.name.startswith("_"):
-                # Check if it contains skills
-                has_skills = any(
-                    (item / s).is_dir() and (item / s / "SKILL.md").exists()
-                    for s in item.iterdir() if s.is_dir()
-                )
-                if has_skills:
-                    categories.append(item.name)
-
+        categories: set = set()
+        for skill in self.load_all_skills().values():
+            if skill.category:
+                categories.add(skill.category)
         return sorted(categories)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _parse_frontmatter(self, content: str) -> Tuple[Dict[str, Any], str]:
+        """
+        Parse YAML frontmatter from markdown content using yaml.safe_load.
+
+        Args:
+            content: The markdown content with frontmatter.
+
+        Returns:
+            Tuple of (frontmatter_dict, body_content).
+        """
+        if not content.startswith("---"):
+            return {}, content
+
+        # Find the closing ---
+        rest = content[3:]
+        close_idx = rest.find("\n---")
+        if close_idx == -1:
+            return {}, content
+
+        frontmatter_str = rest[:close_idx]
+        body = rest[close_idx + 4:].lstrip("\n")
+
+        try:
+            frontmatter = yaml.safe_load(frontmatter_str) or {}
+        except yaml.YAMLError:
+            return {}, content
+
+        if not isinstance(frontmatter, dict):
+            return {}, content
+
+        return frontmatter, body
+
+    def _find_skill_path(self, skill_name: str) -> Optional[Path]:
+        """Find the path to a skill directory by name (recursive)."""
+        for skill_file in self.skills_dir.rglob("SKILL.md"):
+            if skill_file.parent.name == skill_name:
+                return skill_file.parent
+        return None
+
+    def _create_definition(
+        self,
+        name: str,
+        frontmatter: Dict[str, Any],
+        path: Path,
+        category: str,
+        body: str
+    ) -> SkillDefinition:
+        """Create a SkillDefinition from parsed data."""
+
+        type_map = {
+            "workflow": SkillType.WORKFLOW,
+            "domain": SkillType.DOMAIN,
+            "meta": SkillType.META,
+            "context": SkillType.CONTEXT,
+            "analysis": SkillType.ANALYSIS,
+            "research": SkillType.RESEARCH,
+            "quality": SkillType.QUALITY,
+            "planning": SkillType.PLANNING,
+            "math": SkillType.MATH,
+        }
+
+        # Determine type from frontmatter or category
+        type_str = frontmatter.get("type", category)
+        skill_type = type_map.get(str(type_str).lower(), SkillType.DOMAIN)
+
+        priority_map = {
+            "critical": Priority.CRITICAL,
+            "high": Priority.HIGH,
+            "medium": Priority.MEDIUM,
+            "low": Priority.LOW,
+        }
+        priority_str = str(frontmatter.get("priority", "medium")).lower()
+        skill_priority = priority_map.get(priority_str, Priority.MEDIUM)
+
+        # Create empty triggers (will be merged from skill-rules.json by registry)
+        triggers = SkillTrigger()
+
+        enforcement_map = {
+            "suggest": Enforcement.SUGGEST,
+            "require": Enforcement.REQUIRE,
+            "block": Enforcement.BLOCK,
+        }
+        enforcement_str = str(frontmatter.get("enforcement", "suggest")).lower()
+        skill_enforcement = enforcement_map.get(enforcement_str, Enforcement.SUGGEST)
+
+        # Parse user-invocable field (was previously ignored)
+        raw_invocable = frontmatter.get("user-invocable", None)
+        if raw_invocable is None:
+            user_invocable = True  # default: user can invoke
+        elif isinstance(raw_invocable, bool):
+            user_invocable = raw_invocable
+        else:
+            user_invocable = str(raw_invocable).lower() not in ("false", "no", "0")
+
+        return SkillDefinition(
+            name=name,
+            description=frontmatter.get("description", ""),
+            type=skill_type,
+            enforcement=skill_enforcement,
+            priority=skill_priority,
+            triggers=triggers,
+            category=category,
+            path=path,
+            frontmatter=frontmatter,
+            user_invocable=user_invocable,
+        )
 
 
 def load_all_skills(skills_dir: Optional[Path] = None) -> Dict[str, SkillDefinition]:

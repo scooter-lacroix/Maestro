@@ -359,15 +359,17 @@ enum MemoryCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("maestro=info".parse()?),
-        )
-        .init();
-
     let cli = Cli::parse();
+
+    // Skip CLI logging init for TUI — cockpit installs its own file-writing subscriber
+    if !matches!(cli.command, Commands::Tui) {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive("maestro=info".parse()?),
+            )
+            .init();
+    }
 
     match cli.command {
         Commands::Analyze {

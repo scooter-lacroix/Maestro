@@ -337,10 +337,10 @@ def leindex_context_hook(input_data: dict) -> dict:
             context_prefix = ""
 
             if code_context:
-                context_prefix += f"<!-- LeIndex Code Context -->\n{code_context}\n\n"
+                context_prefix += f"[LeIndex Code Context]\n{code_context}\n\n"
 
             if memories:
-                context_prefix += "<!-- Related Memories -->\n"
+                context_prefix += "[Related Memories]\n"
                 for mem in memories[:2]:
                     context_prefix += f"- {mem['summary']}\n"
                 context_prefix += "\n"

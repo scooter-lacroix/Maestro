@@ -1,3 +1,9 @@
+---
+name: recall
+description: "Semantic memory retrieval that queries stored learnings from past sessions"
+user-invocable: true
+---
+
 # Recall - Semantic Memory Retrieval
 
 Query the memory system for relevant learnings from past sessions.
@@ -24,11 +30,22 @@ Query the memory system for relevant learnings from past sessions.
 
 ## Execution
 
-When this skill is invoked, run:
+When this skill is invoked:
 
-```bash
-cd $CLAUDE_PROJECT_DIR/opc && PYTHONPATH=. uv run python scripts/recall_learnings.py --query "<ARGS>" --k 5
-```
+1. Determine the memory stack root:
+   ```bash
+   MEMORY_DIR="${MAESTRO_MEMORY_DIR:-$CLAUDE_PROJECT_DIR/opc}"
+   ```
+
+2. Check that the recall script exists before running:
+   ```bash
+   if [ ! -f "$MEMORY_DIR/scripts/recall_learnings.py" ]; then
+     echo "⚠️  Recall unavailable: memory stack not found at $MEMORY_DIR"
+     echo "   Set MAESTRO_MEMORY_DIR to your OPC installation path."
+     exit 0
+   fi
+   cd "$MEMORY_DIR" && PYTHONPATH=. uv run python scripts/recall_learnings.py --query "<ARGS>" --k 5
+   ```
 
 Where `<ARGS>` is the query provided by the user.
 

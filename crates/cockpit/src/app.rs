@@ -101,6 +101,16 @@ pub mod tabs {
 }
 
 pub async fn run() -> Result<()> {
+    // Initialize file logging (before anything else so all operations are captured)
+    // Non-fatal: if logging can't start (disk full, unwritable path), continue without it
+    let _log_guard = match crate::cockpit_log::init() {
+        Ok(guard) => Some(guard),
+        Err(err) => {
+            eprintln!("Warning: failed to initialize cockpit logging: {err}");
+            None
+        }
+    };
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -797,6 +807,28 @@ fn submit_maestroclaw_prompt(app: &mut App) {
 }
 
 impl App {
+    pub fn create_session_manager(
+        &mut self,
+        svc: &leindex_core::memory::MemoryService,
+    ) -> Option<leindex_core::memory::session_manager::SessionManager> {
+        let mut manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
+            Ok(m) => m,
+            Err(e) => {
+                self.status_message = format!("Failed to create session manager: {}", e);
+                return None;
+            }
+        };
+
+        if let Some(lsp_manager) = self.lsp_manager.clone() {
+            manager = manager.with_lsp_manager(lsp_manager);
+        } else if let Some(storage) = self.storage_backend.as_ref() {
+            let lsp_manager = leindex_core::memory::lsp_manager::LspManager::new((**storage).clone());
+            self.lsp_manager = Some(lsp_manager.clone());
+            manager = manager.with_lsp_manager(lsp_manager);
+        }
+        Some(manager)
+    }
+
     fn new(
         _service: Option<&MemoryService>,
         mcp_pool: Option<Arc<McpPool>>,
@@ -2399,14 +2431,11 @@ async fn run_app<B: Backend>(
                                         // let _ = terminal.draw(|frame| ui(frame, \u0026mut app));
 
                                         if let Some(svc) = service.as_ref() {
-                                            let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
-                                                Ok(m) => m,
-                                                Err(e) => {
-                                                    app.status_message = format!("Failed to create session manager: {}", e);
-                                                    app.is_spawning = false;
-                                                    continue;
-                                                }
+                                            let Some(manager) = app.create_session_manager(svc) else {
+                                                app.is_spawning = false;
+                                                continue;
                                             };
+
                                             match manager.create_session(
                                                 &app.new_session_title,
                                                 &app.new_session_path,
@@ -2670,21 +2699,17 @@ async fn run_app<B: Backend>(
                                     InputMode::ForkSession => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
-                                                if let Some(orig) =
-                                                    app.sessions.iter().find(|s| s.session_id == id)
-                                                {
-                                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
-                                                        Ok(m) => m,
-                                                        Err(e) => {
-                                                            app.status_message = format!("Failed to create session manager: {}", e);
-                                                            app.input_mode = InputMode::Normal;
-                                                            continue;
-                                                        }
+                                                let orig = app.sessions.iter().find(|s| s.session_id == id).cloned();
+                                                if let Some(orig) = orig {
+                                                    let Some(manager) = app.create_session_manager(svc) else {
+                                                        app.input_mode = InputMode::Normal;
+                                                        continue;
                                                     };
+
                                                     let _ = manager.fork_session(
                                                         &id,
                                                         &app.rename_buffer,
-                                                        orig,
+                                                        &orig,
                                                     );
                                                     app.status_message = format!(
                                                         "Session forked as {}",
@@ -2703,13 +2728,10 @@ async fn run_app<B: Backend>(
                                     InputMode::KillConfirm | InputMode::DeleteConfirm => {
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
-                                                let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
-                                                    Ok(m) => m,
-                                                    Err(e) => {
-                                                        app.status_message = format!("Failed to create session manager: {}", e);
-                                                        continue;
-                                                    }
+                                                let Some(manager) = app.create_session_manager(svc) else {
+                                                    continue;
                                                 };
+
                                                 match manager.kill_session(&id) {
                                                     Ok(()) => {
                                                         if app.input_mode
@@ -6505,7 +6527,8 @@ fn ui(frame: &mut Frame, app: &mut App) {
         .split(frame.area());
 
     // Header with tabs
-    let is_focused = app.tab_index == tabs::DASHBOARD && app.dash_focus == DashFocus::Tabs;
+    let is_focused = (app.tab_index == tabs::DASHBOARD && app.dash_focus == DashFocus::Tabs)
+        || (app.tab_index == tabs::MAESTROCLAW && app.maestroclaw_pane.is_session_browser_active());
     let tabs = Tabs::new(tabs::all_titles())
         .block(
             Block::default()
@@ -6516,7 +6539,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
                     BorderType::Rounded
                 })
                 .border_style(if is_focused {
-                    Style::default().fg(theme.warning).bold()
+                    Style::default().fg(theme.accent_alt).bold()
                 } else {
                     Style::default().fg(theme.muted)
                 })
@@ -6571,7 +6594,7 @@ fn ui(frame: &mut Frame, app: &mut App) {
         Span::raw(" Tabs  "),
         Span::styled(" n ", Style::default().bg(Color::Green).fg(Color::Black)),
         Span::raw(" New  "),
-        Span::styled(" s ", Style::default().bg(Color::Magenta).fg(Color::Black)),
+        Span::styled(" s ", Style::default().bg(theme.accent_alt).fg(Color::Black)),
         Span::raw(" Switch "),
         Span::styled(" / ", Style::default().bg(Color::Yellow).fg(Color::Black)),
         Span::raw(" Help "),
@@ -6805,7 +6828,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(" Welcome ")
-        .title_style(Style::default().fg(Color::Magenta));
+        .title_style(Style::default().fg(theme.accent_alt));
 
     // Updated welcome section with multi-layer architecture diagram & ANIMATION
     let anim_char = match (app.frame_count / 10) % 4 {
@@ -6815,9 +6838,9 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
         _ => "⠸",
     };
     let welcome_color = if (app.frame_count / 20) % 2 == 0 {
-        Color::Magenta
+        theme.accent_alt
     } else {
-        Color::LightMagenta
+        theme.accent
     };
 
     let welcome_text = vec![
@@ -6871,7 +6894,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("    ● ", Style::default().fg(Color::Magenta)),
+            Span::styled("    ● ", Style::default().fg(theme.accent_alt)),
             Span::styled("Analysis: ", Style::default().fg(Color::Cyan).bold()),
             Span::raw("Structural code intelligence."),
             Span::styled(
@@ -7648,6 +7671,7 @@ fn render_analysis(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
@@ -7874,7 +7898,7 @@ fn render_sessions(frame: &mut Frame, area: Rect, app: &mut App) {
                 preview_lines.push(Line::from(vec![
                     Span::styled(
                         format!(" {} ", s.tool.as_deref().unwrap_or("shell")),
-                        Style::default().bg(Color::Magenta).fg(Color::Black),
+                        Style::default().bg(theme.accent_alt).fg(Color::Black),
                     ),
                     Span::raw(" "),
                     Span::styled(

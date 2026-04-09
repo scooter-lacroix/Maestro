@@ -1432,6 +1432,35 @@ impl LspManager {
 
         // Start each recommended LSP (with MCP bridge for diagnostics)
         for lsp_type in recommended_lsps {
+            let lsp_key = format!("{}:{}", session_id, lsp_type.binary_name());
+
+            // Check if the LSP process is already running or starting (e.g. from
+            // restore_lsps_on_startup). If it is, we only need to start the MCP
+            // bridge — not a second LSP process.
+            let already_running = {
+                let running = self.running_lsps.read().await;
+                running
+                    .get(&lsp_key)
+                    .map_or(false, |p| {
+                        p.status == LspStatus::Running || p.status == LspStatus::Starting
+                    })
+            };
+
+            if already_running {
+                debug!(
+                    "LSP '{}' already running/starting for session '{}', starting MCP bridge only",
+                    lsp_type.display_name(),
+                    session_id
+                );
+                match self.start_mcp_bridge(session_id, lsp_type, project_path).await {
+                    Ok(_) | Err(_) => {
+                        // Bridge start is best-effort; LSP is already available
+                        started_lsps.push(lsp_type);
+                    }
+                }
+                continue;
+            }
+
             let (result, _bridge_pid) = self
                 .start_lsp_with_mcp_bridge(session_id, lsp_type, project_path, None)
                 .await;
@@ -1487,6 +1516,27 @@ impl LspManager {
             }
         };
 
+        // Build a session_id -> project_path lookup so we can filter LSPs by
+        // the session's actual project languages instead of blindly restoring
+        // everything that was previously saved (which may be stale).
+        let session_projects: std::collections::HashMap<String, String> = self
+            .storage
+            .list_sessions()
+            .await
+            .map(|sessions| {
+                sessions
+                    .into_iter()
+                    .filter_map(|s| {
+                        if s.project_path.trim().is_empty() {
+                            None
+                        } else {
+                            Some((s.session_id, s.project_path))
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         debug!(
             "Found {} auto-start LSP states to restore",
             auto_start_states.len()
@@ -1508,38 +1558,76 @@ impl LspManager {
             };
 
             // Only restart if the LSP was previously running
-            if state.status == LspStatus::Running || state.status == LspStatus::Starting {
-                info!(
-                    "Restoring LSP '{}' for session '{}'",
-                    lsp_type.display_name(),
-                    state.session_id
-                );
-
-                match self.start_lsp(&state.session_id, lsp_type, None).await {
-                    Ok(()) => {
-                        info!(
-                            "Successfully restored LSP '{}' for session '{}'",
-                            lsp_type.display_name(),
-                            state.session_id
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to restore LSP '{}' for session '{}': {}",
-                            lsp_type.display_name(),
-                            state.session_id,
-                            e
-                        );
-                        // Continue with other LSPs - graceful degradation
-                    }
-                }
-            } else {
+            if state.status != LspStatus::Running && state.status != LspStatus::Starting {
                 debug!(
                     "Skipping restoration of LSP '{}' for session '{}' (status: {})",
                     lsp_type.display_name(),
                     state.session_id,
                     state.status
                 );
+                continue;
+            }
+
+            // Filter by project language detection to avoid restoring LSPs that
+            // don't match the session's actual project languages.
+            if let Some(project_path) = session_projects.get(&state.session_id) {
+                let path = std::path::Path::new(project_path);
+                if path.exists() {
+                    match self.detect_languages_from_project(path).await {
+                        Ok(detected) if !detected.contains(&lsp_type) => {
+                            info!(
+                                "Skipping restoration of LSP '{}' for session '{}' — not detected in project at '{}'",
+                                lsp_type.display_name(),
+                                state.session_id,
+                                project_path
+                            );
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Failed to detect languages for session '{}': {}, restoring anyway",
+                                state.session_id, e
+                            );
+                        }
+                        _ => {} // language detected, proceed with restoration
+                    }
+                }
+            } else {
+                debug!(
+                    "No project path found for session '{}', restoring LSP '{}' without language filter",
+                    state.session_id,
+                    lsp_type.display_name()
+                );
+            }
+
+            info!(
+                "Restoring LSP '{}' for session '{}'",
+                lsp_type.display_name(),
+                state.session_id
+            );
+
+            let config = LspConfig {
+                auto_start: state.auto_start,
+                use_proxy: state.use_proxy,
+                ..Default::default()
+            };
+            match self.start_lsp(&state.session_id, lsp_type, Some(config)).await {
+                Ok(()) => {
+                    info!(
+                        "Successfully restored LSP '{}' for session '{}'",
+                        lsp_type.display_name(),
+                        state.session_id
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to restore LSP '{}' for session '{}': {}",
+                        lsp_type.display_name(),
+                        state.session_id,
+                        e
+                    );
+                    // Continue with other LSPs - graceful degradation
+                }
             }
         }
 

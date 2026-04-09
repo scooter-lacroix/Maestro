@@ -17,6 +17,9 @@ from typing import Optional, Dict, Any, List
 try:
     from loguru import logger
     LOGURU_AVAILABLE = True
+    # Ensure loguru only prints to stderr to avoid polluting stdout (which Claude needs for JSON)
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
 except ImportError:
     LOGURU_AVAILABLE = False
     # Create a simple fallback logger
@@ -24,13 +27,13 @@ except ImportError:
         def debug(self, msg, *args, **kwargs):
             pass
         def info(self, msg, *args, **kwargs):
-            print(f"INFO: {msg}")
+            print(f"INFO: {msg}", file=sys.stderr)
         def warning(self, msg, *args, **kwargs):
-            print(f"WARNING: {msg}")
+            print(f"WARNING: {msg}", file=sys.stderr)
         def error(self, msg, *args, **kwargs):
-            print(f"ERROR: {msg}")
+            print(f"ERROR: {msg}", file=sys.stderr)
         def critical(self, msg, *args, **kwargs):
-            print(f"CRITICAL: {msg}")
+            print(f"CRITICAL: {msg}", file=sys.stderr)
 
     logger = LoggerStub()
 
@@ -55,16 +58,19 @@ def get_python_executable() -> str:
         Path to Python executable
     """
     # Priority 1: Current Python executable (best for venvs)
-    if sys.executable:
-        return sys.executable
+    exe = sys.executable
+    if exe is not None and exe.strip() != "":
+        return exe
 
     # Try python3 next (Unix-like systems)
-    if shutil.which("python3"):
-        return "python3"
+    exe3 = shutil.which("python3")
+    if exe3 is not None:
+        return exe3
 
     # Try python last (Windows, some Unix systems)
-    if shutil.which("python"):
-        return "python"
+    exe_fallback = shutil.which("python")
+    if exe_fallback is not None:
+        return exe_fallback
 
     return "python"
 
@@ -170,8 +176,15 @@ class HookExecutor:
             return input_data.copy()
 
         try:
+            # Validate and sanitize input data format
+            if not isinstance(input_data, dict):
+                input_data = {}
+            
             # Run the hook as a subprocess with cross-platform Python executable
             python_exe = get_python_executable()
+            if not python_exe:
+                python_exe = "python"
+                
             result = subprocess.run(
                 [python_exe, str(hook_path)],
                 input=json.dumps(input_data),
@@ -193,6 +206,10 @@ class HookExecutor:
         except subprocess.TimeoutExpired:
             logger.error(f"Hook {phase}/{hook_name} timed out")
             input_data["hook_error"] = "Timeout"
+            return input_data
+        except FileNotFoundError:
+            logger.error(f"Python executable not found for hook {phase}/{hook_name}")
+            input_data["hook_error"] = "Python Executable Missing"
             return input_data
         except json.JSONDecodeError as e:
             logger.error(f"Hook {phase}/{hook_name} returned invalid JSON: {e}")
@@ -229,7 +246,15 @@ class HookExecutor:
         for hook_path in hooks:
             hook_name = hook_path.stem
             result = self.execute_hook(phase, hook_name, output_data)
-            output_data = result
+            # Merge result into output_data to preserve state even if the hook returns a fresh dict
+            if isinstance(result, dict):
+                output_data.update(result)
+            else:
+                logger.warning(
+                    "Hook '%s' returned non-dict type %s; skipping merge to preserve pipeline state",
+                    hook_name,
+                    type(result).__name__,
+                )
 
             phase_results.append({
                 "hook": hook_name,
@@ -330,12 +355,28 @@ class HookExecutor:
                 "stderr": result.stderr.strip(),
                 "stdout": result.stdout.strip(),
             }
+        except subprocess.TimeoutExpired:
+            return {
+                "phase": phase,
+                "command": [nexus_bin, *args],
+                "success": False,
+                "stderr": "Nexus connection or execution timed out.",
+                "stdout": "",
+            }
+        except FileNotFoundError:
+            return {
+                "phase": phase,
+                "command": [nexus_bin, *args],
+                "success": False,
+                "stderr": "Nexus executable not found.",
+                "stdout": "",
+            }
         except Exception as exc:
             return {
                 "phase": phase,
                 "command": [nexus_bin, *args],
                 "success": False,
-                "stderr": str(exc),
+                "stderr": f"Network or execution failure: {str(exc)}",
                 "stdout": "",
             }
 

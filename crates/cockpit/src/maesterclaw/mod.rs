@@ -31,7 +31,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 use std::collections::HashSet;
@@ -132,6 +132,41 @@ pub struct ChannelStatusDisplay {
     pub config_status: String,
 }
 
+/// Which sub-pane within the MaestroClaw view currently has keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedPane {
+    /// Left sidebar – session rail
+    SessionRail,
+    /// Center column – agent output + input
+    AgentPanel,
+    /// Right column – quick actions / status / setup
+    CommandPalette,
+}
+
+impl Default for FocusedPane {
+    fn default() -> Self {
+        Self::AgentPanel
+    }
+}
+
+impl FocusedPane {
+    pub fn next(self) -> Self {
+        match self {
+            Self::SessionRail => Self::AgentPanel,
+            Self::AgentPanel => Self::CommandPalette,
+            Self::CommandPalette => Self::SessionRail,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::SessionRail => Self::CommandPalette,
+            Self::AgentPanel => Self::SessionRail,
+            Self::CommandPalette => Self::AgentPanel,
+        }
+    }
+}
+
 /// MaestroClaw pane state for the TUI
 #[derive(Debug, Clone)]
 pub struct MaestroClawPane {
@@ -160,6 +195,8 @@ pub struct MaestroClawPane {
     pub cron_jobs: Vec<CronJobDisplay>,
     /// Channel status display entries
     pub channel_statuses: Vec<ChannelStatusDisplay>,
+    /// Which sub-pane has keyboard focus
+    pub focused_pane: FocusedPane,
 }
 
 impl MaestroClawPane {
@@ -185,6 +222,7 @@ impl MaestroClawPane {
             view_mode: ClawViewMode::Agent,
             cron_jobs: Vec::new(),
             channel_statuses: Vec::new(),
+            focused_pane: FocusedPane::default(),
         }
     }
 
@@ -314,20 +352,29 @@ impl MaestroClawPane {
             ])
             .split(main_chunks[2]);
 
+        let agent_panel_focused = self.focused_pane == FocusedPane::AgentPanel;
+        let command_palette_focused = self.focused_pane == FocusedPane::CommandPalette;
+
         self.render_session_rail(frame, main_chunks[0], app);
-        self.render_agent_summary(frame, center_chunks[0]);
-        self.render_agent_output(frame, center_chunks[1]);
-        self.render_input_box(frame, center_chunks[2]);
-        self.render_command_palette(frame, right_chunks[0]);
-        self.render_status_sidebar(frame, right_chunks[1]);
-        self.render_setup_sidebar(frame, right_chunks[2]);
+        self.render_agent_summary(frame, center_chunks[0], agent_panel_focused);
+        self.render_agent_output(frame, center_chunks[1], agent_panel_focused);
+        self.render_input_box(frame, center_chunks[2], agent_panel_focused);
+        self.render_command_palette(frame, right_chunks[0], command_palette_focused);
+        self.render_status_sidebar(frame, right_chunks[1], command_palette_focused);
+        self.render_setup_sidebar(frame, right_chunks[2], command_palette_focused);
     }
 
     fn render_session_rail(&self, frame: &mut Frame, area: Rect, app: Option<&crate::app::App>) {
+        let is_focused = self.focused_pane == FocusedPane::SessionRail;
         let block = Block::default()
-            .title(" Sessions ")
+            .title(if is_focused { " [Sessions] ● " } else { " Sessions " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::LightBlue));
+            .border_type(if is_focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if is_focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::LightBlue)
+            });
 
         let mut lines = vec![
             Line::from(vec![
@@ -349,8 +396,10 @@ impl MaestroClawPane {
                 Style::default().fg(Color::DarkGray),
             )));
         } else {
+            // SAFETY: app is guaranteed Some here — the if-branch covers both
+            // None and Some(empty-sessions), so else means Some(non-empty).
+            let app = app.unwrap();
             for (idx, session) in app
-                .expect("checked Some app above")
                 .sessions
                 .iter()
                 .take(8)
@@ -365,9 +414,9 @@ impl MaestroClawPane {
                 let marker = if is_live {
                     "●"
                 } else if is_selected {
-                    "▶"
+                    "»"
                 } else {
-                    "•"
+                    " "
                 };
                 let title = if session.title.len() > 22 {
                     format!("{}...", &session.title[..22])
@@ -379,6 +428,8 @@ impl MaestroClawPane {
                         format!("{} ", marker),
                         Style::default().fg(if is_live {
                             Color::Green
+                        } else if is_selected {
+                            Color::Yellow
                         } else {
                             Color::DarkGray
                         }),
@@ -387,7 +438,7 @@ impl MaestroClawPane {
                         title,
                         if is_selected || is_live {
                             Style::default()
-                                .fg(Color::White)
+                                .fg(if is_selected { Color::Yellow } else { Color::White })
                                 .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(Color::Gray)
@@ -410,11 +461,16 @@ impl MaestroClawPane {
         );
     }
 
-    fn render_agent_summary(&self, frame: &mut Frame, area: Rect) {
+    fn render_agent_summary(&self, frame: &mut Frame, area: Rect, focused: bool) {
         let block = Block::default()
-            .title(" Agent Panel ")
+            .title(if focused { " [Agent Panel] ● " } else { " Agent Panel " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green));
+            .border_type(if focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Green)
+            });
 
         let status = self.claw_session.as_ref().map(|session| {
             let status = match session.status {
@@ -519,11 +575,16 @@ impl MaestroClawPane {
         );
     }
 
-    fn render_agent_output(&self, frame: &mut Frame, area: Rect) {
+    fn render_agent_output(&self, frame: &mut Frame, area: Rect, focused: bool) {
         let block = Block::default()
-            .title(" Interaction Feed ")
+            .title(if focused { " [Interaction Feed] ● " } else { " Interaction Feed " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue));
+            .border_type(if focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Blue)
+            });
 
         let lines: Vec<Line> = if self.agent_output.is_empty() {
             vec![
@@ -576,11 +637,16 @@ impl MaestroClawPane {
         );
     }
 
-    fn render_input_box(&self, frame: &mut Frame, area: Rect) {
+    fn render_input_box(&self, frame: &mut Frame, area: Rect, focused: bool) {
         let block = Block::default()
-            .title(" Prompt ")
+            .title(if focused { " [Prompt] ● " } else { " Prompt " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta));
+            .border_type(if focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Magenta)
+            });
 
         let prompt = if self.user_input.is_empty() {
             "Type a prompt for the active CLI bridge..."
@@ -600,11 +666,16 @@ impl MaestroClawPane {
         );
     }
 
-    fn render_command_palette(&self, frame: &mut Frame, area: Rect) {
+    fn render_command_palette(&self, frame: &mut Frame, area: Rect, focused: bool) {
         let block = Block::default()
-            .title(" Quick Actions ")
+            .title(if focused { " [Quick Actions] ● " } else { " Quick Actions " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow));
+            .border_type(if focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Yellow)
+            });
 
         let lines = vec![
             Line::from("[n] new claw session"),
@@ -617,11 +688,16 @@ impl MaestroClawPane {
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
-    fn render_status_sidebar(&self, frame: &mut Frame, area: Rect) {
+    fn render_status_sidebar(&self, frame: &mut Frame, area: Rect, focused: bool) {
         let block = Block::default()
-            .title(" Runtime Status ")
+            .title(if focused { " [Runtime Status] ● " } else { " Runtime Status " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_type(if focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Cyan)
+            });
 
         let view_label = match self.view_mode {
             ClawViewMode::Agent => "agent",
@@ -669,11 +745,16 @@ impl MaestroClawPane {
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
-    fn render_setup_sidebar(&self, frame: &mut Frame, area: Rect) {
+    fn render_setup_sidebar(&self, frame: &mut Frame, area: Rect, focused: bool) {
         let block = Block::default()
-            .title(" Setup Readiness ")
+            .title(if focused { " [Setup Readiness] ● " } else { " Setup Readiness " })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green));
+            .border_type(if focused { BorderType::Double } else { BorderType::Rounded })
+            .border_style(if focused {
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Green)
+            });
 
         let selected_channels = self.wizard.selected_channels.len();
         let primary_tool = self
@@ -1529,6 +1610,14 @@ impl MaestroClawPane {
                 crossterm::event::KeyCode::Enter => MaestroClawAction::OpenSelected,
                 crossterm::event::KeyCode::Up | crossterm::event::KeyCode::Down => {
                     MaestroClawAction::Navigate
+                }
+                crossterm::event::KeyCode::Tab => {
+                    self.focused_pane = self.focused_pane.next();
+                    MaestroClawAction::FocusChanged
+                }
+                crossterm::event::KeyCode::BackTab => {
+                    self.focused_pane = self.focused_pane.prev();
+                    MaestroClawAction::FocusChanged
                 }
                 _ => MaestroClawAction::None,
             }
