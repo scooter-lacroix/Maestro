@@ -822,7 +822,9 @@ impl App {
         if let Some(lsp_manager) = self.lsp_manager.clone() {
             manager = manager.with_lsp_manager(lsp_manager);
         } else if let Some(storage) = self.storage_backend.as_ref() {
-            manager = manager.with_lsp_manager(leindex_core::memory::lsp_manager::LspManager::new((**storage).clone()));
+            let lsp_manager = leindex_core::memory::lsp_manager::LspManager::new((**storage).clone());
+            self.lsp_manager = Some(lsp_manager.clone());
+            manager = manager.with_lsp_manager(lsp_manager);
         }
         Some(manager)
     }

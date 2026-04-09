@@ -128,5 +128,10 @@ if __name__ == "__main__":
         # sys.stderr is not hijacked yet at this point
         sys.stderr.write("Usage: entry_point.py <phase> <event_name>\n")
         sys.exit(1)
-        
-    run_hook(sys.argv[1], sys.argv[2])
+
+    try:
+        run_hook(sys.argv[1], sys.argv[2])
+    except Exception as e:
+        sys.stderr.write(f"FATAL HOOK ERROR: {e}\n")
+        sys.stdout.write("{}")
+        sys.exit(1)

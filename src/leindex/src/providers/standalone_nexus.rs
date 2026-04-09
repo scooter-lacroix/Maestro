@@ -298,7 +298,7 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     /// Global lock to serialize env-mutating tests (parallel default in cargo test)
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(Mutex::new);
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     /// Guard that saves environment variables on creation and restores them on Drop.
     /// Acquires ENV_LOCK to prevent concurrent env mutation across threads.

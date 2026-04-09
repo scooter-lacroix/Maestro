@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -71,13 +71,34 @@ fn prune_old_logs(log_dir: &Path) {
     let cutoff = Local::now() - chrono::Duration::days(MAX_LOG_AGE_DAYS as i64);
     let cutoff_str = cutoff.format("%Y%m%d").to_string();
 
-    // Prune log files
+    // Load active session filenames (ended == None) to protect from deletion
+    let manifest_path = log_dir.join(MANIFEST_FILE);
+    let active_log_files: HashSet<String> = if manifest_path.exists() {
+        fs::read_to_string(&manifest_path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                serde_json::from_str::<SessionEntry>(line)
+                    .ok()
+                    .filter(|e| e.ended.is_none())
+                    .map(|e| e.log_file)
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    // Prune log files (skip files belonging to still-active sessions)
     if let Ok(entries) = fs::read_dir(log_dir) {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             // Only prune cockpit log files, never the manifest
             if name_str.starts_with("cockpit-") && name_str.ends_with(".log") {
+                // Skip if this file belongs to an active session
+                if active_log_files.contains(name_str.as_ref()) {
+                    continue;
+                }
                 // Extract date portion: cockpit-YYYYMMDD_...
                 if let Some(date_part) = name_str.strip_prefix("cockpit-") {
                     if let Some(date) = date_part.get(..8) {
