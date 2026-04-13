@@ -19,6 +19,10 @@ interface MarkdownEditorProps {
 export function MarkdownEditor({ value, onChange }: MarkdownEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const onChangeRef = useRef(onChange);
+
+  // Keep onChangeRef.current up to date
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -55,7 +59,7 @@ export function MarkdownEditor({ value, onChange }: MarkdownEditorProps) {
         EditorView.lineWrapping,
         EditorView.updateListener.of((update: ViewUpdate) => {
           if (update.docChanged) {
-            onChange(update.state.doc.toString());
+            onChangeRef.current(update.state.doc.toString());
           }
         }),
       ],

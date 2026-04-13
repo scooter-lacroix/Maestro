@@ -108,7 +108,15 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
           }
         );
 
-        if (walkthroughResult.status !== 0) {
+        if (walkthroughResult.error) {
+          ctx.ui.notify(
+            `TrackLens walkthrough failed to launch: ${walkthroughResult.error.message}`,
+            "error"
+          );
+          return;
+        }
+
+        if (walkthroughResult.status === null || walkthroughResult.status !== 0) {
           ctx.ui.notify(
             `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
             "warning"

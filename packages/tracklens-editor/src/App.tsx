@@ -57,7 +57,7 @@ import type { Annotation, Block, EditorMode, ImageAttachment } from '@maestro/tr
 import type { Frontmatter } from '@maestro/tracklens-ui';
 import { MarkdownEditor } from './MarkdownEditor';
 
-// Initialize mermaid (lazy - loaded by MermaidBlock when needed)// Initialize mermaid (lazy - loaded by MermaidBlock when needed)
+// Initialize mermaid (lazy - loaded by MermaidBlock when needed)
 
 // Demo plan content
 const DEMO_PLAN = `# Implementation Plan: Real-time Collaboration

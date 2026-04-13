@@ -236,7 +236,7 @@ impl TrackLensServer {
                     .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
             )
             .layer(CompressionLayer::new()) // Compress HTML responses
-            .layer(RequestBodyLimitLayer::new(1024 * 100)) // Limit request body to 100KB
+            .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // Limit request body to 10MB for large payloads
             .with_state(self.state.clone());
 
         // Open browser if configured (non-blocking)

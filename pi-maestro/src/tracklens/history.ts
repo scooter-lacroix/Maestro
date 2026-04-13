@@ -76,11 +76,15 @@ export function appendReviewEntry(
   // Cap at max entries
   const capped = history.slice(0, MAX_HISTORY_ENTRIES);
 
-  // Ensure directory exists
-  mkdirSync(trackDir, { recursive: true });
-
-  const historyPath = resolve(trackDir, "review-history.json");
-  writeFileSync(historyPath, JSON.stringify(capped, null, 2), "utf-8");
+  // Ensure directory exists and write history file
+  try {
+    mkdirSync(trackDir, { recursive: true });
+    const historyPath = resolve(trackDir, "review-history.json");
+    writeFileSync(historyPath, JSON.stringify(capped, null, 2), "utf-8");
+  } catch (error) {
+    // History is non-critical; log warning but don't rethrow
+    console.warn(`Failed to write review history for ${trackDir}:`, error);
+  }
 }
 
 /**

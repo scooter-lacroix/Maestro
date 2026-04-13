@@ -47,7 +47,7 @@ export function recordRecentDocument(doc: Omit<RecentDocument, "timestamp">): vo
   recentDocuments.unshift(entry);
 
   // Prune: remove expired entries and cap at max
-  pruneExpired();
+  pruneExpired(MAX_AGE_MS);
   if (recentDocuments.length > MAX_ENTRIES) {
     recentDocuments = recentDocuments.slice(0, MAX_ENTRIES);
   }
@@ -61,7 +61,7 @@ export function getLastGeneratedDocument(options?: {
   maxAgeMs?: number;
 }): RecentDocument | undefined {
   const maxAge = options?.maxAgeMs ?? MAX_AGE_MS;
-  pruneExpired();
+  pruneExpired(maxAge);
   const now = Date.now();
   return recentDocuments.find((doc) => now - doc.timestamp < maxAge);
 }
@@ -73,6 +73,7 @@ export function getRecentDocuments(options?: {
   maxAgeMs?: number;
 }): RecentDocument[] {
   const maxAge = options?.maxAgeMs ?? MAX_AGE_MS;
+  pruneExpired(maxAge);
   const now = Date.now();
   return recentDocuments.filter((doc) => now - doc.timestamp < maxAge);
 }
@@ -92,9 +93,9 @@ export function clearRecentDocuments(): void {
 }
 
 /** Remove documents that have exceeded the max age */
-function pruneExpired(): void {
+function pruneExpired(maxAgeMs: number): void {
   const now = Date.now();
   recentDocuments = recentDocuments.filter(
-    (doc) => now - doc.timestamp < MAX_AGE_MS,
+    (doc) => now - doc.timestamp < maxAgeMs,
   );
 }

@@ -227,30 +227,54 @@ describe("TrackLens Tools", () => {
 });
 
 describe("Checkpoint Behavior", () => {
-  it("should include TrackLens checkpoints in newTrack workflow", async () => {
-    // Verify the workflow string contains checkpoint instructions
-    const workflowIncludesCheckpoint = (
-      workflow: string,
-      checkpointNumber: string
-    ) => workflow.includes(`CHECKPOINT (${checkpointNumber})`);
+  it("should include TrackLens walkthrough in implement workflow", async () => {
+    // Import and read the implement.ts file to verify workflow content
+    const implementModule = await import("../../../commands/implement");
+    
+    // Verify the module exists
+    expect(implementModule).toBeDefined();
 
-    // This is a structural test - the actual workflow is tested
-    // in integration tests with the full LLM flow
-    expect(workflowIncludesCheckpoint).toBeDefined();
+    // Read the actual source file to verify workflow content
+    const { readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const implementPath = join(__dirname, "../../../commands/implement.ts");
+    const implementSource = readFileSync(implementPath, "utf-8");
+
+    // Verify the workflow includes the walkthrough section
+    // Section 4.0 is "TRACKLENS WALKTHROUGH REVIEW"
+    expect(implementSource).toContain("TRACKLENS WALKTHROUGH REVIEW");
+    expect(implementSource).toContain("tracklens_walkthrough");
+    
+    // Verify the workflow requires walkthrough regardless of toggle state
+    // (After Task 3.3, walkthrough is mandatory)
+    expect(implementSource).toContain("When all tasks in plan.md are complete, request TrackLens walkthrough review");
+    
+    // Verify remediation loop is mentioned
+    expect(implementSource).toContain("REMEDIATION LOOP");
   });
 
-  it("should include TrackLens checkpoints in implement workflow", () => {
-    // Verify implement workflow includes walkthrough section
-    const workflowIncludesWalkthrough = (workflow: string) =>
-      workflow.includes("WALKTHROUGH REVIEW");
+  it("should include TrackLens review checkpoints in newTrack workflow", async () => {
+    // Import and read the newTrack.ts file to verify workflow content
+    const newTrackModule = await import("../../../commands/newTrack");
+    
+    // Verify the module exists
+    expect(newTrackModule).toBeDefined();
 
-    expect(workflowIncludesWalkthrough).toBeDefined();
-  });
+    // Read the actual source file to verify workflow content
+    const { readFileSync } = await import("fs");
+    const { join } = await import("path");
+    const newTrackPath = join(__dirname, "../../../commands/newTrack.ts");
+    const newTrackSource = readFileSync(newTrackPath, "utf-8");
 
-  it("should always include walkthrough (unconditional)", () => {
-    // After Task 3.3, walkthrough is mandatory regardless of toggle state
-    const unconditionalWorkflow = () => "include walkthrough";
+    // Verify the workflow includes TrackLens review checkpoints
+    // Checkpoint 3.6 for spec review
+    expect(newTrackSource).toContain("TRACKLENS REVIEW CHECKPOINT");
+    expect(newTrackSource).toContain('documentType: "spec.md"');
 
-    expect(unconditionalWorkflow()).toContain("walkthrough");
+    // Checkpoint 4.5 for plan review
+    expect(newTrackSource).toContain('documentType: "plan.md"');
+
+    // Checkpoint 5.7 for consolidated review
+    expect(newTrackSource).toContain("TRACKLENS CONSOLIDATED REVIEW CHECKPOINT");
   });
 });

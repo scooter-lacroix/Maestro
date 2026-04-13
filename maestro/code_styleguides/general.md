@@ -6,7 +6,7 @@
 - Use appropriate data structures and algorithms
 - Fix root causes, not symptoms
 - Include necessary error handling and validation at system boundaries
-- No stub, mock, or simulated implementations
+- No stub, mock, or simulated implementations in production code (test doubles are acceptable for testing)
 
 ## TypeScript/React
 
