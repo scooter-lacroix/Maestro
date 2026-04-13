@@ -247,12 +247,10 @@ describe("Checkpoint Behavior", () => {
     expect(workflowIncludesWalkthrough).toBeDefined();
   });
 
-  it("should conditionally include walkthrough based on toggle", () => {
-    // The workflow should vary based on isTrackLensEnabled()
-    const conditionalWorkflow = (enabled: boolean) =>
-      enabled ? "include walkthrough" : "skip walkthrough";
+  it("should always include walkthrough (unconditional)", () => {
+    // After Task 3.3, walkthrough is mandatory regardless of toggle state
+    const unconditionalWorkflow = () => "include walkthrough";
 
-    expect(conditionalWorkflow(true)).toContain("walkthrough");
-    expect(conditionalWorkflow(false)).not.toContain("walkthrough");
+    expect(unconditionalWorkflow()).toContain("walkthrough");
   });
 });

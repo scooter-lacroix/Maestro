@@ -21,7 +21,7 @@ import {
   updateTrackMetadata,
   listAllTracks,
 } from "../lib/tracks";
-import { isTrackLensEnabled } from "../tracklens/extension/command";
+
 import * as fs from "fs";
 import * as path from "path";
 
@@ -121,7 +121,6 @@ function isInMaestroProject(root: string): boolean {
 
 function buildMaestroWorkflow(context: { root: string; trackId?: string }): string {
   const { root, trackId } = context;
-  const trackLensEnabled = isTrackLensEnabled();
 
   return `# Maestro Implementation Protocol
 
@@ -260,7 +259,6 @@ ${trackId ? `
    - After completing each task, update plan.md
    - Change \`- [ ] Task: ...\` to \`- [x] Task: ...\`
 
-${trackLensEnabled ? `
 ## 4.0 TRACKLENS WALKTHROUGH REVIEW
 
 When all tasks in plan.md are complete, request TrackLens walkthrough review:
@@ -294,10 +292,7 @@ When all tasks in plan.md are complete, request TrackLens walkthrough review:
 
 ## 5.0 FINALIZE TRACK
 
-After walkthrough approval:` : `
-## 4.0 FINALIZE TRACK
-
-After completing all tasks:`}
+After walkthrough approval:
 
 1. Update track status to complete:
    - Change \`## [~] Track: ...\` to \`## [x] Track: ...\`
@@ -325,19 +320,9 @@ After completing all tasks:`}
 
 ## 7.0 TRACKLENS INTEGRATION
 
-**TrackLens Walkthrough Status:** ${trackLensEnabled ? "ENABLED" : "DISABLED"}
-${trackLensEnabled ? `
 - All completed tracks require walkthrough review
 - User can approve, deny with feedback, or request changes
 - Review/denial loop continues until user approves
-
-**Toggle TrackLens Behavior:**
-- To disable walkthrough reviews: Use \`/tracklens off\` command
-- To re-enable walkthrough reviews: Use \`/tracklens on\` command
-` : `
-- Walkthrough reviews are currently DISABLED
-- To re-enable walkthrough reviews: Use \`/tracklens on\` command
-`}
 
 ## 6.0 TOOL MAPPING
 

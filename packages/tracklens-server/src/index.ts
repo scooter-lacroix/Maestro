@@ -59,6 +59,7 @@ export interface ServerResult {
     annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
+    edited_content?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -141,6 +142,7 @@ export async function startTrackLensServer(
         annotations?: unknown[];
         agentSwitch?: string;
         autonomyMode?: string;
+        edited_content?: string;
       }) => void)
     | undefined;
 
@@ -151,6 +153,7 @@ export async function startTrackLensServer(
     annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
+    edited_content?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
@@ -456,11 +459,13 @@ export async function startTrackLensServer(
             feedback,
             agentSwitch,
             autonomyMode: requestedPermissionMode,
+            edited_content,
           } = body as {
             feedback?: string;
             agentSwitch?: string;
             permissionMode?: string;
             autonomyMode?: string;
+            edited_content?: string;
           };
 
           // Resolve decision promise with approval
@@ -470,6 +475,7 @@ export async function startTrackLensServer(
               feedback,
               agentSwitch,
               autonomyMode: requestedPermissionMode || autonomyMode,
+              edited_content,
             });
           }
 
@@ -518,6 +524,7 @@ export async function startTrackLensServer(
             annotations,
             agentSwitch,
             autonomyMode: newAutonomyMode,
+            edited_content,
           } = body as {
             approved: boolean;
             feedback?: string;
@@ -525,6 +532,7 @@ export async function startTrackLensServer(
             annotations?: unknown[] | string;
             agentSwitch?: string;
             autonomyMode?: string;
+            edited_content?: string;
           };
 
           // Save final snapshot
@@ -559,6 +567,7 @@ export async function startTrackLensServer(
                   : annotations,
               agentSwitch,
               autonomyMode: newAutonomyMode,
+              edited_content,
             });
           }
 

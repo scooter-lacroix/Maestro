@@ -18,7 +18,7 @@ import {
   applyCriticalThinkForImplementation,
   applyCriticalThinkAfterAction,
 } from "../lib/criticalThink";
-import { isTrackLensEnabled } from "../tracklens/extension/command";
+
 import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
@@ -78,11 +78,9 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
         if (result === "completed") {
           completedCount++;
 
-          // TrackLens walkthrough for completed sub-track (if enabled)
-          if (isTrackLensEnabled()) {
-            ctx.ui.notify(`Requesting TrackLens walkthrough for ${subtrackId}...`, "info");
-            // The implement workflow handles walkthrough; this is just a notification
-          }
+          // TrackLens walkthrough for completed sub-track
+          ctx.ui.notify(`Requesting TrackLens walkthrough for ${subtrackId}...`, "info");
+          // The implement workflow handles walkthrough; this is just a notification
         } else if (result === "failed") {
           failedCount++;
         }
@@ -90,33 +88,32 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
 
       // Update master track status
       if (failedCount === 0) {
-        if (isTrackLensEnabled()) {
-          ctx.ui.notify(
-            `Launching TrackLens walkthrough for completed master track ${trackId}...`,
-            "info"
-          );
+        // TrackLens walkthrough review for master track (unconditional)
+        ctx.ui.notify(
+          `Launching TrackLens walkthrough for completed master track ${trackId}...`,
+          "info"
+        );
 
-          const walkthroughResult = spawnSync(
-            "maestro",
-            ["tracklens", "walkthrough", trackId, "--full-diffs"],
-            {
-              cwd: root,
-              stdio: "inherit",
-              env: {
-                ...process.env,
-                TRACKLENS_CLIENT_READY_TIMEOUT_MS:
-                  process.env.TRACKLENS_CLIENT_READY_TIMEOUT_MS || "20000",
-              },
-            }
-          );
-
-          if (walkthroughResult.status !== 0) {
-            ctx.ui.notify(
-              `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
-              "warning"
-            );
-            return;
+        const walkthroughResult = spawnSync(
+          "maestro",
+          ["tracklens", "walkthrough", trackId, "--full-diffs"],
+          {
+            cwd: root,
+            stdio: "inherit",
+            env: {
+              ...process.env,
+              TRACKLENS_CLIENT_READY_TIMEOUT_MS:
+                process.env.TRACKLENS_CLIENT_READY_TIMEOUT_MS || "20000",
+            },
           }
+        );
+
+        if (walkthroughResult.status !== 0) {
+          ctx.ui.notify(
+            `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
+            "warning"
+          );
+          return;
         }
 
         updateTrackStatus(root, trackId, "completed");

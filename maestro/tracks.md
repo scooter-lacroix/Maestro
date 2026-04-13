@@ -519,3 +519,28 @@ tracklens-pipeline-integrity ───────┘ (parallel)
 - Phase 9: Compilation & Verification (4 tasks) - COMPLETE
 
 **Total Tasks**: 26 - All Complete
+
+---
+
+## [x] Track: TrackLens × Ultraplan Integration
+*Link: [./maestro/tracks/tracklens-ultraplan-integration_20260412/](./maestro/tracks/tracklens-ultraplan-integration_20260412/)*
+
+**Description**: Integrate Ultraplan's browser-based review capabilities into Maestro's TrackLens system — server infrastructure enhancements (phase tracking, graceful shutdown, multi-round review), CodeMirror inline editing, workflow integration across all Maestro commands, keyword auto-triggering, and agent-side feedback loop. Includes fix for BUG-1 (annotation serialization blocking approve/deny).
+
+**Type**: Feature — Enhancement to existing TrackLens system
+
+**Status**: COMPLETE — All 5 phases finished, all 28 tasks completed, 20 Rust tests + 250 TS tests passing
+
+**Phases**:
+- [x] Phase 1: Server Infrastructure (6 tasks + verification) - COMPLETE
+- [x] Phase 2: UI Enhancements (5 tasks incl. BUG-1 fix + verification) - COMPLETE
+- [x] Phase 3: Workflow Integration (7 tasks + verification) - COMPLETE
+- [x] Phase 4: Keyword Detection & Auto-Trigger (3 tasks + verification) - COMPLETE
+- [x] Phase 5: Agent-Side Feedback Loop (3 tasks + verification) - COMPLETE
+
+**Total Tasks**: 28 - All Complete
+
+**Bugs fixed**:
+- BUG-1: Approve/Deny fails with annotations present (double-stringified JSON in App.tsx) - FIXED
+
+**Execution**: `/maestro:implement tracklens-ultraplan-integration_20260412`

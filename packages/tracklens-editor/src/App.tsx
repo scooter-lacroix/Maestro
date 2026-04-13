@@ -55,8 +55,9 @@ import { isVaultBrowserEnabled } from '@maestro/tracklens-ui';
 
 import type { Annotation, Block, EditorMode, ImageAttachment } from '@maestro/tracklens-ui';
 import type { Frontmatter } from '@maestro/tracklens-ui';
+import { MarkdownEditor } from './MarkdownEditor';
 
-// Initialize mermaid (lazy - loaded by MermaidBlock when needed)
+// Initialize mermaid (lazy - loaded by MermaidBlock when needed)// Initialize mermaid (lazy - loaded by MermaidBlock when needed)
 
 // Demo plan content
 const DEMO_PLAN = `# Implementation Plan: Real-time Collaboration
@@ -100,6 +101,10 @@ export default function App() {
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [uiPrefs, setUiPrefs] = useState<UIPreferences>(() => getUIPreferences());
 
+  // Edit mode state
+  const [editMode, setEditMode] = useState(false);
+  const [editedMarkdown, setEditedMarkdown] = useState('');
+
   // Modal states
   const [showExportModal, setShowExportModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -126,6 +131,9 @@ export default function App() {
 
   // Toast notification
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Phase indicator state
+  const [phase, setPhase] = useState<string>('launching');
 
   // Export dropdown
   const [showExportDropdown, setShowExportDropdown] = useState(false);
@@ -201,7 +209,16 @@ export default function App() {
         repoInfo?: { display: string; branch?: string };
       }) => {
         if (data.plan) {
-          setMarkdown(data.plan);
+          // Detect editable marker for seed content auto-edit mode
+          const editableMarker = '<!-- tracklens:editable -->';
+          if (data.plan.startsWith(editableMarker)) {
+            const stripped = data.plan.replace(editableMarker + '\n', '').replace(editableMarker, '');
+            setMarkdown(stripped);
+            setEditedMarkdown(stripped);
+            setEditMode(true);
+          } else {
+            setMarkdown(data.plan);
+          }
         }
         setIsApiMode(true);
         if (data.origin) {
@@ -238,6 +255,23 @@ export default function App() {
     return () => clearInterval(timer);
   }, [timeLeft]);
 
+  // Poll server phase every 2 seconds
+  useEffect(() => {
+    if (!isApiMode) return;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/phase');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.phase) setPhase(data.phase);
+        }
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [isApiMode]);
+
   // Sync sidebar with preferences
   useEffect(() => {
     if (uiPrefs.tocEnabled) {
@@ -260,9 +294,25 @@ export default function App() {
     }
   }, [sidebar.activeTab, showVaultTab, vaultPath, obsidianFolder, vaultBrowser]);
 
-  // Global keyboard shortcuts (Cmd/Ctrl+Enter to submit)
+  // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+Shift+Enter - Force Deny (send feedback)
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+        if (showExportModal || showImportModal || showFeedbackPrompt ||
+          showClaudeCodeWarning || showAgentWarning || showPermissionSetup ||
+          showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive) {
+          return;
+        }
+
+        e.preventDefault();
+        handleDeny();
+        return;
+      }
+
       // Cmd/Ctrl+Enter - Approve/Deny
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         const tag = (e.target as HTMLElement)?.tagName;
@@ -293,6 +343,18 @@ export default function App() {
         return;
       }
 
+      // Cmd/Ctrl+E - Toggle edit mode
+      if (e.key === 'e' && (e.metaKey || e.ctrlKey)) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+        if (!isApiMode || isSubmitting) return;
+
+        e.preventDefault();
+        handleToggleEditMode();
+        return;
+      }
+
       // Cmd/Ctrl+S - Save to notes
       if (e.key === 's' && (e.metaKey || e.ctrlKey)) {
         const tag = (e.target as HTMLElement)?.tagName;
@@ -315,7 +377,7 @@ export default function App() {
     showExportModal, showImportModal, showFeedbackPrompt, showClaudeCodeWarning,
     showAgentWarning, showPermissionSetup, showUIFeaturesSetup, isSubmitting,
     isApiMode, linkedDocHook.isActive, annotations.length, origin, getAgentWarning,
-    markdown, annotations, globalAttachments,
+    markdown, annotations, globalAttachments, editMode,
   ]);
 
   // Close export dropdown on outside click
@@ -373,6 +435,53 @@ export default function App() {
     saveEditorMode(newMode);
   }, []);
 
+  const handleToggleEditMode = async () => {
+    const newEditMode = !editMode;
+    
+    if (newEditMode) {
+      // Entering edit mode - capture current markdown
+      setEditedMarkdown(markdown);
+      setEditMode(true);
+      
+      // Report phase change to server
+      if (isApiMode) {
+        try {
+          const token = (window as any).TRACKLENS_AUTH_TOKEN;
+          await fetch('/api/phase', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ phase: 'editing' }),
+          });
+        } catch (e) {
+          console.error('Failed to report phase:', e);
+        }
+      }
+    } else {
+      // Exiting edit mode - return to preview
+      setEditMode(false);
+      
+      // Report phase change to server
+      if (isApiMode) {
+        try {
+          const token = (window as any).TRACKLENS_AUTH_TOKEN;
+          await fetch('/api/phase', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ phase: 'reviewing' }),
+          });
+        } catch (e) {
+          console.error('Failed to report phase:', e);
+        }
+      }
+    }
+  };
+
   const handleExtendTimeout = async (minutes: number = 30) => {
     try {
       const token = (window as any).TRACKLENS_AUTH_TOKEN;
@@ -408,7 +517,8 @@ export default function App() {
         agentSwitch?: string;
         permissionMode?: string;
         feedback?: string;
-        annotations?: string;
+        annotations?: Annotation[];
+        edited_content?: string;
       } = { approved: true };
 
       if (origin === 'claude-code') {
@@ -435,7 +545,12 @@ export default function App() {
 
       if (annotations.length > 0 || globalAttachments.length > 0) {
         body.feedback = annotationsOutput;
-        body.annotations = JSON.stringify(annotations);
+        body.annotations = annotations;
+      }
+
+      // Include edited content if in edit mode and content has changed
+      if (editMode && editedMarkdown !== markdown) {
+        body.edited_content = editedMarkdown;
       }
 
       const token = (window as any).TRACKLENS_AUTH_TOKEN;
@@ -473,7 +588,7 @@ export default function App() {
         body: JSON.stringify({
           approved: false,
           feedback: annotationsOutput,
-          annotations: JSON.stringify(annotations),
+          annotations: annotations,
         }),
       });
 
@@ -507,7 +622,7 @@ export default function App() {
         body: JSON.stringify({
           approved: false,
           feedback: annotationsOutput,
-          annotations: JSON.stringify(annotations),
+          annotations: annotations,
         }),
       });
 
@@ -695,6 +810,16 @@ export default function App() {
                 {agentName}
               </span>
             )}
+            {isApiMode && phase !== 'launching' && phase !== 'decided' && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium hidden md:inline ${
+                phase === 'reviewing' ? 'bg-blue-500/15 text-blue-400'
+                : phase === 'editing' ? 'bg-amber-500/15 text-amber-400'
+                : phase === 'loading' ? 'bg-gray-500/15 text-gray-400'
+                : 'bg-zinc-500/15 text-zinc-400'
+              }`}>
+                {phase.charAt(0).toUpperCase() + phase.slice(1)}
+              </span>
+            )}
           </div>
 
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
@@ -713,9 +838,30 @@ export default function App() {
             {isApiMode && !linkedDocHook.isActive && (
               <>
                 <button
-                  onClick={handleFeedback}
+                  onClick={handleToggleEditMode}
                   disabled={isSubmitting}
                   className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${isSubmitting
+                    ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
+                    : editMode
+                      ? 'bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30'
+                      : 'bg-muted hover:bg-muted/80'
+                    }`}
+                  title={editMode ? 'Switch to preview mode' : 'Switch to edit mode'}
+                >
+                  <span className="hidden md:inline">{editMode ? 'Preview' : 'Edit'}</span>
+                  <svg className="w-4 h-4 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    {editMode ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    )}
+                  </svg>
+                </button>
+
+                <button
+                  onClick={handleFeedback}
+                  disabled={isSubmitting || editMode}
+                  className={`p-1.5 md:px-2.5 md:py-1 rounded-md text-xs font-medium transition-all ${isSubmitting || editMode
                     ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                     : 'bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30'
                     }`}
@@ -744,8 +890,8 @@ export default function App() {
                       }
                       handleApprove();
                     }}
-                    disabled={isSubmitting}
-                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${isSubmitting
+                    disabled={isSubmitting || editMode}
+                    className={`px-2 py-1 md:px-2.5 rounded-md text-xs font-medium transition-all ${isSubmitting || editMode
                       ? 'opacity-50 cursor-not-allowed bg-muted text-muted-foreground'
                       : 'bg-success text-success-foreground hover:opacity-90'
                       }`}
@@ -973,59 +1119,72 @@ export default function App() {
 
           <main ref={containerRef} className="flex-1 min-w-0 overflow-y-auto relative">
             {/* Mode Switcher - Sticky Placement with Sliding Animation */}
-            <div
-              className="sticky top-6 z-30 flex justify-end px-8 pointer-events-none transition-all duration-300 ease-in-out"
-              style={{
-                right: isPanelOpen ? `${leftPanel.width + 32}px` : '32px'
-              }}
-            >
-              <div className="pointer-events-auto">
-                <ModeSwitcher mode={mode} onChange={handleModeChange} />
+            {!editMode && (
+              <div
+                className="sticky top-6 z-30 flex justify-end px-8 pointer-events-none transition-all duration-300 ease-in-out"
+                style={{
+                  right: isPanelOpen ? `${leftPanel.width + 32}px` : '32px'
+                }}
+              >
+                <div className="pointer-events-auto">
+                  <ModeSwitcher mode={mode} onChange={handleModeChange} />
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="min-h-full flex flex-col items-center px-4 py-1 md:px-10 md:py-4 xl:px-16">
-              <Viewer
-                key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
-                ref={viewerRef}
-                blocks={blocks}
-                markdown={markdown}
-                frontmatter={frontmatter}
-                annotations={annotations}
-                onAddAnnotation={handleAddAnnotation}
-                onSelectAnnotation={handleSelectAnnotation}
-                selectedAnnotationId={selectedAnnotationId}
-                mode={mode}
-                onModeChange={handleModeChange}
-                globalAttachments={globalAttachments}
-                onAddGlobalAttachment={handleAddGlobalAttachment}
-                onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
-                stickyActions={uiPrefs.stickyActionsEnabled}
-                onOpenLinkedDoc={handleOpenLinkedDoc}
-                linkedDocInfo={linkedDocHook.isActive ? {
-                  filepath: linkedDocHook.filepath!,
-                  onBack: handleLinkedDocBack
-                } : null}
-                showToc={false}
-              />
+              {editMode ? (
+                <div className="w-full max-w-4xl py-4">
+                  <MarkdownEditor
+                    value={editedMarkdown}
+                    onChange={setEditedMarkdown}
+                  />
+                </div>
+              ) : (
+                <Viewer
+                  key={linkedDocHook.isActive ? `doc:${linkedDocHook.filepath}` : 'plan'}
+                  ref={viewerRef}
+                  blocks={blocks}
+                  markdown={markdown}
+                  frontmatter={frontmatter}
+                  annotations={annotations}
+                  onAddAnnotation={handleAddAnnotation}
+                  onSelectAnnotation={handleSelectAnnotation}
+                  selectedAnnotationId={selectedAnnotationId}
+                  mode={mode}
+                  onModeChange={handleModeChange}
+                  globalAttachments={globalAttachments}
+                  onAddGlobalAttachment={handleAddGlobalAttachment}
+                  onRemoveGlobalAttachment={handleRemoveGlobalAttachment}
+                  stickyActions={uiPrefs.stickyActionsEnabled}
+                  onOpenLinkedDoc={handleOpenLinkedDoc}
+                  linkedDocInfo={linkedDocHook.isActive ? {
+                    filepath: linkedDocHook.filepath!,
+                    onBack: handleLinkedDocBack
+                  } : null}
+                  showToc={false}
+                />
+              )}
             </div>
           </main>
 
           {/* Resize Handle */}
-          {isPanelOpen && <ResizeHandle {...leftPanel.handleProps} />}
+          {isPanelOpen && !editMode && <ResizeHandle {...leftPanel.handleProps} />}
 
           {/* Annotation Panel */}
-          <div className="fabric-border-l flex flex-col bg-card/30" style={{ width: leftPanel.width }}>
-            <AnnotationPanel
-              isOpen={isPanelOpen}
-              annotations={annotations}
-              blocks={blocks}
-              onSelect={handleSelectAnnotation}
-              onDelete={handleDeleteAnnotation}
-              onEdit={handleEditAnnotation}
-              selectedId={selectedAnnotationId}
-            />
-          </div>
+          {!editMode && (
+            <div className="fabric-border-l flex flex-col bg-card/30" style={{ width: leftPanel.width }}>
+              <AnnotationPanel
+                isOpen={isPanelOpen}
+                annotations={annotations}
+                blocks={blocks}
+                onSelect={handleSelectAnnotation}
+                onDelete={handleDeleteAnnotation}
+                onEdit={handleEditAnnotation}
+                selectedId={selectedAnnotationId}
+              />
+            </div>
+          )}
         </div>
 
         {/* Export Modal */}
@@ -1086,7 +1245,7 @@ export default function App() {
           variant="info"
         />
 
-        {/* Claude Code annotation warning dialog */}
+        {/* Claude Code annotation confirmation dialog */}
         <ConfirmDialog
           isOpen={showClaudeCodeWarning}
           onClose={() => setShowClaudeCodeWarning(false)}
@@ -1094,11 +1253,11 @@ export default function App() {
             setShowClaudeCodeWarning(false);
             handleApprove();
           }}
-          title="Annotations Won't Be Sent"
-          message={`${agentName} doesn't yet support feedback on approval. Your ${annotations.length} annotation${annotations.length !== 1 ? 's' : ''} will be lost.`}
-          confirmText="Approve Anyway"
+          title="Confirm Approval with Annotations"
+          message={`You have ${annotations.length} annotation${annotations.length !== 1 ? 's' : ''} that will be sent with your approval.`}
+          confirmText="Approve"
           cancelText="Cancel"
-          variant="warning"
+          variant="info"
           showCancel
         />
 

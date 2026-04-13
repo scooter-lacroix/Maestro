@@ -116,6 +116,69 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
   const tracksMd = generateTracksMd();
   writeMaestroFile(root, "tracks.md", tracksMd);
 
+  // TrackLens review of generated setup docs
+  try {
+    const combinedMarkdown = [
+      "# Maestro Setup Review\n",
+      "---\n\n",
+      "## product.md\n\n",
+      productMd,
+      "\n\n---\n\n",
+      "## tech-stack.md\n\n",
+      techStackMd,
+      "\n\n---\n\n",
+      "## workflow.md\n\n",
+      workflowMd,
+    ].join("");
+
+    // @ts-ignore - Dynamic import for TrackLens server
+    const tracklensServer = await import("@maestro/tracklens-server");
+    const { existsSync: exists, readFileSync: read } = await import("fs");
+    const { resolve } = await import("path");
+
+    let htmlContent: string | null = null;
+    const htmlPaths = [
+      resolve(root, "apps/tracklens-opencode/tracklens.html"),
+      resolve(root, "dist/tracklens-editor.html"),
+    ];
+    for (const htmlPath of htmlPaths) {
+      if (exists(htmlPath)) {
+        htmlContent = read(htmlPath, "utf-8");
+        break;
+      }
+    }
+
+    if (htmlContent) {
+      const server = await tracklensServer.startTrackLensServer({
+        plan: combinedMarkdown,
+        origin: "pi-maestro",
+        htmlContent,
+      });
+
+      const result = await server.waitForDecision() as {
+        approved: boolean; feedback?: string; edited_content?: string;
+      };
+      server.stop();
+      if (!result.approved && result.feedback) {
+        ctx.ui.notify(`Setup docs review feedback: ${result.feedback}`, "warning");
+      } else if (result.approved) {
+        // If user edited content, apply edits to the files
+        if (result.edited_content) {
+          // Parse edited content back into individual docs
+          const sections = result.edited_content.split(/\n---\n/);
+          for (const section of sections) {
+            const docMatch = section.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
+            if (docMatch) {
+              writeMaestroFile(root, `${docMatch[1]}.md`, docMatch[2].trim());
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // TrackLens review is optional for setup — continue without it
+  }
+
   ctx.ui.notify("Maestro project initialized successfully", "success");
 }
 
