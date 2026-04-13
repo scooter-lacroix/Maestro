@@ -61,7 +61,7 @@ export function getLastGeneratedDocument(options?: {
   maxAgeMs?: number;
 }): RecentDocument | undefined {
   const maxAge = options?.maxAgeMs ?? MAX_AGE_MS;
-  pruneExpired(maxAge);
+  pruneExpired(MAX_AGE_MS); // Prune with module policy to avoid destroying shared state
   const now = Date.now();
   return recentDocuments.find((doc) => now - doc.timestamp < maxAge);
 }
@@ -73,7 +73,7 @@ export function getRecentDocuments(options?: {
   maxAgeMs?: number;
 }): RecentDocument[] {
   const maxAge = options?.maxAgeMs ?? MAX_AGE_MS;
-  pruneExpired(maxAge);
+  pruneExpired(MAX_AGE_MS); // Prune with module policy to avoid destroying shared state
   const now = Date.now();
   return recentDocuments.filter((doc) => now - doc.timestamp < maxAge);
 }
