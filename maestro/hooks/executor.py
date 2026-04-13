@@ -248,6 +248,13 @@ class HookExecutor:
             result = self.execute_hook(phase, hook_name, output_data)
             # Merge result into output_data to preserve state even if the hook returns a fresh dict
             if isinstance(result, dict):
+                overlapping = set(result.keys()) & set(output_data.keys())
+                if overlapping:
+                    logger.warning(
+                        "Hook '%s' result overwrites existing keys: %s",
+                        hook_name,
+                        overlapping,
+                    )
                 output_data.update(result)
             else:
                 logger.warning(
@@ -451,6 +458,12 @@ def execute_subagent_stop(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """Execute all subagent-stop hooks."""
     executor = get_hook_executor()
     return executor.execute_phase("subagent-stop", input_data)
+
+
+def execute_loop(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute all loop hooks."""
+    executor = get_hook_executor()
+    return executor.execute_phase("loop", input_data)
 
 
 def execute_review(input_data: Dict[str, Any]) -> Dict[str, Any]:

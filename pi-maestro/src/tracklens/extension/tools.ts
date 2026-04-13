@@ -16,7 +16,7 @@
 import type { ExtensionAPI } from "../../types";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { runRemediationLoop } from "../walkthrough/remediation";
 import { recordRecentDocument } from "../recentDoc";
 import { formatDenialForAgent } from "../feedback";
@@ -626,27 +626,24 @@ After review, provide your feedback or approval.`,
         files?: string[];
       };
 
-      // Generate diff
-      let diffCommand: string;
-      if (files && files.length > 0) {
-        const fileList = files.map(f => `"${f}"`).join(" ");
-        diffCommand = `git diff ${gitRef} -- ${fileList}`;
-      } else {
-        diffCommand = `git diff ${gitRef}`;
-      }
-
-      // Also include staged changes if reviewing HEAD
-      if (gitRef === "HEAD" && (!files || files.length === 0)) {
-        diffCommand = "git diff HEAD";
-      }
-
+      // Generate diff using execFileSync to prevent shell injection
       let diffContent: string;
       try {
-        diffContent = execSync(diffCommand, {
-          cwd: ctx.cwd,
-          maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
-          encoding: "utf-8",
-        });
+        if (files && files.length > 0) {
+          // Use args array to avoid shell injection
+          diffContent = execFileSync("git", ["diff", gitRef, "--", ...files], {
+            cwd: ctx.cwd,
+            encoding: "utf-8",
+            maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
+          });
+        } else {
+          // No files specified, diff everything
+          diffContent = execFileSync("git", ["diff", gitRef], {
+            cwd: ctx.cwd,
+            encoding: "utf-8",
+            maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
+          });
+        }
       } catch (error: any) {
         // git diff returns exit code 1 on error, but may still produce output
         if (error.stdout && error.stdout.trim().length > 0) {

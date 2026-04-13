@@ -167,7 +167,8 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
           // Parse edited content back into individual docs
           const sections = result.edited_content.split(/\n---\n/);
           for (const section of sections) {
-            const docMatch = section.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
+            const trimmed = section.trim();
+            const docMatch = trimmed.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
             if (docMatch) {
               writeMaestroFile(root, `${docMatch[1]}.md`, docMatch[2].trim());
             }

@@ -527,13 +527,14 @@ fn run_hook_executor_phase(
     let script = r#"
 import json
 import sys
-from maestro.hooks.executor import execute_checkpoint, execute_review
+from maestro.hooks.executor import execute_checkpoint, execute_loop, execute_review
 
 phase = sys.argv[1]
 payload = json.loads(sys.stdin.read())
 mapping = {
     "review": execute_review,
     "checkpoint": execute_checkpoint,
+    "loop": execute_loop,
 }
 result = mapping[phase](payload)
 json.dump(result, sys.stdout)
