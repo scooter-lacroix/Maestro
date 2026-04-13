@@ -1,0 +1,64 @@
+{
+  "id": "tracklens-ultraplan-integration_20260412",
+  "name": "TrackLens × Ultraplan Integration",
+  "type": "feature",
+  "status": "new",
+  "created": "2026-04-12",
+  "description": "Integrate Ultraplan's browser-based review capabilities into Maestro's TrackLens system — server infrastructure enhancements, CodeMirror inline editing, workflow integration across all Maestro commands, keyword auto-triggering, agent-side feedback loop, and annotation serialization bug fix.",
+  "phases": [
+    {
+      "id": 1,
+      "name": "Server Infrastructure",
+      "status": "pending",
+      "tasks": 6
+    },
+    {
+      "id": 2,
+      "name": "UI Enhancements",
+      "status": "pending",
+      "tasks": 4
+    },
+    {
+      "id": 3,
+      "name": "Workflow Integration",
+      "status": "pending",
+      "tasks": 7
+    },
+    {
+      "id": 4,
+      "name": "Keyword Detection & Auto-Trigger",
+      "status": "pending",
+      "tasks": 3
+    },
+    {
+      "id": 5,
+      "name": "Agent-Side Feedback Loop",
+      "status": "pending",
+      "tasks": 3
+    }
+  ],
+  "totalTasks": 23,
+  "files": [
+    "src/leindex/src/tracklens/types.rs",
+    "src/leindex/src/tracklens/server.rs",
+    "src/leindex/src/tracklens/mod.rs",
+    "packages/tracklens-editor/src/App.tsx",
+    "packages/tracklens-editor/src/main.tsx",
+    "pi-maestro/src/tracklens/keyword.ts",
+    "pi-maestro/src/tracklens/phaseReporter.ts",
+    "pi-maestro/src/tracklens/history.ts",
+    "pi-maestro/src/tracklens/extension/tools.ts"
+  ],
+  "specApproved": "2026-04-12",
+  "planApproved": "2026-04-12",
+  "bugs": [
+    {
+      "id": "BUG-1",
+      "title": "Approve/Deny fails when annotations present — double-stringified JSON",
+      "files": ["packages/tracklens-editor/src/App.tsx"],
+      "lines": [438, 476, 510],
+      "rootCause": "body.annotations = JSON.stringify(annotations) double-encodes the array. Server expects Vec<Annotation> but receives a JSON string, causing 422 Unprocessable Entity.",
+      "fix": "Remove JSON.stringify, send annotations as array directly. Update TypeScript type from string to Annotation[]."
+    }
+  ]
+}
