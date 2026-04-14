@@ -552,8 +552,8 @@ export default function App() {
         body.annotations = annotations;
       }
 
-      // Include edited content if edits exist and content has changed
-      if (editedMarkdown && editedMarkdown !== markdown) {
+      // Include edited content if content has changed (including empty string edits)
+      if (editedMarkdown !== undefined && editedMarkdown !== null && editedMarkdown !== markdown) {
         body.edited_content = editedMarkdown;
       }
 

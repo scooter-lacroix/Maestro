@@ -22,6 +22,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
+import { isTrackLensEnabled } from "../tracklens/extension/command";
 
 /**
  * Register /maestro:orchestrate command
@@ -88,40 +89,42 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
 
       // Update master track status
       if (failedCount === 0) {
-        // TrackLens walkthrough review for master track (unconditional)
-        ctx.ui.notify(
-          `Launching TrackLens walkthrough for completed master track ${trackId}...`,
-          "info"
-        );
+        if (isTrackLensEnabled()) {
+          // TrackLens walkthrough review for master track
+          ctx.ui.notify(
+            `Launching TrackLens walkthrough for completed master track ${trackId}...`,
+            "info"
+          );
 
-        const walkthroughResult = spawnSync(
-          "maestro",
-          ["tracklens", "walkthrough", trackId, "--full-diffs"],
-          {
-            cwd: root,
-            stdio: "inherit",
-            env: {
-              ...process.env,
-              TRACKLENS_CLIENT_READY_TIMEOUT_MS:
-                process.env.TRACKLENS_CLIENT_READY_TIMEOUT_MS || "20000",
-            },
+          const walkthroughResult = spawnSync(
+            "maestro",
+            ["tracklens", "walkthrough", trackId, "--full-diffs"],
+            {
+              cwd: root,
+              stdio: "inherit",
+              env: {
+                ...process.env,
+                TRACKLENS_CLIENT_READY_TIMEOUT_MS:
+                  process.env.TRACKLENS_CLIENT_READY_TIMEOUT_MS || "20000",
+              },
+            }
+          );
+
+          if (walkthroughResult.error) {
+            ctx.ui.notify(
+              `TrackLens walkthrough failed to launch: ${walkthroughResult.error.message}`,
+              "error"
+            );
+            return;
           }
-        );
 
-        if (walkthroughResult.error) {
-          ctx.ui.notify(
-            `TrackLens walkthrough failed to launch: ${walkthroughResult.error.message}`,
-            "error"
-          );
-          return;
-        }
-
-        if (walkthroughResult.status === null || walkthroughResult.status !== 0) {
-          ctx.ui.notify(
-            `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
-            "warning"
-          );
-          return;
+          if (walkthroughResult.status === null || walkthroughResult.status !== 0) {
+            ctx.ui.notify(
+              `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
+              "warning"
+            );
+            return;
+          }
         }
 
         updateTrackStatus(root, trackId, "completed");
