@@ -2706,15 +2706,24 @@ async fn run_app<B: Backend>(
                                                         continue;
                                                     };
 
-                                                    let _ = manager.fork_session(
+                                                    match manager.fork_session(
                                                         &id,
                                                         &app.rename_buffer,
                                                         &orig,
-                                                    );
-                                                    app.status_message = format!(
-                                                        "Session forked as {}",
-                                                        app.rename_buffer
-                                                    );
+                                                    ) {
+                                                        Ok(_) => {
+                                                            app.status_message = format!(
+                                                                "Session forked as {}",
+                                                                app.rename_buffer
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Failed to fork session: {}",
+                                                                e
+                                                            );
+                                                        }
+                                                    }
                                                     if let Ok(sessions) = svc.list_sessions() {
                                                         app.sessions = sessions;
                                                     }

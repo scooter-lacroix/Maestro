@@ -160,3 +160,24 @@ impl PtyBridge {
         Ok(())
     }
 }
+
+impl Drop for PtyBridge {
+    fn drop(&mut self) {
+        // Kill the child process if it's still running.
+        // Ignore errors - the process may already be dead, and
+        // we must not panic in Drop.
+        let _ = self.child.kill();
+
+        // Reap the child to prevent zombie processes.
+        // Use try_wait in a loop with a short timeout to avoid
+        // blocking indefinitely in Drop.
+        // If the process doesn't exit quickly, we've at least
+        // sent SIGKILL and the OS will reap it eventually.
+        for _ in 0..10 {
+            if self.child.try_wait().is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}

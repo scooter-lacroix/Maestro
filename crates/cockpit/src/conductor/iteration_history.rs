@@ -191,9 +191,10 @@ pub fn render_iteration_popup(
     } else {
         for entry in related_logs.into_iter().rev() {
             let mut summary = entry.summary.replace('\n', " ");
-            if summary.len() > 88 {
-                summary.truncate(85);
-                summary.push_str("...");
+            // Use character-based slicing to avoid UTF-8 truncation panic
+            if summary.chars().count() > 88 {
+                let truncated: String = summary.chars().take(85).collect();
+                summary = format!("{}...", truncated);
             }
             lines.push(Line::from(vec![
                 Span::styled("  • ", Style::default().fg(theme.accent)),
