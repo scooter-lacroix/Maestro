@@ -685,6 +685,7 @@ After review, provide your feedback or approval.`,
 
         const { existsSync: exists, readFileSync: read } = await import("fs");
         const htmlPaths = [
+          resolve(ctx.cwd, "apps/tracklens-opencode/tracklens-review.html"),
           resolve(ctx.cwd, "apps/tracklens-opencode/tracklens.html"),
           resolve(ctx.cwd, "dist/tracklens-editor.html"),
         ];
