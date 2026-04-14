@@ -261,6 +261,29 @@ export async function startTrackLensServer(
         return Response.json({ ready: true });
       }
 
+      // API: Extend timeout (UI-side timeout extension, no server-side deadline after client ready)
+      if (url.pathname === "/api/extend-timeout" && req.method === "POST") {
+        try {
+          const body = await req.json();
+          const { minutes } = body as { minutes?: number };
+
+          // Server waits indefinitely after client is ready, so this is a no-op
+          // The UI uses this to sync its client-side timeout countdown
+          return Response.json({
+            success: true,
+            extendedMinutes: minutes ?? 30,
+          });
+        } catch (error) {
+          return Response.json(
+            {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            { status: 400 }
+          );
+        }
+      }
+
       // API: Validate image path
       if (url.pathname === "/api/validate-image" && req.method === "POST") {
         try {
