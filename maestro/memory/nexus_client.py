@@ -241,11 +241,13 @@ class StandaloneNexusClient:
             )
             if fallback.success:
                 parsed = self._parse_search_output(fallback.stdout)
+            # Use parsed CLI results when available; fall back to SQL only if empty
+            results = parsed if parsed else await self._query_command_fallback(query, project_path=project_path, limit=limit)
             return {
                 "success": fallback.success,
                 "query": query,
                 "agent": agent,
-                "results": await self._query_command_fallback(query, project_path=project_path, limit=limit),
+                "results": results,
                 "stdout": fallback.stdout,
                 "stderr": fallback.stderr,
                 "returncode": fallback.returncode,

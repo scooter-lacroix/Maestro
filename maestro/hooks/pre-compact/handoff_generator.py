@@ -11,6 +11,7 @@ On each compaction event, this hook:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import asyncio
@@ -75,9 +76,10 @@ def generate_handoff(input_data: dict) -> dict:
     project_path = input_data.get("project_path", os.getcwd())
     track_id = input_data.get("track_id", input_data.get("current_track", "unknown"))
 
-    # Sanitize track_id to prevent path traversal attacks
-    if ".." in track_id or track_id.startswith("/") or track_id.startswith("\\"):
-        raise ValueError(f"Invalid track_id: path traversal detected: {track_id}")
+    # Validate track_id: allow only alphanumeric, hyphens, underscores
+    _TRACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+    if not _TRACK_ID_RE.match(track_id):
+        raise ValueError(f"Invalid track_id: must match [a-zA-Z0-9_-]: {track_id}")
 
     tracks_dir = Path(project_path) / "maestro" / "tracks"
     track_dir = tracks_dir / track_id

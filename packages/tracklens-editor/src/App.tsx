@@ -103,7 +103,7 @@ export default function App() {
 
   // Edit mode state
   const [editMode, setEditMode] = useState(false);
-  const [editedMarkdown, setEditedMarkdown] = useState('');
+  const [editedMarkdown, setEditedMarkdown] = useState<string | undefined>(undefined);
 
   // Modal states
   const [showExportModal, setShowExportModal] = useState(false);
@@ -304,7 +304,7 @@ export default function App() {
 
         if (showExportModal || showImportModal || showFeedbackPrompt ||
           showClaudeCodeWarning || showAgentWarning || showPermissionSetup ||
-          showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive) {
+          showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive || editMode) {
           return;
         }
 
@@ -320,7 +320,7 @@ export default function App() {
 
         if (showExportModal || showImportModal || showFeedbackPrompt ||
           showClaudeCodeWarning || showAgentWarning || showPermissionSetup ||
-          showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive) {
+          showUIFeaturesSetup || isSubmitting || !isApiMode || linkedDocHook.isActive || editMode) {
           return;
         }
 
@@ -1140,7 +1140,7 @@ export default function App() {
               {editMode ? (
                 <div className="w-full max-w-4xl py-4">
                   <MarkdownEditor
-                    value={editedMarkdown}
+                    value={editedMarkdown ?? ''}
                     onChange={setEditedMarkdown}
                   />
                 </div>
