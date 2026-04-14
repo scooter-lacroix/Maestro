@@ -93,10 +93,12 @@ def session_load_hook(input_data: dict) -> dict:
 
         # Inject context into input
         if memories:
-            context_summaries = [
-                m.content for m in memories
-                if hasattr(m, 'content')
-            ]
+            context_summaries = []
+            for m in memories:
+                if isinstance(m, dict):
+                    context_summaries.append(m.get("content", ""))
+                elif hasattr(m, 'content'):
+                    context_summaries.append(m.content)
             input_data["restored_context"] = context_summaries
             input_data["context_loaded"] = True
 

@@ -75,6 +75,10 @@ def generate_handoff(input_data: dict) -> dict:
     project_path = input_data.get("project_path", os.getcwd())
     track_id = input_data.get("track_id", input_data.get("current_track", "unknown"))
 
+    # Sanitize track_id to prevent path traversal
+    if ".." in track_id or (len(track_id) > 0 and track_id[0] == "/"):
+        return {"hook_error": f"Invalid track_id: {track_id}"}
+
     tracks_dir = Path(project_path) / "maestro" / "tracks"
     track_dir = tracks_dir / track_id
 

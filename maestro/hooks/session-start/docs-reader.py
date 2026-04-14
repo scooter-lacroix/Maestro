@@ -26,7 +26,7 @@ def _find_maestro_docs(project_path: str) -> list[str]:
             docs.append(str(p))
 
     # Style guides
-    style_dir = maestro_dir / "style-guides"
+    style_dir = maestro_dir / "code_styleguides"
     if style_dir.exists():
         for f in style_dir.glob("*.md"):
             docs.append(str(f))
