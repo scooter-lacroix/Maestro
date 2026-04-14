@@ -327,7 +327,7 @@ class StandaloneNexusClient:
             return tracks
 
     async def hydrate_memories(self, memory_ids: Iterable[int]) -> list[dict[str, Any]]:
-        ids = [int(memory_id) for memory_id in memory_ids if str(memory_id).strip()]
+        ids = [int(memory_id) for memory_id in memory_ids if memory_id is not None and str(memory_id).strip()]
         if not ids:
             return []
 

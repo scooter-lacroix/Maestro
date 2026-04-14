@@ -15,7 +15,7 @@
 
 import type { ExtensionAPI } from "../../types";
 import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { resolve, isAbsolute } from "path";
 import { execSync, execFileSync } from "child_process";
 import { runRemediationLoop } from "../walkthrough/remediation";
 import { recordRecentDocument } from "../recentDoc";
@@ -249,6 +249,13 @@ After review, provide your feedback or approval.`,
 
         // Persist review history if track directory is available
         if (trackId && ctx.cwd) {
+          // Sanitize trackId to prevent path traversal
+          if (trackId.includes("..") || isAbsolute(trackId)) {
+            return {
+              content: [{ type: "text", text: `Error: Invalid track ID: ${trackId}` }],
+              details: { approved: false },
+            };
+          }
           const { findMaestroProjectRoot } = await import("../../lib/project");
           const root = findMaestroProjectRoot(ctx.cwd);
           if (root) {

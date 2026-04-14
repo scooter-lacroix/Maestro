@@ -79,7 +79,7 @@ export function registerAutoTrigger(pi: ExtensionAPI): void {
     pi.sendMessage(
       {
         customType: "tracklens-auto-trigger",
-        content: `The user requested a TrackLens review. Automatically invoking ${toolName} for the most recent ${lastDoc.type} document (track: ${lastDoc.trackId}).\n\nUser context: ${userContext}`,
+        content: buildAutoTriggerMessage(toolName, lastDoc, userContext),
         display: false,
       },
       { triggerTurn: true },
@@ -110,6 +110,47 @@ export function registerAutoTrigger(pi: ExtensionAPI): void {
  * reviewed via TrackLens (spec, plan, walkthrough, etc.).
  */
 export { recordRecentDocument };
+
+/**
+ * Build auto-trigger message with document payload so the agent can
+ * invoke the correct TrackLens tool with the right parameters.
+ */
+function buildAutoTriggerMessage(
+  toolName: string,
+  lastDoc: { type: string; trackId: string; content?: string; filePath?: string },
+  userContext: string,
+): string {
+  const parts = [
+    `The user requested a TrackLens review. Automatically invoking ${toolName} for the most recent ${lastDoc.type} document (track: ${lastDoc.trackId}).`,
+    ``,
+    `User context: ${userContext}`,
+    ``,
+    `## Tool Parameters`,
+  ];
+
+  if (toolName === "tracklens_walkthrough") {
+    parts.push(`- trackId: "${lastDoc.trackId}"`);
+  } else {
+    if (lastDoc.filePath) {
+      parts.push(`- filePath: "${lastDoc.filePath}"`);
+      parts.push(`- documentType: "${lastDoc.type}"`);
+      if (lastDoc.trackId) parts.push(`- trackId: "${lastDoc.trackId}"`);
+    } else if (lastDoc.content) {
+      parts.push(`- documentType: "${lastDoc.type}"`);
+      if (lastDoc.trackId) parts.push(`- trackId: "${lastDoc.trackId}"`);
+      parts.push(`- markdown: (see below)`);
+      parts.push(``);
+      parts.push(lastDoc.content);
+    } else {
+      parts.push(`- documentType: "${lastDoc.type}"`);
+      if (lastDoc.trackId) parts.push(`- trackId: "${lastDoc.trackId}"`);
+      parts.push(``);
+      parts.push(`WARNING: No document content or file path available. Ask the user what to review.`);
+    }
+  }
+
+  return parts.join("\n");
+}
 
 /** Event shape for before_send_message (proposed runtime extension) */
 interface BeforeSendMessageEvent {
