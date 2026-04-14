@@ -159,8 +159,9 @@ export async function startTrackLensServer(
   });
   const clientReady = createClientReadyMonitor();
 
-  // Mutable state for auto-close
+  // Mutable state for auto-close and phase tracking
   let shouldAutoClose = false;
+  let currentPhase = "reviewing";
 
   // Start server
   const server = Bun.serve({
@@ -279,6 +280,30 @@ export async function startTrackLensServer(
               success: false,
               error: error instanceof Error ? error.message : String(error),
             },
+            { status: 400 }
+          );
+        }
+      }
+
+      // API: Get current phase
+      if (url.pathname === "/api/phase" && req.method === "GET") {
+        return Response.json({ phase: currentPhase });
+      }
+
+      // API: Update phase
+      if (url.pathname === "/api/phase" && req.method === "POST") {
+        try {
+          const body = await req.json();
+          const { phase } = body as { phase?: string };
+
+          if (phase && typeof phase === "string") {
+            currentPhase = phase;
+          }
+
+          return Response.json({ success: true, phase: currentPhase });
+        } catch (error) {
+          return Response.json(
+            { success: false, error: error instanceof Error ? error.message : String(error) },
             { status: 400 }
           );
         }
@@ -503,6 +528,7 @@ export async function startTrackLensServer(
           }
 
           shouldAutoClose = true;
+          currentPhase = "decided";
           return Response.json({ ok: true });
         } catch (error) {
           return Response.json(
@@ -527,6 +553,7 @@ export async function startTrackLensServer(
           }
 
           shouldAutoClose = true;
+          currentPhase = "decided";
           return Response.json({ ok: true });
         } catch (error) {
           return Response.json(
@@ -595,6 +622,7 @@ export async function startTrackLensServer(
           }
 
           shouldAutoClose = true;
+          currentPhase = "decided";
 
           return Response.json({ success: true });
         } catch (error) {
