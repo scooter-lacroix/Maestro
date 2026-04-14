@@ -462,8 +462,8 @@ export default function App() {
     } else {
       // Exiting edit mode - return to preview
       setEditMode(false);
-      // Sync preview to show edited content
-      if (editedMarkdown) {
+      // Sync preview to show edited content (including intentionally empty)
+      if (editedMarkdown !== undefined && editedMarkdown !== null) {
         setMarkdown(editedMarkdown);
       }
       
