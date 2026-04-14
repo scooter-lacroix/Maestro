@@ -462,6 +462,10 @@ export default function App() {
     } else {
       // Exiting edit mode - return to preview
       setEditMode(false);
+      // Sync preview to show edited content
+      if (editedMarkdown) {
+        setMarkdown(editedMarkdown);
+      }
       
       // Report phase change to server
       if (isApiMode) {

@@ -286,6 +286,7 @@ After review, provide your feedback or approval.`,
             savedPath: result.savedPath,
             agentSwitch: result.agentSwitch,
             autonomyMode: result.autonomyMode,
+            edited_content: result.edited_content,
           },
         };
       } catch (error) {
