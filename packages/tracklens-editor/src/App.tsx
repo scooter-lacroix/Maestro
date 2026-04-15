@@ -297,6 +297,60 @@ export default function App() {
     }
   }, [sidebar.activeTab, showVaultTab, vaultPath, obsidianFolder, vaultBrowser]);
 
+  // Toggle edit mode handler (defined before useEffect that references it)
+  const handleToggleEditMode = useCallback(async () => {
+    const newEditMode = !editMode;
+    const previousEditMode = editMode;
+    const previousEditedMarkdown = editedMarkdown;
+    const previousMarkdown = markdown;
+    
+    if (newEditMode) {
+      setEditedMarkdown(markdown);
+      setEditMode(true);
+      
+      if (isApiMode) {
+        try {
+          const token = (window as any).TRACKLENS_AUTH_TOKEN;
+          await fetch('/api/phase', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ phase: 'editing' }),
+          });
+        } catch (e) {
+          console.error('Failed to report phase, rolling back:', e);
+          setEditMode(previousEditMode);
+          setEditedMarkdown(previousEditedMarkdown);
+        }
+      }
+    } else {
+      setEditMode(false);
+      if (editedMarkdown !== undefined && editedMarkdown !== null) {
+        setMarkdown(editedMarkdown);
+      }
+      
+      if (isApiMode) {
+        try {
+          const token = (window as any).TRACKLENS_AUTH_TOKEN;
+          await fetch('/api/phase', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ phase: 'reviewing' }),
+          });
+        } catch (e) {
+          console.error('Failed to report phase, rolling back:', e);
+          setEditMode(previousEditMode);
+          setMarkdown(previousMarkdown);
+        }
+      }
+    }
+  }, [editMode, editedMarkdown, markdown, isApiMode]);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -380,7 +434,7 @@ export default function App() {
     showExportModal, showImportModal, showFeedbackPrompt, showClaudeCodeWarning,
     showAgentWarning, showPermissionSetup, showUIFeaturesSetup, isSubmitting,
     isApiMode, linkedDocHook.isActive, annotations.length, origin, getAgentWarning,
-    markdown, annotations, globalAttachments, editMode,
+    markdown, annotations, globalAttachments, editMode, handleToggleEditMode,
   ]);
 
   // Close export dropdown on outside click
@@ -437,66 +491,6 @@ export default function App() {
     setMode(newMode);
     saveEditorMode(newMode);
   }, []);
-
-  const handleToggleEditMode = async () => {
-    const newEditMode = !editMode;
-    const previousEditMode = editMode;
-    const previousEditedMarkdown = editedMarkdown;
-    const previousMarkdown = markdown;
-    
-    if (newEditMode) {
-      // Entering edit mode - capture current markdown
-      setEditedMarkdown(markdown);
-      setEditMode(true);
-      
-      // Report phase change to server
-      if (isApiMode) {
-        try {
-          const token = (window as any).TRACKLENS_AUTH_TOKEN;
-          await fetch('/api/phase', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ phase: 'editing' }),
-          });
-        } catch (e) {
-          // Rollback: revert local state since server update failed
-          console.error('Failed to report phase, rolling back:', e);
-          setEditMode(previousEditMode);
-          setEditedMarkdown(previousEditedMarkdown);
-        }
-      }
-    } else {
-      // Exiting edit mode - return to preview
-      setEditMode(false);
-      // Sync preview to show edited content (including intentionally empty)
-      if (editedMarkdown !== undefined && editedMarkdown !== null) {
-        setMarkdown(editedMarkdown);
-      }
-      
-      // Report phase change to server
-      if (isApiMode) {
-        try {
-          const token = (window as any).TRACKLENS_AUTH_TOKEN;
-          await fetch('/api/phase', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ phase: 'reviewing' }),
-          });
-        } catch (e) {
-          // Rollback: revert local state since server update failed
-          console.error('Failed to report phase, rolling back:', e);
-          setEditMode(previousEditMode);
-          setMarkdown(previousMarkdown);
-        }
-      }
-    }
-  };
 
   const handleExtendTimeout = async (minutes: number = 30) => {
     try {
