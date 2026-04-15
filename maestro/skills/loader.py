@@ -109,12 +109,19 @@ class SkillLoader:
           skills_dir/category/subcategory/skill-name/SKILL.md   ← previously missed
           skills_dir/math/math/linear-algebra/matrices/SKILL.md ← previously missed
 
+        Also discovers skills with fallback names (skill.md, README.md).
+
         Returns:
             Dictionary mapping skill names to SkillDefinitions.
         """
         skills: Dict[str, SkillDefinition] = {}
 
-        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
+        # Collect all potential skill files (primary + fallback names)
+        skill_files = set(self.skills_dir.rglob("SKILL.md"))
+        for fallback_name in ["skill.md", "README.md"]:
+            skill_files.update(self.skills_dir.rglob(fallback_name))
+
+        for skill_file in sorted(skill_files):
             skill_path = skill_file.parent
 
             # Skip infrastructure directories at root of skills dir
@@ -226,9 +233,15 @@ class SkillLoader:
 
     def _find_skill_path(self, skill_name: str) -> Optional[Path]:
         """Find the path to a skill directory by name (recursive)."""
+        # Check primary SKILL.md first
         for skill_file in self.skills_dir.rglob("SKILL.md"):
             if skill_file.parent.name == skill_name:
                 return skill_file.parent
+        # Check fallback names
+        for fallback_name in ["skill.md", "README.md"]:
+            for skill_file in self.skills_dir.rglob(fallback_name):
+                if skill_file.parent.name == skill_name:
+                    return skill_file.parent
         return None
 
     def _create_definition(

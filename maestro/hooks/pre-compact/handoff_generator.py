@@ -85,10 +85,30 @@ def generate_handoff(input_data: dict) -> dict:
     track_dir = tracks_dir / track_id
 
     if not track_dir.exists() and tracks_dir.exists():
+        # Try fuzzy matching: prioritize directories that start with track_id
+        # followed by common archive/suffix patterns
+        candidates = []
         for d in tracks_dir.iterdir():
-            if d.is_dir() and track_id in d.name:
-                track_dir = d
-                break
+            if not d.is_dir():
+                continue
+            # Exact match (shouldn't reach here due to the exists() check above,
+            # but kept for completeness)
+            if d.name == track_id:
+                candidates.append((0, d))  # Priority 0: exact match
+            # Starts with track_id and has a common separator/suffix
+            elif d.name.startswith(track_id):
+                suffix = d.name[len(track_id):]
+                # Common patterns: -archived, -backup, -old, .bak, _v2, etc.
+                if suffix.startswith(('-', '_', '.')) or suffix.startswith('-archived') or suffix.startswith('-backup'):
+                    candidates.append((1, d))  # Priority 1: starts with track_id + separator
+                # Contains track_id as a word boundary (less preferred)
+                elif re.search(rf'\b{re.escape(track_id)}\b', d.name):
+                    candidates.append((2, d))  # Priority 2: word boundary match
+
+        if candidates:
+            # Sort by priority and use the best match
+            candidates.sort(key=lambda x: x[0])
+            track_dir = candidates[0][1]
 
     track_dir.mkdir(parents=True, exist_ok=True)
     handoff_path = track_dir / "compaction-handoff.md"

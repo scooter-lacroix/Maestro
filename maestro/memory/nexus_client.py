@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -69,34 +70,54 @@ class StandaloneNexusClient:
         metadata: Optional[dict[str, Any]] = None,
         memory_lane_type: Optional[str] = None,
     ) -> dict[str, Any]:
-        # Truncate content to avoid ARG_MAX limits when passing via CLI argv.
-        # Typical ARG_MAX is 2MB; use 1MB safety threshold.
-        ARG_MAX_SAFETY = 1_000_000
-        if len(content) > ARG_MAX_SAFETY:
-            logger.warning(
-                "Truncating large memory content (%d bytes) to ARG_MAX safety limit",
-                len(content),
-            )
-            content = content[:ARG_MAX_SAFETY]
+        # Use temp files for sensitive data to avoid exposing via CLI argv
+        content_file = None
+        metadata_file = None
 
-        args = [
-            "store",
-            "--content",
-            content,
-            "--agent",
-            agent,
-            "--category",
-            category,
-        ]
-        label_list = [label for label in (labels or []) if label]
-        if label_list:
-            args.extend(["--labels", ",".join(label_list)])
-        if metadata:
-            args.extend(["--metadata-json", _json_dumps(metadata)])
-        if memory_lane_type:
-            args.extend(["--memory-lane-type", memory_lane_type])
+        try:
+            # Write content to temp file with secure permissions
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix='nexus_content_') as f:
+                f.write(content)
+                content_file = f.name
+                os.chmod(content_file, 0o600)
 
-        result = await self._run_nexus(args)
+            args = [
+                "store",
+                "--content-file",
+                content_file,
+                "--agent",
+                agent,
+                "--category",
+                category,
+            ]
+            label_list = [label for label in (labels or []) if label]
+            if label_list:
+                args.extend(["--labels", ",".join(label_list)])
+
+            # Write metadata to temp file if present
+            if metadata:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix='nexus_metadata_') as f:
+                    f.write(_json_dumps(metadata))
+                    metadata_file = f.name
+                    os.chmod(metadata_file, 0o600)
+                args.extend(["--metadata-json-file", metadata_file])
+
+            if memory_lane_type:
+                args.extend(["--memory-lane-type", memory_lane_type])
+
+            result = await self._run_nexus(args)
+        finally:
+            # Clean up temp files
+            if content_file and os.path.exists(content_file):
+                try:
+                    os.unlink(content_file)
+                except OSError:
+                    pass
+            if metadata_file and os.path.exists(metadata_file):
+                try:
+                    os.unlink(metadata_file)
+                except OSError:
+                    pass
         memory_id = self._extract_memory_id(result.stdout)
         if not result.success or memory_id is None:
             return {
@@ -408,10 +429,9 @@ class StandaloneNexusClient:
             total_stmt = text(
                 """
                 SELECT COUNT(*) AS total_memories
-                FROM memories m
-                JOIN agent_namespaces ns ON ns.id = m.namespace_id
+                FROM memories
                 WHERE is_active = 1
-                  AND (:agent_type IS NULL OR ns.name = :agent_type)
+                  AND (:agent_type IS NULL OR json_extract(metadata, '$.agent_type') = :agent_type)
                 """
             )
             total_result = await session.execute(total_stmt, {"agent_type": agent_type})
@@ -785,7 +805,7 @@ class StandaloneNexusClient:
             "source": None,
             "session_id": metadata.get("session_id"),
             "project_id": getattr(row, "maestro_project_id", None),
-            "track_id": getattr(row, "maestro_track_id", None),
+            "track_id": metadata.get("track_id") or getattr(row, "maestro_track_id", None),
             "command": getattr(row, "maestro_command", None) or metadata.get("maestro_command"),
             "command_context": command_context,
             "created_at": row.created_at,

@@ -127,7 +127,7 @@ export default function App() {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('bypassPermissions');
   // Timeout dropdown state
   const [showTimeoutControls, setShowTimeoutControls] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<number | null>(1800);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   // Toast notification
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -351,7 +351,7 @@ export default function App() {
         const tag = (e.target as HTMLElement)?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-        if (!isApiMode || isSubmitting) return;
+        if (!isApiMode || isSubmitting || linkedDocHook.isActive) return;
 
         e.preventDefault();
         handleToggleEditMode();
@@ -920,7 +920,7 @@ export default function App() {
               </>
             )}
 
-            {timeLeft !== null && (
+            {isApiMode && timeLeft !== null && (
               <div className="relative">
                 <button
                   onClick={() => setShowTimeoutControls(!showTimeoutControls)}

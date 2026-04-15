@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::json;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 
 use crate::provider_boundary::{MemoryLifecycleEventKind, SessionProviderProfile};
 
@@ -89,6 +90,8 @@ impl NexusRuntimeBridge {
         args: &[&str],
         reason: &str,
     ) -> Result<()> {
+        const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
         let mut command = Command::new(self.provider.installation().executable.clone());
         command.args(args);
         if let Some(root) = &self.provider.state_root {
@@ -100,9 +103,9 @@ impl NexusRuntimeBridge {
             self.event_payload(profile, reason).to_string(),
         );
 
-        let output = command
-            .output()
+        let output = timeout(COMMAND_TIMEOUT, command.output())
             .await
+            .context("nexus bridge command timed out")?
             .context("failed to invoke nexus bridge")?;
         if !output.status.success() {
             anyhow::bail!(

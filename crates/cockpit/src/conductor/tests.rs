@@ -57,6 +57,8 @@ impl HomeEnvGuard {
     fn set(path: &std::path::Path) -> Self {
         let lock = HOME_ENV_LOCK.lock().unwrap();
         let previous_home = std::env::var_os("HOME");
+        // TODO: When upgrading to Rust 2024+, wrap set_var in unsafe {} with safety comment:
+        // "Safe: we have exclusive access via HOME_ENV_LOCK and restore on Drop"
         std::env::set_var("HOME", path);
         Self {
             previous_home,
@@ -67,6 +69,8 @@ impl HomeEnvGuard {
 
 impl Drop for HomeEnvGuard {
     fn drop(&mut self) {
+        // TODO: When upgrading to Rust 2024+, wrap set_var/remove_var in unsafe {} with safety comment:
+        // "Safe: we have exclusive access via HOME_ENV_LOCK held until Drop completes"
         match &self.previous_home {
             Some(previous) => std::env::set_var("HOME", previous),
             None => std::env::remove_var("HOME"),

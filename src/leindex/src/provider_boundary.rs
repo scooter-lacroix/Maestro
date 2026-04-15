@@ -8,12 +8,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use tokio::time::timeout;
+
+fn serialize_enum_snake_case<T: Serialize + std::fmt::Debug>(val: &T) -> String {
+    serde_json::to_string(val)
+        .map(|s| s.trim_matches('"').to_string())
+        .unwrap_or_else(|_| format!("{:?}", val).to_ascii_lowercase())
+}
 
 /// Runtime entry point that launched a managed session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -517,11 +525,11 @@ impl AgentSessionLaunchSpec {
         environment_overrides.insert("MAESTRO_SELECTED_CLI".to_string(), selected_cli.clone());
         environment_overrides.insert(
             "MAESTRO_ANALYSIS_PROVIDER".to_string(),
-            format!("{:?}", provider_profile.analysis_provider).to_ascii_lowercase(),
+            serialize_enum_snake_case(&provider_profile.analysis_provider),
         );
         environment_overrides.insert(
             "MAESTRO_MEMORY_PROVIDER".to_string(),
-            format!("{:?}", provider_profile.memory_provider).to_ascii_lowercase(),
+            serialize_enum_snake_case(&provider_profile.memory_provider),
         );
 
         Self {
@@ -1027,8 +1035,16 @@ pub(crate) async fn run_provider_check(
     executable: &Path,
     args: &[&str],
 ) -> (ProviderStatus, String) {
-    match Command::new(executable).args(args).output().await {
-        Ok(output) if output.status.success() => {
+    const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+
+    let result = timeout(
+        HEALTH_CHECK_TIMEOUT,
+        Command::new(executable).args(args).output(),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(output)) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             let message = if !stdout.is_empty() {
@@ -1040,14 +1056,18 @@ pub(crate) async fn run_provider_check(
             };
             (ProviderStatus::Healthy, message)
         }
-        Ok(output) => (
+        Ok(Ok(output)) => (
             ProviderStatus::Misconfigured,
             format!(
                 "command failed with status {}",
                 output.status.code().unwrap_or_default()
             ),
         ),
-        Err(err) => (ProviderStatus::Missing, err.to_string()),
+        Ok(Err(err)) => (ProviderStatus::Missing, err.to_string()),
+        Err(_) => (
+            ProviderStatus::Misconfigured,
+            format!("health check timeout after {}s", HEALTH_CHECK_TIMEOUT.as_secs()),
+        ),
     }
 }
 

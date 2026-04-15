@@ -603,11 +603,19 @@ impl MaestroClawPane {
                 ]),
             ]
         } else {
+            let viewport = area.height.saturating_sub(2) as usize;
+            let total_lines = self.agent_output.len();
+            let scroll = self.output_scroll as usize;
+            // Compute visible window start position accounting for scroll offset
+            // When scroll is 0, we show the last `viewport` lines
+            // When scroll increases, we show older lines
+            let start = total_lines.saturating_sub(viewport + scroll);
+            let end = total_lines.saturating_sub(scroll);
+
             self.agent_output
+                .get(start..end)
+                .unwrap_or(&[])
                 .iter()
-                .rev()
-                .take(area.height.saturating_sub(2) as usize)
-                .rev()
                 .map(|line| {
                     let color = match line.line_type {
                         OutputLineType::AgentText => Color::White,

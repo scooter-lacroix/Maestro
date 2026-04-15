@@ -13,6 +13,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 impl ConductorPane {
     /// Poll the orchestrate engine state for all tracks to find active ones
@@ -524,6 +526,9 @@ fn run_hook_executor_phase(
     payload: &serde_json::Value,
     project_root: &Path,
 ) -> Option<String> {
+    const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
     let script = r#"
 import json
 import sys
@@ -537,33 +542,60 @@ json.dump(result, sys.stdout)
 "#;
 
     for python in ["python3", "python"] {
-        let mut child = match Command::new(python)
-            .arg("-c")
-            .arg(script)
-            .arg(phase)
-            .current_dir(project_root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(_) => continue,
-        };
+        let phase_owned = phase.to_owned();
+        let project_root_owned = project_root.to_path_buf();
+        let payload_owned = payload.clone();
 
-        if let Some(mut stdin) = child.stdin.take() {
-            if let Ok(json) = serde_json::to_string(payload) {
-                let _ = stdin.write_all(json.as_bytes());
+        let handle = thread::spawn(move || {
+            let mut child = match Command::new(python)
+                .arg("-c")
+                .arg(script)
+                .arg(&phase_owned)
+                .current_dir(&project_root_owned)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(_) => return None,
+            };
+
+            if let Some(mut stdin) = child.stdin.take() {
+                if let Ok(json) = serde_json::to_string(&payload_owned) {
+                    let _ = stdin.write_all(json.as_bytes());
+                }
             }
-        }
 
-        let output = match child.wait_with_output() {
-            Ok(output) => output,
-            Err(_) => continue,
-        };
+            match child.wait_with_output() {
+                Ok(output) if output.status.success() => {
+                    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                }
+                _ => None,
+            }
+        });
 
-        if output.status.success() {
-            return Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        let deadline = Instant::now() + HOOK_TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                eprintln!("Hook executor phase '{}' timed out after {:?}", phase, HOOK_TIMEOUT);
+                return None;
+            }
+
+            let wait_duration = std::cmp::min(POLL_INTERVAL, remaining);
+            thread::sleep(wait_duration);
+
+            if handle.is_finished() {
+                match handle.join() {
+                    Ok(Some(result)) => return Some(result),
+                    Ok(None) => break,
+                    Err(_) => {
+                        eprintln!("Hook executor phase '{}' thread panicked", phase);
+                        return None;
+                    }
+                }
+            }
         }
     }
 

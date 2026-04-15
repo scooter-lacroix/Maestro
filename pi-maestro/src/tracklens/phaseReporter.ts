@@ -74,7 +74,24 @@ export function startPhaseReporter(options: PhaseReporterOptions): () => void {
     if (stopped || signal.aborted) return;
 
     try {
-      const response = await fetch(`${serverUrl}/api/phase`);
+      // Create timeout abort controller
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), 5000);
+
+      // Chain with existing signal
+      const combinedSignal = signal.aborted
+        ? signal
+        : (() => {
+            // If original signal aborts, clear timeout
+            signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+            return {
+              get aborted() { return signal.aborted || timeoutController.signal.aborted; },
+              addEventListener: timeoutController.signal.addEventListener.bind(timeoutController.signal),
+              removeEventListener: timeoutController.signal.removeEventListener.bind(timeoutController.signal),
+            } as AbortSignal;
+          })();
+
+      const response = await fetch(`${serverUrl}/api/phase`, { signal: combinedSignal });
       if (!response.ok) {
         // Server might not have phase endpoint yet; retry
         scheduleNext();

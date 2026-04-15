@@ -366,8 +366,12 @@ install_nexus_provider() {
     # Validate nexus init (no longer silently swallow errors)
     log "Running nexus init..."
     local init_out
-    init_out="$(nexus init 2>&1)"
-    local init_rc=$?
+    local init_rc
+    if init_out="$(nexus init 2>&1)"; then
+        init_rc=0
+    else
+        init_rc=$?
+    fi
     log_raw "nexus init output (rc=$init_rc):"
     echo "$init_out" >> "$INSTALL_LOG"
     if [[ $init_rc -ne 0 ]]; then

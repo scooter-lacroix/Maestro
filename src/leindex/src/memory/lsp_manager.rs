@@ -652,7 +652,7 @@ impl LspManager {
         {
             let running = self.running_lsps.read().await;
             if let Some(existing) = running.get(&lsp_key) {
-                if matches!(existing.status, LspStatus::Running | LspStatus::Starting) {
+                if matches!(existing.status, LspStatus::Running) {
                     debug!(
                         "LSP '{}' already running for session '{}'",
                         lsp_type.display_name(),
@@ -682,8 +682,20 @@ impl LspManager {
         debug!("Spawning LSP process: {:?}", binary);
 
         // Validate binary exists before spawning (Task 10.1)
-        validate_binary_exists(&binary, lsp_type.binary_name())
-            .with_context(|| format!("Failed to validate LSP binary: {:?}", binary))?;
+        if let Err(e) = validate_binary_exists(&binary, lsp_type.binary_name()) {
+            let error_msg = format!("Failed to validate LSP binary: {:?}", binary);
+            warn!("{}: {}", error_msg, e);
+
+            // Reset status to error since setup failed
+            {
+                let mut running = self.running_lsps.write().await;
+                if let Some(process) = running.get_mut(&lsp_key) {
+                    process.status = LspStatus::Error;
+                    process.last_error = Some(error_msg);
+                }
+            }
+            return Err(e).with_context(|| format!("Failed to validate LSP binary: {:?}", binary));
+        }
 
         let mut args: Vec<String> = config.additional_args;
         for default_arg in lsp_type.default_additional_args() {

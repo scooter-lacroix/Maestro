@@ -299,17 +299,17 @@ fn nexus_install_command(method: &str) -> String {
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     normalize_standard_tool_paths();
     // Open durable log file for the entire setup run.
-    let mut log_file = match open_setup_log() {
+    let (mut log_file, setup_log_path) = match open_setup_log() {
         Ok((f, path)) => {
             let _ = tx.send(SetupEvent::Log(format!("Setup log: {}", path.display())));
-            Some(f)
+            (Some(f), Some(path))
         }
         Err(e) => {
             let _ = tx.send(SetupEvent::Log(format!(
                 "[WARN] Could not open setup log: {}",
                 e
             )));
-            None
+            (None, None)
         }
     };
     setup_log_write(
@@ -1652,7 +1652,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     }
 
     setup_log_write(&mut log_file, "SETUP COMPLETED SUCCESSFULLY");
-    if let Some(path) = setup_log_path().ok() {
+    if let Some(path) = setup_log_path {
         let _ = tx.send(SetupEvent::Log(format!(
             "Setup log saved to: {}",
             path.display()
@@ -1756,24 +1756,26 @@ fn validate_nexus_provider(tx: &Sender<SetupEvent>, log: &mut Option<File>, meth
         }
     }
 
-    // Validate nexus init (previously silently swallowed)
-    match Command::new("nexus").arg("init").output() {
+    // Validate nexus installation (read-only check)
+    match Command::new("nexus").arg("--version").output() {
         Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
             if out.status.success() {
-                let _ = tx.send(SetupEvent::Log("  [OK] nexus init succeeded".to_string()));
-                setup_log_write(log, "  [OK] nexus init succeeded");
+                let version = stdout.trim().lines().next().unwrap_or("unknown");
+                let _ = tx.send(SetupEvent::Log(format!("  [OK] nexus version: {}", version)));
+                setup_log_write(log, &format!("  [OK] nexus version: {}", version));
             } else {
                 let msg = format!(
-                    "nexus init returned non-zero (may already be initialized): {}",
-                    stderr.trim()
+                    "nexus --version failed: {}",
+                    if stderr.trim().is_empty() { &stdout } else { &stderr }.trim()
                 );
                 let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
                 setup_log_write(log, &format!("  [WARN] {}", msg));
             }
         }
         Err(e) => {
-            let msg = format!("Could not execute nexus init: {}", e);
+            let msg = format!("Could not execute nexus --version: {}", e);
             let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
             setup_log_write(log, &format!("  [WARN] {}", msg));
         }
