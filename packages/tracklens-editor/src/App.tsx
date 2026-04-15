@@ -142,6 +142,7 @@ export default function App() {
   // Refs
   const viewerRef = useRef<ViewerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const originalPlanRef = useRef<string>('');
 
   // Resizable panels
   const leftPanel = useResizablePanel({
@@ -213,10 +214,12 @@ export default function App() {
           const editableMarker = '<!-- tracklens:editable -->';
           if (data.plan.startsWith(editableMarker)) {
             const stripped = data.plan.replace(editableMarker + '\n', '').replace(editableMarker, '');
+            originalPlanRef.current = stripped;
             setMarkdown(stripped);
             setEditedMarkdown(stripped);
             setEditMode(true);
           } else {
+            originalPlanRef.current = data.plan;
             setMarkdown(data.plan);
           }
         }
@@ -552,8 +555,8 @@ export default function App() {
         body.annotations = annotations;
       }
 
-      // Include edited content if content has changed (including empty string edits)
-      if (editedMarkdown !== undefined && editedMarkdown !== null && editedMarkdown !== markdown) {
+      // Include edited content if user modified the plan from the original
+      if (editedMarkdown !== undefined && editedMarkdown !== null && editedMarkdown !== originalPlanRef.current) {
         body.edited_content = editedMarkdown;
       }
 

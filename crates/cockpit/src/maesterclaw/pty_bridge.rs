@@ -174,7 +174,7 @@ impl Drop for PtyBridge {
         // If the process doesn't exit quickly, we've at least
         // sent SIGKILL and the OS will reap it eventually.
         for _ in 0..10 {
-            if self.child.try_wait().is_ok() {
+            if let Ok(Some(_)) = self.child.try_wait() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
