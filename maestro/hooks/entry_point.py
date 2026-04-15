@@ -97,11 +97,50 @@ def run_hook(phase: str, event_name: str):
                 messages.append(f"Preserved {continuity.get('preserved_count', 0)} memories.")
             if result.get("hook_error"):
                 messages.append(f"Warning: {result['hook_error']}")
-            
+
             response = {
                 "continue": True,
                 "systemMessage": "\n".join(messages) if messages else "Maestro pre-compact complete."
             }
+
+        # Consume critical_think_result from checkpoint/review/loop hooks
+        # and surface as additionalContext so Claude sees the metacognitive analysis.
+        ct_result = result.get("critical_think_result")
+        if ct_result and isinstance(ct_result, dict):
+            ct_parts = []
+            if ct_result.get("synthesis"):
+                ct_parts.append(f"Analysis: {ct_result['synthesis']}")
+            if ct_result.get("pitfalls"):
+                pitfalls = ct_result["pitfalls"]
+                if isinstance(pitfalls, list) and pitfalls:
+                    ct_parts.append(f"Pitfalls: {'; '.join(str(p) for p in pitfalls[:5])}")
+            if ct_result.get("risks"):
+                risks = ct_result["risks"]
+                if isinstance(risks, list) and risks:
+                    ct_parts.append(f"Risks: {'; '.join(str(r) for r in risks[:5])}")
+            if ct_result.get("next_steps"):
+                next_steps = ct_result["next_steps"]
+                if isinstance(next_steps, list) and next_steps:
+                    ct_parts.append(f"Suggested next steps: {'; '.join(str(s) for s in next_steps[:5])}")
+            if ct_result.get("revised_confidence") is not None:
+                ct_parts.append(f"Confidence: {ct_result['revised_confidence']:.0%}")
+
+            if ct_parts:
+                ct_context = f"[Maestro Critical Think - {phase}]\n" + "\n".join(ct_parts)
+                if response and "hookSpecificOutput" in response:
+                    existing = response["hookSpecificOutput"].get("additionalContext", "")
+                    response["hookSpecificOutput"]["additionalContext"] = (
+                        f"{existing}\n\n{ct_context}" if existing else ct_context
+                    )
+                elif response and "systemMessage" in response:
+                    response["systemMessage"] += f"\n\n{ct_context}"
+                else:
+                    response = {
+                        "hookSpecificOutput": {
+                            "hookEventName": event_name,
+                            "additionalContext": ct_context,
+                        }
+                    }
 
         # Print final JSON to REAL stdout
         original_stdout.write(json.dumps(response if response else {}))

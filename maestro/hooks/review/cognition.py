@@ -88,6 +88,32 @@ def review_hook(input_data: dict) -> dict:
                 "synthesis": ct_result.synthesis,
                 "next_steps": ct_result.next_steps,
             }
+
+            # Persist critical think analysis to Nexus for cross-session retrieval
+            try:
+                from maestro.memory.service import MaestroMemoryService
+
+                async def _store_ct_result() -> None:
+                    service = MaestroMemoryService()
+                    await service.initialize()
+                    try:
+                        await service.store_command_context(
+                            command="hook:review:critical_think",
+                            project_path=project_path,
+                            context={
+                                "session_id": session_id,
+                                "track_id": input_data.get("track_id"),
+                                "task_id": input_data.get("task_id") or input_data.get("current_task_id"),
+                                "event": "critical_think_analysis",
+                                "critical_think_result": input_data["critical_think_result"],
+                            },
+                        )
+                    finally:
+                        await service.close()
+
+                asyncio.run(_store_ct_result())
+            except Exception:
+                pass
         except Exception:
             # Critical think is best-effort — don't fail the review
             pass
