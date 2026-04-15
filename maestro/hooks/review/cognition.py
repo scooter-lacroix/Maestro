@@ -36,10 +36,11 @@ def review_hook(input_data: dict) -> dict:
         if not session_id or not project_path:
             return input_data
 
-        async def _store_review() -> None:
+        async def _store_review_data() -> None:
             service = MaestroMemoryService()
             await service.initialize()
             try:
+                # Store review transition
                 await service.store_command_context(
                     command="hook:review",
                     project_path=project_path,
@@ -56,7 +57,7 @@ def review_hook(input_data: dict) -> dict:
             finally:
                 await service.close()
 
-        asyncio.run(_store_review())
+        asyncio.run(_store_review_data())
         input_data["review_cognition_scheduled"] = True
 
         # Invoke CriticalThinkEngine for pre-review analysis

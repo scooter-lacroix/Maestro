@@ -414,28 +414,15 @@ impl ConductorPane {
                     if !suppress_output {
                         self.state.transition(&comp_event);
                         crate::conductor::telemetry::BUS.broadcast(comp_event);
-                        self.schedule_cognition_transition(
-                            "loop",
+                        // Schedule all three transitions in parallel to avoid blocking UI thread for up to 90s
+                        self.schedule_cognition_transitions_parallel(
+                            &[
+                                ("loop", false, true),
+                                ("review", true, false),
+                                ("checkpoint", true, true),
+                            ],
                             log.iteration,
                             &log.task_id,
-                            false,
-                            true,
-                            suppress_output,
-                        );
-                        self.schedule_cognition_transition(
-                            "review",
-                            log.iteration,
-                            &log.task_id,
-                            true,
-                            false,
-                            suppress_output,
-                        );
-                        self.schedule_cognition_transition(
-                            "checkpoint",
-                            log.iteration,
-                            &log.task_id,
-                            true,
-                            true,
                             suppress_output,
                         );
                     }
@@ -504,6 +491,80 @@ impl ConductorPane {
                 summary,
                 Some(stdout),
             );
+        }
+    }
+
+    /// Schedule multiple cognition transitions in parallel to avoid blocking UI thread
+    fn schedule_cognition_transitions_parallel(
+        &mut self,
+        phases: &[(&str, bool, bool)], // (phase_name, review_point_reached, task_completed)
+        iteration: u64,
+        task_id: &str,
+        suppress_output: bool,
+    ) {
+        if suppress_output {
+            return;
+        }
+
+        let project_root = self
+            .current_project
+            .as_ref()
+            .map(|project| project.root_dir.clone())
+            .or_else(|| self.tracks_dir.parent().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| self.tracks_dir.clone());
+
+        // Build payloads for all phases
+        let payloads: Vec<_> = phases
+            .iter()
+            .map(|(phase, review_point_reached, task_completed)| {
+                let payload = json!({
+                    "session_id": self.state.session_id.clone().unwrap_or_default(),
+                    "track_id": self.state.current_track.clone().unwrap_or_default(),
+                    "task_id": task_id,
+                    "iteration": iteration,
+                    "project_path": project_root.display().to_string(),
+                    "cwd": project_root.display().to_string(),
+                    "selected_cli": self
+                        .state
+                        .active_agent
+                        .as_ref()
+                        .map(|agent| agent.tool.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    "loop_mode": format!("{:?}", self.loop_mode),
+                    "review_point_reached": review_point_reached,
+                    "checkpoint_interval": self.state.max_iterations,
+                    "task_completed": task_completed,
+                });
+                (*phase, payload)
+            })
+            .collect();
+
+        // Spawn threads for each phase in parallel
+        let handles: Vec<_> = payloads
+            .into_iter()
+            .map(|(phase, payload)| {
+                let phase = phase.to_string();
+                let project_root = project_root.clone();
+                thread::spawn(move || {
+                    (phase.clone(), run_hook_executor_phase(&phase, &payload, &project_root))
+                })
+            })
+            .collect();
+
+        // Collect results and log them
+        for handle in handles {
+            if let Ok((phase, stdout)) = handle.join() {
+                if let Some(stdout) = stdout {
+                    let summary = format!("scheduled {} transition for iteration {}", phase, iteration);
+                    self.push_runtime_log(
+                        crate::conductor::model::RuntimeLogLevel::Info,
+                        Some(iteration),
+                        Some(task_id.to_string()),
+                        summary,
+                        Some(stdout),
+                    );
+                }
+            }
         }
     }
 }
@@ -589,7 +650,7 @@ json.dump(result, sys.stdout)
             if handle.is_finished() {
                 match handle.join() {
                     Ok(Some(result)) => return Some(result),
-                    Ok(None) => break,
+                    Ok(None) => return None,
                     Err(_) => {
                         eprintln!("Hook executor phase '{}' thread panicked", phase);
                         return None;

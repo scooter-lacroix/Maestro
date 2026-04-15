@@ -1449,7 +1449,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                 setup_log_raw(
                     &mut log_file,
-                    &format!("  command: {}", &command[..command.len().min(500)]),
+                    &format!("  command: {}", command.chars().take(500).collect::<String>()),
                 );
 
                 // For sudo commands, we need to handle them specially
@@ -2513,7 +2513,7 @@ fn verify_installed_system(install_path: &str, selected_tools: &[String], leinde
                     &provider_report
                 ));
             }
-            let leindex_binary = Path::new("leindex");
+            let leindex_binary = leindex.binary();
             let leindex_help = command_output(leindex_binary, &["--help"])?;
             for token in ["index", "search", "analyze", "phase", "mcp"] {
                 if !leindex_help.contains(token) {

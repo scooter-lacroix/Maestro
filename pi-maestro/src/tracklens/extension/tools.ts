@@ -634,6 +634,50 @@ After review, provide your feedback or approval.`,
         files?: string[];
       };
 
+      // Validate gitRef: prevent flag injection (e.g., "--output=/etc/passwd")
+      // Must not start with '-' and must match safe git ref pattern
+      if (gitRef.startsWith("-")) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: gitRef cannot start with '-' (flag injection prevented)",
+            },
+          ],
+          details: { approved: false },
+        };
+      }
+      // Allow: HEAD, branch names, tags, commit SHAs, refs/* paths
+      // Reject values that look like git flags
+      if (!/^[a-zA-Z0-9_\/\-\.]+$/.test(gitRef)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: gitRef contains invalid characters. Expected branch name, tag, or commit SHA.`,
+            },
+          ],
+          details: { approved: false },
+        };
+      }
+
+      // Validate files array: prevent flag injection via file paths
+      if (files && files.length > 0) {
+        for (const file of files) {
+          if (file.startsWith("-")) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: file path cannot start with '-' (flag injection prevented): ${file}`,
+                },
+              ],
+              details: { approved: false },
+            };
+          }
+        }
+      }
+
       // Generate diff using execFileSync to prevent shell injection
       let diffContent: string;
       try {

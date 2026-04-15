@@ -80,24 +80,31 @@ def session_outcome_hook(input_data: dict) -> dict:
                 duration = (session.ended_at - session.started_at).total_seconds()
                 outcome["duration_seconds"] = duration
 
-        # Get memory count for this session from Nexus-backed truth.
+        # Combined async coordinator for all async operations
+        # This consolidates all asyncio.run() calls into a single event loop execution
+        async def _async_operations() -> tuple[int, str]:
+            """Perform all async operations in one event loop."""
+            service = MaestroMemoryService()
+            await service.initialize()
+            try:
+                # Get memory count for this session from Nexus-backed truth
+                memories = await service.retrieve_session_context(session_id=session_id, limit=500)
+                return len(memories), ""
+            except Exception as e:
+                return 0, str(e)
+            finally:
+                await service.close()
+
         memory_count = 0
+        memory_error = ""
         try:
-            from maestro.memory.service import MaestroMemoryService
-
-            async def _load_session_memories() -> list[dict[str, Any]]:
-                service = MaestroMemoryService()
-                await service.initialize()
-                try:
-                    return await service.retrieve_session_context(session_id=session_id, limit=500)
-                finally:
-                    await service.close()
-
-            memories = asyncio.run(_load_session_memories())
-            memory_count = len(memories)
+            memory_count, memory_error = asyncio.run(_async_operations())
         except Exception as e:
             input_data["outcome_memory_load_error"] = str(e)
             memory_count = 0
+
+        if memory_error:
+            input_data["outcome_memory_load_error"] = memory_error
 
         outcome["memory_count"] = memory_count
 
@@ -111,13 +118,16 @@ def session_outcome_hook(input_data: dict) -> dict:
             project_name = Path(session.project_path).name
             summary += f" in {project_name}"
 
-        # Store outcome in memory
+        # Store outcome in memory and create DB handoff in the same async context
         current_session_id = getattr(manager, '_current_session_id', None)
         if current_session_id or session_id:
             try:
                 from maestro.memory.service import MaestroMemoryService
+                from maestro.memory.coordination.handoffs import HandoffHandler, HandoffTemplate
 
-                async def _store_session_outcome() -> None:
+                async def _persist_operations() -> None:
+                    """Store outcome and create handoff in a single async operation."""
+                    # Part 1: Store outcome in Nexus
                     service = MaestroMemoryService()
                     await service.initialize()
                     try:
@@ -138,7 +148,33 @@ def session_outcome_hook(input_data: dict) -> dict:
                     finally:
                         await service.close()
 
-                asyncio.run(_store_session_outcome())
+                    # Part 2: Create DB handoff in the same event loop
+                    from maestro.memory.database.session import get_session
+                    async with get_session() as db_session:
+                        handler = HandoffHandler(db_session)
+                        track_id = input_data.get("track_id")
+                        project_path = (
+                            session.project_path if session and session.project_path else os.getcwd()
+                        )
+                        context = HandoffTemplate.generic_handoff(
+                            summary=summary,
+                            track_id=track_id,
+                            current_task=input_data.get("current_task_id"),
+                            iteration=input_data.get("iteration"),
+                            remaining_work=input_data.get("remaining_work", ""),
+                        )
+                        handoff = handler.create_handoff(
+                            title=f"Session handoff: {session_id[:8]}",
+                            from_session_id=session_id,
+                            from_agent_id=agent_id,
+                            project_path=project_path,
+                            summary=summary,
+                            context_data=context,
+                        )
+                        if handoff is None:
+                            input_data["outcome_handoff_error"] = "create_handoff returned None"
+
+                asyncio.run(_persist_operations())
             except Exception as e:
                 input_data["outcome_storage_error"] = str(e)
 
@@ -153,40 +189,6 @@ def session_outcome_hook(input_data: dict) -> dict:
                 )
             except Exception as e:
                 input_data["outcome_ledger_error"] = str(e)
-
-        # Create DB handoff so the next session can resume work
-        try:
-            from maestro.memory.coordination.handoffs import HandoffHandler, HandoffTemplate
-
-            async def _create_session_handoff() -> None:
-                from maestro.memory.database.session import get_session
-                async with get_session() as db_session:
-                    handler = HandoffHandler(db_session)
-                    track_id = input_data.get("track_id")
-                    project_path = (
-                        session.project_path if session and session.project_path else os.getcwd()
-                    )
-                    context = HandoffTemplate.generic_handoff(
-                        summary=summary,
-                        track_id=track_id,
-                        current_task=input_data.get("current_task_id"),
-                        iteration=input_data.get("iteration"),
-                        remaining_work=input_data.get("remaining_work", ""),
-                    )
-                    handoff = handler.create_handoff(
-                        title=f"Session handoff: {session_id[:8]}",
-                        from_session_id=session_id,
-                        from_agent_id=agent_id,
-                        project_path=project_path,
-                        summary=summary,
-                        context_data=context,
-                    )
-                    if handoff is None:
-                        input_data["outcome_handoff_error"] = "create_handoff returned None"
-
-            asyncio.run(_create_session_handoff())
-        except Exception as e:
-            input_data["outcome_handoff_error"] = str(e)
 
         input_data["session_outcome_captured"] = outcome
         input_data["outcome_summary"] = summary

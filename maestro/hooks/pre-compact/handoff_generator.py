@@ -173,11 +173,14 @@ def generate_handoff(input_data: dict) -> dict:
     input_data["compaction_handoff_path"] = str(handoff_path)
     input_data["compaction_count"] = compaction_count
 
-    # Create DB handoff record for cross-session queryability
+    # Create DB handoff record and store in memory in a single async operation
     try:
         from maestro.memory.coordination.handoffs import HandoffHandler
+        from maestro.memory.service import MaestroMemoryService
 
-        async def _create_compaction_handoff() -> None:
+        async def _persist_compaction_handoff() -> None:
+            """Create DB handoff and store in memory in one event loop."""
+            # Part 1: Create DB handoff record
             from maestro.memory.database.session import get_session
             async with get_session() as db_session:
                 handler = HandoffHandler(db_session)
@@ -200,14 +203,7 @@ def generate_handoff(input_data: dict) -> dict:
                     context_data=context,
                 )
 
-        asyncio.run(_create_compaction_handoff())
-    except Exception as e:
-        input_data["compaction_db_error"] = str(e)
-
-    try:
-        from maestro.memory.service import MaestroMemoryService
-
-        async def _store_compaction_handoff() -> None:
+            # Part 2: Store in Nexus memory
             service = MaestroMemoryService()
             await service.initialize()
             try:
@@ -226,7 +222,7 @@ def generate_handoff(input_data: dict) -> dict:
             finally:
                 await service.close()
 
-        asyncio.run(_store_compaction_handoff())
+        asyncio.run(_persist_compaction_handoff())
     except Exception as e:
         input_data["compaction_memory_error"] = str(e)
 

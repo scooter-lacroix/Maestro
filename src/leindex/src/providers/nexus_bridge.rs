@@ -79,7 +79,7 @@ impl NexusRuntimeBridge {
                 "--reason",
                 reason,
             ],
-            "session end",
+            reason,
         )
         .await
     }
@@ -103,16 +103,33 @@ impl NexusRuntimeBridge {
             self.event_payload(profile, reason).to_string(),
         );
 
-        let output = timeout(COMMAND_TIMEOUT, command.output())
-            .await
-            .context("nexus bridge command timed out")?
+        // Spawn the process to have control over killing it on timeout
+        let mut child = command
+            .spawn()
             .context("failed to invoke nexus bridge")?;
-        if !output.status.success() {
-            anyhow::bail!(
-                "nexus bridge command failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+
+        // Wait for completion with timeout
+        let result = timeout(COMMAND_TIMEOUT, child.wait()).await;
+
+        match result {
+            Ok(Ok(exit_status)) => {
+                if !exit_status.success() {
+                    anyhow::bail!(
+                        "nexus bridge command failed with exit status: {}",
+                        exit_status
+                    );
+                }
+            }
+            Ok(Err(e)) => {
+                anyhow::bail!("failed to wait for nexus bridge command: {}", e);
+            }
+            Err(_) => {
+                // Timeout occurred - kill the spawned process
+                let _ = child.kill().await;
+                anyhow::bail!("nexus bridge command timed out after {:?}", COMMAND_TIMEOUT);
+            }
         }
+
         Ok(())
     }
 

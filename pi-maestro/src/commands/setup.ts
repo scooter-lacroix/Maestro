@@ -159,26 +159,35 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
         approved: boolean; feedback?: string; edited_content?: string;
       };
       server.stop();
-      if (!result.approved && result.feedback) {
-        ctx.ui.notify(`Setup docs review feedback: ${result.feedback}`, "warning");
-      } else if (result.approved) {
-        // If user edited content, apply edits to the files
-        if (result.edited_content) {
-          // Parse edited content back into individual docs.
-          // Expected format: each section separated by "\n---\n" (newline, 3 dashes, newline)
-          const sections = result.edited_content.split(/\n---\n/);
-          for (const section of sections) {
-            const trimmed = section.trim();
-            const docMatch = trimmed.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
-            if (docMatch) {
-              writeMaestroFile(root, `${docMatch[1]}.md`, docMatch[2].trim());
-            }
+      
+      // Abort setup if review was denied - user rejected the generated docs
+      if (!result.approved) {
+        if (result.feedback) {
+          ctx.ui.notify(`Setup review denied: ${result.feedback}`, "error");
+        } else {
+          ctx.ui.notify("Setup review was denied. Cancelling setup.", "error");
+        }
+        return; // Abort - do not show success toast
+      }
+      
+      // Review approved - apply any user edits to the files
+      if (result.edited_content) {
+        // Parse edited content back into individual docs.
+        // Expected format: each section separated by "\n---\n" (newline, 3 dashes, newline)
+        const sections = result.edited_content.split(/\n---\n/);
+        for (const section of sections) {
+          const trimmed = section.trim();
+          const docMatch = trimmed.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
+          if (docMatch) {
+            writeMaestroFile(root, `${docMatch[1]}.md`, docMatch[2].trim());
           }
         }
       }
     }
-  } catch {
-    // TrackLens review is optional for setup — continue without it
+  } catch (error) {
+    // TrackLens server failed to start or crashed - abort setup
+    ctx.ui.notify(`TrackLens review failed: ${error instanceof Error ? error.message : 'Unknown error'}. Setup aborted.`, "error");
+    return; // Abort - do not show success toast
   }
 
   ctx.ui.notify("Maestro project initialized successfully", "success");

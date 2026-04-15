@@ -383,20 +383,38 @@ impl Integrator {
                 config_path.display()
             ));
 
-            // Create basic TOML structure
-            let toml_content = format!(
-                r#"[mcp_servers.{}]
+            // For Codex, use direct format; for others, use proxy format
+            let toml_content = if matches!(tool, IntegrationTool::Codex) {
+                // Codex uses direct leindex invocation
+                let command = if cfg!(target_os = "windows") {
+                    "leindex.exe"
+                } else {
+                    "leindex"
+                };
+                format!(
+                    r#"[mcp_servers.{}]
+command = "{}"
+args = ["mcp"]
+"#,
+                    tool.mcp_server_name(),
+                    command
+                )
+            } else {
+                // Other tools use proxy format through maestro
+                format!(
+                    r#"[mcp_servers.{}]
 command = "{}"
 args = ["mcp", "proxy", "{}"]
 "#,
-                tool.mcp_server_name(),
-                if cfg!(target_os = "windows") {
-                    "maestro.exe"
-                } else {
-                    "maestro"
-                },
-                tool.mcp_server_name()
-            );
+                    tool.mcp_server_name(),
+                    if cfg!(target_os = "windows") {
+                        "maestro.exe"
+                    } else {
+                        "maestro"
+                    },
+                    tool.mcp_server_name()
+                )
+            };
 
             if !self.dry_run {
                 fs::write(config_path, toml_content)?;
@@ -413,11 +431,6 @@ args = ["mcp", "proxy", "{}"]
 
         // Build the TOML structure for the MCP server
         let server_name = tool.mcp_server_name();
-        let command = if cfg!(target_os = "windows") {
-            "maestro.exe"
-        } else {
-            "maestro"
-        };
 
         // Ensure mcp_servers table exists
         if toml_val.is_table() {
@@ -428,18 +441,44 @@ args = ["mcp", "proxy", "{}"]
 
             if let Some(mcp_servers) = table.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
                 let mut server_table = TomlMap::new();
-                server_table.insert(
-                    "command".to_string(),
-                    TomlValue::String(command.to_string()),
-                );
-                server_table.insert(
-                    "args".to_string(),
-                    TomlValue::Array(vec![
-                        TomlValue::String("mcp".to_string()),
-                        TomlValue::String("proxy".to_string()),
-                        TomlValue::String(server_name.to_string()),
-                    ]),
-                );
+
+                if matches!(tool, IntegrationTool::Codex) {
+                    // Codex uses direct leindex invocation
+                    let command = if cfg!(target_os = "windows") {
+                        "leindex.exe"
+                    } else {
+                        "leindex"
+                    };
+                    server_table.insert(
+                        "command".to_string(),
+                        TomlValue::String(command.to_string()),
+                    );
+                    server_table.insert(
+                        "args".to_string(),
+                        TomlValue::Array(vec![
+                            TomlValue::String("mcp".to_string()),
+                        ]),
+                    );
+                } else {
+                    // Other tools use proxy format through maestro
+                    let command = if cfg!(target_os = "windows") {
+                        "maestro.exe"
+                    } else {
+                        "maestro"
+                    };
+                    server_table.insert(
+                        "command".to_string(),
+                        TomlValue::String(command.to_string()),
+                    );
+                    server_table.insert(
+                        "args".to_string(),
+                        TomlValue::Array(vec![
+                            TomlValue::String("mcp".to_string()),
+                            TomlValue::String("proxy".to_string()),
+                            TomlValue::String(server_name.to_string()),
+                        ]),
+                    );
+                }
 
                 mcp_servers.insert(server_name.to_string(), TomlValue::Table(server_table));
             }

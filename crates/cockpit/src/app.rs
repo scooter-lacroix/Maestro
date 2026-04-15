@@ -366,20 +366,34 @@ fn parse_memory_access_history(
     events
         .iter()
         .filter_map(|event| {
-            let agent_id = event
+            // Extract raw values first, before applying defaults
+            let raw_agent_id = event
                 .get("agent_id")
                 .or_else(|| event.get("agent"))
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown")
-                .trim()
-                .to_string();
-            let timestamp = event
+                .map(|s| s.trim());
+            let raw_timestamp = event
                 .get("timestamp")
                 .or_else(|| event.get("at"))
                 .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+                .map(|s| s.trim());
+            let raw_tool_used = event
+                .get("tool_used")
+                .or_else(|| event.get("tool"))
+                .and_then(|value| value.as_str())
+                .map(|s| s.trim());
+
+            // Skip if all raw values are empty or None
+            let all_empty = raw_agent_id.map_or(true, |s| s.is_empty())
+                && raw_timestamp.map_or(true, |s| s.is_empty())
+                && raw_tool_used.map_or(true, |s| s.is_empty());
+            if all_empty {
+                return None;
+            }
+
+            // Now apply defaults for the struct
+            let agent_id = raw_agent_id.unwrap_or("unknown").to_string();
+            let timestamp = raw_timestamp.unwrap_or("").to_string();
             let access_type = event
                 .get("access_type")
                 .or_else(|| event.get("type"))
@@ -387,23 +401,14 @@ fn parse_memory_access_history(
                 .unwrap_or("read")
                 .trim()
                 .to_string();
-            let tool_used = event
-                .get("tool_used")
-                .or_else(|| event.get("tool"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty());
+            let tool_used = raw_tool_used.map(|s| s.to_string()).filter(|s| !s.is_empty());
 
-            if agent_id.is_empty() && timestamp.is_empty() && tool_used.is_none() {
-                None
-            } else {
-                Some(crate::state::MemoryAccessEvent {
-                    agent_id,
-                    timestamp,
-                    tool_used,
-                    access_type,
-                })
-            }
+            Some(crate::state::MemoryAccessEvent {
+                agent_id,
+                timestamp,
+                tool_used,
+                access_type,
+            })
         })
         .collect()
 }
@@ -570,7 +575,14 @@ fn fallback_maestroclaw_command(session: &leindex_core::memory::models::Session)
         "qwen" => "qwen".to_string(),
         "iflow" => "iflow".to_string(),
         "droid" => "droid".to_string(),
-        _ => std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string()),
+        _ => {
+            // Use appropriate shell for the platform
+            if cfg!(windows) {
+                std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+            } else {
+                std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string())
+            }
+        }
     }
 }
 
@@ -694,10 +706,12 @@ fn start_maestroclaw_session(
     }
 
     let launch = build_maestroclaw_launch(&session)?;
+    // Redact command arguments for UI display to avoid leaking secrets
     let command_preview = session
         .command
         .clone()
         .filter(|value| !value.trim().is_empty())
+        .and_then(|cmd| cmd.split_whitespace().next().map(|first_word| first_word.to_string()))
         .unwrap_or_else(|| fallback_maestroclaw_command(&session));
     let claw_session = ClawSession {
         id: session.session_id.clone(),
@@ -2176,6 +2190,15 @@ fn apply_selected_channels_to_config(
             .unwrap_or_default()
     }
 
+    // Clear all channel configs first to ensure deselected ones are removed
+    config.channels.telegram = None;
+    config.channels.discord = None;
+    config.channels.slack = None;
+    config.channels.matrix = None;
+    config.channels.whatsapp = None;
+    config.channels.mattermost = None;
+
+    // Now populate only the selected channels
     if selected_channels.contains(&ChannelType::Telegram) {
         if let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") {
             config.channels.telegram = Some(TelegramConfig {
@@ -7323,6 +7346,33 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
+
+    // Handle memory detail modes - show placeholder for graph/detail views
+    // TODO: Implement full memory graph visualization and detail view rendering
+    if matches!(
+        app.input_mode,
+        InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+    ) {
+        let list_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(" 🧠 Memory Detail View ")
+            .title_style(Style::default().fg(theme.accent_alt));
+
+        let text = vec![
+            Line::from(""),
+            Line::from("  Memory Detail / Graph View"),
+            Line::from(""),
+            Line::from("  This feature shows detailed memory relationships"),
+            Line::from("  and graphical visualization of memory connections."),
+            Line::from(""),
+            Line::from("  Press 'Esc' to return to memory list."),
+        ];
+        let para = Paragraph::new(text).block(list_block).alignment(Alignment::Center);
+        frame.render_widget(para, area);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])

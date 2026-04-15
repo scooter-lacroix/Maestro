@@ -618,7 +618,7 @@ class StandaloneNexusClient:
         if self.config_path:
             command.extend(["--config", str(self.config_path)])
         command.extend(args)
-        # Log command without sensitive payload args (--content, --metadata-json)
+        # Log command without sensitive payload args (--content, --metadata-json, --content-file, --metadata-json-file)
         safe_preview = []
         skip_next = False
         for part in command:
@@ -626,7 +626,7 @@ class StandaloneNexusClient:
                 safe_preview.append("<redacted>")
                 skip_next = False
                 continue
-            if part in ("--content", "--metadata-json"):
+            if part in ("--content", "--metadata-json", "--content-file", "--metadata-json-file"):
                 skip_next = True
                 safe_preview.append(part)
                 continue

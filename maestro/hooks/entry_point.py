@@ -80,8 +80,8 @@ def run_hook(phase: str, event_name: str):
                     }
                 }
         elif phase == "pre-tool-use":
-            reason = result.get("hook_message") or result.get("hook_error")
-            if result.get("hook_block") and reason:
+            reason = result.get("hook_message") or result.get("hook_error") or "Blocked by Maestro hook policy"
+            if result.get("hook_block"):
                 response = {
                     "hookSpecificOutput": {
                         "hookEventName": event_name,
@@ -90,8 +90,9 @@ def run_hook(phase: str, event_name: str):
                     }
                 }
         elif phase == "subagent-stop":
-            if result.get("hook_block") and result.get("hook_message"):
-                response = {"decision": "block", "reason": result["hook_message"]}
+            reason = result.get("hook_message") or result.get("hook_error") or "Blocked by Maestro subagent-stop policy"
+            if result.get("hook_block"):
+                response = {"decision": "block", "reason": reason}
         elif phase == "pre-compact":
             messages = []
             continuity = result.get("continuity_preserved")

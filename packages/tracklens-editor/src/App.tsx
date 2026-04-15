@@ -440,6 +440,9 @@ export default function App() {
 
   const handleToggleEditMode = async () => {
     const newEditMode = !editMode;
+    const previousEditMode = editMode;
+    const previousEditedMarkdown = editedMarkdown;
+    const previousMarkdown = markdown;
     
     if (newEditMode) {
       // Entering edit mode - capture current markdown
@@ -459,7 +462,10 @@ export default function App() {
             body: JSON.stringify({ phase: 'editing' }),
           });
         } catch (e) {
-          console.error('Failed to report phase:', e);
+          // Rollback: revert local state since server update failed
+          console.error('Failed to report phase, rolling back:', e);
+          setEditMode(previousEditMode);
+          setEditedMarkdown(previousEditedMarkdown);
         }
       }
     } else {
@@ -483,7 +489,10 @@ export default function App() {
             body: JSON.stringify({ phase: 'reviewing' }),
           });
         } catch (e) {
-          console.error('Failed to report phase:', e);
+          // Rollback: revert local state since server update failed
+          console.error('Failed to report phase, rolling back:', e);
+          setEditMode(previousEditMode);
+          setMarkdown(previousMarkdown);
         }
       }
     }

@@ -8,9 +8,10 @@ Nexus internals.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, Union
 
 from sqlalchemy import event
 from sqlalchemy import create_engine
@@ -48,35 +49,41 @@ class AsyncDatabaseManager:
         self._sync_fallback = False
         self._initialized = False
         self._sqlite_pragmas_registered = False
+        self._init_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         if self._initialized:
             return
 
-        try:
-            self.engine = create_async_engine(
-                self.database_url,
-                future=True,
-                pool_pre_ping=True,
-            )
-            self.session_factory = async_sessionmaker(
-                bind=self.engine,
-                expire_on_commit=False,
-                class_=AsyncSession,
-            )
-            await self._setup_sqlite_pragmas()
-        except ModuleNotFoundError as exc:
-            if "aiosqlite" not in str(exc):
-                raise
-            sync_url = self.database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
-            self.sync_engine = create_engine(sync_url, future=True)
-            self.sync_session_factory = sessionmaker(
-                bind=self.sync_engine,
-                expire_on_commit=False,
-                class_=Session,
-            )
-            self._sync_fallback = True
-        self._initialized = True
+        async with self._init_lock:
+            # Double-check after acquiring lock
+            if self._initialized:
+                return
+
+            try:
+                self.engine = create_async_engine(
+                    self.database_url,
+                    future=True,
+                    pool_pre_ping=True,
+                )
+                self.session_factory = async_sessionmaker(
+                    bind=self.engine,
+                    expire_on_commit=False,
+                    class_=AsyncSession,
+                )
+                await self._setup_sqlite_pragmas()
+            except ModuleNotFoundError as exc:
+                if "aiosqlite" not in str(exc):
+                    raise
+                sync_url = self.database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
+                self.sync_engine = create_engine(sync_url, future=True)
+                self.sync_session_factory = sessionmaker(
+                    bind=self.sync_engine,
+                    expire_on_commit=False,
+                    class_=Session,
+                )
+                self._sync_fallback = True
+            self._initialized = True
 
     async def close(self) -> None:
         if self.engine is not None:
@@ -92,7 +99,7 @@ class AsyncDatabaseManager:
         self._sqlite_pragmas_registered = False
 
     @asynccontextmanager
-    async def get_async_session(self) -> AsyncIterator[AsyncSession]:
+    async def get_async_session(self) -> AsyncIterator[Union[AsyncSession, "SyncSessionAdapter"]]:
         await self.initialize()
         if self._sync_fallback:
             assert self.sync_session_factory is not None
@@ -159,7 +166,27 @@ class SyncSessionAdapter:
     async def rollback(self) -> None:
         self._session.rollback()
 
+    async def add(self, instance: Any) -> None:
+        """Add an instance to the session (sync wrapper)."""
+        self._session.add(instance)
+
+    async def delete(self, instance: Any) -> None:
+        """Delete an instance from the session (sync wrapper)."""
+        self._session.delete(instance)
+
+    async def flush(self) -> None:
+        """Flush pending changes to the database (sync wrapper)."""
+        self._session.flush()
+
+    async def refresh(self, instance: Any) -> None:
+        """Refresh an instance from the database (sync wrapper)."""
+        self._session.refresh(instance)
+
     def __getattr__(self, name: str) -> Any:
+        # Explicitly wrap common sync methods to prevent accidental await
+        if name in ("add", "delete", "flush", "refresh"):
+            # Return the sync method directly - caller should not await
+            return getattr(self._session, name)
         return getattr(self._session, name)
 
 

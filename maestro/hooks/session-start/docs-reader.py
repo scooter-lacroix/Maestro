@@ -42,7 +42,7 @@ def _find_maestro_docs(project_path: str) -> list[str]:
 def docs_reader_hook(input_data: dict) -> dict:
     """Inject docs reading requirement at session start."""
     try:
-        session_type = input_data.get("session_type", "")
+        session_type = input_data.get("session_type") or ""
         if session_type not in ("implement", "orchestrate", ""):
             return input_data
 

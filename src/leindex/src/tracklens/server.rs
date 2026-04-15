@@ -543,12 +543,16 @@ async fn extend_timeout(
     State(state): State<Arc<ServerState>>,
     Json(req): Json<ExtendTimeoutRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Calculate new deadline: current time + requested minutes
+    // Calculate new deadline: extend from current deadline or now, whichever is later
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let new_deadline = now + (req.minutes * 60);
+    
+    // Read current deadline from the receiver to extend from it
+    let current_deadline = *state.deadline_rx.borrow();
+    let base = current_deadline.max(now);
+    let new_deadline = base + (req.minutes * 60);
 
     state
         .deadline_tx
