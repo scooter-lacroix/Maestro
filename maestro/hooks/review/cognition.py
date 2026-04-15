@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Review hook: Nexus cognition scheduling.
+Review hook: Nexus cognition scheduling + Critical Think analysis.
 
 Records a review transition in Nexus-backed memory so the review boundary is
-preserved as part of the active session lifecycle.
+preserved as part of the active session lifecycle. Also invokes the
+CriticalThinkEngine for pre-review analysis to identify risks before review.
 """
 
 import asyncio
@@ -57,6 +58,40 @@ def review_hook(input_data: dict) -> dict:
 
         asyncio.run(_store_review())
         input_data["review_cognition_scheduled"] = True
+
+        # Invoke CriticalThinkEngine for pre-review analysis
+        try:
+            from maestro.critical_think.core import CriticalThinkEngine
+
+            engine = CriticalThinkEngine()
+            review_desc = (
+                input_data.get("review_description")
+                or f"Review at task {input_data.get('task_id', 'unknown')}"
+            )
+            context_parts = []
+            if input_data.get("track_id"):
+                context_parts.append(f"Track: {input_data['track_id']}")
+            if input_data.get("iteration"):
+                context_parts.append(f"Iteration: {input_data['iteration']}")
+            review_context = "; ".join(context_parts) if context_parts else "Routine review checkpoint"
+
+            ct_result = engine.invoke_before(
+                action_description=review_desc,
+                context=review_context,
+                action_type="implementation",
+            )
+            input_data["critical_think_result"] = {
+                "confidence_score": ct_result.confidence_score,
+                "revised_confidence": ct_result.revised_confidence,
+                "pitfalls": ct_result.pitfalls,
+                "risks": ct_result.risks,
+                "synthesis": ct_result.synthesis,
+                "next_steps": ct_result.next_steps,
+            }
+        except Exception:
+            # Critical think is best-effort — don't fail the review
+            pass
+
         return input_data
     except Exception as exc:
         input_data["hook_error"] = str(exc)

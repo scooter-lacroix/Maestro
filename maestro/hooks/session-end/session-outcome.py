@@ -152,6 +152,39 @@ def session_outcome_hook(input_data: dict) -> dict:
             except Exception:
                 pass
 
+        # Create DB handoff so the next session can resume work
+        try:
+            from maestro.memory.coordination.handoffs import HandoffHandler, HandoffTemplate
+
+            async def _create_session_handoff() -> None:
+                from maestro.memory.database.session import get_session
+                async with get_session() as db_session:
+                    handler = HandoffHandler(db_session)
+                    track_id = input_data.get("track_id")
+                    project_path = (
+                        session.project_path if session and session.project_path else os.getcwd()
+                    )
+                    context = HandoffTemplate.generic_handoff(
+                        summary=summary,
+                        track_id=track_id,
+                        current_task=input_data.get("current_task_id"),
+                        iteration=input_data.get("iteration"),
+                        remaining_work=input_data.get("remaining_work", ""),
+                    )
+                    handler.create_handoff(
+                        title=f"Session handoff: {session_id[:8]}",
+                        from_session_id=session_id,
+                        from_agent_id=agent_id,
+                        project_path=project_path,
+                        summary=summary,
+                        context_data=context,
+                    )
+
+            asyncio.run(_create_session_handoff())
+        except Exception:
+            # Handoff creation is best-effort
+            pass
+
         input_data["session_outcome_captured"] = outcome
         input_data["outcome_summary"] = summary
 

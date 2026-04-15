@@ -102,6 +102,38 @@ def session_load_hook(input_data: dict) -> dict:
             input_data["restored_context"] = context_summaries
             input_data["context_loaded"] = True
 
+        # Resume pickable handoffs from previous sessions
+        try:
+            from maestro.memory.coordination.handoffs import HandoffHandler
+
+            async def _resume_handoffs() -> list[dict[str, Any]]:
+                from maestro.memory.database.session import get_session
+                async with get_session() as db_session:
+                    handler = HandoffHandler(db_session)
+                    pickable = handler.get_pickable_handoffs(
+                        agent_id=agent_id,
+                        project_path=project_path,
+                    )
+                    results = []
+                    for h in pickable[:3]:  # Limit to 3 most recent
+                        context = handler.get_handoff_context(h.handoff_id)
+                        results.append({
+                            "handoff_id": h.handoff_id,
+                            "title": h.title,
+                            "from_agent": h.from_agent_id,
+                            "summary": h.summary,
+                            "context": context,
+                        })
+                        handler.pick_handoff(h.handoff_id, session_id, agent_id)
+                    return results
+
+            handoffs = asyncio.run(_resume_handoffs())
+            if handoffs:
+                input_data["resumed_handoffs"] = handoffs
+        except Exception:
+            # Handoff resumption is best-effort
+            pass
+
         return input_data
 
     except Exception as e:

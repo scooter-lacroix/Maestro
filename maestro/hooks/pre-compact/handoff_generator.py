@@ -153,6 +153,37 @@ def generate_handoff(input_data: dict) -> dict:
     input_data["compaction_handoff_path"] = str(handoff_path)
     input_data["compaction_count"] = compaction_count
 
+    # Create DB handoff record for cross-session queryability
+    try:
+        from maestro.memory.coordination.handoffs import HandoffHandler
+
+        async def _create_compaction_handoff() -> None:
+            from maestro.memory.database.session import get_session
+            async with get_session() as db_session:
+                handler = HandoffHandler(db_session)
+                context = {
+                    "compaction_count": compaction_count,
+                    "current_task": str(_safe_get(input_data, "current_task", default="N/A")),
+                    "iteration": str(_safe_get(input_data, "iteration", default="0")),
+                    "workflow_phase": str(_safe_get(input_data, "workflow_phase", default="implementation")),
+                    "completed_work": str(_safe_get(input_data, "completed_work", default="")),
+                    "remaining_work": str(_safe_get(input_data, "remaining_work", default="")),
+                    "changed_files": str(_safe_get(input_data, "changed_files", default="")),
+                    "handoff_path": str(handoff_path),
+                }
+                handler.create_handoff(
+                    title=f"Compaction #{compaction_count}: {track_id}",
+                    from_session_id=_safe_get(input_data, "session_id", default=""),
+                    from_agent_id=_safe_get(input_data, "agent_id", default=""),
+                    project_path=project_path,
+                    summary=f"Compaction handoff #{compaction_count} for track {track_id}",
+                    context_data=context,
+                )
+
+        asyncio.run(_create_compaction_handoff())
+    except Exception:
+        pass
+
     try:
         from maestro.memory.service import MaestroMemoryService
 

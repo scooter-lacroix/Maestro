@@ -92,13 +92,13 @@ trap 'rc=$?; ts=$(date "+%Y-%m-%d %H:%M:%S"); echo "" >> "$INSTALL_LOG"; if [[ $
 clear
 log_section "Preparing the Overture..."
 
-# Default remote installs to main. Local installs stay on the current checkout
+# Default remote installs to master. Local installs stay on the current checkout
 # unless MAESTRO_BRANCH was explicitly provided by the caller.
 BRANCH_EXPLICIT=0
 if [[ -n "${MAESTRO_BRANCH:-}" ]]; then
     BRANCH_EXPLICIT=1
 fi
-MAESTRO_BRANCH="${MAESTRO_BRANCH:-main}"
+MAESTRO_BRANCH="${MAESTRO_BRANCH:-master}"
 REPO_URL="${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}"
 
 # Determine if we're running from a cloned repo or a remote install
@@ -661,6 +661,51 @@ if [[ $SETUP_SUCCESS -eq 0 ]]; then
     echo -e "      4. Full install log: ${Y}$INSTALL_LOG${NC}"
     echo ""
     exit 1
+fi
+
+# Copy live Python modules to plugin bundle (hooks/skills already copied by maestro-setup).
+# Only copy modules that are actively imported — skip dead/orphaned code.
+log_section "Installing Python modules..."
+PY_PLUGIN_DIR="$MAESTRO_PLUGIN_DIR/maestro"
+mkdir -p "$PY_PLUGIN_DIR"
+
+# Live modules needed by hooks: memory/ (Nexus service, 11+ hook imports),
+# utils/ (small utilities), config/ (settings manager),
+# critical_think/ (metacognitive analysis at checkpoints).
+for mod in memory utils config critical_think; do
+    if [[ -d "$INSTALL_DIR/maestro/$mod" ]]; then
+        cp -a "$INSTALL_DIR/maestro/$mod" "$PY_PLUGIN_DIR/$mod"
+        log "[OK] Copied maestro/$mod/"
+    else
+        log "[WARN] maestro/$mod/ not found in source — skipping"
+    fi
+done
+
+# Copy top-level __init__.py and non-deprecated .py files
+for pyfile in "$INSTALL_DIR/maestro/"*.py; do
+    [[ -f "$pyfile" ]] || continue
+    fname="$(basename "$pyfile")"
+    # handoffs.py is explicitly deprecated — skip
+    [[ "$fname" == "handoffs.py" ]] && continue
+    cp -a "$pyfile" "$PY_PLUGIN_DIR/$fname"
+    log "[OK] Copied maestro/$fname"
+done
+
+# Verify critical Python modules are present
+PY_VERIFY_OK=1
+for check in \
+    "maestro/memory/service.py:Nexus memory service" \
+    "maestro/memory/hooks/unified.py:Hook manager" \
+    "maestro/memory/nexus_client.py:Nexus client"; do
+    fpath="${check%%:*}"
+    flabel="${check##*:}"
+    if [[ ! -f "$MAESTRO_PLUGIN_DIR/$fpath" ]]; then
+        log "[VERIFY FAIL] $flabel not found at $MAESTRO_PLUGIN_DIR/$fpath"
+        PY_VERIFY_OK=0
+    fi
+done
+if [[ "$PY_VERIFY_OK" -eq 1 ]]; then
+    log "[OK] Python modules installed and verified"
 fi
 
 # Clean up temp install directory if we cloned
