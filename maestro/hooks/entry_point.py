@@ -25,13 +25,14 @@ if str(maestro_root) not in sys.path:
 def run_hook(phase: str, event_name: str):
     from maestro.hooks.executor import get_hook_executor
 
-    # Delay stream hijacking until after imports
     original_stdout = sys.stdout
     original_stderr = sys.stderr
-    sys.stdout = io.StringIO()
-    sys.stderr = io.StringIO()
 
     try:
+        # Hijack streams inside try to ensure finally restores them
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+
         # Capture input from stdin
         try:
             raw_input = sys.stdin.read()

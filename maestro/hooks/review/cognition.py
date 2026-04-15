@@ -91,7 +91,6 @@ def review_hook(input_data: dict) -> dict:
 
             # Persist critical think analysis to Nexus for cross-session retrieval
             try:
-                from maestro.memory.service import MaestroMemoryService
 
                 async def _store_ct_result() -> None:
                     service = MaestroMemoryService()
@@ -112,11 +111,11 @@ def review_hook(input_data: dict) -> dict:
                         await service.close()
 
                 asyncio.run(_store_ct_result())
-            except Exception:
-                pass
-        except Exception:
+            except Exception as e:
+                input_data["ct_storage_error"] = str(e)
+        except Exception as e:
             # Critical think is best-effort — don't fail the review
-            pass
+            input_data["critical_think_error"] = str(e)
 
         return input_data
     except Exception as exc:

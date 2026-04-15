@@ -284,8 +284,7 @@ install_nexus_provider() {
         ver="$(nexus --version 2>&1 || echo 'unknown')"
         log "[OK] Standalone Nexus already available (version: $ver)"
         local init_out
-        init_out="$(nexus init 2>&1)" || true
-        if [[ $? -ne 0 ]]; then
+        if ! init_out="$(nexus init 2>&1)"; then
             log "[WARN] nexus init returned non-zero (already initialized?): $init_out"
         else
             log "[OK] nexus init succeeded"
@@ -382,7 +381,6 @@ install_nexus_provider() {
 log_section "Checking for Bun..."
 if ! command -v bun &> /dev/null; then
     log "[!] Bun not found. Installing Bun..."
-    local bun_out
     bun_out="$(curl -fsSL https://bun.sh/install 2>&1 | bash 2>&1)" || true
     echo "$bun_out" >> "$INSTALL_LOG"
     export BUN_INSTALL="$HOME/.bun"
@@ -666,6 +664,7 @@ fi
 # Copy live Python modules to plugin bundle (hooks/skills already copied by maestro-setup).
 # Only copy modules that are actively imported — skip dead/orphaned code.
 log_section "Installing Python modules..."
+MAESTRO_PLUGIN_DIR="${MAESTRO_PLUGIN_DIR:-$HOME/.claude/plugins/maestro}"
 PY_PLUGIN_DIR="$MAESTRO_PLUGIN_DIR/maestro"
 mkdir -p "$PY_PLUGIN_DIR"
 

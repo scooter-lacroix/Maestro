@@ -130,9 +130,9 @@ def session_load_hook(input_data: dict) -> dict:
             handoffs = asyncio.run(_resume_handoffs())
             if handoffs:
                 input_data["resumed_handoffs"] = handoffs
-        except Exception:
+        except Exception as e:
             # Handoff resumption is best-effort
-            pass
+            input_data["handoff_resumption_error"] = str(e)
 
         return input_data
 
