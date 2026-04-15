@@ -251,14 +251,14 @@ class HookExecutor:
                 overlapping = set(result.keys()) & set(output_data.keys())
                 if overlapping:
                     logger.warning(
-                        "Hook '%s' result overwrites existing keys: %s",
+                        "Hook '{}' result overwrites existing keys: {}",
                         hook_name,
                         overlapping,
                     )
                 output_data.update(result)
             else:
                 logger.warning(
-                    "Hook '%s' returned non-dict type %s; skipping merge to preserve pipeline state",
+                    "Hook '{}' returned non-dict type {}; skipping merge to preserve pipeline state",
                     hook_name,
                     type(result).__name__,
                 )

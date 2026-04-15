@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+from loguru import logger
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,7 +47,7 @@ def _detect_git_info(project_path: str) -> dict:
         if result.returncode == 0:
             info["branch"] = result.stdout.strip()
     except Exception:
-        pass
+        logger.debug("Could not determine git branch info", exc_info=True)
     return info
 
 
