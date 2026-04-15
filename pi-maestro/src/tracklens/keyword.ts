@@ -61,7 +61,7 @@ function findKeywordTriggerPositions(
 ): TriggerPosition[] {
   const re = new RegExp(keyword, "i");
   if (!re.test(text)) return [];
-  if (text.startsWith("/")) return []; // Slash command — don't trigger
+  if (text.trimStart().startsWith("/")) return []; // Slash command — don't trigger
 
   // Build list of quoted/delimited ranges to exclude
   const quotedRanges: Array<{ start: number; end: number }> = [];

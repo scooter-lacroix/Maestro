@@ -598,7 +598,20 @@ class StandaloneNexusClient:
         if self.config_path:
             command.extend(["--config", str(self.config_path)])
         command.extend(args)
-        logger.debug("Running nexus command: %s", " ".join(command))
+        # Log command without sensitive payload args (--content, --metadata-json)
+        safe_preview = []
+        skip_next = False
+        for part in command:
+            if skip_next:
+                safe_preview.append("<redacted>")
+                skip_next = False
+                continue
+            if part in ("--content", "--metadata-json"):
+                skip_next = True
+                safe_preview.append(part)
+                continue
+            safe_preview.append(part)
+        logger.debug("Running nexus command: %s", " ".join(safe_preview))
         proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,

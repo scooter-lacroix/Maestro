@@ -181,8 +181,8 @@ def generate_handoff(input_data: dict) -> dict:
                 )
 
         asyncio.run(_create_compaction_handoff())
-    except Exception:
-        pass
+    except Exception as e:
+        input_data["compaction_db_error"] = str(e)
 
     try:
         from maestro.memory.service import MaestroMemoryService
@@ -207,14 +207,18 @@ def generate_handoff(input_data: dict) -> dict:
                 await service.close()
 
         asyncio.run(_store_compaction_handoff())
-    except Exception:
-        pass
+    except Exception as e:
+        input_data["compaction_memory_error"] = str(e)
 
     return input_data
 
 
 def main() -> None:
-    input_data = json.loads(sys.stdin.read())
+    try:
+        input_data = json.loads(sys.stdin.read())
+    except json.JSONDecodeError as e:
+        json.dump({"hook_error": f"Invalid JSON input: {e}"}, sys.stdout)
+        return
     result = generate_handoff(input_data)
     json.dump(result, sys.stdout)
 
