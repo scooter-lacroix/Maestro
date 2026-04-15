@@ -22,6 +22,7 @@ impl ClawLoop {
 
     pub fn poll(&mut self) -> Vec<AgentOutputLine> {
         let mut lines = Vec::new();
+        let mut exited = false;
 
         for event in self.bridge.poll_events() {
             match event {
@@ -33,6 +34,7 @@ impl ClawLoop {
                     });
                 }
                 PtyEvent::Exited(code) => {
+                    exited = true;
                     self.session.status = ClawSessionStatus::Stopped;
                     lines.push(AgentOutputLine {
                         timestamp: Utc::now(),
@@ -51,7 +53,7 @@ impl ClawLoop {
             }
         }
 
-        if self.bridge.is_running() {
+        if !exited && self.bridge.is_running() {
             self.session.status = ClawSessionStatus::Running;
         }
 
