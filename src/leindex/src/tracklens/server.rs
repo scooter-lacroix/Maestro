@@ -254,6 +254,10 @@ impl TrackLensServer {
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
+                    // Check initial value before waiting for changes
+                    if *shutdown_rx.borrow() {
+                        return;
+                    }
                     // Wait until shutdown signal is sent
                     loop {
                         shutdown_rx
@@ -678,11 +682,21 @@ async fn update_content(
     State(state): State<Arc<ServerState>>,
     Json(content): Json<ReviewContent>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    let is_editable = content.content.starts_with("<!-- tracklens:editable -->");
     let mut guard = state
         .content
         .write()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     *guard = Some(content);
+    drop(guard);
+    
+    // Auto-set phase to Editing for seed content (matches set_content behavior)
+    if is_editable {
+        state
+            .phase_tx
+            .send(TrackLensPhase::Editing)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
     Ok(StatusCode::OK)
 }
 
@@ -1098,12 +1112,19 @@ mod tests {
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "shutting_down");
 
-        // Give the server a moment to shut down
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        // Server should now be unreachable
-        let result = client.get(format!("{}/api/status", url)).send().await;
-        assert!(result.is_err(), "Server should be shut down");
+        // Poll until server is shut down (with timeout)
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(2);
+        loop {
+            let result = client.get(format!("{}/api/status", url)).send().await;
+            if result.is_err() {
+                break; // Server is shut down
+            }
+            if start.elapsed() > timeout {
+                panic!("Server did not shut down within {:?}", timeout);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     /// Test shutdown() method (programmatic shutdown)
@@ -1125,11 +1146,19 @@ mod tests {
         // Trigger shutdown programmatically
         server.shutdown().unwrap();
 
-        // Give server time to shut down
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let result = client.get(format!("{}/api/status", url)).send().await;
-        assert!(result.is_err(), "Server should be shut down after shutdown()");
+        // Poll until server is shut down (with timeout)
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(2);
+        loop {
+            let result = client.get(format!("{}/api/status", url)).send().await;
+            if result.is_err() {
+                break; // Server is shut down
+            }
+            if start.elapsed() > timeout {
+                panic!("Server did not shut down within {:?}", timeout);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     /// Test set_content with editable marker auto-sets phase to Editing

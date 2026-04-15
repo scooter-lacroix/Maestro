@@ -297,15 +297,9 @@ ${trackId ? `
       - Use: \`maestro memory --store --category decision --content "Task completed: ..."\`
 
 3. **Update Task Checkboxes:**
-   - After completing each task, update plan.md
-   - Change \`- [ ] Task: ...\` to \`- [x] Task: ...\`
+ ## 5.0 FINALIZE TRACK
 
-${tracklensSection}
-
-## 5.0 FINALIZE TRACK
-
-After walkthrough approval:
-
+${isTrackLensEnabled() ? "After walkthrough approval:" : "After manual review approval:"}
 1. Update track status to complete:
    - Change \`## [~] Track: ...\` to \`## [x] Track: ...\`
 
@@ -340,7 +334,7 @@ ${isTrackLensEnabled() ? `## 7.0 TRACKLENS INTEGRATION
 - Present walkthrough summary for user approval
 - Use \`/tracklens on\` to enable TrackLens integration`}
 
-## 7.0 TOOL MAPPING
+## 8.0 TOOL MAPPING
 
 **File Operations:**
 - **Read** → Read tool

@@ -94,6 +94,11 @@ function findKeywordTriggerPositions(
     }
   }
 
+  // If delimiter was never closed, treat the tail as excluded
+  if (openQuote !== null) {
+    quotedRanges.push({ start: openAt, end: text.length });
+  }
+
   // Find keyword matches, excluding false positives
   const positions: TriggerPosition[] = [];
   const wordRe = new RegExp(`\\b${keyword}\\b`, "gi");

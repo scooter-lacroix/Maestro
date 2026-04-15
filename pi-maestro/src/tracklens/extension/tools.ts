@@ -249,8 +249,8 @@ After review, provide your feedback or approval.`,
 
         // Persist review history if track directory is available
         if (trackId && ctx.cwd) {
-          // Sanitize trackId to prevent path traversal
-          if (trackId.includes("..") || isAbsolute(trackId)) {
+          // Sanitize trackId to prevent path traversal and unexpected directories
+          if (trackId.includes("..") || isAbsolute(trackId) || trackId.includes("/") || trackId.includes("\\")) {
             return {
               content: [{ type: "text", text: `Error: Invalid track ID: ${trackId}` }],
               details: { approved: false },

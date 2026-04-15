@@ -128,7 +128,9 @@ def run_hook(phase: str, event_name: str):
             if ct_result.get("revised_confidence") is not None:
                 revised_confidence = ct_result['revised_confidence']
                 if isinstance(revised_confidence, (int, float)):
-                    ct_parts.append(f"Confidence: {revised_confidence:.0%}")
+                    # Normalize to 0-1 range: if on 1-10 scale, divide by 10
+                    normalized = revised_confidence / 10 if revised_confidence > 1 else revised_confidence
+                    ct_parts.append(f"Confidence: {normalized:.0%}")
 
             if ct_parts:
                 ct_context = f"[Maestro Critical Think - {phase}]\n" + "\n".join(ct_parts)
@@ -142,6 +144,13 @@ def run_hook(phase: str, event_name: str):
                 elif response and "reason" in response:
                     # subagent-stop block — preserve decision, append CT context
                     response["reason"] = f"{response['reason']}\n\n{ct_context}"
+                elif response:
+                    # Preserve existing response structure (e.g., {"decision": "block"})
+                    # by merging CT context into a new hookSpecificOutput field
+                    response["hookSpecificOutput"] = {
+                        "hookEventName": event_name,
+                        "additionalContext": ct_context,
+                    }
                 else:
                     response = {
                         "hookSpecificOutput": {

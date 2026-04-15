@@ -77,9 +77,12 @@ def generate_handoff(input_data: dict) -> dict:
     track_id = input_data.get("track_id", input_data.get("current_track", "unknown"))
 
     # Validate track_id: allow only alphanumeric, hyphens, underscores
+    # Ensure track_id is a string before regex match (could be null/number)
+    track_id_str = str(track_id) if track_id is not None else ""
     _TRACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
-    if not _TRACK_ID_RE.match(track_id):
-        raise ValueError(f"Invalid track_id: must match [a-zA-Z0-9_-]: {track_id}")
+    if not _TRACK_ID_RE.match(track_id_str):
+        raise ValueError(f"Invalid track_id: must match [a-zA-Z0-9_-]: {track_id_str}")
+    track_id = track_id_str  # Use validated string
 
     tracks_dir = Path(project_path) / "maestro" / "tracks"
     track_dir = tracks_dir / track_id
@@ -224,6 +227,8 @@ def generate_handoff(input_data: dict) -> dict:
 
         asyncio.run(_persist_compaction_handoff())
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to persist compaction handoff to DB: %s", e)
         input_data["compaction_memory_error"] = str(e)
 
     return input_data
@@ -234,7 +239,7 @@ def main() -> None:
         input_data = json.loads(sys.stdin.read())
     except json.JSONDecodeError as e:
         json.dump({"hook_error": f"Invalid JSON input: {e}"}, sys.stdout)
-        return
+        sys.exit(1)
     result = generate_handoff(input_data)
     json.dump(result, sys.stdout)
 

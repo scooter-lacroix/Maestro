@@ -699,7 +699,8 @@ PY_VERIFY_OK=1
 for check in \
     "maestro/memory/service.py:Nexus memory service" \
     "maestro/memory/hooks/unified.py:Hook manager" \
-    "maestro/memory/nexus_client.py:Nexus client"; do
+    "maestro/memory/nexus_client.py:Nexus client" \
+    "maestro/critical_think/__init__.py:Critical think module"; do
     fpath="${check%%:*}"
     flabel="${check##*:}"
     if [[ ! -f "$MAESTRO_PLUGIN_DIR/$fpath" ]]; then

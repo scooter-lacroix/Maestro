@@ -101,11 +101,11 @@ def main() -> None:
     except json.JSONDecodeError as e:
         sys.stderr.write(f"Failed to parse JSON input: {e}\n")
         sys.stdout.write("{}")
-        return
+        sys.exit(1)
     except Exception as e:
         sys.stderr.write(f"Failed to read hook stdin: {e}\n")
         sys.stdout.write("{}")
-        return
+        sys.exit(1)
     result = enforce_leindex(input_data)
     json.dump(result, sys.stdout)
 

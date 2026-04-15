@@ -122,11 +122,14 @@ export function formatHistoryForAgent(
     }
 
     if (entry.feedback) {
-      // Truncate long feedback
+      // Sanitize feedback: escape newlines and strip control chars to prevent prompt injection
+      const sanitized = entry.feedback
+        .replace(/[\r\n]+/g, " ") // Normalize newlines to spaces
+        .replace(/[\x00-\x1F\x7F]/g, ""); // Strip control characters
       const truncated =
-        entry.feedback.length > 200
-          ? entry.feedback.slice(0, 200) + "..."
-          : entry.feedback;
+        sanitized.length > 200
+          ? sanitized.slice(0, 200) + "..."
+          : sanitized;
       lines.push(`   > ${truncated}`);
     }
 

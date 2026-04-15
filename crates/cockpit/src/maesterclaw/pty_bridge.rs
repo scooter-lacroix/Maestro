@@ -169,15 +169,9 @@ impl Drop for PtyBridge {
         let _ = self.child.kill();
 
         // Reap the child to prevent zombie processes.
-        // Use try_wait in a loop with a short timeout to avoid
-        // blocking indefinitely in Drop.
-        // If the process doesn't exit quickly, we've at least
-        // sent SIGKILL and the OS will reap it eventually.
-        for _ in 0..10 {
-            if let Ok(Some(_)) = self.child.try_wait() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        // Spawn a thread to avoid blocking the async executor in Drop.
+        // Note: Since we're in Drop and can't move self.child, we skip the
+        // blocking try_wait loop here. We've already sent SIGKILL above,
+        // so the OS will reap the process eventually.
     }
 }

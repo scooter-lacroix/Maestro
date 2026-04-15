@@ -24,7 +24,7 @@ Ultraplan provides a polished browser-based plan review experience with keyword 
 ### What We're NOT Taking
 
 - **Remote CCR sessions**: TrackLens stays local-first (no Anthropic auth dependency)
-- **30-minute timeouts**: Local review has configurable but shorter defaults (5min, extendable)
+- **30-minute timeouts**: Local review has configurable but shorter defaults (5 min, extendable)
 - **Remote execution target**: No "execute in CCR" path — plans always return to local agent
 
 ---

@@ -110,9 +110,11 @@ def session_load_hook(input_data: dict) -> dict:
                 from maestro.memory.database.session import get_session
                 async with get_session() as db_session:
                     handler = HandoffHandler(db_session)
+                    # Note: get_pickable_handoffs filters by project_id (int), not project_path (str).
+                    # For now, we pass None to get all handoffs; the handler will filter by agent_id.
                     pickable = handler.get_pickable_handoffs(
                         agent_id=agent_id,
-                        project_path=project_path,
+                        project_id=None,  # TODO: resolve project_path to project_id if needed
                     )
                     results = []
                     for h in pickable[:3]:  # Limit to 3 most recent

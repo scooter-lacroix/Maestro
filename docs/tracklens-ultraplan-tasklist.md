@@ -1352,7 +1352,7 @@ if (trackId) {
 
 ## Dependency Graph
 
-```
+```text
 Phase 1 (Server)
   ├── 1.1 Types ──────────┐
   ├── 1.2 Phase channel ──┤

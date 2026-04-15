@@ -155,11 +155,15 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
         htmlContent,
       });
 
-      const result = await server.waitForDecision() as {
-        approved: boolean; feedback?: string; edited_content?: string;
-      };
-      server.stop();
-      
+      let result: { approved: boolean; feedback?: string; edited_content?: string; };
+      try {
+        result = await server.waitForDecision() as {
+          approved: boolean; feedback?: string; edited_content?: string;
+        };
+      } finally {
+        server.stop();
+      }
+
       // Abort setup if review was denied - user rejected the generated docs
       if (!result.approved) {
         if (result.feedback) {

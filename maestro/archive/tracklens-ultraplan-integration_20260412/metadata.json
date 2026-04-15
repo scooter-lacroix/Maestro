@@ -2,7 +2,7 @@
   "id": "tracklens-ultraplan-integration_20260412",
   "name": "TrackLens × Ultraplan Integration",
   "type": "feature",
-  "status": "new",
+  "status": "completed",
   "created": "2026-04-12",
   "description": "Integrate Ultraplan's browser-based review capabilities into Maestro's TrackLens system — server infrastructure enhancements, CodeMirror inline editing, workflow integration across all Maestro commands, keyword auto-triggering, agent-side feedback loop, and annotation serialization bug fix.",
   "phases": [

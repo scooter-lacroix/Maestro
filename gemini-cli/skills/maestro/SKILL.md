@@ -1,16 +1,16 @@
 ---
 name: maestro
-description: "Maestro spec-driven development for Amp CLI. Load this skill when invoking Maestro commands so workflows stay aligned with LeIndex and the Rust TUI."
+description: "Maestro spec-driven development for Gemini CLI. Load this skill when invoking Maestro commands so workflows stay aligned with LeIndex and the Rust TUI."
 ---
 
-# Maestro in Amp CLI
+# Maestro in Gemini CLI
 
-Use this skill whenever you run Maestro inside Amp. Keep it native to Amp and the Agent Skills standard.
+Use this skill whenever you run Maestro inside Gemini Code. Keep it native to Gemini and the Gemini Skills standard.
 
 - **Commands:** `/maestro`, `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`, `/maestro:orchestrate`, `/maestro:status`, `/maestro:revert`, `/maestro:leindex`, `/maestro:tui`.
-- **Skill install path (user scope):** `~/.config/agents/skills/maestro/` (installed by the Maestro wizard).
-- **MCP:** `amp.mcpServers.leindex` → `{ "command": "maestro", "args": ["mcp", "tool-search"], "type": "stdio" (if required) }` so Amp reaches the Maestro MCP pool through the dynamic broker. Do **not** point to any TLDR/legacy endpoints.
-- **No cross-tool bleed:** Avoid references to `~/.claude`, `~/.gemini`, or OpenCode paths.
+- **Skill install path (user scope):** `~/.config/gemini/skills/maestro/` (installed by the Maestro wizard).
+- **MCP:** `gemini.mcpServers.leindex` → `{ "command": "maestro", "args": ["mcp", "tool-search"], "type": "stdio" (if required) }` so Gemini reaches the Maestro MCP pool through the dynamic broker. Do **not** point to any TLDR/legacy endpoints.
+- **No cross-tool bleed:** Avoid references to `~/.claude`, `~/.amp`, or OpenCode paths.
 
 ## Quick flow
 1) `/maestro setup` — initialize/refresh product, tech stack, workflow, track registry.
@@ -67,6 +67,6 @@ When a review is **approved**:
 - If LeIndex MCP is missing, request rerun of `/maestro:configure` / installer.
 
 ## Validation checklist
-- Skill exists at `~/.config/agents/skills/maestro/`.
-- Amp config (`~/.config/amp/settings.json`) has `amp.mcpServers.leindex` pointing to `maestro mcp tool-search`.
-- Commands are available through Amp’s command surface (per its command discovery).
+- Skill exists at `~/.config/gemini/skills/maestro/`.
+- Gemini config (`~/.config/gemini/settings.json`) has `gemini.mcpServers.leindex` pointing to `maestro mcp tool-search`.
+- Commands are available through Gemini’s command surface (per its command discovery).
