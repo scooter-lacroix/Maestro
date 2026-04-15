@@ -607,6 +607,8 @@ json.dump(result, sys.stdout)
         let project_root_owned = project_root.to_path_buf();
         let payload_owned = payload.clone();
 
+        let (pid_tx, pid_rx) = std::sync::mpsc::channel();
+
         let handle = thread::spawn(move || {
             let mut child = match Command::new(python)
                 .arg("-c")
@@ -628,19 +630,49 @@ json.dump(result, sys.stdout)
                 }
             }
 
+            // Send PID before blocking wait so the main thread can kill on timeout
+            let _ = pid_tx.send(child.id());
+
             match child.wait_with_output() {
                 Ok(output) if output.status.success() => {
                     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
                 }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.is_empty() {
+                        eprintln!(
+                            "Hook executor phase '{}' failed: {}",
+                            phase_owned,
+                            stderr.trim()
+                        );
+                    }
+                    None
+                }
                 _ => None,
             }
         });
+
+        // Wait briefly for the spawned thread to send us the child PID
+        let child_pid = pid_rx.recv_timeout(POLL_INTERVAL).ok();
 
         let deadline = Instant::now() + HOOK_TIMEOUT;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 eprintln!("Hook executor phase '{}' timed out after {:?}", phase, HOOK_TIMEOUT);
+                // Kill orphaned child process tree to prevent resource leaks
+                if let Some(pid) = child_pid {
+                    // Send SIGKILL to the process group (negative PID) to kill the
+                    // python process and any subprocesses it spawned.
+                    let pgid = pid as i32;
+                    let _ = Command::new("kill")
+                        .arg(format!("-{}", pgid))
+                        .output();
+                    // Also kill the process directly in case setpgid wasn't called
+                    let _ = Command::new("kill")
+                        .arg(format!("{}", pid))
+                        .output();
+                }
                 return None;
             }
 

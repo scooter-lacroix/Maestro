@@ -188,7 +188,7 @@ class SyncSessionAdapter:
         if callable(attr):
             @functools.wraps(attr)
             async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                return attr(*args, **kwargs)
+                return await asyncio.to_thread(attr, *args, **kwargs)
             return _async_wrapper
         return attr
 

@@ -1,4 +1,7 @@
+use std::process::Stdio;
+
 use anyhow::{Context, Result};
+use tokio::io::AsyncReadExt;
 use serde_json::json;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
@@ -103,8 +106,10 @@ impl NexusRuntimeBridge {
             self.event_payload(profile, reason).to_string(),
         );
 
-        // Spawn the process to have control over killing it on timeout
+        // Spawn the process with piped stdout/stderr so we can capture diagnostic output
         let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .context("failed to invoke nexus bridge")?;
 
@@ -112,11 +117,18 @@ impl NexusRuntimeBridge {
         let result = timeout(COMMAND_TIMEOUT, child.wait()).await;
 
         match result {
-            Ok(Ok(exit_status)) => {
-                if !exit_status.success() {
+            Ok(Ok(status)) => {
+                if !status.success() {
+                    // Read captured stderr for diagnostics
+                    let mut stderr_buf = Vec::new();
+                    if let Some(mut stderr) = child.stderr.take() {
+                        let _ = stderr.read_to_end(&mut stderr_buf).await;
+                    }
+                    let stderr_text = String::from_utf8_lossy(&stderr_buf);
                     anyhow::bail!(
-                        "nexus bridge command failed with exit status: {}",
-                        exit_status
+                        "nexus bridge command failed with exit status: {}\nstderr: {}",
+                        status,
+                        stderr_text.trim()
                     );
                 }
             }
@@ -126,7 +138,24 @@ impl NexusRuntimeBridge {
             Err(_) => {
                 // Timeout occurred - kill the spawned process
                 let _ = child.kill().await;
-                anyhow::bail!("nexus bridge command timed out after {:?}", COMMAND_TIMEOUT);
+                // Wait for the kill to take effect so stderr reaches EOF
+                let _ = child.wait().await;
+                // Read any stderr produced before the kill
+                let mut stderr_buf = Vec::new();
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_end(&mut stderr_buf).await;
+                }
+                let stderr_text = String::from_utf8_lossy(&stderr_buf).trim().to_string();
+                let detail = if stderr_text.is_empty() {
+                    String::new()
+                } else {
+                    format!("\nstderr: {}", stderr_text)
+                };
+                anyhow::bail!(
+                    "nexus bridge command timed out after {:?}{}",
+                    COMMAND_TIMEOUT,
+                    detail
+                );
             }
         }
 
