@@ -157,10 +157,16 @@ def session_outcome_hook(input_data: dict) -> dict:
                             session.project_path if session and session.project_path else os.getcwd()
                         )
                         context = HandoffTemplate.generic_handoff(
-                            summary=summary,
-                            track_id=track_id,
-                            current_task=input_data.get("current_task_id"),
-                            iteration=input_data.get("iteration"),
+                            title=f"Session handoff: {session_id[:8]}",
+                            description=summary,
+                            current_state={
+                                "track_id": track_id,
+                                "current_task": input_data.get("current_task_id"),
+                                "iteration": input_data.get("iteration"),
+                            },
+                            achievements=input_data.get("achievements", []),
+                            blockers=input_data.get("blockers", []),
+                            action_items=input_data.get("action_items", []),
                             remaining_work=input_data.get("remaining_work", ""),
                         )
                         handoff = handler.create_handoff(

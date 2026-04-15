@@ -9,6 +9,7 @@ Nexus internals.
 from __future__ import annotations
 
 import asyncio
+import functools
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
@@ -183,11 +184,13 @@ class SyncSessionAdapter:
         self._session.refresh(instance)
 
     def __getattr__(self, name: str) -> Any:
-        # Explicitly wrap common sync methods to prevent accidental await
-        if name in ("add", "delete", "flush", "refresh"):
-            # Return the sync method directly - caller should not await
-            return getattr(self._session, name)
-        return getattr(self._session, name)
+        attr = getattr(self._session, name)
+        if callable(attr):
+            @functools.wraps(attr)
+            async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                return attr(*args, **kwargs)
+            return _async_wrapper
+        return attr
 
 
 __all__ = ["AsyncDatabaseManager"]
