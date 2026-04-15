@@ -46,8 +46,9 @@ def run_hook(phase: str, event_name: str):
         if not isinstance(data, dict):
             data = {}
 
-        # Ensure project_path is set
-        data.setdefault("project_path", data.get("cwd") or os.getcwd())
+        # Ensure project_path is set (handle missing, None, and empty string)
+        if not data.get("project_path"):
+            data["project_path"] = data.get("cwd") or os.getcwd()
         
         # Execute hooks for the phase
         executor = get_hook_executor()
@@ -137,6 +138,9 @@ def run_hook(phase: str, event_name: str):
                     )
                 elif response and "systemMessage" in response:
                     response["systemMessage"] += f"\n\n{ct_context}"
+                elif response and "reason" in response:
+                    # subagent-stop block — preserve decision, append CT context
+                    response["reason"] = f"{response['reason']}\n\n{ct_context}"
                 else:
                     response = {
                         "hookSpecificOutput": {

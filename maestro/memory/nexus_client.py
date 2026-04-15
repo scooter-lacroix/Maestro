@@ -69,6 +69,16 @@ class StandaloneNexusClient:
         metadata: Optional[dict[str, Any]] = None,
         memory_lane_type: Optional[str] = None,
     ) -> dict[str, Any]:
+        # Truncate content to avoid ARG_MAX limits when passing via CLI argv.
+        # Typical ARG_MAX is 2MB; use 1MB safety threshold.
+        ARG_MAX_SAFETY = 1_000_000
+        if len(content) > ARG_MAX_SAFETY:
+            logger.warning(
+                "Truncating large memory content (%d bytes) to ARG_MAX safety limit",
+                len(content),
+            )
+            content = content[:ARG_MAX_SAFETY]
+
         args = [
             "store",
             "--content",

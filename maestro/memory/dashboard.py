@@ -774,6 +774,8 @@ npm run build
                 "memories": [sanitize_dict_for_json(memory) for memory in memories],
                 "total": len(memories)
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error listing memories: {e}")
             raise HTTPException(status_code=500, detail="Failed to list memories")

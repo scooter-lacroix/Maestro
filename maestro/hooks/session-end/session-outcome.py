@@ -173,7 +173,7 @@ def session_outcome_hook(input_data: dict) -> dict:
                         iteration=input_data.get("iteration"),
                         remaining_work=input_data.get("remaining_work", ""),
                     )
-                    handler.create_handoff(
+                    handoff = handler.create_handoff(
                         title=f"Session handoff: {session_id[:8]}",
                         from_session_id=session_id,
                         from_agent_id=agent_id,
@@ -181,6 +181,8 @@ def session_outcome_hook(input_data: dict) -> dict:
                         summary=summary,
                         context_data=context,
                     )
+                    if handoff is None:
+                        input_data["outcome_handoff_error"] = "create_handoff returned None"
 
             asyncio.run(_create_session_handoff())
         except Exception as e:

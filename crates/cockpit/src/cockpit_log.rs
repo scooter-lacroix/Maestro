@@ -400,8 +400,15 @@ pub fn tail_log(log_path: &Path, n: usize) -> Result<Vec<String>> {
     file.read_to_end(&mut buf)
         .with_context(|| format!("Failed to read log file: {}", log_path.display()))?;
 
-    let lines: Vec<String> = String::from_utf8_lossy(&buf)
-        .lines()
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines_iter = text.lines();
+
+    // If we sought into the middle of the file, skip the first (potentially partial) line.
+    if start > 0 {
+        lines_iter.next();
+    }
+
+    let lines: Vec<String> = lines_iter
         .filter(|l| !l.starts_with('#') && *l != "---")
         .rev()
         .take(n)
