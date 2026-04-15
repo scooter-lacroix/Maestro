@@ -3064,6 +3064,7 @@ dependencies = [
  "ktop_collectors",
  "lazy_static",
  "leindex-core",
+ "libc",
  "maestro-claw",
  "maestro-core",
  "maestro-pi-mono",

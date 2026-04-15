@@ -148,8 +148,12 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
       }
     }
 
-    if (htmlContent) {
-      const server = await tracklensServer.startTrackLensServer({
+    if (!htmlContent) {
+      ctx.ui.notify("TrackLens review UI unavailable — setup docs not found. Setup aborted.", "error");
+      return; // Fail closed — don't proceed without review
+    }
+
+    const server = await tracklensServer.startTrackLensServer({
         plan: combinedMarkdown,
         origin: "pi-maestro",
         htmlContent,
@@ -187,7 +191,6 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
           }
         }
       }
-    }
   } catch (error) {
     // TrackLens server failed to start or crashed - abort setup
     ctx.ui.notify(`TrackLens review failed: ${error instanceof Error ? error.message : 'Unknown error'}. Setup aborted.`, "error");

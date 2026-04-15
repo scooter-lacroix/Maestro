@@ -297,6 +297,9 @@ ${trackId ? `
       - Use: \`maestro memory --store --category decision --content "Task completed: ..."\`
 
 3. **Update Task Checkboxes:**
+
+${tracklensSection}
+
  ## 5.0 FINALIZE TRACK
 
 ${isTrackLensEnabled() ? "After walkthrough approval:" : "After manual review approval:"}

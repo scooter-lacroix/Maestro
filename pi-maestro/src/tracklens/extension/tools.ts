@@ -261,16 +261,21 @@ After review, provide your feedback or approval.`,
           if (root) {
             const trackDir = resolve(root, "maestro/tracks", trackId);
             if (existsSync(trackDir)) {
-              appendReviewEntry(trackDir, {
-                timestamp: new Date().toISOString(),
-                documentType,
-                approved: result.approved,
-                annotationCount: result.annotations?.length ?? 0,
-                feedback: result.feedback,
-                editedContent: result.edited_content,
-                reviewDurationMs: result.review_duration_ms ?? 0,
-                iteration: result.iteration ?? 0,
-              });
+              // Best-effort history persistence — never let logging fail the review
+              try {
+                appendReviewEntry(trackDir, {
+                  timestamp: new Date().toISOString(),
+                  documentType,
+                  approved: result.approved,
+                  annotationCount: result.annotations?.length ?? 0,
+                  feedback: result.feedback,
+                  editedContent: result.edited_content,
+                  reviewDurationMs: result.review_duration_ms ?? 0,
+                  iteration: result.iteration ?? 0,
+                });
+              } catch {
+                // Intentionally swallowed — review result takes priority over history log
+              }
             }
           }
         }

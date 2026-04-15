@@ -36,31 +36,7 @@ def checkpoint_hook(input_data: dict) -> dict:
         if not session_id or not project_path:
             return input_data
 
-        async def _store_checkpoint() -> None:
-            service = MaestroMemoryService()
-            await service.initialize()
-            try:
-                await service.store_command_context(
-                    command="hook:checkpoint",
-                    project_path=project_path,
-                    context={
-                        "session_id": session_id,
-                        "track_id": input_data.get("track_id"),
-                        "task_id": input_data.get("task_id") or input_data.get("current_task_id"),
-                        "iteration": input_data.get("iteration"),
-                        "event": "checkpoint_transition",
-                        "checkpoint_interval": input_data.get("checkpoint_interval"),
-                        "task_completed": bool(input_data.get("task_completed", False)),
-                        "selected_cli": input_data.get("selected_cli") or os.environ.get("MAESTRO_SELECTED_CLI", ""),
-                    },
-                )
-            finally:
-                await service.close()
-
-        asyncio.run(_store_checkpoint())
-        input_data["checkpoint_cognition_scheduled"] = True
-
-        # Invoke CriticalThinkEngine for post-checkpoint analysis
+        # Invoke CriticalThinkEngine for post-checkpoint analysis (best-effort)
         try:
             from maestro.critical_think.core import CriticalThinkEngine
 
@@ -90,15 +66,40 @@ def checkpoint_hook(input_data: dict) -> dict:
                 "synthesis": ct_result.synthesis,
                 "next_steps": ct_result.next_steps,
             }
+        except Exception as e:
+            # Critical think is best-effort — don't fail the checkpoint
+            input_data["critical_think_error"] = str(e)
 
-            # Persist critical think analysis to Nexus for cross-session retrieval
+        # Single event loop for all persistence operations
+        async def _store_all() -> None:
+            # Part 1: Store checkpoint
+            service = MaestroMemoryService()
+            await service.initialize()
             try:
+                await service.store_command_context(
+                    command="hook:checkpoint",
+                    project_path=project_path,
+                    context={
+                        "session_id": session_id,
+                        "track_id": input_data.get("track_id"),
+                        "task_id": input_data.get("task_id") or input_data.get("current_task_id"),
+                        "iteration": input_data.get("iteration"),
+                        "event": "checkpoint_transition",
+                        "checkpoint_interval": input_data.get("checkpoint_interval"),
+                        "task_completed": bool(input_data.get("task_completed", False)),
+                        "selected_cli": input_data.get("selected_cli") or os.environ.get("MAESTRO_SELECTED_CLI", ""),
+                    },
+                )
+            finally:
+                await service.close()
 
-                async def _store_ct_result() -> None:
-                    service = MaestroMemoryService()
-                    await service.initialize()
+            # Part 2: Store critical think result (if available)
+            if "critical_think_result" in input_data:
+                try:
+                    service2 = MaestroMemoryService()
+                    await service2.initialize()
                     try:
-                        await service.store_command_context(
+                        await service2.store_command_context(
                             command="hook:checkpoint:critical_think",
                             project_path=project_path,
                             context={
@@ -110,14 +111,15 @@ def checkpoint_hook(input_data: dict) -> dict:
                             },
                         )
                     finally:
-                        await service.close()
+                        await service2.close()
+                except Exception as e:
+                    input_data["ct_storage_error"] = str(e)
 
-                asyncio.run(_store_ct_result())
-            except Exception as e:
-                input_data["ct_storage_error"] = str(e)
+        try:
+            asyncio.run(_store_all())
+            input_data["checkpoint_cognition_scheduled"] = True
         except Exception as e:
-            # Critical think is best-effort — don't fail the checkpoint
-            input_data["critical_think_error"] = str(e)
+            input_data["ct_storage_error"] = str(e)
 
         return input_data
     except Exception as exc:

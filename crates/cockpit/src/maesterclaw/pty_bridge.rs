@@ -27,7 +27,7 @@ pub struct PtyLaunchConfig {
 pub struct PtyBridge {
     master: Box<dyn portable_pty::MasterPty + Send>,
     stdin: Box<dyn Write + Send>,
-    child: Box<dyn portable_pty::Child + Send + Sync>,
+    child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
     events: Receiver<PtyEvent>,
     exit_reported: bool,
 }
@@ -105,7 +105,7 @@ impl PtyBridge {
 
         Ok(Self {
             master: pair.master,
-            child,
+            child: Some(child),
             stdin,
             events: rx,
             exit_reported: false,
@@ -127,9 +127,11 @@ impl PtyBridge {
         }
 
         if !self.exit_reported {
-            if let Ok(Some(status)) = self.child.try_wait() {
-                self.exit_reported = true;
-                drained.push(PtyEvent::Exited(Some(status.exit_code() as i32)));
+            if let Some(ref mut child) = self.child {
+                if let Ok(Some(status)) = child.try_wait() {
+                    self.exit_reported = true;
+                    drained.push(PtyEvent::Exited(Some(status.exit_code() as i32)));
+                }
             }
         }
 
@@ -137,7 +139,9 @@ impl PtyBridge {
     }
 
     pub fn is_running(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        self.child
+            .as_mut()
+            .map_or(false, |child| matches!(child.try_wait(), Ok(None)))
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
@@ -153,9 +157,9 @@ impl PtyBridge {
 
     pub fn terminate(&mut self) -> Result<()> {
         if self.is_running() {
-            self.child
-                .kill()
-                .context("failed to terminate claw process")?;
+            if let Some(ref mut child) = self.child {
+                child.kill().context("failed to terminate claw process")?;
+            }
         }
         Ok(())
     }
@@ -163,15 +167,14 @@ impl PtyBridge {
 
 impl Drop for PtyBridge {
     fn drop(&mut self) {
-        // Kill the child process if it's still running.
-        // Ignore errors - the process may already be dead, and
-        // we must not panic in Drop.
-        let _ = self.child.kill();
-
-        // Reap the child to prevent zombie processes.
-        // Spawn a thread to avoid blocking the async executor in Drop.
-        // Note: Since we're in Drop and can't move self.child, we skip the
-        // blocking try_wait loop here. We've already sent SIGKILL above,
-        // so the OS will reap the process eventually.
+        // Take the child out of the Option so we can move it into a reap thread.
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            // Spawn a thread to reap the zombie. We must not block
+            // in Drop (could be on async executor), so use try_wait in a loop.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
     }
 }

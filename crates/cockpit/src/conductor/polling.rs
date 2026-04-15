@@ -662,16 +662,12 @@ json.dump(result, sys.stdout)
                 eprintln!("Hook executor phase '{}' timed out after {:?}", phase, HOOK_TIMEOUT);
                 // Kill orphaned child process tree to prevent resource leaks
                 if let Some(pid) = child_pid {
+                    let pid_raw = pid as i32;
                     // Send SIGKILL to the process group (negative PID) to kill the
-                    // python process and any subprocesses it spawned.
-                    let pgid = pid as i32;
-                    let _ = Command::new("kill")
-                        .arg(format!("-{}", pgid))
-                        .output();
+                    // child process and any subprocesses it spawned.
+                    unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
                     // Also kill the process directly in case setpgid wasn't called
-                    let _ = Command::new("kill")
-                        .arg(format!("{}", pid))
-                        .output();
+                    unsafe { libc::kill(pid_raw, libc::SIGKILL); }
                 }
                 return None;
             }

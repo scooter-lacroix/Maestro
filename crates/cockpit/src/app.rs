@@ -2190,15 +2190,28 @@ fn apply_selected_channels_to_config(
             .unwrap_or_default()
     }
 
-    // Clear all channel configs first to ensure deselected ones are removed
-    config.channels.telegram = None;
-    config.channels.discord = None;
-    config.channels.slack = None;
-    config.channels.matrix = None;
-    config.channels.whatsapp = None;
-    config.channels.mattermost = None;
+    // Only clear deselected channels — preserve configs for selected ones
+    // (even if env vars are missing, we keep the existing persisted config)
+    if !selected_channels.contains(&ChannelType::Telegram) {
+        config.channels.telegram = None;
+    }
+    if !selected_channels.contains(&ChannelType::Discord) {
+        config.channels.discord = None;
+    }
+    if !selected_channels.contains(&ChannelType::Slack) {
+        config.channels.slack = None;
+    }
+    if !selected_channels.contains(&ChannelType::Matrix) {
+        config.channels.matrix = None;
+    }
+    if !selected_channels.contains(&ChannelType::WhatsApp) {
+        config.channels.whatsapp = None;
+    }
+    if !selected_channels.contains(&ChannelType::Mattermost) {
+        config.channels.mattermost = None;
+    }
 
-    // Now populate only the selected channels
+    // Now populate selected channels from env vars (overwriting if available)
     if selected_channels.contains(&ChannelType::Telegram) {
         if let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") {
             config.channels.telegram = Some(TelegramConfig {

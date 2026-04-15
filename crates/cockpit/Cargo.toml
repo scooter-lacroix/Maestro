@@ -66,6 +66,7 @@ which = "6.0"
 # Blocked by: upstream cli-clipboard dependency on wl-clipboard-rs ^0.7.0
 cli-clipboard = "0.4"
 dirs = "5.0"
+libc = "0.2"
 portable-pty = "0.8"
 
 [dev-dependencies]

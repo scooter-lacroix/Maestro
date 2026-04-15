@@ -67,20 +67,27 @@ function findKeywordTriggerPositions(
   const quotedRanges: Array<{ start: number; end: number }> = [];
   let openQuote: string | null = null;
   let openAt = 0;
+  let bracketDepth = 0; // Track nesting depth for bracket-like delimiters
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!;
     if (openQuote) {
-      // Handle nested brackets: `[[` resets the open position
+      // Handle nested brackets: increment depth instead of resetting openAt
       if (openQuote === "[" && ch === "[") {
-        openAt = i;
+        bracketDepth++;
         continue;
       }
       if (ch !== OPEN_TO_CLOSE[openQuote]) continue;
+      // For brackets, only close when depth is fully unwound
+      if (openQuote === "[" && bracketDepth > 0) {
+        bracketDepth--;
+        continue;
+      }
       // Single quotes: only close if not followed by a word char (possessive)
       if (openQuote === "'" && isWord(text[i + 1])) continue;
       quotedRanges.push({ start: openAt, end: i + 1 });
       openQuote = null;
+      bracketDepth = 0;
     } else if (
       // HTML tag opening: `<` followed by letter or `/`
       (ch === "<" && i + 1 < text.length && /[a-zA-Z/]/.test(text[i + 1]!)) ||
@@ -91,6 +98,7 @@ function findKeywordTriggerPositions(
     ) {
       openQuote = ch;
       openAt = i;
+      bracketDepth = 0;
     }
   }
 

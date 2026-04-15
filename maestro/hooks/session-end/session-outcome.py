@@ -80,6 +80,9 @@ def session_outcome_hook(input_data: dict) -> dict:
                 duration = (session.ended_at - session.started_at).total_seconds()
                 outcome["duration_seconds"] = duration
 
+        # Import MaestroMemoryService early — used by both _async_operations and _persist_operations
+        from maestro.memory.service import MaestroMemoryService
+
         # Combined async coordinator for all async operations
         # This consolidates all asyncio.run() calls into a single event loop execution
         async def _async_operations() -> tuple[int, str]:
@@ -122,7 +125,6 @@ def session_outcome_hook(input_data: dict) -> dict:
         current_session_id = getattr(manager, '_current_session_id', None)
         if current_session_id or session_id:
             try:
-                from maestro.memory.service import MaestroMemoryService
                 from maestro.memory.coordination.handoffs import HandoffHandler, HandoffTemplate
 
                 async def _persist_operations() -> None:
