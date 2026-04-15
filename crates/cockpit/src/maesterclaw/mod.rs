@@ -418,8 +418,8 @@ impl MaestroClawPane {
                 } else {
                     " "
                 };
-                let title = if session.title.len() > 22 {
-                    format!("{}...", &session.title[..22])
+                let title = if session.title.chars().count() > 22 {
+                    format!("{}...", session.title.chars().take(22).collect::<String>())
                 } else {
                     session.title.clone()
                 };

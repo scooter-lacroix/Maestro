@@ -159,7 +159,9 @@ def run_hook(phase: str, event_name: str):
         original_stdout.write("{}")
     finally:
         # Capture hijacked stderr content before restoring streams
-        captured_stderr = sys.stderr.getvalue()
+        captured_stderr = ""
+        if hasattr(sys.stderr, 'getvalue'):
+            captured_stderr = sys.stderr.getvalue()
 
         # Restore original streams first to ensure consistent state
         sys.stdout = original_stdout

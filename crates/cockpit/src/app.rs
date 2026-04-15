@@ -689,7 +689,7 @@ fn start_maestroclaw_session(
     app: &mut App,
     session: leindex_core::memory::models::Session,
 ) -> anyhow::Result<()> {
-    if let Some(runtime) = app.maestroclaw_runtime.as_mut() {
+    if let Some(mut runtime) = app.maestroclaw_runtime.take() {
         let _ = runtime.stop();
     }
 
@@ -8146,14 +8146,10 @@ mod app_wiring_tests {
         assert!(handled);
         assert!(app.maestroclaw_pane.is_session_browser_active());
 
-        // 2. SessionBrowserSelect should find the session and switch to Sessions tab.
+        // 2. SessionBrowserSelect should find the session and select it.
         let handled = handle_maestroclaw_action(&mut app, MaestroClawAction::SessionBrowserSelect);
         assert!(handled);
-        assert_eq!(
-            app.tab_index,
-            tabs::SESSIONS,
-            "tab_index must switch to Sessions after SessionBrowserSelect"
-        );
-        assert_eq!(app.status_message, "Focused session 'My Test Session'");
+        assert!(app.maestroclaw_pane.selected_session.is_some());
+        assert_eq!(app.status_message, "Selected session 'My Test Session' in MaestroClaw");
     }
 }

@@ -191,18 +191,18 @@ def generate_handoff(input_data: dict) -> dict:
             service = MaestroMemoryService()
             await service.initialize()
             try:
-                    await service.store_command_context(
-                        command="hook:pre-compact-handoff",
-                        project_path=project_path,
-                        context={
-                            "session_id": _safe_get(input_data, "session_id", default=""),
-                            "track_id": track_id,
-                            "current_task_id": _safe_get(input_data, "current_task_id", default=""),
-                            "event": "compaction_handoff_generated",
-                            "compaction_count": compaction_count,
-                            "handoff_path": str(handoff_path),
-                        },
-                    )
+                await service.store_command_context(
+                    command="hook:pre-compact-handoff",
+                    project_path=project_path,
+                    context={
+                        "session_id": _safe_get(input_data, "session_id", default=""),
+                        "track_id": track_id,
+                        "current_task_id": _safe_get(input_data, "current_task_id", default=""),
+                        "event": "compaction_handoff_generated",
+                        "compaction_count": compaction_count,
+                        "handoff_path": str(handoff_path),
+                    },
+                )
             finally:
                 await service.close()
 

@@ -112,7 +112,10 @@ def continuity_hook(input_data: dict) -> dict:
                     try:
                         await service.store_command_context(
                             command="hook:pre-compact",
-                            project_path=getattr(manager.session_manager.get_session_by_id(session_id), "project_path", None) or os.getcwd(),
+                            project_path=getattr(
+                                manager.session_manager.get_session_by_id(session_id) if manager.session_manager else None,
+                                "project_path", None
+                            ) or os.getcwd(),
                             context={
                                 "session_id": session_id,
                                 "current_task_id": input_data.get("current_task_id", ""),

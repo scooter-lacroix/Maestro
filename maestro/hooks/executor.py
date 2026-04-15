@@ -265,7 +265,7 @@ class HookExecutor:
 
             phase_results.append({
                 "hook": hook_name,
-                "success": "hook_error" not in result,
+                "success": isinstance(result, dict) and "hook_error" not in result,
             })
 
         nexus_result = self._emit_nexus_lifecycle(phase, output_data)
