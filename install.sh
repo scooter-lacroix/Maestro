@@ -710,6 +710,9 @@ for check in \
 done
 if [[ "$PY_VERIFY_OK" -eq 1 ]]; then
     log "[OK] Python modules installed and verified"
+else
+    log "[ERROR] Critical Python modules are missing. Installation failed."
+    exit 1
 fi
 
 # Clean up temp install directory if we cloned

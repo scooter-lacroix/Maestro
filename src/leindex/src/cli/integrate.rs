@@ -375,6 +375,47 @@ impl Integrator {
         Ok(())
     }
 
+    /// Build the TOML map for an MCP server entry based on the tool type.
+    fn build_mcp_server_table(tool: &IntegrationTool) -> TomlMap<String, TomlValue> {
+        let mut server_table = TomlMap::new();
+        if matches!(tool, IntegrationTool::Codex) {
+            let command = if cfg!(target_os = "windows") {
+                "leindex.exe"
+            } else {
+                "leindex"
+            };
+            server_table.insert(
+                "command".to_string(),
+                TomlValue::String(command.to_string()),
+            );
+            server_table.insert(
+                "args".to_string(),
+                TomlValue::Array(vec![
+                    TomlValue::String("mcp".to_string()),
+                ]),
+            );
+        } else {
+            let command = if cfg!(target_os = "windows") {
+                "maestro.exe"
+            } else {
+                "maestro"
+            };
+            server_table.insert(
+                "command".to_string(),
+                TomlValue::String(command.to_string()),
+            );
+            server_table.insert(
+                "args".to_string(),
+                TomlValue::Array(vec![
+                    TomlValue::String("mcp".to_string()),
+                    TomlValue::String("proxy".to_string()),
+                    TomlValue::String(tool.mcp_server_name().to_string()),
+                ]),
+            );
+        }
+        server_table
+    }
+
     /// Update a TOML config file with MCP server config
     fn update_toml_config(&self, tool: IntegrationTool, config_path: &Path) -> Result<()> {
         if !config_path.exists() {
@@ -383,38 +424,25 @@ impl Integrator {
                 config_path.display()
             ));
 
-            // For Codex, use direct format; for others, use proxy format
-            let toml_content = if matches!(tool, IntegrationTool::Codex) {
-                // Codex uses direct leindex invocation
-                let command = if cfg!(target_os = "windows") {
-                    "leindex.exe"
-                } else {
-                    "leindex"
-                };
-                format!(
-                    r#"[mcp_servers.{}]
-command = "{}"
-args = ["mcp"]
-"#,
-                    tool.mcp_server_name(),
-                    command
-                )
-            } else {
-                // Other tools use proxy format through maestro
-                format!(
-                    r#"[mcp_servers.{}]
-command = "{}"
-args = ["mcp", "proxy", "{}"]
-"#,
-                    tool.mcp_server_name(),
-                    if cfg!(target_os = "windows") {
-                        "maestro.exe"
-                    } else {
-                        "maestro"
-                    },
-                    tool.mcp_server_name()
-                )
-            };
+            // Build server config using shared helper
+            let server_table = Self::build_mcp_server_table(&tool);
+            let command = server_table.get("command")
+                .and_then(|v: &TomlValue| v.as_str())
+                .unwrap_or("leindex");
+            let args: Vec<String> = server_table.get("args")
+                .and_then(|v: &TomlValue| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v: &TomlValue| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let args_str = args.iter()
+                .map(|a| format!("\"{}\"", a))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let toml_content = format!(
+                "[mcp_servers.{}]\ncommand = \"{}\"\nargs = [{}]\n",
+                tool.mcp_server_name(),
+                command,
+                args_str
+            );
 
             if !self.dry_run {
                 fs::write(config_path, toml_content)?;
@@ -440,45 +468,7 @@ args = ["mcp", "proxy", "{}"]
             }
 
             if let Some(mcp_servers) = table.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
-                let mut server_table = TomlMap::new();
-
-                if matches!(tool, IntegrationTool::Codex) {
-                    // Codex uses direct leindex invocation
-                    let command = if cfg!(target_os = "windows") {
-                        "leindex.exe"
-                    } else {
-                        "leindex"
-                    };
-                    server_table.insert(
-                        "command".to_string(),
-                        TomlValue::String(command.to_string()),
-                    );
-                    server_table.insert(
-                        "args".to_string(),
-                        TomlValue::Array(vec![
-                            TomlValue::String("mcp".to_string()),
-                        ]),
-                    );
-                } else {
-                    // Other tools use proxy format through maestro
-                    let command = if cfg!(target_os = "windows") {
-                        "maestro.exe"
-                    } else {
-                        "maestro"
-                    };
-                    server_table.insert(
-                        "command".to_string(),
-                        TomlValue::String(command.to_string()),
-                    );
-                    server_table.insert(
-                        "args".to_string(),
-                        TomlValue::Array(vec![
-                            TomlValue::String("mcp".to_string()),
-                            TomlValue::String("proxy".to_string()),
-                            TomlValue::String(server_name.to_string()),
-                        ]),
-                    );
-                }
+                let server_table = Self::build_mcp_server_table(&tool);
 
                 mcp_servers.insert(server_name.to_string(), TomlValue::Table(server_table));
             }
