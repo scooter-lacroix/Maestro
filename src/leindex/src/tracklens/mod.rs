@@ -13,6 +13,6 @@ pub mod walkthrough;
 
 // ─── Re-exports ───────────────────────────────────────────────────────────────
 
-pub use server::{ReviewContent, ReviewMetadata, ServerConfig, TrackLensServer};
+pub use server::{ExtendTimeoutRequest, ResetReviewRequest, ReviewContent, ReviewMetadata, ServerConfig, SetPhaseRequest, TrackLensServer};
 pub use types::*;
 pub use walkthrough::{WalkthroughConfig, WalkthroughGenerator};

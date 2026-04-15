@@ -7,7 +7,7 @@ LeIndex provides a comprehensive CLI surface for code analysis, indexing, and se
 ## CLI Structure
 
 ```
-maestro <command> [subcommand] [options]
+leindex <command> [subcommand] [options]
 ```
 
 ## Commands
@@ -18,7 +18,7 @@ maestro <command> [subcommand] [options]
 
 **Usage:**
 ```bash
-maestro analyze <path> [options]
+leindex analyze <path> [options]
 ```
 
 **Options:**
@@ -30,16 +30,16 @@ maestro analyze <path> [options]
 **Examples:**
 ```bash
 # All layers on a file (LLM-ready output)
-maestro analyze src/auth.py
+leindex analyze src/auth.py
 
 # Specific analysis layer
-maestro analyze src/auth.py --analysis callgraph
+leindex analyze src/auth.py --analysis callgraph
 
 # JSON output for parsing
-maestro analyze src/auth.py --format json
+leindex analyze src/auth.py --format json
 
 # Ultra-condensed for exploration
-maestro analyze src/auth.py --format ultra
+leindex analyze src/auth.py --format ultra
 ```
 
 **Output Caps:**
@@ -55,7 +55,7 @@ maestro analyze src/auth.py --format ultra
 
 **Usage:**
 ```bash
-maestro le-index <subcommand> [options]
+leindex <subcommand> [options]
 ```
 
 #### Subcommands
@@ -64,7 +64,7 @@ maestro le-index <subcommand> [options]
 
 **Usage:**
 ```bash
-maestro le-index init [path]
+leindex init [path]
 ```
 
 **Options:**
@@ -72,14 +72,14 @@ maestro le-index init [path]
 
 **Example:**
 ```bash
-maestro le-index init .
+leindex init .
 ```
 
 ##### `status` - Show index status
 
 **Usage:**
 ```bash
-maestro le-index status
+leindex status
 ```
 
 **Output:**
@@ -92,7 +92,7 @@ maestro le-index status
 
 **Usage:**
 ```bash
-maestro le-index search "<query>" [options]
+leindex search "<query>" [options]
 ```
 
 **Options:**
@@ -102,16 +102,16 @@ maestro le-index search "<query>" [options]
 
 **Examples:**
 ```bash
-maestro le-index search "authentication"
-maestro le-index search "database connection pooling" --limit 10
-maestro le-index search "process_payment" --file src/services/payment.py
+leindex search "authentication"
+leindex search "database connection pooling" --limit 10
+leindex search "process_payment" --file src/services/payment.py
 ```
 
 ##### `analyze <path>` - 5-phase project analysis
 
 **Usage:**
 ```bash
-maestro le-index analyze <path> [options]
+leindex analyze <path> [options]
 ```
 
 **Options:**
@@ -130,16 +130,16 @@ maestro le-index analyze <path> [options]
 **Examples:**
 ```bash
 # All phases (balanced mode)
-maestro le-index analyze .
+leindex analyze .
 
 # Single phase (ultra-condensed)
-maestro le-index analyze . --phase 1 --mode ultra
+leindex analyze . --phase 1 --mode ultra
 
 # Phase 3 with custom limits
-maestro le-index analyze . --phase 3 --max-files 50 --max-chars 20000
+leindex analyze . --phase 3 --max-files 50 --max-chars 20000
 
 # JSON output for orchestrate engine
-maestro le-index analyze . --format json
+leindex analyze . --format json
 ```
 
 **Output Caps:**
@@ -151,25 +151,25 @@ maestro le-index analyze . --format json
 
 **Usage:**
 ```bash
-maestro le-index phase1 <path> [options]
-maestro le-index phase2 <path> [options]
-maestro le-index phase3 <path> [options]
-maestro le-index phase4 <path> [options]
-maestro le-index phase5 <path> [options]
+leindex phase1 <path> [options]
+leindex phase2 <path> [options]
+leindex phase3 <path> [options]
+leindex phase4 <path> [options]
+leindex phase5 <path> [options]
 ```
 
 **Options:** Same as `analyze` subcommand
 
 **Example:**
 ```bash
-maestro le-index phase1 . --mode ultra
+leindex phase1 . --mode ultra
 ```
 
 ##### `context <target> [path]` - Generate context bundle
 
 **Usage:**
 ```bash
-maestro le-index context <target> [path]
+leindex context <target> [path]
 ```
 
 **Arguments:**
@@ -184,16 +184,16 @@ maestro le-index context <target> [path]
 **Examples:**
 ```bash
 # Context for a file
-maestro le-index context src/auth.py
+leindex context src/auth.py
 
 # Context for a function
-maestro le-index context authenticate_user src/auth.py
+leindex context authenticate_user src/auth.py
 
 # Context for entire project
-maestro le-index context . --project
+leindex context . --project
 
 # JSON bundle for orchestrate
-maestro le-index context src/auth.py --format json
+leindex context src/auth.py --format json
 ```
 
 ---
@@ -204,7 +204,7 @@ maestro le-index context src/auth.py --format json
 
 **Usage:**
 ```bash
-maestro memory <subcommand> [options]
+leindex memory <subcommand> [options]
 ```
 
 #### Subcommands
@@ -223,7 +223,7 @@ maestro memory <subcommand> [options]
 
 **Usage:**
 ```bash
-maestro tui
+leindex tui
 ```
 
 ---
@@ -234,7 +234,7 @@ maestro tui
 
 **Usage:**
 ```bash
-maestro mcp <subcommand> [options]
+leindex mcp <subcommand> [options]
 ```
 
 #### Subcommands
@@ -278,8 +278,8 @@ LeIndex supports 8 programming languages via tree-sitter:
 | Language | Extensions | CLI Value |
 |----------|-----------|-----------|
 | Python | `.py` | `python`, `py` |
-| TypeScript | `.ts`, `.tsx` | `typescript`, `ts` |
-| JavaScript | `.js`, `.jsx` | `javascript`, `js` |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | `typescript`, `ts` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | `javascript`, `js` |
 | Rust | `.rs` | `rust`, `rs` |
 | Go | `.go` | `go` |
 | Java | `.java` | `java` |
@@ -288,25 +288,29 @@ LeIndex supports 8 programming languages via tree-sitter:
 
 ---
 
-## TLDR Compatibility Mapping
+## Legacy TLDR Compatibility Mapping
+
+The standalone `leindex` CLI above is the authoritative analysis interface.
+The mapping below is reference-only for migrating from TLDR-era commands and
+must not be interpreted as a separate primary surface.
 
 | Old TLDR Command | LeIndex Equivalent |
 |------------------|-------------------|
-| `tldr warm .` | `maestro le-index init .` |
-| `tldr context main.py` | `maestro le-index context main.py` |
-| `tldr ast file.py` | `maestro analyze file.py --analysis ast` |
-| `tldr callgraph file.py` | `maestro analyze file.py --analysis callgraph` |
-| `tldr callers func` | `maestro le-index context func file.py --include-callers` |
-| `tldr callees func` | `maestro le-index context func file.py --include-callees` |
-| `tldr cfg file.py` | `maestro analyze file.py --analysis cfg` |
-| `tldr dfg file.py` | `maestro analyze file.py --analysis dfg` |
-| `tldr slice file.py 42` | `maestro analyze file.py --analysis slicing --line 42` |
-| `tldr search "query"` | `maestro le-index search "query"` |
-| `/phase1` | `maestro le-index phase1 .` |
-| `/phase2` | `maestro le-index phase2 .` |
-| `/phase3` | `maestro le-index phase3 .` |
-| `/phase4` | `maestro le-index phase4 .` |
-| `/phase5` | `maestro le-index phase5 .` |
+| `tldr warm .` | `leindex init .` |
+| `tldr context main.py` | `leindex context main.py` |
+| `tldr ast file.py` | `leindex analyze file.py --analysis ast` |
+| `tldr callgraph file.py` | `leindex analyze file.py --analysis callgraph` |
+| `tldr callers func` | `leindex context func file.py --include-callers` |
+| `tldr callees func` | `leindex context func file.py --include-callees` |
+| `tldr cfg file.py` | `leindex analyze file.py --analysis cfg` |
+| `tldr dfg file.py` | `leindex analyze file.py --analysis dfg` |
+| `tldr slice file.py 42` | `leindex analyze file.py --analysis slicing --line 42` |
+| `tldr search "query"` | `leindex search "query"` |
+| `/phase1` | `leindex phase1 .` |
+| `/phase2` | `leindex phase2 .` |
+| `/phase3` | `leindex phase3 .` |
+| `/phase4` | `leindex phase4 .` |
+| `/phase5` | `leindex phase5 .` |
 
 ---
 

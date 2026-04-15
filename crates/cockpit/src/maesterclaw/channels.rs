@@ -559,9 +559,15 @@ mod tests {
         assert!(!ChannelType::Mattermost.setup_instructions().is_empty());
 
         // Verify known substrings for correctness
-        assert!(ChannelType::Matrix.setup_instructions().contains("Matrix server"));
-        assert!(ChannelType::WhatsApp.setup_instructions().contains("Node.js bridge"));
-        assert!(ChannelType::Mattermost.setup_instructions().contains("Bot Accounts"));
+        assert!(ChannelType::Matrix
+            .setup_instructions()
+            .contains("Matrix server"));
+        assert!(ChannelType::WhatsApp
+            .setup_instructions()
+            .contains("Node.js bridge"));
+        assert!(ChannelType::Mattermost
+            .setup_instructions()
+            .contains("Bot Accounts"));
     }
 
     #[test]
@@ -575,21 +581,28 @@ mod tests {
     fn test_channel_type_icons() {
         // Verify icons are non-empty for all types
         for ct in ChannelType::all() {
-            assert!(!ct.icon().is_empty(), "icon for {:?} should not be empty", ct);
+            assert!(
+                !ct.icon().is_empty(),
+                "icon for {:?} should not be empty",
+                ct
+            );
         }
     }
 
     #[test]
     fn test_channel_type_all() {
         let all = ChannelType::all();
-        assert_eq!(all, &[
-            ChannelType::Telegram,
-            ChannelType::Discord,
-            ChannelType::Slack,
-            ChannelType::Matrix,
-            ChannelType::WhatsApp,
-            ChannelType::Mattermost,
-        ]);
+        assert_eq!(
+            all,
+            &[
+                ChannelType::Telegram,
+                ChannelType::Discord,
+                ChannelType::Slack,
+                ChannelType::Matrix,
+                ChannelType::WhatsApp,
+                ChannelType::Mattermost,
+            ]
+        );
     }
 
     #[test]

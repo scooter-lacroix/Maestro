@@ -252,9 +252,7 @@ mod cockpit_integration_tests {
 /// without requiring a full TUI backend (crossterm).
 #[cfg(test)]
 mod session_browser_integration_tests {
-    use crate::maesterclaw::{
-        MaestroClawAction, MaestroClawPane, SessionEntry,
-    };
+    use crate::maesterclaw::{MaestroClawAction, MaestroClawPane, SessionEntry};
     use crossterm::event::KeyCode;
 
     fn make_entry(id: &str, title: &str) -> SessionEntry {
@@ -322,9 +320,7 @@ mod session_browser_integration_tests {
         // Per the plan: Enter should resume/open the session immediately,
         // not just select it and require a second Enter.
         let mut pane = MaestroClawPane::default();
-        pane.load_session_entries(vec![
-            make_entry("s1", "First"),
-        ]);
+        pane.load_session_entries(vec![make_entry("s1", "First")]);
         pane.activate_session_browser();
 
         // Single Enter should both select AND close the browser
@@ -364,10 +360,7 @@ mod session_browser_integration_tests {
         // Select the single filtered result directly
         let action = pane.handle_key(KeyCode::Enter);
         assert_eq!(action, MaestroClawAction::SessionBrowserSelect);
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s3".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s3".to_string()));
     }
 }
 
@@ -424,9 +417,7 @@ mod channel_setup_render_tests {
     fn render_checklist(checklist: &Checklist) -> ratatui::backend::TestBackend {
         let backend = ratatui::backend::TestBackend::new(60, 20);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        terminal
-            .draw(|f| checklist.render(f, f.area()))
-            .unwrap();
+        terminal.draw(|f| checklist.render(f, f.area())).unwrap();
         terminal.backend().clone()
     }
 
@@ -453,9 +444,9 @@ mod channel_setup_render_tests {
         let labels: Vec<&str> = channels.iter().map(|ch| ch.label()).collect();
         let mut search_from = 0;
         for label in &labels {
-            let pos = full[search_from..].find(label).expect(
-                &format!("expected channel label '{label}' in render output, got:\n{full}")
-            );
+            let pos = full[search_from..].find(label).expect(&format!(
+                "expected channel label '{label}' in render output, got:\n{full}"
+            ));
             search_from += pos + label.len();
         }
     }
@@ -595,7 +586,10 @@ mod wizard_e2e_transition_tests {
 
         // Toggle Telegram (Space)
         pane.handle_key(crossterm::event::KeyCode::Char(' '));
-        assert!(pane.wizard.selected_channels.contains(&ChannelType::Telegram));
+        assert!(pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Telegram));
 
         // Move down to Discord
         pane.handle_key(crossterm::event::KeyCode::Down);
@@ -603,11 +597,17 @@ mod wizard_e2e_transition_tests {
 
         // Toggle Discord (Space)
         pane.handle_key(crossterm::event::KeyCode::Char(' '));
-        assert!(pane.wizard.selected_channels.contains(&ChannelType::Discord));
+        assert!(pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Discord));
 
         // Untoggle Discord (Space again)
         pane.handle_key(crossterm::event::KeyCode::Char(' '));
-        assert!(!pane.wizard.selected_channels.contains(&ChannelType::Discord));
+        assert!(!pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Discord));
 
         // Move to Continue (cursor == channel_count)
         for _ in 1..=channel_count {
@@ -630,7 +630,10 @@ mod wizard_e2e_transition_tests {
         let action = pane.handle_key(crossterm::event::KeyCode::Enter);
         assert_eq!(action, MaestroClawAction::WizardSelection);
         assert_eq!(pane.wizard.current_step(), WizardStep::ChannelSetup);
-        assert!(pane.wizard.selected_channels.contains(&ChannelType::Telegram));
+        assert!(pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Telegram));
     }
 
     #[test]
@@ -662,7 +665,10 @@ mod wizard_e2e_transition_tests {
 
         // Toggle a channel
         pane.handle_key(crossterm::event::KeyCode::Char(' '));
-        assert!(pane.wizard.selected_channels.contains(&ChannelType::Telegram));
+        assert!(pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Telegram));
 
         // Back: ChannelSetup -> ProviderSelection
         pane.handle_key(crossterm::event::KeyCode::Esc);
@@ -674,7 +680,9 @@ mod wizard_e2e_transition_tests {
 
         // Telegram selection should persist across the round trip
         assert!(
-            pane.wizard.selected_channels.contains(&ChannelType::Telegram),
+            pane.wizard
+                .selected_channels
+                .contains(&ChannelType::Telegram),
             "Telegram selection should persist after round-trip navigation"
         );
     }
@@ -773,12 +781,18 @@ mod wizard_channel_setup_render_tests {
 
         // Toggle Telegram (Space on cursor 0)
         pane.handle_key(crossterm::event::KeyCode::Char(' '));
-        assert!(pane.wizard.selected_channels.contains(&ChannelType::Telegram));
+        assert!(pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Telegram));
 
         // Move down and toggle Discord
         pane.handle_key(crossterm::event::KeyCode::Down);
         pane.handle_key(crossterm::event::KeyCode::Char(' '));
-        assert!(pane.wizard.selected_channels.contains(&ChannelType::Discord));
+        assert!(pane
+            .wizard
+            .selected_channels
+            .contains(&ChannelType::Discord));
 
         let backend = ratatui::backend::TestBackend::new(60, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -999,8 +1013,7 @@ mod main_view_render_tests {
             "expected 'No active sessions.' in zero-session main view, got:\n{content}"
         );
         // Phase 7 plan: tool count from available_tools.len(), not tool_details.len()
-        let expected_tool_line =
-            format!("{expected_count} tools detected on this system");
+        let expected_tool_line = format!("{expected_count} tools detected on this system");
         assert!(
             content.contains(&expected_tool_line),
             "expected '{expected_tool_line}' in zero-session main view, got:\n{content}"
@@ -1034,7 +1047,10 @@ mod tool_summary_tests {
         assert_eq!(action, MaestroClawAction::WizardAdvanced);
         assert_eq!(pane.wizard.current_step(), WizardStep::Complete);
         assert!(pane.wizard.is_completed());
-        assert!(pane.wizard_active, "wizard should stay active showing Complete screen");
+        assert!(
+            pane.wizard_active,
+            "wizard should stay active showing Complete screen"
+        );
     }
 
     #[test]
@@ -1510,15 +1526,13 @@ mod tool_summary_tests {
         .unwrap();
 
         // 2. Load config using the explicit home dir (no HOME mutation)
-        let loaded_config = maestro_claw::config::Config::load_from_dir(
-            tmp_home.path().to_path_buf(),
-        )
-        .expect("config should load");
+        let loaded_config =
+            maestro_claw::config::Config::load_from_dir(tmp_home.path().to_path_buf())
+                .expect("config should load");
 
         // 3. Verify the loaded workspace_dir points to the default location
         assert_eq!(
-            loaded_config.workspace_dir,
-            workspace_dir,
+            loaded_config.workspace_dir, workspace_dir,
             "Config::load_from_dir() should return the default workspace_dir under temp home"
         );
 
@@ -1548,8 +1562,7 @@ mod tool_summary_tests {
 
         // 6. Verify workspace_dir actually matches what Config::load_from_dir() returned
         assert_eq!(
-            pane.wizard.workspace_dir,
-            loaded_config.workspace_dir,
+            pane.wizard.workspace_dir, loaded_config.workspace_dir,
             "wizard workspace_dir should match Config::load_from_dir() workspace_dir"
         );
     }
@@ -1571,13 +1584,12 @@ mod tool_summary_tests {
         // Intentionally do NOT create mcp/servers.toml
 
         // 2. Load config using the explicit home dir — same path as App::new line 398.
-        let workspace_dir_from_config = maestro_claw::config::Config::load_from_dir(
-            tmp_home.path().to_path_buf(),
-        )
-        .unwrap_or_else(|e| {
-            panic!("Config::load_from_dir() failed: {e}");
-        })
-        .workspace_dir;
+        let workspace_dir_from_config =
+            maestro_claw::config::Config::load_from_dir(tmp_home.path().to_path_buf())
+                .unwrap_or_else(|e| {
+                    panic!("Config::load_from_dir() failed: {e}");
+                })
+                .workspace_dir;
 
         // 3. Verify the loaded workspace_dir points to the default location
         assert_eq!(
@@ -1695,11 +1707,7 @@ mod tool_summary_tests {
 
         // Write a minimal config.toml (primary_tool is the only field we set;
         // workspace_dir is always overwritten by the default path in load).
-        std::fs::write(
-            config_dir.join("config.toml"),
-            "primary_tool = \"codex\"\n",
-        )
-        .unwrap();
+        std::fs::write(config_dir.join("config.toml"), "primary_tool = \"codex\"\n").unwrap();
 
         // 2. Create the workspace dir + mcp/servers.toml so MCP is available
         let workspace_dir = config_dir.join("workspace");
@@ -1712,10 +1720,9 @@ mod tool_summary_tests {
 
         // 3. Load config the same way App::new does (via load_from_dir to avoid
         //    HOME mutation), then extract workspace_dir — matching app.rs:397–400.
-        let loaded_config = maestro_claw::config::Config::load_from_dir(
-            tmp_home.path().to_path_buf(),
-        )
-        .expect("config should load from temp home");
+        let loaded_config =
+            maestro_claw::config::Config::load_from_dir(tmp_home.path().to_path_buf())
+                .expect("config should load from temp home");
 
         // Config::load_from_dir() should have picked up primary_tool from the
         // config file and kept the default workspace_dir.
@@ -1741,8 +1748,7 @@ mod tool_summary_tests {
 
         // 6. Assert wizard workspace_dir matches the loaded config
         assert_eq!(
-            pane.wizard.workspace_dir,
-            loaded_config.workspace_dir,
+            pane.wizard.workspace_dir, loaded_config.workspace_dir,
             "wizard workspace_dir must match Config::load_from_dir() workspace_dir"
         );
 
@@ -1838,6 +1844,7 @@ mod app_path_backnav_tests {
             WizardStep::PrimaryToolSelection,
             WizardStep::ProviderSelection,
             WizardStep::ChannelSetup,
+            WizardStep::CronSetup,
             WizardStep::ToolSummary,
             WizardStep::Complete,
         ];
@@ -1850,6 +1857,7 @@ mod app_path_backnav_tests {
             match step {
                 WizardStep::Welcome
                 | WizardStep::ToolDetection
+                | WizardStep::CronSetup
                 | WizardStep::ToolSummary => {
                     let _ = pane.handle_key_with_session_count(KeyCode::Enter, 0);
                 }
@@ -1890,8 +1898,7 @@ mod app_path_backnav_tests {
     #[test]
     fn test_backtab_on_primary_tool_selection_goes_back() {
         let mut pane = advance_to_step(WizardStep::PrimaryToolSelection);
-        let action =
-            pane.handle_key_with_session_count(KeyCode::BackTab, 0);
+        let action = pane.handle_key_with_session_count(KeyCode::BackTab, 0);
         assert_eq!(action, MaestroClawAction::WizardBack);
         assert_eq!(pane.wizard.current_step(), WizardStep::ToolDetection);
     }
@@ -1915,8 +1922,7 @@ mod app_path_backnav_tests {
     #[test]
     fn test_backtab_on_provider_selection_goes_back() {
         let mut pane = advance_to_step(WizardStep::ProviderSelection);
-        let action =
-            pane.handle_key_with_session_count(KeyCode::BackTab, 0);
+        let action = pane.handle_key_with_session_count(KeyCode::BackTab, 0);
         assert_eq!(action, MaestroClawAction::WizardBack);
         assert_eq!(pane.wizard.current_step(), WizardStep::PrimaryToolSelection);
     }
@@ -1940,8 +1946,7 @@ mod app_path_backnav_tests {
     #[test]
     fn test_backtab_on_channel_setup_goes_back() {
         let mut pane = advance_to_step(WizardStep::ChannelSetup);
-        let action =
-            pane.handle_key_with_session_count(KeyCode::BackTab, 0);
+        let action = pane.handle_key_with_session_count(KeyCode::BackTab, 0);
         assert_eq!(action, MaestroClawAction::WizardBack);
         assert_eq!(pane.wizard.current_step(), WizardStep::ProviderSelection);
     }
@@ -2017,17 +2022,11 @@ mod session_browser_resume_tests {
         pane.activate_session_browser();
 
         assert!(pane.is_session_browser_active());
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s1".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s1".to_string()));
 
         // Navigate down
         let _ = pane.handle_key(KeyCode::Down);
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s2".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s2".to_string()));
 
         // Enter selects and closes browser
         let action = pane.handle_key(KeyCode::Enter);
@@ -2036,10 +2035,7 @@ mod session_browser_resume_tests {
 
         // The app can now query the selected session ID to perform the
         // same focus/switch-to-Sessions flow as OpenSelected
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s2".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s2".to_string()));
     }
 
     #[test]
@@ -2096,10 +2092,7 @@ mod session_browser_resume_tests {
         // Step 2: Navigate
         let _ = pane.handle_key(KeyCode::Down);
         let _ = pane.handle_key(KeyCode::Down);
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("id-3".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("id-3".to_string()));
 
         // Step 3: Select (Enter)
         let action = pane.handle_key(KeyCode::Enter);
@@ -2172,18 +2165,12 @@ mod app_dispatch_browser_regression {
         let _ = pane.handle_key_with_session_count(KeyCode::Char('e'), 3);
         assert!(pane.is_session_browser_active());
         // Only "Beta Session" should remain
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("beta".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("beta".to_string()));
 
         // Backspace removes 'e' → now filter is "b" → matches "Beta" still
         let _ = pane.handle_key_with_session_count(KeyCode::Backspace, 3);
         assert!(pane.is_session_browser_active());
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("beta".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("beta".to_string()));
 
         // Backspace again removes 'b' → empty filter → back to "Alpha" (first)
         let _ = pane.handle_key_with_session_count(KeyCode::Backspace, 3);
@@ -2338,10 +2325,7 @@ mod browser_shortcircuit_and_wizard_rerun_tests {
         // Backspace removes 'e'
         let _ = pane.handle_key_with_session_count(KeyCode::Backspace, 3);
         // Filter is now "b" — should still match "Beta Session"
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("beta".to_string())
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("beta".to_string()));
         // Backspace removes 'b' — empty filter, back to first
         let _ = pane.handle_key_with_session_count(KeyCode::Backspace, 3);
         assert_eq!(
@@ -2602,10 +2586,8 @@ mod browser_priority_routing_tests {
         pane.load_session_entries(vec![make_entry("s1", "Alpha")]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT),
-            1,
-        );
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT), 1);
         assert_eq!(
             action, None,
             "Alt+n must fall through even when browser is active"
@@ -2626,23 +2608,22 @@ mod browser_priority_routing_tests {
         ]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
-            2,
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE), 2);
+        assert!(
+            action.is_some(),
+            "'n' must be captured when browser is active"
         );
-        assert!(action.is_some(), "'n' must be captured when browser is active");
         assert_eq!(action, Some(MaestroClawAction::None));
 
         // Prove the first character actually reached the filter
         assert_eq!(
-            pane.browser_filter_text(), "n",
+            pane.browser_filter_text(),
+            "n",
             "filter must contain 'n' after priority gate captured it"
         );
         // Only "November Session" matches 'n' → selection narrowed
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s1".to_string()),
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s1".to_string()),);
     }
 
     #[test]
@@ -2654,23 +2635,22 @@ mod browser_priority_routing_tests {
         ]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
-            2,
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE), 2);
+        assert!(
+            action.is_some(),
+            "'p' must be captured when browser is active"
         );
-        assert!(action.is_some(), "'p' must be captured when browser is active");
         assert_eq!(action, Some(MaestroClawAction::None));
 
         // Prove the first character actually reached the filter
         assert_eq!(
-            pane.browser_filter_text(), "p",
+            pane.browser_filter_text(),
+            "p",
             "filter must contain 'p' after priority gate captured it"
         );
         // Only "Python Project" matches 'p' → selection narrowed
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s1".to_string()),
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s1".to_string()),);
     }
 
     #[test]
@@ -2682,23 +2662,22 @@ mod browser_priority_routing_tests {
         ]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
-            2,
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE), 2);
+        assert!(
+            action.is_some(),
+            "'t' must be captured when browser is active"
         );
-        assert!(action.is_some(), "'t' must be captured when browser is active");
         assert_eq!(action, Some(MaestroClawAction::None));
 
         // Prove the first character actually reached the filter
         assert_eq!(
-            pane.browser_filter_text(), "t",
+            pane.browser_filter_text(),
+            "t",
             "filter must contain 't' after priority gate captured it"
         );
         // Only "Track Builder" matches 't' (Memory View does not)
-        assert_eq!(
-            pane.selected_browser_session_id(),
-            Some("s1".to_string()),
-        );
+        assert_eq!(pane.selected_browser_session_id(), Some("s1".to_string()),);
     }
 
     // -- Browser active: Esc still closes browser through priority gate -------
@@ -2709,10 +2688,8 @@ mod browser_priority_routing_tests {
         pane.load_session_entries(vec![make_entry("s1", "Alpha")]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-            1,
-        );
+        let action =
+            pane.route_key_browser_priority(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 1);
         assert_eq!(
             action,
             Some(MaestroClawAction::SessionBrowserClose),
@@ -2732,10 +2709,8 @@ mod browser_priority_routing_tests {
         pane.load_session_entries(vec![make_entry("s1", "New Project")]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
-            1,
-        );
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE), 1);
         assert_ne!(
             action,
             Some(MaestroClawAction::NewSession),
@@ -2769,10 +2744,8 @@ mod browser_priority_routing_tests {
         pane.load_session_entries(vec![make_entry("s1", "Alpha")]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
-            1,
-        );
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT), 1);
         assert_eq!(
             action, None,
             "BackTab (Shift+Tab) must fall through when browser is active"
@@ -2791,10 +2764,8 @@ mod browser_priority_routing_tests {
         pane.load_session_entries(vec![make_entry("s1", "Alpha")]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
-            1,
-        );
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT), 1);
         assert_eq!(
             action, None,
             "'?' must fall through when browser is active so help toggle works"
@@ -2804,7 +2775,8 @@ mod browser_priority_routing_tests {
             "browser must remain active after '?' fall-through"
         );
         assert_eq!(
-            pane.browser_filter_text(), "",
+            pane.browser_filter_text(),
+            "",
             "'?' must not be added to the filter"
         );
     }
@@ -2817,14 +2789,9 @@ mod browser_priority_routing_tests {
         pane.load_session_entries(vec![make_entry("s1", "Alpha")]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-            1,
-        );
-        assert_eq!(
-            action, None,
-            "Tab must fall through when browser is active"
-        );
+        let action =
+            pane.route_key_browser_priority(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), 1);
+        assert_eq!(action, None, "Tab must fall through when browser is active");
         assert!(pane.is_session_browser_active());
     }
 
@@ -2839,11 +2806,12 @@ mod browser_priority_routing_tests {
         ]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE),
-            2,
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE), 2);
+        assert!(
+            action.is_some(),
+            "'b' must be captured when browser is active"
         );
-        assert!(action.is_some(), "'b' must be captured when browser is active");
         assert_eq!(pane.browser_filter_text(), "b");
         // b should NOT produce OpenSessionBrowser — it goes to the filter
         assert_ne!(action, Some(MaestroClawAction::OpenSessionBrowser));
@@ -2858,11 +2826,12 @@ mod browser_priority_routing_tests {
         ]);
         pane.activate_session_browser();
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE),
-            2,
+        let action = pane
+            .route_key_browser_priority(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), 2);
+        assert!(
+            action.is_some(),
+            "'w' must be captured when browser is active"
         );
-        assert!(action.is_some(), "'w' must be captured when browser is active");
         assert_eq!(pane.browser_filter_text(), "w");
         assert_ne!(action, Some(MaestroClawAction::StartSetup));
     }
@@ -2872,22 +2841,15 @@ mod browser_priority_routing_tests {
     #[test]
     fn test_browser_active_enter_selects_via_priority_gate() {
         let mut pane = MaestroClawPane::default();
-        pane.load_session_entries(vec![
-            make_entry("s1", "Alpha"),
-            make_entry("s2", "Beta"),
-        ]);
+        pane.load_session_entries(vec![make_entry("s1", "Alpha"), make_entry("s2", "Beta")]);
         pane.activate_session_browser();
 
         // Navigate down to second session
-        let _ = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-            2,
-        );
+        let _ =
+            pane.route_key_browser_priority(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), 2);
 
-        let action = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-            2,
-        );
+        let action =
+            pane.route_key_browser_priority(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 2);
         assert_eq!(
             action,
             Some(MaestroClawAction::SessionBrowserSelect),
@@ -2909,24 +2871,17 @@ mod browser_priority_routing_tests {
         ]);
         pane.activate_session_browser();
 
-        let down = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-            3,
-        );
+        let down =
+            pane.route_key_browser_priority(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), 3);
         assert_eq!(down, Some(MaestroClawAction::Navigate));
         assert_eq!(pane.selected_browser_session_id(), Some("s2".to_string()));
 
-        let down2 = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-            3,
-        );
+        let down2 =
+            pane.route_key_browser_priority(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), 3);
         assert_eq!(down2, Some(MaestroClawAction::Navigate));
         assert_eq!(pane.selected_browser_session_id(), Some("s3".to_string()));
 
-        let up = pane.route_key_browser_priority(
-            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-            3,
-        );
+        let up = pane.route_key_browser_priority(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), 3);
         assert_eq!(up, Some(MaestroClawAction::Navigate));
         assert_eq!(pane.selected_browser_session_id(), Some("s2".to_string()));
     }
@@ -3004,7 +2959,8 @@ mod app_normal_mode_dispatch_regression {
         assert_eq!(action, None, "Tab must fall through");
         assert!(pane.is_session_browser_active(), "browser must stay active");
         assert_eq!(
-            pane.browser_filter_text(), "",
+            pane.browser_filter_text(),
+            "",
             "Tab must not alter the filter"
         );
     }
@@ -3019,7 +2975,8 @@ mod app_normal_mode_dispatch_regression {
         assert_eq!(action, None, "BackTab must fall through");
         assert!(pane.is_session_browser_active(), "browser must stay active");
         assert_eq!(
-            pane.browser_filter_text(), "",
+            pane.browser_filter_text(),
+            "",
             "BackTab must not alter the filter"
         );
     }
@@ -3034,7 +2991,8 @@ mod app_normal_mode_dispatch_regression {
         assert_eq!(action, None, "'?' must fall through");
         assert!(pane.is_session_browser_active(), "browser must stay active");
         assert_eq!(
-            pane.browser_filter_text(), "",
+            pane.browser_filter_text(),
+            "",
             "'?' must not be added to the filter"
         );
     }

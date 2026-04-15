@@ -2,6 +2,7 @@
 //!
 //! Based on Ralph TUI's state machine and execution loop.
 
+use super::normalized_model::ConductorTree;
 use crate::maestro_paths::MaestroProject;
 use crate::omp::OmpWorkerStatus;
 use chrono::{DateTime, Utc};
@@ -10,7 +11,6 @@ use leindex_core::{
     orchestrate::model::{IterationLog, LoopMode, TaskDependency, TrackStatus},
 };
 use serde::{Deserialize, Serialize};
-use super::normalized_model::ConductorTree;
 
 /// Ralph: RalphStatus → Maestro: ConductorStatus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -134,6 +134,8 @@ pub struct ConductorState {
     pub track_runtime_statuses: std::collections::HashMap<String, ConductorStatus>,
     /// Recent iteration logs for the current track
     pub iteration_logs: Vec<IterationLog>,
+    /// Structured runtime log summaries for the log pane
+    pub runtime_logs: Vec<RuntimeLogEntry>,
     /// Memories associated with the current track
     pub track_memories: Vec<Memory>,
     /// Whether the OMP backend is available
@@ -184,6 +186,7 @@ impl Default for ConductorState {
             selected_project_index: 0,
             track_runtime_statuses: std::collections::HashMap::new(),
             iteration_logs: Vec::new(),
+            runtime_logs: Vec::new(),
             track_memories: Vec::new(),
             omp_available: false,
             pi_mono_available: false,
@@ -381,6 +384,25 @@ pub enum DependencyStatus {
     Completed,
     Blocked,
     Pending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeLogLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeLogEntry {
+    pub timestamp: DateTime<Utc>,
+    pub iteration: Option<u64>,
+    pub task_id: Option<String>,
+    pub summary: String,
+    pub details: Option<String>,
+    pub level: RuntimeLogLevel,
 }
 
 /// A flattened representation of the track/task tree for navigation

@@ -27,7 +27,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, Field  # type: ignore[import]
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger
+except ImportError:  # pragma: no cover - optional dependency in minimal test envs
+    logger = logging.getLogger(__name__)
 
 from .service import MaestroMemoryService
 from .search.zoekt_client import ZoektClient, ZoektConfig
@@ -699,38 +704,14 @@ npm run build
                 )
                 total_tracks = track_result.scalar() or 0
 
-                # Count total memories
-                memory_result = await session.execute(
-                    select(func.count()).select_from(text("memories")).where(text("is_active = 1"))
-                )
-                total_memories = memory_result.scalar() or 0
+                nexus_stats = {}
+                if service.nexus_client is not None:
+                    nexus_stats = await service.nexus_client.get_statistics()
 
-                # Count memories by command
-                command_result = await session.execute(
-                    text("""
-                        SELECT maestro_command, COUNT(*) as count
-                        FROM memories
-                        WHERE is_active = 1
-                        GROUP BY maestro_command
-                    """)
-                )
-                memories_by_command = {
-                    row[0]: row[1] for row in command_result.fetchall() if row[0]
-                }
-
-                # Count memories by project (using project names)
-                project_memories_result = await session.execute(
-                    text("""
-                        SELECT mp.project_name, COUNT(*) as count
-                        FROM memories m
-                        JOIN maestro_projects mp ON m.maestro_project_id = mp.id
-                        WHERE m.is_active = 1
-                        GROUP BY mp.project_name
-                    """)
-                )
-                memories_by_project = {
-                    row[0]: row[1] for row in project_memories_result.fetchall()
-                }
+                memory_stats = nexus_stats.get("statistics", {})
+                total_memories = int(memory_stats.get("total_memories", 0))
+                memories_by_command = memory_stats.get("memories_by_command", {})
+                memories_by_project = memory_stats.get("memories_by_project", {})
 
                 return StatsResponse(
                     success=True,
@@ -754,63 +735,45 @@ npm run build
         """
         List memories with optional filters.
 
-        CRITICAL-4 FIX: Replaced raw SQL with SQLAlchemy ORM to prevent SQL injection.
-        Uses parameterized queries through ORM's select() and filter_by() methods.
+        Uses parameterized text() queries — no direct Nexus ORM imports.
         """
         service: MaestroMemoryService = app.state.memory_service
 
         try:
-            from sqlalchemy import select, desc, text
-            from nexus.database.models import Memory
+            from .database.models import MaestroProject, MaestroTrack
+            from sqlalchemy import select
+
+            project_path = None
+            track_name = None
 
             async with service.db_manager.get_async_session() as session:
-                # Build query using SQLAlchemy ORM (safe from SQL injection)
-                stmt = select(Memory).filter_by(is_active=True)
-
-                # Add project filter if provided
                 if project_id is not None:
-                    # Use text() for Maestro columns added via ALTER TABLE
-                    # This is safe because project_id is validated by Query() type check
-                    stmt = stmt.filter(text("maestro_project_id = :project_id")).params(project_id=project_id)
+                    project = await session.scalar(select(MaestroProject).where(MaestroProject.id == project_id))
+                    if project is None:
+                        return {"success": True, "memories": [], "total": 0}
+                    project_path = project.project_path
 
-                # Add track filter if provided
                 if track_id is not None:
-                    stmt = stmt.filter(text("maestro_track_id = :track_id")).params(track_id=track_id)
+                    track = await session.scalar(select(MaestroTrack).where(MaestroTrack.id == track_id))
+                    if track is None:
+                        return {"success": True, "memories": [], "total": 0}
+                    track_name = track.track_id
 
-                # Add ordering and pagination
-                stmt = stmt.order_by(desc(Memory.created_at)).limit(limit).offset(offset)
+            if service.nexus_client is None:
+                raise HTTPException(status_code=503, detail="Nexus client not initialized")
 
-                result = await session.execute(stmt)
-                memories = result.scalars().all()
+            memories = await service.nexus_client.list_memories(
+                limit=limit,
+                offset=offset,
+                project_path=project_path,
+                track_id=track_name,
+            )
 
-                memory_list = []
-                for memory in memories:
-                    # Get metadata from the ORM object
-                    metadata = memory.extra_metadata if hasattr(memory, 'extra_metadata') else {}
-                    if isinstance(metadata, str):
-                        try:
-                            metadata = json.loads(metadata)
-                        except json.JSONDecodeError:
-                            metadata = {}
-
-                    # Get maestro_command from metadata
-                    command = metadata.get("maestro_command", "unknown")
-
-                    memory_list.append({
-                        "id": memory.id,
-                        "content": memory.content,
-                        "category": memory.category,
-                        "labels": memory.labels if memory.labels else [],
-                        "created_at": memory.created_at.isoformat() if memory.created_at else None,
-                        "command": command,
-                        "metadata": metadata
-                    })
-
-                return {
-                    "success": True,
-                    "memories": memory_list,
-                    "total": len(memory_list)
-                }
+            return {
+                "success": True,
+                "memories": [sanitize_dict_for_json(memory) for memory in memories],
+                "total": len(memories)
+            }
         except Exception as e:
             logger.error(f"Error listing memories: {e}")
             raise HTTPException(status_code=500, detail="Failed to list memories")

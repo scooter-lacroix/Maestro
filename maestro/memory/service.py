@@ -3,22 +3,25 @@ Maestro Memory Service
 
 Primary interface for all memory operations in Maestro.
 
-This service wraps Nexus MemoryManager and provides Maestro-specific
-functionality for project and track-based memory isolation.
+This service is now a thin compatibility facade over the standalone
+Nexus-backed bridge plus a local async DB session manager for Maestro-owned
+tables and transitional dashboard queries.
 """
 
 import json
 from datetime import datetime, UTC
 from typing import Optional, List, Dict, Any
 from pathlib import Path
-from loguru import logger
-import sys
-import os
 import asyncio
 import re
 import uuid
 from collections import deque  # IMPORTANT-6: Use deque for O(1) rate limiting operations
-from types import ModuleType
+import logging
+
+try:
+    from loguru import logger
+except ImportError:  # pragma: no cover - optional dependency in minimal test envs
+    logger = logging.getLogger(__name__)
 
 # IMPORTANT-4: Import constants
 from maestro.memory.constants import (
@@ -47,179 +50,10 @@ from maestro.memory.constants import (
     MAX_STRING_LENGTH,
 )
 
-# =============================================================================
-# CRITICAL-2 FIX: Proper Nexus Path Discovery
-# =============================================================================
-
-
-def _discover_nexus_path() -> str:
-    """
-    Discover Nexus Memory System path using multiple robust fallback strategies.
-
-    Priority order:
-    1. Environment variable NEXUS_MEMORY_PATH
-    2. Parent directory relative to maestro package (work_resources sibling)
-    3. Common development directories (~/work_resources, ~/dev, ~/projects)
-    4. System-wide installation under /opt
-    5. Recursive search in home directory (depth-limited to 3 levels)
-    6. Raise error if not found
-
-    This function is designed to work automatically on any system without
-    manual environment variable configuration. It searches intelligently
-    based on common project structures and locations.
-
-    Returns:
-        Absolute path to Nexus Memory System
-
-    Raises:
-        ImportError: If Nexus cannot be found in any location
-    """
-    # Strategy 1: Environment variable (highest priority - explicit override)
-    env_path = os.environ.get('NEXUS_MEMORY_PATH')
-    if env_path and Path(env_path).exists():
-        logger.debug(f"Using Nexus from environment variable: {env_path}")
-        return str(env_path)
-
-    # Strategy 2: Parent directory relative to maestro package
-    # Handles structure: .../work_resources/nexus-memory-system and .../Prod/maestro
-    # This works for both: ~/Prod/maestro and ~/projects/maestro layouts
-    try:
-        maestro_root = Path(__file__).parent.parent.parent  # maestro package root
-        # Try work_resources sibling (common pattern)
-        work_resources = maestro_root.parent / "work_resources" / "nexus-memory-system"
-        if work_resources.exists():
-            logger.debug(f"Using Nexus from work_resources sibling: {work_resources}")
-            return str(work_resources)
-
-        # Try sibling directories directly
-        sibling_nexus = maestro_root.parent / "nexus-memory-system"
-        if sibling_nexus.exists():
-            logger.debug(f"Using Nexus from sibling directory: {sibling_nexus}")
-            return str(sibling_nexus)
-    except Exception as e:
-        logger.debug(f"Could not discover Nexus via parent directory: {e}")
-
-    # Strategy 3: Common development directories in user's home
-    # This covers various common development setups
-    common_locations = [
-        Path.home() / "work_resources" / "nexus-memory-system",
-        Path.home() / "dev" / "nexus-memory-system",
-        Path.home() / "development" / "nexus-memory-system",
-        Path.home() / "projects" / "nexus-memory-system",
-        Path.home() / "code" / "nexus-memory-system",
-        Path.home() / "src" / "nexus-memory-system",
-        Path.home() / "Prod" / "work_resources" / "nexus-memory-system",
-        Path.home() / "Prod" / "nexus-memory-system",
-    ]
-
-    for location in common_locations:
-        if location.exists():
-            logger.debug(f"Using Nexus from common location: {location}")
-            return str(location)
-
-    # Strategy 4: System-wide installation paths
-    # Covers both Unix/Linux and common system installation locations
-    system_paths = [
-        Path("/opt/nexus-memory-system"),
-        Path("/usr/local/nexus-memory-system"),
-        Path("/usr/local/lib/nexus-memory-system"),
-    ]
-
-    for system_path in system_paths:
-        if system_path.exists():
-            logger.debug(f"Using Nexus from system path: {system_path}")
-            return str(system_path)
-
-    # Strategy 5: Depth-limited recursive search in home directory
-    # This is a fallback to find nexus in non-standard locations
-    # Limited to depth 3 to avoid excessive filesystem traversal
-    try:
-        logger.debug("Performing depth-limited recursive search for Nexus...")
-        max_depth = 3
-        home_dir = Path.home()
-
-        # Use os.walk for controlled depth iteration
-        for root, dirs, files in os.walk(home_dir):
-            # Calculate current depth
-            current_depth = len(Path(root).relative_to(home_dir).parts)
-
-            # Skip if we've exceeded max depth
-            if current_depth > max_depth:
-                # Don't descend further
-                dirs[:] = []
-                continue
-
-            # Skip hidden directories and common system dirs
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in {
-                'node_modules', 'venv', '.venv', 'env', '__pycache__',
-                'site-packages', '.git', '.cache', 'Applications', 'Library'
-            }]
-
-            # Check if nexus-memory-system exists in current directory
-            if 'nexus-memory-system' in dirs:
-                nexus_path = Path(root) / 'nexus-memory-system'
-                # Verify it has the expected structure
-                if (nexus_path / 'nexus' / 'database' / '__init__.py').exists():
-                    logger.debug(f"Using Nexus from recursive search: {nexus_path}")
-                    return str(nexus_path)
-                    # Don't continue searching after finding one
-                    break
-    except Exception as e:
-        logger.debug(f"Recursive search failed: {e}")
-
-    # All strategies failed - provide helpful error message
-    searched_locations = [
-        "1. Environment variable NEXUS_MEMORY_PATH",
-        "2. Parent directory work_resources/nexus-memory-system",
-        "3. Common locations: ~/work_resources, ~/dev, ~/projects, ~/Prod",
-        "4. System paths: /opt, /usr/local",
-        f"5. Recursive search in {Path.home()} (depth=3)",
-    ]
-
-    error_msg = (
-        "Nexus Memory System not found. Tried the following locations:\n" +
-        "\n".join(f"  {loc}" for loc in searched_locations) +
-        f"\n\nTo fix this, either:\n" +
-        f"  1. Set NEXUS_MEMORY_PATH environment variable to Nexus directory\n" +
-        f"  2. Clone Nexus to one of the searched locations above\n" +
-        f"     git clone https://github.com/anthropics/nexus-memory-system.git\n" +
-        f"  3. Install Nexus system-wide to /opt/nexus-memory-system\n"
-    )
-    logger.error(error_msg)
-    raise ImportError(error_msg)
-
-
-NEXUS_PATH: str | None
-
-# Discover and add Nexus to path
-try:
-    NEXUS_PATH = _discover_nexus_path()
-    if NEXUS_PATH not in sys.path:
-        sys.path.insert(0, NEXUS_PATH)
-        logger.info(f"Nexus Memory System discovered at: {NEXUS_PATH}")
-except ImportError as e:
-    logger.warning(f"Nexus path discovery failed: {e}")
-    # Will fail when trying to import Nexus modules
-    NEXUS_PATH = None
-
-# Import only specific Nexus modules directly to avoid triggering server imports
-import importlib.util
-
-def import_nexus_module(module_name: str, file_path: str) -> ModuleType:
-    """Import a module directly from file path to avoid __init__.py side effects"""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Failed to import module spec for {module_name} from {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-# Import necessary Nexus components
-from sqlalchemy.ext.asyncio import AsyncSession
+# Non-Nexus imports — safe at module level
 from sqlalchemy import select, and_, create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
 
+from maestro.memory.database.async_db import AsyncDatabaseManager
 from maestro.memory.database.models import MaestroProject, MaestroTrack
 from maestro.memory.utils.sanitizer import MemorySanitizer
 from maestro.memory.exceptions import (
@@ -231,45 +65,24 @@ from maestro.memory.exceptions import (
     MaestroRetrievalError
 )
 
-# Import Nexus modules using direct imports to avoid MCP server
-_nexus_managers: Any = None
-_nexus_models: Any = None
-_nexus_config: Any = None
 
+def _load_nexus_bridge() -> tuple[Any, Any, Any]:
+    """Resolve the active standalone Nexus bridge lazily."""
+    try:
+        from maestro.memory.nexus_client import (
+            get_database_manager,
+            get_memory_manager,
+            get_nexus_base,
+        )
 
-def _get_nexus_modules() -> tuple[Any, Any, Any]:
-    """Lazy load Nexus modules to avoid import issues"""
-    global _nexus_managers, _nexus_models, _nexus_config
-    if _nexus_managers is None:
-        import sys
+        return get_database_manager(), get_memory_manager(), get_nexus_base()
+    except ImportError:
+        try:
+            from maestro.memory.database.async_db import AsyncDatabaseManager as DeferredAsyncDatabaseManager
 
-        # Use the discovered Nexus path instead of hardcoded fallback
-        if NEXUS_PATH is None:
-            raise ImportError("Nexus Memory System path not discovered. Set NEXUS_MEMORY_PATH environment variable.")
-
-        if 'nexus' not in sys.modules:
-            import types
-            nexus_module = types.ModuleType('nexus')
-            sys.modules['nexus'] = nexus_module
-
-            from nexus.database import managers as db_managers  # type: ignore[import-not-found]
-            from nexus.database import models as db_models  # type: ignore[import-not-found]
-            from nexus.config import settings as db_settings  # type: ignore[import-not-found]
-
-            _nexus_managers = db_managers
-            _nexus_models = db_models
-            _nexus_config = db_settings
-        else:
-            from nexus.database import managers as db_managers  # type: ignore[import-not-found]
-            from nexus.database import models as db_models  # type: ignore[import-not-found]
-            from nexus.config import settings as db_settings  # type: ignore[import-not-found]
-
-            _nexus_managers = db_managers
-            _nexus_models = db_models
-            _nexus_config = db_settings
-
-    return _nexus_managers, _nexus_models, _nexus_config
-
+            return DeferredAsyncDatabaseManager, None, None
+        except ImportError as exc:
+            raise ImportError("No Nexus backend available") from exc
 
 class MaestroMemoryService:
     """
@@ -300,17 +113,16 @@ class MaestroMemoryService:
         self.database_path: Path = database_path
         self.db_manager: Any = None
         self.memory_manager: Any = None
+        self.nexus_client: Any = None
         self._initialized: bool = False
+        self.DatabaseManager: Any = None
+        self.MemoryManager: Any = None
+        self.NexusBase: Any = None
+        self._bridge_loaded: bool = False
 
         # Issue 7: Track sync engine for cleanup on errors
         self._sync_engine: Any = None
         self._init_lock = asyncio.Lock()  # Issue 4: Add lock for initialization
-
-        # Lazy load Nexus modules
-        nexus_managers, nexus_models, nexus_config = _get_nexus_modules()
-        self.DatabaseManager = nexus_managers.DatabaseManager
-        self.MemoryManager = nexus_managers.MemoryManager
-        self.Memory = nexus_models.Memory
 
         # Issue 13: Database operation metrics for monitoring
         self._db_metrics = {
@@ -397,10 +209,8 @@ class MaestroMemoryService:
         """
         Create database tables synchronously to avoid async lock issues.
 
-        Uses SQLAlchemy's metadata.create_all() for proper table creation.
+        Creates only Maestro-owned tables and compatibility columns.
         """
-        from maestro.memory.database.models import Base as MaestroBase
-        from nexus.database.models import Base as NexusBase  # type: ignore[import-not-found]
         from sqlalchemy import create_engine
         from sqlalchemy import text
 
@@ -438,31 +248,18 @@ class MaestroMemoryService:
             conn.execute(text("PRAGMA temp_store=MEMORY"))  # Use memory for temp tables
             conn.execute(text("PRAGMA mmap_size=268435456"))  # 256MB mmap
 
-            # Create all Nexus tables using SQLAlchemy metadata
-            NexusBase.metadata.create_all(conn, checkfirst=True)
+            MaestroProject.__table__.create(conn, checkfirst=True)
+            MaestroTrack.__table__.create(conn, checkfirst=True)
 
-            # Create all Maestro tables
-            MaestroBase.metadata.create_all(conn, checkfirst=True)
-
-            # Create default namespace for maestro
-            from maestro.memory.database.models import MaestroProject
-            
-            # Check if agent_type column exists before using it
-            result = conn.execute(text("PRAGMA table_info(agent_namespaces)"))
-            columns = [row[1] for row in result.fetchall()]
-            
-            if 'agent_type' in columns:
-                conn.execute(text("""
-                    INSERT OR IGNORE INTO agent_namespaces (name, description, agent_type)
-                    VALUES ('maestro', 'Maestro unified development framework', 'maestro')
-                """))
-            else:
-                # Fallback for older databases without agent_type column
-                conn.execute(text("""
-                    INSERT OR IGNORE INTO agent_namespaces (name, description)
-                    VALUES ('maestro', 'Maestro unified development framework')
-                """))
-            conn.commit()
+            table_names = {
+                row[0]
+                for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+            }
+            if "memories" not in table_names:
+                raise MaestroInitializationError(
+                    "Standalone Nexus storage is not initialized for this database. "
+                    "Run `nexus init` before using Maestro memory."
+                )
 
             # Check if we need to add Maestro columns to memories table
             result = conn.execute(text("PRAGMA table_info(memories)"))
@@ -531,11 +328,13 @@ class MaestroMemoryService:
             try:
                 # Step 1: Create tables synchronously (DDL only)
                 logger.debug(f"Initializing MaestroMemoryService with database: {self.database_path}")
+                self.DatabaseManager, self.MemoryManager, self.NexusBase = _load_nexus_bridge()
+                self._bridge_loaded = True
                 self._create_tables_sync()
 
                 # Step 2: Initialize async database manager
-                database_url = f"sqlite:///{self.database_path}"
-                self.db_manager = self.DatabaseManager(database_url)
+                database_manager_cls = self.DatabaseManager or AsyncDatabaseManager
+                self.db_manager = database_manager_cls(database_path=self.database_path)
 
                 # Issue 3: Verify WAL files are released with proper lock verification
                 # Instead of magic sleep, use actual file locking to detect database availability
@@ -604,8 +403,15 @@ class MaestroMemoryService:
                     await session.execute(text("PRAGMA mmap_size=268435456"))
                     await session.commit()
 
-                # Step 4: Initialize memory manager
-                self.memory_manager = self.MemoryManager(self.db_manager)
+                # Step 4: Initialize standalone Nexus bridge and compatibility manager.
+                from maestro.memory.nexus_client import StandaloneNexusClient, CompatibilityMemoryManager
+
+                self.nexus_client = StandaloneNexusClient(
+                    database_path=self.database_path,
+                    async_db=self.db_manager,
+                )
+                memory_manager_cls = self.MemoryManager or CompatibilityMemoryManager
+                self.memory_manager = memory_manager_cls(self.db_manager)
 
                 self._initialized = True
                 logger.info(f"MaestroMemoryService initialized successfully: {self.database_path}")
@@ -638,6 +444,7 @@ class MaestroMemoryService:
         if self.db_manager:
             await self.db_manager.close()
             self.db_manager = None
+        self.nexus_client = None
         self.memory_manager = None
         self._initialized = False
         logger.debug("MaestroMemoryService closed")
@@ -908,74 +715,25 @@ class MaestroMemoryService:
                 await session.commit()
                 track_id_value = track.id
 
-        # Step 3: Sanitize context and build content
-        sanitized_context = self._sanitize_context(context)
+        if self.nexus_client is None:
+            raise MaestroInitializationError("Standalone Nexus client not initialized")
 
-        content = f"""Command: {command}
-Project: {project_path}
-Track: {track_id if track_id else 'N/A'}
-
-Context:
-{sanitized_context}
-"""
-
-        # Step 4: Store memory with Nexus (this opens its own session)
-        result = await self.memory_manager.store_memory(
-            content=content,
-            agent_type="maestro",
-            category="context",
-            labels=[command, "maestro"],
-            metadata={
-                "maestro_project_id": project_id,
-                "maestro_track_id": track_id_value,
-                "maestro_command": command,
-                "maestro_command_context": context,  # Store raw context in metadata
-                "project_path": project_path,
-                "track_id": track_id,
-            }
+        # Step 3: Store through the standalone Nexus bridge.
+        result = await self.nexus_client.store_command_context(
+            command=command,
+            project_path=project_path,
+            context=context,
+            project_id=project_id,
+            track_row_id=track_id_value,
+            track_id=track_id,
+            session_id=str(context.get("session_id")) if context.get("session_id") else None,
+            agent="maestro",
         )
 
         if not result.get("success"):
             raise RuntimeError(f"Failed to store memory: {result.get('error')}")
 
-        memory_id = result["memory_id"]
-
-        # Step 5: Update the memory record with Maestro columns (separate transaction)
-        validated_memory_id = self._validate_memory_id(memory_id)
-
-        # Issue 1: Use SQLAlchemy text() with parameterized queries for columns added via ALTER TABLE
-        # Issue 4: Add transaction rollback handling
-        from sqlalchemy import text
-        async with self.db_manager.get_async_session() as session:
-            try:
-                # Use text() for columns that may not be in the model definition
-                # Parameterized query prevents SQL injection
-                stmt = text("""
-                    UPDATE memories
-                    SET maestro_project_id = :project_id,
-                        maestro_track_id = :track_id,
-                        maestro_command = :command,
-                        maestro_command_context = :context_json
-                    WHERE id = :memory_id
-                """)
-                await session.execute(stmt, {
-                    "project_id": project_id,
-                    "track_id": track_id_value,
-                    "command": command,
-                    "context_json": json.dumps(context),
-                    "memory_id": validated_memory_id
-                })
-                await session.commit()
-            except Exception as update_error:
-                await session.rollback()
-                self._log_structured(
-                    "error",
-                    "Failed to update memory with Maestro columns",
-                    request_id=request_id,
-                    memory_id=memory_id,
-                    error=str(update_error)
-                )
-                raise MaestroDatabaseError(f"Failed to update memory: {update_error}")
+        memory_id = self._validate_memory_id(result["memory_id"])
 
         self._log_structured(
             "info",
@@ -1015,57 +773,11 @@ Context:
             raise ValueError("Limit must be a positive integer")
 
         try:
-            async with self.db_manager.get_async_session() as session:
-                from sqlalchemy import desc, text
-
-                # Get project first
-                project_stmt = select(MaestroProject).filter_by(project_path=project_path)
-                result = await session.execute(project_stmt)
-                project = result.scalars().first()
-
-                if not project:
-                    return []
-
-                # Issue 1: Use text() with parameterized query for Maestro columns
-                # These columns are added via ALTER TABLE and may not be in the model
-                # Note: column name is 'metadata' (mapped to 'extra_metadata' in Python)
-                memories_stmt = text("""
-                    SELECT id, content, created_at, category, labels, metadata,
-                           maestro_command, maestro_command_context
-                    FROM memories
-                    WHERE maestro_project_id = :project_id
-                      AND is_active = 1
-                    ORDER BY created_at DESC
-                    LIMIT :limit
-                """)
-                result = await session.execute(memories_stmt, {
-                    "project_id": project.id,
-                    "limit": limit
-                })
-                memories = result.fetchall()
-
-                # Format results - convert rows to dicts
-                results = []
-                for memory in memories:
-                    # memory is a Row object
-                    metadata = json.loads(memory.metadata) if memory.metadata else {}
-                    labels = json.loads(memory.labels) if memory.labels else []
-                    command_context = json.loads(memory.maestro_command_context) if memory.maestro_command_context else {}
-
-                    results.append({
-                        "id": memory.id,
-                        "command": memory.maestro_command or "unknown",
-                        "project_path": project_path,
-                        "context": command_context,
-                        "content": memory.content,
-                        "created_at": memory.created_at,
-                        "category": memory.category,
-                        "labels": labels,
-                    })
-
-                logger.info(f"Retrieved {len(results)} memories for project {project_path}")
-
-                return results
+            if self.nexus_client is None:
+                raise MaestroInitializationError("Standalone Nexus client not initialized")
+            results = await self.nexus_client.retrieve_project_context(project_path=project_path, limit=limit)
+            logger.info(f"Retrieved {len(results)} memories for project {project_path}")
+            return results
 
         except Exception as e:
             # Issue 12: Sanitize error message for user
@@ -1099,60 +811,50 @@ Context:
             raise ValueError("Limit must be a positive integer")
 
         try:
-            async with self.db_manager.get_async_session() as session:
-                from sqlalchemy import desc, text
-
-                # Get track first
-                track_stmt = select(MaestroTrack).filter_by(track_id=track_id)
-                result = await session.execute(track_stmt)
-                track = result.scalars().first()
-
-                if not track:
-                    return []
-
-                # Issue 1: Use text() with parameterized query for Maestro columns
-                # Note: column name is 'metadata' (mapped to 'extra_metadata' in Python)
-                memories_stmt = text("""
-                    SELECT id, content, created_at, category, labels, metadata,
-                           maestro_command, maestro_command_context
-                    FROM memories
-                    WHERE maestro_track_id = :track_id
-                      AND is_active = 1
-                    ORDER BY created_at DESC
-                    LIMIT :limit
-                """)
-                result = await session.execute(memories_stmt, {
-                    "track_id": track.id,
-                    "limit": limit
-                })
-                memories = result.fetchall()
-
-                # Format results
-                results = []
-                for memory in memories:
-                    metadata = json.loads(memory.metadata) if memory.metadata else {}
-                    labels = json.loads(memory.labels) if memory.labels else []
-                    command_context = json.loads(memory.maestro_command_context) if memory.maestro_command_context else {}
-
-                    results.append({
-                        "id": memory.id,
-                        "command": memory.maestro_command or "unknown",
-                        "track_id": track_id,
-                        "context": command_context,
-                        "content": memory.content,
-                        "created_at": memory.created_at,
-                        "category": memory.category,
-                        "labels": labels,
-                    })
-
-                logger.info(f"Retrieved {len(results)} memories for track {track_id}")
-
-                return results
+            if self.nexus_client is None:
+                raise MaestroInitializationError("Standalone Nexus client not initialized")
+            results = await self.nexus_client.retrieve_track_context(track_id=track_id, limit=limit)
+            logger.info(f"Retrieved {len(results)} memories for track {track_id}")
+            return results
 
         except Exception as e:
             # Issue 12: Sanitize error message for user
             sanitized_msg = self._sanitize_error_message(e, include_details=True)
             raise MaestroRetrievalError(f"Failed to retrieve track context: {sanitized_msg}")
+
+    async def retrieve_session_context(
+        self,
+        session_id: str,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve all context captured for a specific session.
+
+        Args:
+            session_id: Session identifier
+            limit: Maximum number of memories to retrieve
+
+        Returns:
+            List of memory dictionaries ordered by recency
+        """
+        await self._ensure_initialized()
+
+        if not session_id or not isinstance(session_id, str):
+            raise ValueError("Session ID must be a non-empty string")
+
+        if not isinstance(limit, int) or limit <= 0:
+            raise ValueError("Limit must be a positive integer")
+
+        try:
+            if self.nexus_client is None:
+                raise MaestroInitializationError("Standalone Nexus client not initialized")
+            results = await self.nexus_client.retrieve_session_context(session_id=session_id, limit=limit)
+            logger.info(f"Retrieved {len(results)} memories for session {session_id}")
+            return results
+
+        except Exception as e:
+            sanitized_msg = self._sanitize_error_message(e, include_details=True)
+            raise MaestroRetrievalError(f"Failed to retrieve session context: {sanitized_msg}")
 
     async def search_similar_commands(
         self,
@@ -1183,38 +885,22 @@ Context:
             raise ValueError("Limit must be a positive integer")
 
         try:
-            # Build search query
-            search_query = f"Command: {command}"
-
-            if project_path:
-                search_query += f" Project: {project_path}"
-
-            # Search memories
-            result = await self.memory_manager.search_memories(
-                query=search_query,
-                agent_type="maestro",
+            if self.nexus_client is None:
+                raise MaestroInitializationError("Standalone Nexus client not initialized")
+            result = await self.nexus_client.search_similar_commands(
+                query=command,
+                agent="maestro",
+                project_path=project_path,
                 limit=limit,
-                category="context"
+                include_raw=True,
             )
 
-            if not result.get("success"):
+            if not result.get("results"):
                 logger.warning(f"Memory search failed: {result.get('error')}")
                 return []
 
-            # Format results
-            results = []
-            for memory in result.get("results", []):
-                results.append({
-                    "id": memory["id"],
-                    "content": memory["content"],
-                    "command": memory.get("metadata", {}).get("maestro_command", "unknown"),
-                    "context": memory.get("metadata", {}).get("maestro_command_context", {}),
-                    "similarity_score": memory.get("similarity_score"),
-                    "created_at": memory["created_at"],
-                })
-
+            results = list(result.get("results", []))
             logger.info(f"Found {len(results)} similar commands for '{command}'")
-
             return results
 
         except Exception as e:
@@ -1307,16 +993,18 @@ Context:
             # Clean up special characters from keyword
             search_query = keywords[0].strip('/.:,;') if keywords else context
 
-            # Search for relevant memories using the query
-            # Use Nexus's text-based search capabilities
-            search_result = await self.memory_manager.search_memories(
+            # Search for relevant memories using the Nexus-backed text search.
+            if self.nexus_client is None:
+                raise MaestroInitializationError("Standalone Nexus client not initialized")
+            search_result = await self.nexus_client.search_similar_commands(
                 query=search_query,
-                agent_type=agent_type,
-                limit=limit
+                agent=agent_type,
+                limit=limit,
+                include_raw=True,
             )
 
             # Check if search was successful and has results
-            if not search_result.get("success"):
+            if not search_result.get("results"):
                 logger.debug(f"Memory search failed: {search_result.get('error')}")
                 await self._record_db_metric("enhance_context_search_failed")
                 return context

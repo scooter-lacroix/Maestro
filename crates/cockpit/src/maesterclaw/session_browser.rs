@@ -117,7 +117,10 @@ impl SessionBrowser {
     /// Moves the cursor down in the filtered list.
     pub fn move_down(&mut self) {
         if !self.filtered_indices.is_empty() {
-            self.cursor = self.cursor.saturating_add(1).min(self.filtered_indices.len() - 1);
+            self.cursor = self
+                .cursor
+                .saturating_add(1)
+                .min(self.filtered_indices.len() - 1);
             // Adjust scroll_offset if cursor moved below visible area
             // (This will be handled in render based on available height)
         }
@@ -191,19 +194,17 @@ impl SessionBrowser {
             // Show filter when active
             vec![
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled(
-                        format!("  Filter: {}█", self.filter_text),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]),
+                Line::from(vec![Span::styled(
+                    format!("  Filter: {}█", self.filter_text),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )]),
             ]
         };
 
-        let paragraph = Paragraph::new(header_text)
-            .block(Block::default().borders(Borders::BOTTOM));
+        let paragraph =
+            Paragraph::new(header_text).block(Block::default().borders(Borders::BOTTOM));
         frame.render_widget(paragraph, area);
     }
 
@@ -214,9 +215,10 @@ impl SessionBrowser {
         }
 
         if self.filtered_indices.is_empty() {
-            let no_sessions = Paragraph::new(vec![Line::from(vec![
-                Span::styled("No sessions match the filter.", Style::default().fg(Color::DarkGray)),
-            ])]);
+            let no_sessions = Paragraph::new(vec![Line::from(vec![Span::styled(
+                "No sessions match the filter.",
+                Style::default().fg(Color::DarkGray),
+            )])]);
             frame.render_widget(no_sessions, area);
             return;
         }
@@ -233,7 +235,8 @@ impl SessionBrowser {
             scroll_offset = self.cursor;
         }
 
-        let visible_indices: Vec<_> = self.filtered_indices
+        let visible_indices: Vec<_> = self
+            .filtered_indices
             .iter()
             .skip(scroll_offset)
             .take(max_visible)
@@ -263,7 +266,9 @@ impl SessionBrowser {
                 let id_display = truncate(&session.id, 18);
 
                 let style = if is_selected {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -289,23 +294,17 @@ impl SessionBrowser {
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let total = self.sessions.len();
         let filtered = self.filtered_indices.len();
-        let pos = if filtered > 0 {
-            self.cursor + 1
-        } else {
-            0
-        };
+        let pos = if filtered > 0 { self.cursor + 1 } else { 0 };
         let footer_text = if filtered < total {
-            format!(
-                "  {}/{} sessions (filtered from {})",
-                pos, filtered, total
-            )
+            format!("  {}/{} sessions (filtered from {})", pos, filtered, total)
         } else {
             format!("  {}/{} sessions", pos, filtered)
         };
 
-        let paragraph = Paragraph::new(Line::from(vec![
-            Span::styled(footer_text, Style::default().fg(Color::DarkGray)),
-        ]));
+        let paragraph = Paragraph::new(Line::from(vec![Span::styled(
+            footer_text,
+            Style::default().fg(Color::DarkGray),
+        )]));
 
         frame.render_widget(paragraph, area);
     }
@@ -565,8 +564,7 @@ mod tests {
         // Footer is the last line (y=9 for height 10)
         let footer_text = buffer_line(terminal.backend(), 9);
         assert_eq!(
-            footer_text,
-            "  0/0 sessions (filtered from 3)",
+            footer_text, "  0/0 sessions (filtered from 3)",
             "footer should show zero-match counts"
         );
     }
@@ -590,8 +588,7 @@ mod tests {
 
         let footer_text = buffer_line(terminal.backend(), 9);
         assert_eq!(
-            footer_text,
-            "  1/3 sessions",
+            footer_text, "  1/3 sessions",
             "footer should show unfiltered counts"
         );
     }
@@ -631,8 +628,7 @@ mod tests {
 
         let footer_text = buffer_line(terminal.backend(), 9);
         assert_eq!(
-            footer_text,
-            "  1/1 sessions (filtered from 3)",
+            footer_text, "  1/1 sessions (filtered from 3)",
             "footer should show filtered match counts"
         );
     }

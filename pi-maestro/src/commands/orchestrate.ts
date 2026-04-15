@@ -18,10 +18,11 @@ import {
   applyCriticalThinkForImplementation,
   applyCriticalThinkAfterAction,
 } from "../lib/criticalThink";
-import { isTrackLensEnabled } from "../tracklens/extension/command";
+
 import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
+import { isTrackLensEnabled } from "../tracklens/extension/command";
 
 /**
  * Register /maestro:orchestrate command
@@ -78,11 +79,9 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
         if (result === "completed") {
           completedCount++;
 
-          // TrackLens walkthrough for completed sub-track (if enabled)
-          if (isTrackLensEnabled()) {
-            ctx.ui.notify(`Requesting TrackLens walkthrough for ${subtrackId}...`, "info");
-            // The implement workflow handles walkthrough; this is just a notification
-          }
+          // TrackLens walkthrough for completed sub-track
+          ctx.ui.notify(`Requesting TrackLens walkthrough for ${subtrackId}...`, "info");
+          // The implement workflow handles walkthrough; this is just a notification
         } else if (result === "failed") {
           failedCount++;
         }
@@ -91,6 +90,7 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
       // Update master track status
       if (failedCount === 0) {
         if (isTrackLensEnabled()) {
+          // TrackLens walkthrough review for master track
           ctx.ui.notify(
             `Launching TrackLens walkthrough for completed master track ${trackId}...`,
             "info"
@@ -110,7 +110,15 @@ export function registerOrchestrate(pi: ExtensionAPI, commandName: string) {
             }
           );
 
-          if (walkthroughResult.status !== 0) {
+          if (walkthroughResult.error) {
+            ctx.ui.notify(
+              `TrackLens walkthrough failed to launch: ${walkthroughResult.error.message}`,
+              "error"
+            );
+            return;
+          }
+
+          if (walkthroughResult.status === null || walkthroughResult.status !== 0) {
             ctx.ui.notify(
               `TrackLens walkthrough did not approve ${trackId}. Leaving track in progress.`,
               "warning"

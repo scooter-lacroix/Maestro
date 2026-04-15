@@ -379,10 +379,7 @@ pub fn render_dashboard(frame: &mut Frame, area: Rect, app: &mut App) {
                     format!(" [{}] ", s.status.to_string()),
                     Style::default().fg(status_color),
                 ),
-                Span::styled(
-                    managed_badge,
-                    Style::default().fg(theme.warning),
-                ),
+                Span::styled(managed_badge, Style::default().fg(theme.warning)),
                 Span::styled(
                     format!(" {} active", s.client_count),
                     Style::default().fg(Color::Gray),

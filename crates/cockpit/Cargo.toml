@@ -52,6 +52,7 @@ anyhow = "1.0"
 
 # Logging
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -65,6 +66,7 @@ which = "6.0"
 # Blocked by: upstream cli-clipboard dependency on wl-clipboard-rs ^0.7.0
 cli-clipboard = "0.4"
 dirs = "5.0"
+portable-pty = "0.8"
 
 [dev-dependencies]
 serial_test = "3"

@@ -1,3 +1,9 @@
+---
+name: remember
+description: "Store a learning, pattern, or decision in the memory system for future recall"
+user-invocable: true
+---
+
 # Remember - Store Learning in Memory
 
 Store a learning, pattern, or decision in the memory system for future recall.
@@ -41,16 +47,27 @@ Or with explicit type:
 
 ## Execution
 
-When this skill is invoked, run:
+When this skill is invoked:
 
-```bash
-cd $CLAUDE_PROJECT_DIR/opc && PYTHONPATH=. uv run python scripts/store_learning.py \
-  --session-id "manual-$(date +%Y%m%d-%H%M)" \
-  --type <TYPE or WORKING_SOLUTION> \
-  --content "<ARGS>" \
-  --context "manual entry via /remember" \
-  --confidence medium
-```
+1. Determine the memory stack root:
+   ```bash
+   MEMORY_DIR="${MAESTRO_MEMORY_DIR:-$CLAUDE_PROJECT_DIR/opc}"
+   ```
+
+2. Check that the store script exists before running:
+   ```bash
+   if [ ! -f "$MEMORY_DIR/scripts/store_learning.py" ]; then
+     echo "⚠️  Remember unavailable: memory stack not found at $MEMORY_DIR"
+     echo "   Set MAESTRO_MEMORY_DIR to your OPC installation path."
+     exit 0
+   fi
+   cd "$MEMORY_DIR" && PYTHONPATH=. uv run python scripts/store_learning.py \
+     --session-id "manual-$(date +%Y%m%d-%H%M)" \
+     --type <TYPE or WORKING_SOLUTION> \
+     --content "<ARGS>" \
+     --context "manual entry via /remember" \
+     --confidence medium
+   ```
 
 ## Auto-Type Detection
 

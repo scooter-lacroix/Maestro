@@ -15,12 +15,148 @@ use ratatui::{
 use crate::app::App;
 use crate::maesterclaw::clamp_flash;
 use crate::state::InputMode;
+use std::collections::BTreeMap;
 
 /// Maximum content preview length in collapsed view
 const PREVIEW_LEN: usize = 60;
 
 /// Character width for detail panel
 const DETAIL_PANEL_WIDTH_PERCENT: u16 = 45;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MemoryRelationKind {
+    NexusLink,
+    SessionLink,
+    TrackLink,
+    ProjectLink,
+    AgentLink,
+    TagLink,
+    CategoryLink,
+    Other,
+}
+
+fn relation_kind_label(kind: MemoryRelationKind) -> &'static str {
+    match kind {
+        MemoryRelationKind::NexusLink => "nexus link",
+        MemoryRelationKind::SessionLink => "session link",
+        MemoryRelationKind::TrackLink => "track link",
+        MemoryRelationKind::ProjectLink => "project link",
+        MemoryRelationKind::AgentLink => "agent link",
+        MemoryRelationKind::TagLink => "tag link",
+        MemoryRelationKind::CategoryLink => "category link",
+        MemoryRelationKind::Other => "other",
+    }
+}
+
+fn relation_style(kind: MemoryRelationKind) -> (Color, &'static str) {
+    match kind {
+        MemoryRelationKind::NexusLink => (Color::Magenta, "N"),
+        MemoryRelationKind::SessionLink => (Color::Cyan, "S"),
+        MemoryRelationKind::TrackLink => (Color::Blue, "T"),
+        MemoryRelationKind::ProjectLink => (Color::Green, "P"),
+        MemoryRelationKind::AgentLink => (Color::Yellow, "A"),
+        MemoryRelationKind::TagLink => (Color::LightBlue, "#"),
+        MemoryRelationKind::CategoryLink => (Color::LightYellow, "C"),
+        MemoryRelationKind::Other => (Color::DarkGray, "."),
+    }
+}
+
+fn classify_relation(
+    selected: &crate::state::MemoryInfo,
+    memory: &crate::state::MemoryInfo,
+) -> MemoryRelationKind {
+    if selected.id == memory.id {
+        return MemoryRelationKind::NexusLink;
+    }
+
+    if selected.related_memory_ids.contains(&memory.id)
+        || memory.related_memory_ids.contains(&selected.id)
+    {
+        return MemoryRelationKind::NexusLink;
+    }
+
+    if selected.session_id.is_some() && selected.session_id == memory.session_id {
+        return MemoryRelationKind::SessionLink;
+    }
+
+    if selected.track_id.is_some() && selected.track_id == memory.track_id {
+        return MemoryRelationKind::TrackLink;
+    }
+
+    if selected.project_id.is_some() && selected.project_id == memory.project_id {
+        return MemoryRelationKind::ProjectLink;
+    }
+
+    if !selected.stored_by.trim().is_empty()
+        && selected.stored_by.eq_ignore_ascii_case(&memory.stored_by)
+        && !matches!(
+            selected.stored_by.to_ascii_lowercase().as_str(),
+            "unknown" | "nexus" | "maestro"
+        )
+    {
+        return MemoryRelationKind::AgentLink;
+    }
+
+    if selected
+        .tags
+        .iter()
+        .any(|tag| memory.tags.iter().any(|candidate| candidate == tag))
+    {
+        return MemoryRelationKind::TagLink;
+    }
+
+    if selected.category == memory.category {
+        return MemoryRelationKind::CategoryLink;
+    }
+
+    MemoryRelationKind::Other
+}
+
+fn relation_rank(kind: MemoryRelationKind) -> u8 {
+    match kind {
+        MemoryRelationKind::NexusLink => 100,
+        MemoryRelationKind::SessionLink => 90,
+        MemoryRelationKind::TrackLink => 80,
+        MemoryRelationKind::ProjectLink => 70,
+        MemoryRelationKind::AgentLink => 60,
+        MemoryRelationKind::TagLink => 40,
+        MemoryRelationKind::CategoryLink => 30,
+        MemoryRelationKind::Other => 10,
+    }
+}
+
+pub fn graph_navigation_targets(app: &App) -> Vec<usize> {
+    if app.memories.is_empty() {
+        return Vec::new();
+    }
+
+    let selected_idx = app
+        .memory_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.memories.len().saturating_sub(1));
+    let selected = &app.memories[selected_idx];
+    let mut ranked = Vec::new();
+
+    for (idx, memory) in app.memories.iter().enumerate() {
+        if idx == selected_idx {
+            continue;
+        }
+        let kind = classify_relation(selected, memory);
+        ranked.push((idx, relation_rank(kind), kind));
+    }
+
+    ranked.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| app.memories[a.0].category.cmp(&app.memories[b.0].category))
+            .then_with(|| app.memories[a.0].content.cmp(&app.memories[b.0].content))
+    });
+
+    let mut targets = vec![selected_idx];
+    targets.extend(ranked.into_iter().map(|(idx, _, _)| idx));
+    targets
+}
 
 pub fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
@@ -46,6 +182,7 @@ pub fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
         (chunks[0], None, Some(chunks[2]), Some(chunks[1]), None)
     } else if app.input_mode == InputMode::MemoryDetail
         || app.input_mode == InputMode::MemoryDetailFocus
+        || app.memory_graph_enabled
     {
         // Two-pane layout: list (left), detail (right)
         let chunks = Layout::default()
@@ -99,7 +236,7 @@ pub fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
     let search_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" Memory Search (Ctrl+F clear, r refresh, n new, Enter expand) ")
+        .title(" Memory Search (Ctrl+F search, Ctrl+L clear, r refresh, n new, Enter details, g graph) ")
         .title_style(Style::default().fg(theme.accent))
         .style(Style::default().bg(theme.panel_bg));
 
@@ -163,7 +300,9 @@ fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
         .title(format!(
             " Memory Results ({}) ",
             if app.input_mode == InputMode::MemoryDetailFocus {
-                "Tab to switch focus"
+                "graph focused, Tab returns to list"
+            } else if app.memory_graph_enabled {
+                "Tab focuses graph, g hides graph"
             } else {
                 "Enter to view details"
             }
@@ -255,6 +394,26 @@ fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
                     ]));
                 }
 
+                if !m.stored_by.trim().is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Agent: {}", m.stored_by),
+                            Style::default().fg(Color::Magenta),
+                        ),
+                    ]));
+                }
+
+                if let Some(state) = m.nexus_runtime_state.as_deref() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Runtime: {}", state),
+                            Style::default().fg(Color::Green),
+                        ),
+                    ]));
+                }
+
                 ListItem::new(lines)
             } else {
                 // Collapsed view: single line
@@ -306,15 +465,18 @@ fn render_memory_detail(frame: &mut Frame, area: Rect, app: &App) {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(0),     // Content and metadata
-                Constraint::Length(10), // Vector visualization
+                Constraint::Length(10), // Vector visualization or relationship graph
             ])
             .split(inner_area);
 
         // Render content and metadata
         render_detail_content(frame, detail_chunks[0], m, &theme);
 
-        // Render vector visualization
-        render_vector_visualization(frame, detail_chunks[1], m, &theme);
+        if app.memory_graph_enabled {
+            render_memory_graph(frame, detail_chunks[1], app, &theme);
+        } else {
+            render_vector_visualization(frame, detail_chunks[1], m, &theme);
+        }
     } else {
         let text = Paragraph::new("No memory selected")
             .style(Style::default().fg(Color::DarkGray))
@@ -434,12 +596,85 @@ fn render_detail_content(
         ]));
     }
 
+    if let Some(ref project_id) = memory.project_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Project ID: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(project_id, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    if let Some(ref track_id) = memory.track_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Track ID: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(track_id, Style::default().fg(Color::White)),
+        ]));
+    }
+
     // Tags
     if !memory.tags.is_empty() {
         lines.push(Line::from(vec![
             Span::styled("  Tags: ", Style::default().fg(Color::DarkGray)),
             Span::styled(memory.tags.join(", "), Style::default().fg(Color::Green)),
         ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Stored By: ", Style::default().fg(Color::Cyan).bold()),
+        Span::styled(
+            if memory.stored_by.trim().is_empty() {
+                "unknown"
+            } else {
+                &memory.stored_by
+            },
+            Style::default().fg(Color::White),
+        ),
+    ]));
+
+    if memory.nexus_scope.is_some()
+        || memory.nexus_runtime_state.is_some()
+        || !memory.related_memory_ids.is_empty()
+    {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Nexus Runtime / Subconscious:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+
+        if let Some(scope) = memory.nexus_scope.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("  Scope: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(scope, Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        if let Some(runtime_state) = memory.nexus_runtime_state.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("  Runtime: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(runtime_state, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+
+        if !memory.related_memory_ids.is_empty() {
+            let preview = memory
+                .related_memory_ids
+                .iter()
+                .take(12)
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(Line::from(vec![
+                Span::styled("  Related IDs: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    if memory.related_memory_ids.len() > 12 {
+                        format!("{} …", preview)
+                    } else {
+                        preview
+                    },
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+        }
     }
 
     // Agent access history
@@ -457,8 +692,216 @@ fn render_detail_content(
         }
     }
 
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Access History:",
+        Style::default().fg(theme.accent).bold().underlined(),
+    )));
+
+    if memory.access_history.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No detailed access history recorded.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for event in &memory.access_history {
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    if event.timestamp.trim().is_empty() {
+                        "unknown-time".to_string()
+                    } else {
+                        event.timestamp.clone()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(" ", Style::default()),
+                Span::styled(&event.agent_id, Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!(" ({})", event.access_type),
+                    Style::default().fg(Color::Gray),
+                ),
+            ];
+
+            if let Some(tool_used) = &event.tool_used {
+                spans.push(Span::styled(
+                    format!(" via {}", tool_used),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+
+            lines.push(Line::from(spans));
+        }
+    }
+
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, area);
+}
+
+fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::theme::Theme) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Memory Relationships ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.memories.is_empty() || inner.height == 0 || inner.width == 0 {
+        frame.render_widget(
+            Paragraph::new("No memories to visualize.").style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let targets = graph_navigation_targets(app);
+    if targets.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No graph targets available.")
+                .style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let selected_idx = app
+        .memory_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.memories.len().saturating_sub(1));
+    let graph_cursor = app
+        .memory_graph_selection
+        .min(targets.len().saturating_sub(1));
+    let selected = &app.memories[selected_idx];
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("anchor ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if selected.content.len() > 26 {
+                    format!("{}...", &selected.content[..26])
+                } else {
+                    selected.content.clone()
+                },
+                Style::default().fg(Color::Cyan).bold(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("focus ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if app.input_mode == InputMode::MemoryDetailFocus {
+                    "graph navigation"
+                } else {
+                    "list navigation"
+                },
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  Tab ", Style::default().fg(Color::DarkGray)),
+            Span::styled("switch", Style::default().fg(Color::Green)),
+            Span::styled("  Enter ", Style::default().fg(Color::DarkGray)),
+            Span::styled("open", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(""),
+    ];
+
+    if let Some(scope) = selected.nexus_scope.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("scope ", Style::default().fg(Color::DarkGray)),
+            Span::styled(scope, Style::default().fg(Color::Green)),
+        ]));
+    }
+
+    if let Some(runtime_state) = selected.nexus_runtime_state.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("runtime ", Style::default().fg(Color::DarkGray)),
+            Span::styled(runtime_state, Style::default().fg(Color::Magenta)),
+        ]));
+    }
+
+    if !selected.related_memory_ids.is_empty() {
+        let preview = selected
+            .related_memory_ids
+            .iter()
+            .take(8)
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(vec![
+            Span::styled("nexus ids ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if selected.related_memory_ids.len() > 8 {
+                    format!("{} …", preview)
+                } else {
+                    preview
+                },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    let mut related_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+
+    for idx in targets.into_iter().skip(1) {
+        let memory = &app.memories[idx];
+        let relation = relation_kind_label(classify_relation(selected, memory)).to_string();
+        related_groups.entry(relation).or_default().push(idx);
+    }
+
+    for (relation, indices) in related_groups {
+        let kind = match relation.as_str() {
+            "nexus link" => MemoryRelationKind::NexusLink,
+            "session link" => MemoryRelationKind::SessionLink,
+            "track link" => MemoryRelationKind::TrackLink,
+            "project link" => MemoryRelationKind::ProjectLink,
+            "agent link" => MemoryRelationKind::AgentLink,
+            "tag link" => MemoryRelationKind::TagLink,
+            "category link" => MemoryRelationKind::CategoryLink,
+            _ => MemoryRelationKind::Other,
+        };
+        let (category_color, category_icon) = relation_style(kind);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} {}", category_icon, relation),
+                Style::default().fg(category_color).bold(),
+            ),
+            Span::styled(
+                format!(" ({})", indices.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+
+        for idx in indices {
+            let memory = &app.memories[idx];
+            let cursor_idx = graph_navigation_targets(app)
+                .iter()
+                .position(|candidate| *candidate == idx)
+                .unwrap_or(0);
+            let is_graph_selected = cursor_idx == graph_cursor;
+            let preview = if memory.content.len() > 28 {
+                format!("{}...", &memory.content[..28])
+            } else {
+                memory.content.clone()
+            };
+            let style = if is_graph_selected {
+                Style::default().fg(Color::Black).bg(Color::Yellow).bold()
+            } else {
+                Style::default().fg(Color::White)
+            };
+            lines.push(Line::from(vec![
+                Span::styled("  ├─ ", Style::default().fg(category_color)),
+                Span::styled(
+                    format!("[{}] ", memory.id),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(preview, style),
+            ]));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 /// Render a simple vector visualization using ASCII art
@@ -712,5 +1155,57 @@ mod tests {
         assert_eq!(importance_color("high"), Color::LightRed);
         assert_eq!(importance_color("normal"), Color::White);
         assert_eq!(importance_color("low"), Color::DarkGray);
+    }
+
+    fn memory_info(id: i64, category: &str, stored_by: &str) -> crate::state::MemoryInfo {
+        crate::state::MemoryInfo {
+            id,
+            content: format!("memory-{}", id),
+            category: category.to_string(),
+            summary: None,
+            importance: "normal".to_string(),
+            source: None,
+            session_id: None,
+            project_id: None,
+            track_id: None,
+            created_at: "2026-03-28T00:00:00Z".to_string(),
+            expires_at: None,
+            last_accessed: None,
+            access_count: 0,
+            accessed_by: Vec::new(),
+            tags: Vec::new(),
+            is_expanded: false,
+            similarity_score: None,
+            related_memory_ids: Vec::new(),
+            nexus_runtime_state: None,
+            nexus_scope: None,
+            stored_by: stored_by.to_string(),
+            access_history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_classify_relation_prefers_nexus_links() {
+        let mut selected = memory_info(1, "context", "agent-a");
+        selected.related_memory_ids = vec![2];
+        let memory = memory_info(2, "fact", "agent-b");
+
+        assert_eq!(
+            classify_relation(&selected, &memory),
+            MemoryRelationKind::NexusLink
+        );
+    }
+
+    #[test]
+    fn test_classify_relation_uses_session_before_category() {
+        let mut selected = memory_info(1, "context", "agent-a");
+        selected.session_id = Some("session-1".to_string());
+        let mut memory = memory_info(2, "fact", "agent-b");
+        memory.session_id = Some("session-1".to_string());
+
+        assert_eq!(
+            classify_relation(&selected, &memory),
+            MemoryRelationKind::SessionLink
+        );
     }
 }

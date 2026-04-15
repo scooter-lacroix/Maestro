@@ -244,8 +244,10 @@ class SkillActivator:
         file_type: str
     ) -> None:
         """Add suggestions based on file type."""
-        # Map file types to skills
-        file_type_skills = {
+        # Each entry is either a list of skill-name strings, or a dict of
+        # {skill_name: reason_description}.  Previously the dict variant was
+        # silently mishandled — iterating a dict yields its keys, not its items.
+        file_type_skills: Dict[str, Any] = {
             "python": ["tdd", "test", "qlty-check"],
             "javascript": ["tdd", "test", "qlty-check"],
             "typescript": ["tdd", "test", "qlty-check"],
@@ -253,23 +255,26 @@ class SkillActivator:
             "yaml": {"validate": "validate YAML structure"},
         }
 
-        if file_type in file_type_skills:
-            for skill_name_or_dict in file_type_skills[file_type]:
-                if isinstance(skill_name_or_dict, str):
-                    skill = self._registry.get(skill_name_or_dict)
-                else:
-                    for name, desc in skill_name_or_dict.items():
-                        skill = self._registry.get(name)
+        spec = file_type_skills.get(file_type)
+        if spec is None:
+            return
 
-                if skill and not any(s.skill.name == skill.name for s in result.suggestions):
-                    suggestion = ActivationSuggestion(
-                        skill=skill,
-                        reason=ActivationReason.CONTEXTUAL,
-                        message=f"Recommended for {file_type} files",
-                        confidence=0.5,
-                        blocking=False,
-                    )
-                    result.add_suggestion(suggestion)
+        if isinstance(spec, dict):
+            entries = spec  # {skill_name: reason_msg}
+        else:
+            entries = {name: f"Recommended for {file_type} files" for name in spec}
+
+        for skill_name, reason_msg in entries.items():
+            skill = self._registry.get(skill_name)
+            if skill and not any(s.skill.name == skill.name for s in result.suggestions):
+                suggestion = ActivationSuggestion(
+                    skill=skill,
+                    reason=ActivationReason.CONTEXTUAL,
+                    message=reason_msg,
+                    confidence=0.5,
+                    blocking=False,
+                )
+                result.add_suggestion(suggestion)
 
     def _add_language_suggestions(
         self,
@@ -297,6 +302,23 @@ class SkillActivator:
                     result.add_suggestion(suggestion)
 
 
+# Module-level activator singleton — avoids re-compiling the command regex
+# on every call to activate_skills_for_prompt().
+_activator: Optional["SkillActivator"] = None
+
+
+def reset_activator() -> None:
+    """
+    Reset the cached activator singleton.
+
+    Called by registry.reset_registry() so that a stale activator (holding a
+    reference to a previous registry instance) is not reused after the
+    registry is rebuilt.
+    """
+    global _activator
+    _activator = None
+
+
 def activate_skills_for_prompt(
     prompt: str,
     context: Optional[Dict[str, Any]] = None
@@ -311,8 +333,10 @@ def activate_skills_for_prompt(
     Returns:
         ActivationResult with suggestions.
     """
-    activator = SkillActivator()
+    global _activator
+    if _activator is None:
+        _activator = SkillActivator()
 
     if context:
-        return activator.activate_for_context(prompt, context)
-    return activator.analyze(prompt)
+        return _activator.activate_for_context(prompt, context)
+    return _activator.analyze(prompt)

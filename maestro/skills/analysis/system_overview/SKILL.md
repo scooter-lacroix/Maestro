@@ -1,3 +1,9 @@
+---
+name: system_overview
+description: "Show users how Maestro works - the opinionated setup with hooks, memory, and coordination"
+user-invocable: true
+---
+
 # System Overview
 
 Show users how Maestro works - the opinionated setup with hooks, memory, and coordination.

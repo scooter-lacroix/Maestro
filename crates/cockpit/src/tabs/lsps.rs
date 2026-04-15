@@ -231,3 +231,10 @@ pub fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 
+pub fn generate_agent_prompt<T: std::fmt::Debug>(diagnostics: &[T], project_path: &str) -> String {
+    format!(
+        "Review and fix the current LSP diagnostics for project `{project_path}`.\n\nDiagnostics ({count}):\n{details:#?}\n",
+        count = diagnostics.len(),
+        details = diagnostics
+    )
+}

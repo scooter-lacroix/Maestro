@@ -8,14 +8,19 @@
  * Tools:
  * - tracklens_review: Review spec, plan, or walkthrough markdown
  * - tracklens_walkthrough: Generate and present walkthrough for completed track
+ * - tracklens_code_review: Review git diffs in code-review mode
  *
  * @packageDocumentation
  */
 
 import type { ExtensionAPI } from "../../types";
 import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { resolve, isAbsolute } from "path";
+import { execSync, execFileSync } from "child_process";
 import { runRemediationLoop } from "../walkthrough/remediation";
+import { recordRecentDocument } from "../recentDoc";
+import { formatDenialForAgent } from "../feedback";
+import { appendReviewEntry, formatHistoryForAgent } from "../history";
 
 /**
  * Register TrackLens tools with pi-maestro extension
@@ -80,17 +85,22 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
           type: "string",
           description: "Alternative: Path to the markdown file to review (relative to project root)",
         },
+        seedContent: {
+          type: "string",
+          description: "Optional seed content that opens in edit mode. Prefixes the document with an editable marker so the UI starts in CodeMirror edit mode. Use for 'refine this draft' workflows.",
+        },
       },
       required: ["documentType"],
     },
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { markdown: directMarkdown, documentType, trackId, mode = "review", filePath } = params as {
+      const { markdown: directMarkdown, documentType, trackId, mode = "review", filePath, seedContent } = params as {
         markdown?: string;
         documentType: "spec.md" | "plan.md" | "walkthrough" | "document";
         trackId?: string;
         mode?: "review" | "walkthrough";
         filePath?: string;
+        seedContent?: string;
       };
 
       let markdown: string;
@@ -98,6 +108,9 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
       // Get markdown content - either directly or from file
       if (directMarkdown) {
         markdown = directMarkdown;
+      } else if (seedContent) {
+        // Seed content: prefix with editable marker for UI to detect
+        markdown = `<!-- tracklens:editable -->\n${seedContent}`;
       } else if (filePath) {
         // Resolve file path
         const absolutePath = resolve(ctx.cwd, filePath);
@@ -122,7 +135,7 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `Error: Either 'markdown' content or 'filePath' must be provided`,
+              text: `Error: Either 'markdown', 'filePath', or 'seedContent' must be provided`,
             },
           ],
           details: { approved: false },
@@ -140,6 +153,14 @@ export function registerTrackLensTools(pi: ExtensionAPI) {
           details: { approved: false },
         };
       }
+
+      // Record this document for auto-trigger tracking
+      recordRecentDocument({
+        trackId: trackId || "unknown",
+        type: documentType,
+        content: markdown,
+        filePath,
+      });
 
       // Import TrackLens server functions
       let startTrackLensServer: any;
@@ -226,12 +247,45 @@ After review, provide your feedback or approval.`,
         // Stop the server
         server.stop();
 
+        // Persist review history if track directory is available
+        if (trackId && ctx.cwd) {
+          // Sanitize trackId to prevent path traversal
+          if (trackId.includes("..") || isAbsolute(trackId)) {
+            return {
+              content: [{ type: "text", text: `Error: Invalid track ID: ${trackId}` }],
+              details: { approved: false },
+            };
+          }
+          const { findMaestroProjectRoot } = await import("../../lib/project");
+          const root = findMaestroProjectRoot(ctx.cwd);
+          if (root) {
+            const trackDir = resolve(root, "maestro/tracks", trackId);
+            if (existsSync(trackDir)) {
+              appendReviewEntry(trackDir, {
+                timestamp: new Date().toISOString(),
+                documentType,
+                approved: result.approved,
+                annotationCount: result.annotations?.length ?? 0,
+                feedback: result.feedback,
+                editedContent: result.edited_content,
+                reviewDurationMs: result.review_duration_ms ?? 0,
+                iteration: result.iteration ?? 0,
+              });
+            }
+          }
+        }
+
+        // Format result for agent
+        const resultText = result.approved
+          ? (result.feedback || "Approved")
+          : formatDenialForAgent(result, documentType);
+
         // Return the result
         return {
           content: [
             {
               type: "text",
-              text: result.feedback || (result.approved ? "Approved" : "Changes requested"),
+              text: resultText,
             },
           ],
           details: {
@@ -239,6 +293,7 @@ After review, provide your feedback or approval.`,
             savedPath: result.savedPath,
             agentSwitch: result.agentSwitch,
             autonomyMode: result.autonomyMode,
+            edited_content: result.edited_content,
           },
         };
       } catch (error) {
@@ -357,6 +412,13 @@ After review, provide your feedback or approval.`,
 
       // Save walkthrough to storage
       const savedPath = await saveWalkthrough(trackId, walkthrough);
+
+      // Record walkthrough for auto-trigger tracking
+      recordRecentDocument({
+        trackId,
+        type: "walkthrough",
+        content: walkthrough.markdown,
+      });
 
       // If autoReview is disabled, just return the walkthrough
       if (!autoReview) {
@@ -525,6 +587,179 @@ After review, provide your feedback or approval.`,
             savedPath,
             manualReview: true,
           },
+        };
+      }
+    },
+  });
+
+  /**
+   * TrackLens Code Review Tool
+   *
+   * Generates a git diff and presents it in TrackLens code-review mode.
+   * Supports reviewing uncommitted changes, a specific ref, or selected files.
+   */
+  pi.registerTool({
+    name: "tracklens_code_review",
+    label: "TrackLens Code Review",
+    description: `
+      Generate and review a git diff in TrackLens code-review mode.
+
+      Use this tool when you need visual review of code changes:
+      - Uncommitted changes (default)
+      - Changes at a specific git ref
+      - Changes in specific files
+
+      The user will see the diff in a side-by-side code review UI with
+      annotation support. On denial, structured feedback is returned.
+    `.trim(),
+    parameters: {
+      type: "object",
+      properties: {
+        gitRef: {
+          type: "string",
+          description: "Git ref to diff against (default: HEAD for uncommitted changes)",
+          default: "HEAD",
+        },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of specific files to include in the diff",
+        },
+      },
+    },
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { gitRef = "HEAD", files } = params as {
+        gitRef?: string;
+        files?: string[];
+      };
+
+      // Generate diff using execFileSync to prevent shell injection
+      let diffContent: string;
+      try {
+        if (files && files.length > 0) {
+          // Use args array to avoid shell injection
+          diffContent = execFileSync("git", ["diff", gitRef, "--", ...files], {
+            cwd: ctx.cwd,
+            encoding: "utf-8",
+            maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
+          });
+        } else {
+          // No files specified, diff everything
+          diffContent = execFileSync("git", ["diff", gitRef], {
+            cwd: ctx.cwd,
+            encoding: "utf-8",
+            maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
+          });
+        }
+      } catch (error: any) {
+        // git diff returns exit code 1 on error, but may still produce output
+        if (error.stdout && error.stdout.trim().length > 0) {
+          diffContent = error.stdout;
+        } else {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error generating diff: ${error.message}`,
+              },
+            ],
+            details: { approved: false },
+          };
+        }
+      }
+
+      if (!diffContent.trim()) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No changes detected in the diff.",
+            },
+          ],
+          details: { approved: true },
+        };
+      }
+
+      // Import TrackLens server
+      let startTrackLensServer: any;
+      let htmlContent: string | null = null;
+
+      try {
+        // @ts-ignore - Dynamic import for TrackLens server
+        const tracklensServer = await import("@maestro/tracklens-server");
+        startTrackLensServer = tracklensServer.startTrackLensServer;
+
+        const { existsSync: exists, readFileSync: read } = await import("fs");
+        const htmlPaths = [
+          resolve(ctx.cwd, "apps/tracklens-opencode/tracklens-review.html"),
+          resolve(ctx.cwd, "apps/tracklens-opencode/tracklens.html"),
+          resolve(ctx.cwd, "dist/tracklens-editor.html"),
+        ];
+        for (const htmlPath of htmlPaths) {
+          if (exists(htmlPath)) {
+            htmlContent = read(htmlPath, "utf-8");
+            break;
+          }
+        }
+      } catch {
+        // Fallback: return diff as text
+        return {
+          content: [
+            {
+              type: "text",
+              text: `# Code Review\n\nTrackLens server not available. Diff:\n\n\`\`\`diff\n${diffContent}\n\`\`\``,
+            },
+          ],
+          details: { approved: false, manualReview: true },
+        };
+      }
+
+      if (!htmlContent) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `# Code Review\n\nTrackLens UI not built. Diff:\n\n\`\`\`diff\n${diffContent}\n\`\`\``,
+            },
+          ],
+          details: { approved: false, manualReview: true },
+        };
+      }
+
+      // Start TrackLens server in code-review mode
+      try {
+        const server = await startTrackLensServer({
+          plan: diffContent,
+          origin: "pi-maestro",
+          htmlContent,
+          mode: "code-review",
+        });
+
+        const result = await server.waitForDecision();
+        server.stop();
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result.feedback || (result.approved ? "Code review approved" : "Changes requested"),
+            },
+          ],
+          details: {
+            approved: result.approved,
+            annotations: result.annotations,
+          },
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `TrackLens server error: ${error}\n\nDiff:\n\n\`\`\`diff\n${diffContent}\n\`\`\``,
+            },
+          ],
+          details: { approved: false, manualReview: true },
         };
       }
     },

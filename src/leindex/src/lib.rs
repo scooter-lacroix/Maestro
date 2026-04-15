@@ -30,6 +30,8 @@ pub mod multi_lang_dfg;
 pub mod multi_lang_slicing;
 pub mod multiplexer;
 pub mod orchestrate;
+pub mod provider_boundary;
+pub mod providers;
 pub mod setup;
 pub mod slicing;
 pub mod token_format;
@@ -56,6 +58,8 @@ pub use multi_lang_dfg::{
 pub use multi_lang_slicing::*;
 #[allow(ambiguous_glob_reexports)]
 pub use orchestrate::*;
+pub use provider_boundary::*;
+pub use providers::*;
 pub use slicing::*;
 
 // Re-export config module's Config explicitly before setup to avoid shadowing

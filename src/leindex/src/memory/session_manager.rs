@@ -21,6 +21,12 @@ use super::models::{McpTransport, MemoryCategory, Session, SessionStatus};
 #[cfg(feature = "rusqlite")]
 use super::service::MemoryService;
 use crate::multiplexer::{TmuxMultiplexer, TmuxSession};
+use crate::provider_boundary::{
+    managed_cli_overlap_matrix_for, managed_cli_overlap_profile, AnalysisProviderKind,
+    LaunchOrigin, MemoryProvider, MemoryProviderKind, PooledMcpServerRef, ProviderDiagnostic,
+    ProviderMcpConfig, ProviderStatus, SessionProviderProfile,
+};
+use crate::providers::{StandaloneLeIndexProvider, StandaloneNexusProvider};
 use tokio::runtime::Handle;
 
 #[cfg(feature = "rusqlite")]
@@ -157,6 +163,7 @@ impl SessionManager {
         let _ = self
             .service
             .store_memory(&memory_content, MemoryCategory::Observation);
+        let _ = self.notify_nexus_session_started(&session.session_id, project_path);
 
         // Auto-start LSPs for the session based on project language detection
         // Note: This is done in a separate task to avoid blocking session creation
@@ -223,11 +230,48 @@ impl SessionManager {
         let escaped_session_id = shell_escape(session_id);
         let mcp_config_path = self.write_session_mcp_config(session_id)?;
         let mcp_config = shell_escape(mcp_config_path.to_string_lossy().as_ref());
+        let profile = self.build_session_provider_profile(session_id, project_path)?;
+        let provider_profile = shell_escape("maestro_runtime");
+        let analysis_provider = shell_escape("standalone_leindex");
+        let memory_provider = shell_escape("standalone_nexus");
+        let suppression_policy = shell_escape(&profile.suppression_policy.to_json_string()?);
+        let overlap_profile = shell_escape(&serde_json::to_string(&managed_cli_overlap_profile(
+            &profile.selected_cli,
+        ))?);
+        let nexus_bin = StandaloneNexusProvider::discover()
+            .map(|provider| {
+                shell_escape(
+                    provider
+                        .installation()
+                        .executable
+                        .to_string_lossy()
+                        .as_ref(),
+                )
+            })
+            .unwrap_or_else(|| shell_escape("nexus"));
+        let nexus_home = StandaloneNexusProvider::discover()
+            .and_then(|provider| {
+                provider
+                    .state_root
+                    .map(|root| shell_escape(root.to_string_lossy().as_ref()))
+            })
+            .unwrap_or_else(|| shell_escape(""));
 
         // Common environment variables for all tools
         let env_vars = format!(
-            "export EDITOR={} MAESTRO_SESSION_ID={} MAESTRO_PROJECT_PATH={} MAESTRO_MCP_CONFIG={}",
-            editor, escaped_session_id, escaped_project, mcp_config
+            "export EDITOR={} MAESTRO_SESSION_ID={} MAESTRO_PROJECT_PATH={} MAESTRO_SELECTED_CLI={} MAESTRO_MCP_CONFIG={} MAESTRO_PROVIDER_PROFILE={} MAESTRO_ANALYSIS_PROVIDER={} MAESTRO_MEMORY_PROVIDER={} MAESTRO_TOOL_SUPPRESSION_POLICY={} MAESTRO_CLI_OVERLAP_PROFILE={} MAESTRO_NEXUS_PROVIDER=standalone NEXUS_BIN={} NEXUS_HOME={}",
+            editor,
+            escaped_session_id,
+            escaped_project,
+            shell_escape(&profile.selected_cli),
+            mcp_config,
+            provider_profile,
+            analysis_provider,
+            memory_provider,
+            suppression_policy,
+            overlap_profile,
+            nexus_bin,
+            nexus_home
         );
 
         match tool.to_lowercase().as_str() {
@@ -290,7 +334,7 @@ impl SessionManager {
                     escaped_project,
                     shell_escape("mcp_servers={}")
                 );
-                for override_arg in self.build_codex_mcp_overrides() {
+                for override_arg in self.build_codex_mcp_overrides(session_id, project_path)? {
                     command.push_str(" -c ");
                     command.push_str(&shell_escape(&override_arg));
                 }
@@ -325,27 +369,37 @@ impl SessionManager {
         self.write_mcp_config_with_lsps(session_id, &[])
     }
 
-    fn build_mcp_servers_config(&self) -> BTreeMap<String, serde_json::Value> {
-        self.build_mcp_servers_config_with_stdio_type(true)
-    }
-
-    fn build_settings_mcp_servers_config(&self) -> BTreeMap<String, serde_json::Value> {
-        self.build_mcp_servers_config_with_stdio_type(false)
-    }
-
     fn build_mcp_servers_config_with_stdio_type(
         &self,
+        session_id: &str,
+        project_path: &str,
         include_stdio_type: bool,
-    ) -> BTreeMap<String, serde_json::Value> {
-        let mut servers = BTreeMap::from([(
-            "maestro-tool-search".to_string(),
-            stdio_mcp_config("maestro", vec!["mcp", "tool-search"], include_stdio_type),
+    ) -> Result<BTreeMap<String, serde_json::Value>> {
+        let provider_config =
+            self.build_provider_mcp_config(session_id, project_path, include_stdio_type)?;
+        let mut servers = provider_config.direct_servers;
+        servers.extend(provider_config.pooled_servers);
+        Ok(servers)
+    }
+
+    fn build_provider_mcp_config(
+        &self,
+        _session_id: &str,
+        _project_path: &str,
+        include_stdio_type: bool,
+    ) -> Result<ProviderMcpConfig> {
+        let provider = StandaloneLeIndexProvider::detect()?
+            .context("Standalone LeIndex provider not found. Install LeIndex before launching managed Maestro sessions.")?;
+        let direct_servers = BTreeMap::from([(
+            "leindex".to_string(),
+            provider.direct_stdio_config(include_stdio_type),
         )]);
 
+        let mut pooled_servers = BTreeMap::new();
         if let Ok(pool_servers) = self.service.list_mcp_servers() {
             for server in pool_servers {
                 let name = server.name.clone();
-                if name == "maestro-tool-search" {
+                if name == "maestro-tool-search" || name.eq_ignore_ascii_case("leindex") {
                     continue;
                 }
 
@@ -370,44 +424,258 @@ impl SessionManager {
                     }
                 };
 
-                servers.insert(name, config);
+                pooled_servers.insert(name, config);
             }
         }
 
-        servers
+        Ok(ProviderMcpConfig {
+            direct_servers,
+            pooled_servers,
+        })
+    }
+
+    fn build_session_provider_profile(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<SessionProviderProfile> {
+        // Run the async variant via a blocking adapter to remain callable
+        // from synchronous contexts (CLI, setup wizard, etc.).
+        self.run_profile_future(self.build_session_provider_profile_inner(session_id, project_path))
+    }
+
+    /// Async variant for callers already inside a Tokio runtime (e.g.
+    /// `write_mcp_config_with_lsps_async`). Avoids blocking the runtime
+    /// with the synchronous `health_report_sync` wrapper.
+    async fn build_session_provider_profile_async(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<SessionProviderProfile> {
+        self.build_session_provider_profile_inner(session_id, project_path).await
+    }
+
+    /// Shared core that builds the profile. Uses async health checks
+    /// directly so callers decide whether to block or await.
+    async fn build_session_provider_profile_inner(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<SessionProviderProfile> {
+        let leindex_provider = StandaloneLeIndexProvider::detect()?
+            .context("Standalone LeIndex provider not found. Install LeIndex before launching managed Maestro sessions.")?;
+        let nexus_provider = StandaloneNexusProvider::discover()
+            .context("Standalone Nexus provider not found. Install and initialize Nexus before launching managed Maestro sessions.")?;
+        let selected_cli = self
+            .service
+            .list_sessions()
+            .ok()
+            .and_then(|sessions| {
+                sessions
+                    .into_iter()
+                    .find(|session| session.session_id == session_id)
+                    .and_then(|session| session.tool)
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let overlap_profile = managed_cli_overlap_profile(&selected_cli);
+
+        let pooled_shared_servers = self
+            .service
+            .list_mcp_servers()
+            .map(|servers| {
+                servers
+                    .into_iter()
+                    .filter(|server| {
+                        server.name != "maestro-tool-search"
+                            && !server.name.eq_ignore_ascii_case("leindex")
+                    })
+                    .map(|server| PooledMcpServerRef {
+                        name: server.name,
+                        transport: match server.transport {
+                            McpTransport::Stdio => "stdio".to_string(),
+                            McpTransport::Http => "http".to_string(),
+                        },
+                        source: "maestro_pool".to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Use the async validate_health directly instead of the blocking
+        // health_report_sync wrapper to avoid freezing the Tokio runtime.
+        let nexus_diagnostic = match nexus_provider
+            .validate_health(std::path::Path::new(project_path))
+            .await
+        {
+            Ok(report) => report.diagnostics.into_iter().next().unwrap_or_else(|| {
+                ProviderDiagnostic {
+                    provider_name: "nexus".to_string(),
+                    provider_kind: "memory".to_string(),
+                    status: ProviderStatus::Degraded,
+                    executable: Some("nexus".to_string()),
+                    version: None,
+                    source: Some("standalone".to_string()),
+                    detail: "Nexus health check returned no diagnostics".to_string(),
+                    capabilities: ["memory", "runtime", "digests"]
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    checked_at: Utc::now(),
+                }
+            }),
+            Err(_) => ProviderDiagnostic {
+                provider_name: "nexus".to_string(),
+                provider_kind: "memory".to_string(),
+                status: ProviderStatus::Degraded,
+                executable: Some("nexus".to_string()),
+                version: None,
+                source: Some("standalone".to_string()),
+                detail: "Standalone Nexus provider detected but diagnostics could not be collected"
+                    .to_string(),
+                capabilities: ["memory", "runtime", "digests"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+                checked_at: Utc::now(),
+            },
+        };
+
+        Ok(SessionProviderProfile {
+            profile_name: "maestro_runtime".to_string(),
+            launch_origin: LaunchOrigin::Sessions,
+            selected_cli,
+            project_root: std::path::PathBuf::from(project_path),
+            session_id: session_id.to_string(),
+            track_id: None,
+            analysis_provider: AnalysisProviderKind::StandaloneLeindex,
+            memory_provider: MemoryProviderKind::StandaloneNexus,
+            pooled_shared_servers,
+            suppression_policy: overlap_profile.suppression_policy(),
+            overlap_matrix: managed_cli_overlap_matrix_for(&overlap_profile.cli),
+            diagnostics: vec![
+                leindex_provider
+                    .diagnostic_snapshot(std::path::Path::new(project_path))
+                    .ok()
+                    .unwrap_or_else(|| ProviderDiagnostic {
+                        provider_name: "leindex".to_string(),
+                        provider_kind: "analysis".to_string(),
+                        status: ProviderStatus::Degraded,
+                        executable: Some("leindex".to_string()),
+                        version: None,
+                        source: Some("standalone".to_string()),
+                        detail: "Standalone LeIndex provider detected but diagnostics could not be collected"
+                            .to_string(),
+                        capabilities: ["mcp"].into_iter().map(str::to_string).collect(),
+                        checked_at: Utc::now(),
+                    }),
+                nexus_diagnostic,
+            ],
+        })
+    }
+
+    /// Run an async profile-building future through a blocking adapter,
+    /// mirroring the pattern used by `run_memory_provider_future`.
+    fn run_profile_future<F>(&self, future: F) -> Result<SessionProviderProfile>
+    where
+        F: std::future::Future<Output = Result<SessionProviderProfile>> + Send,
+    {
+        if let Ok(handle) = Handle::try_current() {
+            std::thread::scope(|s| {
+                s.spawn(|| handle.block_on(future))
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("Profile build thread panicked"))?
+            })
+        } else {
+            tokio::runtime::Runtime::new()?.block_on(future)
+        }
+    }
+
+    fn build_provider_diagnostics_json(
+        &self,
+        profile: &SessionProviderProfile,
+        mcp_config: &ProviderMcpConfig,
+    ) -> serde_json::Value {
+        let overlap_profile = managed_cli_overlap_profile(&profile.selected_cli);
+        serde_json::json!({
+            "managedSession": {
+                "profileName": profile.profile_name,
+                "launchOrigin": profile.launch_origin,
+                "selectedCli": profile.selected_cli,
+                "analysisProvider": profile.analysis_provider,
+                "memoryProvider": profile.memory_provider,
+                "suppressionPolicy": &profile.suppression_policy,
+                "cliOverlapProfile": overlap_profile,
+                "directServers": mcp_config.direct_servers.keys().cloned().collect::<Vec<_>>(),
+                "pooledServers": mcp_config.pooled_servers.keys().cloned().collect::<Vec<_>>(),
+                "pooledSharedServers": profile.pooled_shared_servers.iter().map(|server| {
+                    serde_json::json!({
+                        "name": server.name,
+                        "transport": server.transport,
+                        "source": server.source,
+                    })
+                }).collect::<Vec<_>>(),
+            }
+        })
     }
 
     fn build_standard_settings_json(
         &self,
+        session_id: &str,
+        project_path: &str,
         existing: serde_json::Value,
         include_stdio_type: bool,
     ) -> Result<serde_json::Value> {
+        let profile = self.build_session_provider_profile(session_id, project_path)?;
+        let provider_mcp =
+            self.build_provider_mcp_config(session_id, project_path, include_stdio_type)?;
         let mut settings = ensure_json_object(existing);
         settings.as_object_mut().unwrap().insert(
             "mcpServers".to_string(),
-            serde_json::to_value(
-                self.build_mcp_servers_config_with_stdio_type(include_stdio_type),
-            )?,
+            serde_json::to_value(self.build_mcp_servers_config_with_stdio_type(
+                session_id,
+                project_path,
+                include_stdio_type,
+            )?)?,
+        );
+        settings.as_object_mut().unwrap().insert(
+            "maestro".to_string(),
+            self.build_provider_diagnostics_json(&profile, &provider_mcp),
         );
         Ok(settings)
     }
 
     fn build_opencode_settings_json(
         &self,
+        session_id: &str,
+        project_path: &str,
         existing: serde_json::Value,
     ) -> Result<serde_json::Value> {
+        let profile = self.build_session_provider_profile(session_id, project_path)?;
+        let provider_mcp = self.build_provider_mcp_config(session_id, project_path, false)?;
         let mut settings = ensure_json_object(existing);
         settings.as_object_mut().unwrap().insert(
             "mcp".to_string(),
-            serde_json::to_value(self.build_opencode_mcp_servers_config())?,
+            serde_json::to_value(
+                self.build_opencode_mcp_servers_config(session_id, project_path)?,
+            )?,
+        );
+        settings.as_object_mut().unwrap().insert(
+            "maestro".to_string(),
+            self.build_provider_diagnostics_json(&profile, &provider_mcp),
         );
         Ok(settings)
     }
 
-    fn build_opencode_mcp_servers_config(&self) -> BTreeMap<String, serde_json::Value> {
+    fn build_opencode_mcp_servers_config(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<BTreeMap<String, serde_json::Value>> {
         let mut servers = BTreeMap::new();
 
-        for (name, config) in self.build_settings_mcp_servers_config() {
+        for (name, config) in
+            self.build_mcp_servers_config_with_stdio_type(session_id, project_path, false)?
+        {
             let opencode_config = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
                 let mut value = serde_json::json!({
                     "type": "http",
@@ -440,13 +708,19 @@ impl SessionManager {
             servers.insert(name, opencode_config);
         }
 
-        servers
+        Ok(servers)
     }
 
-    fn build_codex_mcp_overrides(&self) -> Vec<String> {
+    fn build_codex_mcp_overrides(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<Vec<String>> {
         let mut overrides = Vec::new();
 
-        for (name, config) in self.build_mcp_servers_config() {
+        for (name, config) in
+            self.build_mcp_servers_config_with_stdio_type(session_id, project_path, true)?
+        {
             let key = sanitize_codex_key(&name);
 
             if let Some(command) = config.get("command").and_then(|v| v.as_str()) {
@@ -478,7 +752,7 @@ impl SessionManager {
             }
         }
 
-        overrides
+        Ok(overrides)
     }
 
     fn write_standard_home_tool_settings(
@@ -494,7 +768,16 @@ impl SessionManager {
             self.prepare_session_home_overlay(session_id, tool_name, config_dir_rel, skip_dirs)?;
         let config_path = home_root.join(config_dir_rel).join(config_file_name);
         let existing = read_json_value_or_empty(&config_path)?;
-        let updated = self.build_standard_settings_json(existing, include_stdio_type)?;
+        let project_path = self
+            .service
+            .get_session_project_path(session_id)?
+            .unwrap_or_else(|| ".".to_string());
+        let updated = self.build_standard_settings_json(
+            session_id,
+            &project_path,
+            existing,
+            include_stdio_type,
+        )?;
         write_json_value_atomic(&config_path, &updated)?;
         Ok(home_root)
     }
@@ -512,8 +795,16 @@ impl SessionManager {
             sanitize_filename(session_id)
         ));
 
-        let updated =
-            self.build_standard_settings_json(serde_json::json!({}), include_stdio_type)?;
+        let project_path = self
+            .service
+            .get_session_project_path(session_id)?
+            .unwrap_or_else(|| ".".to_string());
+        let updated = self.build_standard_settings_json(
+            session_id,
+            &project_path,
+            serde_json::json!({}),
+            include_stdio_type,
+        )?;
         write_json_value_atomic(&path, &updated)?;
         Ok(path)
     }
@@ -525,7 +816,15 @@ impl SessionManager {
             sanitize_filename(session_id)
         ));
 
-        let config = serde_json::to_value(self.build_settings_mcp_servers_config())?;
+        let project_path = self
+            .service
+            .get_session_project_path(session_id)?
+            .unwrap_or_else(|| ".".to_string());
+        let config = serde_json::to_value(self.build_mcp_servers_config_with_stdio_type(
+            session_id,
+            &project_path,
+            false,
+        )?)?;
         write_json_value_atomic(&path, &config)?;
         Ok(path)
     }
@@ -543,7 +842,11 @@ impl SessionManager {
             Some(path) => read_json_value_or_empty(&path)?,
             None => serde_json::json!({}),
         };
-        let updated = self.build_opencode_settings_json(existing)?;
+        let project_path = self
+            .service
+            .get_session_project_path(session_id)?
+            .unwrap_or_else(|| ".".to_string());
+        let updated = self.build_opencode_settings_json(session_id, &project_path, existing)?;
         write_json_value_atomic(&path, &updated)?;
         Ok(path)
     }
@@ -613,7 +916,8 @@ impl SessionManager {
     /// Write MCP configuration file with LSP entries
     ///
     /// Generates a .mcp.json file that includes:
-    /// - Existing MCP servers (like maestro-tool-search)
+    /// - Direct provider entries (for example standalone LeIndex)
+    /// - Pooled shared MCP servers from the Maestro pool
     /// - LSP server entries for direct stdio exposure
     ///
     /// The LSP section follows the format defined in:
@@ -640,8 +944,10 @@ impl SessionManager {
                     .unwrap_or(".".to_string())
             });
 
-        // Build mcpServers section (existing MCP servers)
-        let mcp_servers = self.build_mcp_servers_config();
+        let profile = self.build_session_provider_profile(session_id, &project_path)?;
+        let provider_mcp = self.build_provider_mcp_config(session_id, &project_path, true)?;
+        let mcp_servers =
+            self.build_mcp_servers_config_with_stdio_type(session_id, &project_path, true)?;
 
         // Build LSP servers section from provided LSP types or detect from project
         let lsp_servers = if lsp_types.is_empty() {
@@ -664,11 +970,13 @@ impl SessionManager {
         // Combine into final config
         let config = if lsp_servers.is_empty() {
             serde_json::json!({
-                "mcpServers": mcp_servers
+                "mcpServers": mcp_servers,
+                "maestro": self.build_provider_diagnostics_json(&profile, &provider_mcp)
             })
         } else {
             serde_json::json!({
                 "mcpServers": mcp_servers,
+                "maestro": self.build_provider_diagnostics_json(&profile, &provider_mcp),
                 "lsp": {
                     "servers": lsp_servers
                 }
@@ -723,8 +1031,10 @@ impl SessionManager {
                     .unwrap_or(".".to_string())
             });
 
-        // Build mcpServers section (existing MCP servers)
-        let mcp_servers = self.build_mcp_servers_config();
+        let profile = self.build_session_provider_profile_async(session_id, &project_path).await?;
+        let provider_mcp = self.build_provider_mcp_config(session_id, &project_path, true)?;
+        let mcp_servers =
+            self.build_mcp_servers_config_with_stdio_type(session_id, &project_path, true)?;
 
         // Build LSP servers section from provided LSP types or detect from project
         let lsp_servers = if lsp_types.is_empty() {
@@ -762,11 +1072,13 @@ impl SessionManager {
         // Combine into final config
         let config = if lsp_servers.is_empty() {
             serde_json::json!({
-                "mcpServers": mcp_servers
+                "mcpServers": mcp_servers,
+                "maestro": self.build_provider_diagnostics_json(&profile, &provider_mcp)
             })
         } else {
             serde_json::json!({
                 "mcpServers": mcp_servers,
+                "maestro": self.build_provider_diagnostics_json(&profile, &provider_mcp),
                 "lsp": {
                     "servers": lsp_servers
                 }
@@ -1105,33 +1417,33 @@ impl SessionManager {
 
     /// Kill a session and update DB
     pub fn kill_session(&self, session_id: &str) -> Result<()> {
-        // Stop all LSPs for this session first
-        let session_id_clone = session_id.to_string();
+        let project_path = self
+            .service
+            .get_session_project_path(session_id)?
+            .unwrap_or_else(|| ".".to_string());
 
-        // Get LSP manager reference for the spawned task
+        // Stop all LSPs for this session first
         let lsp_manager_clone = self.get_lsp_manager().cloned();
 
-        // Attempt to stop LSPs in a separate task
-        if let (Some(lsp_manager), Ok(handle)) = (lsp_manager_clone, Handle::try_current()) {
-            handle.spawn(async move {
-                match lsp_manager.stop_all_session_lsps(&session_id_clone).await {
-                    Ok(()) => {
-                        tracing::info!(
-                            "Successfully stopped all LSPs for session '{}'",
-                            session_id_clone
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to stop LSPs for session '{}': {}",
-                            session_id_clone,
-                            e
-                        );
-                    }
-                }
-            });
-        } else {
-            tracing::warn!("Cannot stop LSPs: not in a tokio runtime");
+        if let Some(lsp_manager) = lsp_manager_clone {
+            let sid = session_id.to_string();
+            let result = if let Ok(handle) = Handle::try_current() {
+                // Spawn a dedicated thread to avoid block_in_place which
+                // panics on current_thread runtimes. A fresh thread is never
+                // inside any tokio context, so Handle::block_on is safe here.
+                std::thread::scope(|s| {
+                    s.spawn(|| handle.block_on(lsp_manager.stop_all_session_lsps(&sid)))
+                        .join()
+                        .unwrap()
+                })
+            } else {
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(lsp_manager.stop_all_session_lsps(&sid))
+            };
+            match result {
+                Ok(()) => tracing::info!("Stopped all LSPs for session '{}'", session_id),
+                Err(e) => tracing::warn!("Failed to stop LSPs for session '{}': {}", session_id, e),
+            }
         }
 
         self.tmux.kill_session(session_id)?;
@@ -1148,6 +1460,7 @@ impl SessionManager {
         let _ = self
             .service
             .store_memory(&memory_content, MemoryCategory::Observation);
+        let _ = self.notify_nexus_session_stopped(session_id, &project_path);
 
         Ok(())
     }
@@ -1184,6 +1497,39 @@ impl SessionManager {
         self.service.import_session(new_session.clone())?;
 
         Ok(new_session)
+    }
+
+    fn notify_nexus_session_started(&self, session_id: &str, project_path: &str) -> Result<()> {
+        let provider = match StandaloneNexusProvider::discover() {
+            Some(provider) => provider,
+            None => return Ok(()),
+        };
+        let profile = self.build_session_provider_profile(session_id, project_path)?;
+        self.run_memory_provider_future(provider.session_started(&profile))
+    }
+
+    fn notify_nexus_session_stopped(&self, session_id: &str, project_path: &str) -> Result<()> {
+        let provider = match StandaloneNexusProvider::discover() {
+            Some(provider) => provider,
+            None => return Ok(()),
+        };
+        let profile = self.build_session_provider_profile(session_id, project_path)?;
+        self.run_memory_provider_future(provider.session_stopped(&profile))
+    }
+
+    fn run_memory_provider_future<F>(&self, future: F) -> Result<()>
+    where
+        F: std::future::Future<Output = Result<()>> + Send,
+    {
+        if let Ok(handle) = Handle::try_current() {
+            // Spawn a dedicated thread to avoid block_in_place which
+            // panics on current_thread runtimes.
+            std::thread::scope(|s| {
+                s.spawn(|| handle.block_on(future)).join().unwrap()
+            })
+        } else {
+            tokio::runtime::Runtime::new()?.block_on(future)
+        }
     }
 }
 
@@ -1468,12 +1814,23 @@ mod tests {
         // Verify mcpServers exists
         assert!(json.get("mcpServers").is_some());
         let mcp_servers = json.get("mcpServers").unwrap();
-        assert!(mcp_servers.get("maestro-tool-search").is_some());
+        assert!(mcp_servers.get("maestro-tool-search").is_none());
+        let direct = mcp_servers.get("leindex").unwrap();
+        assert_eq!(direct["command"], "leindex");
+        assert_eq!(direct["args"], serde_json::json!(["mcp"]));
         let pooled = mcp_servers.get("agent-browser").unwrap();
         assert_eq!(pooled["command"], "maestro");
         assert_eq!(
             pooled["args"],
             serde_json::json!(["mcp", "proxy", "agent-browser"])
+        );
+        assert_eq!(
+            json["maestro"]["managedSession"]["directServers"],
+            serde_json::json!(["leindex"])
+        );
+        assert_eq!(
+            json["maestro"]["managedSession"]["pooledServers"],
+            serde_json::json!(["agent-browser"])
         );
 
         // Verify lsp section does NOT exist when no LSPs
@@ -1582,11 +1939,16 @@ mod tests {
             })
             .unwrap();
 
-        let overrides = session_manager.build_codex_mcp_overrides();
+        let overrides = session_manager
+            .build_codex_mcp_overrides("session-codex", "/tmp/project")
+            .unwrap();
 
         assert!(overrides
             .iter()
-            .any(|entry| { entry == "mcp_servers.maestro_tool_search.command=\"maestro\"" }));
+            .any(|entry| { entry == "mcp_servers.leindex.command=\"leindex\"" }));
+        assert!(overrides
+            .iter()
+            .any(|entry| { entry == "mcp_servers.leindex.args=[\"mcp\"]" }));
         assert!(overrides
             .iter()
             .any(|entry| { entry == "mcp_servers.agent_browser.command=\"maestro\"" }));
@@ -1649,22 +2011,26 @@ mod tests {
 
         let session_manager = SessionManager::new(service).unwrap();
         let updated = session_manager
-            .build_opencode_settings_json(serde_json::json!({
-                "command": {
-                    "custom": {
-                        "template": "do custom work"
+            .build_opencode_settings_json(
+                "opencode-session",
+                "/tmp/project",
+                serde_json::json!({
+                    "command": {
+                        "custom": {
+                            "template": "do custom work"
+                        }
                     }
-                }
-            }))
+                }),
+            )
             .unwrap();
 
         assert_eq!(updated["command"]["custom"]["template"], "do custom work");
         assert_eq!(
-            updated["mcp"]["maestro-tool-search"]["command"],
-            serde_json::json!(["maestro", "mcp", "tool-search"])
+            updated["mcp"]["leindex"]["command"],
+            serde_json::json!(["leindex", "mcp"])
         );
         assert_eq!(
-            updated["mcp"]["maestro-tool-search"]["type"],
+            updated["mcp"]["leindex"]["type"],
             serde_json::json!("local")
         );
     }

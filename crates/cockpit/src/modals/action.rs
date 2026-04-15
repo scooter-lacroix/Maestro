@@ -31,10 +31,10 @@ pub fn render_action_modal(frame: &mut Frame, app: &App) {
     let (title, prompt, value) = match app.input_mode {
         InputMode::RenameGroup => (" Rename Group ", "New Name:", Some(&app.rename_buffer)),
         InputMode::ForkSession => (" Fork Session ", "Fork Name:", Some(&app.rename_buffer)),
-        InputMode::KillConfirm => (" Kill Session ", "Are you sure? (y/n)", None),
+        InputMode::KillConfirm => (" [!] Kill Session ", "Are you sure you want to terminate this session? (y/n)", None),
         InputMode::DeleteConfirm => (
-            " Permanent Delete ",
-            "Are you sure you want to PERMANENTLY delete? (y/n)",
+            " [!!!] Permanent Delete ",
+            "This will ERASE the session and all its data. ARE YOU SURE? (y/n)",
             None,
         ),
         InputMode::NewSessionTitle => (

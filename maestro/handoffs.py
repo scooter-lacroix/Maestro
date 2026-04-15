@@ -1,9 +1,20 @@
 """
 Handoffs Module - YAML goal/now/next schema and coordination utilities.
 
+DEPRECATED: Use maestro.memory.coordination.handoffs instead.
+This module is kept for backwards compatibility only. The canonical handoff
+system is the DB-backed HandoffHandler in maestro.memory.coordination.handoffs.
+
 Implements structured handoff mechanisms with YAML schemas for goal/now/next
 patterns, supporting cross-terminal coordination and state persistence.
 """
+
+import warnings as _warnings
+_warnings.warn(
+    "maestro.handoffs is deprecated. Use maestro.memory.coordination.handoffs instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import os
 import yaml

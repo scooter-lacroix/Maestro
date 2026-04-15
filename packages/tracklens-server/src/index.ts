@@ -59,6 +59,7 @@ export interface ServerResult {
     annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
+    edited_content?: string;
   }>;
   /** Stop the server */
   stop: () => void;
@@ -141,6 +142,7 @@ export async function startTrackLensServer(
         annotations?: unknown[];
         agentSwitch?: string;
         autonomyMode?: string;
+        edited_content?: string;
       }) => void)
     | undefined;
 
@@ -151,13 +153,15 @@ export async function startTrackLensServer(
     annotations?: unknown[];
     agentSwitch?: string;
     autonomyMode?: string;
+    edited_content?: string;
   }>((resolve) => {
     resolveDecision = resolve;
   });
   const clientReady = createClientReadyMonitor();
 
-  // Mutable state for auto-close
+  // Mutable state for auto-close and phase tracking
   let shouldAutoClose = false;
+  let currentPhase = "reviewing";
 
   // Start server
   const server = Bun.serve({
@@ -256,6 +260,53 @@ export async function startTrackLensServer(
       if (url.pathname === "/api/client-ready" && req.method === "POST") {
         clientReady.markClientReady();
         return Response.json({ ready: true });
+      }
+
+      // API: Extend timeout (UI-side timeout extension, no server-side deadline after client ready)
+      if (url.pathname === "/api/extend-timeout" && req.method === "POST") {
+        try {
+          const body = await req.json();
+          const { minutes } = body as { minutes?: number };
+
+          // Server waits indefinitely after client is ready, so this is a no-op
+          // The UI uses this to sync its client-side timeout countdown
+          return Response.json({
+            success: true,
+            extendedMinutes: minutes ?? 30,
+          });
+        } catch (error) {
+          return Response.json(
+            {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      // API: Get current phase
+      if (url.pathname === "/api/phase" && req.method === "GET") {
+        return Response.json({ phase: currentPhase });
+      }
+
+      // API: Update phase
+      if (url.pathname === "/api/phase" && req.method === "POST") {
+        try {
+          const body = await req.json();
+          const { phase } = body as { phase?: string };
+
+          if (phase && typeof phase === "string") {
+            currentPhase = phase;
+          }
+
+          return Response.json({ success: true, phase: currentPhase });
+        } catch (error) {
+          return Response.json(
+            { success: false, error: error instanceof Error ? error.message : String(error) },
+            { status: 400 }
+          );
+        }
       }
 
       // API: Validate image path
@@ -456,11 +507,13 @@ export async function startTrackLensServer(
             feedback,
             agentSwitch,
             autonomyMode: requestedPermissionMode,
+            edited_content,
           } = body as {
             feedback?: string;
             agentSwitch?: string;
             permissionMode?: string;
             autonomyMode?: string;
+            edited_content?: string;
           };
 
           // Resolve decision promise with approval
@@ -470,10 +523,12 @@ export async function startTrackLensServer(
               feedback,
               agentSwitch,
               autonomyMode: requestedPermissionMode || autonomyMode,
+              edited_content,
             });
           }
 
           shouldAutoClose = true;
+          currentPhase = "decided";
           return Response.json({ ok: true });
         } catch (error) {
           return Response.json(
@@ -498,6 +553,7 @@ export async function startTrackLensServer(
           }
 
           shouldAutoClose = true;
+          currentPhase = "decided";
           return Response.json({ ok: true });
         } catch (error) {
           return Response.json(
@@ -518,6 +574,7 @@ export async function startTrackLensServer(
             annotations,
             agentSwitch,
             autonomyMode: newAutonomyMode,
+            edited_content,
           } = body as {
             approved: boolean;
             feedback?: string;
@@ -525,6 +582,7 @@ export async function startTrackLensServer(
             annotations?: unknown[] | string;
             agentSwitch?: string;
             autonomyMode?: string;
+            edited_content?: string;
           };
 
           // Save final snapshot
@@ -559,10 +617,12 @@ export async function startTrackLensServer(
                   : annotations,
               agentSwitch,
               autonomyMode: newAutonomyMode,
+              edited_content,
             });
           }
 
           shouldAutoClose = true;
+          currentPhase = "decided";
 
           return Response.json({ success: true });
         } catch (error) {

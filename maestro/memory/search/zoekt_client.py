@@ -18,7 +18,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, UTC
 from dataclasses import dataclass, field
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger
+except ImportError:  # pragma: no cover - optional dependency in minimal test envs
+    logger = logging.getLogger(__name__)
 
 import httpx
 

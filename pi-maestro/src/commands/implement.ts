@@ -21,9 +21,10 @@ import {
   updateTrackMetadata,
   listAllTracks,
 } from "../lib/tracks";
-import { isTrackLensEnabled } from "../tracklens/extension/command";
+
 import * as fs from "fs";
 import * as path from "path";
+import { isTrackLensEnabled } from "../tracklens/extension/command";
 
 /** Store current track context for before_agent_start */
 let currentImplementContext: {
@@ -121,7 +122,46 @@ function isInMaestroProject(root: string): boolean {
 
 function buildMaestroWorkflow(context: { root: string; trackId?: string }): string {
   const { root, trackId } = context;
-  const trackLensEnabled = isTrackLensEnabled();
+
+  const tracklensSection = isTrackLensEnabled()
+    ? `## 4.0 TRACKLENS WALKTHROUGH REVIEW
+
+When all tasks in plan.md are complete, request TrackLens walkthrough review:
+
+1. **CALL TRACKLENS_WALKTHROUGH TOOL:**
+   \`\`\`
+   tracklens_walkthrough with:
+   - trackId: "<track_id>"
+   - summary: "Brief summary of what was accomplished"
+   \`\`\`
+
+2. **WAIT FOR USER DECISION:**
+   - **If approved:** Proceed to finalize track (step 5.0)
+   - **If denied with annotations:** Parse annotations into remediation tasks, execute fixes, regenerate walkthrough, and call tracklens_walkthrough again
+   - **If TrackLens unavailable:** Fall back to manual completion (skip to step 5.0)
+
+3. **REMEDIATION LOOP:**
+   - If user denies with annotations:
+     a. Parse each annotation into a remediation task
+     b. Add tasks to plan.md with - [ ] format
+     c. Execute remediation tasks
+     d. Regenerate walkthrough markdown
+     e. Call tracklens_walkthrough again
+     f. Loop until approved or max 3 iterations
+
+4. **MINIMAL TEXT FALLBACK:**
+   If TrackLens UI is unavailable and manual review is needed:
+   - Generate text-based walkthrough summary
+   - Present as markdown in chat
+   - Ask for approval: "Does this walkthrough look complete? (1) Approve, (2) Request changes"`
+    : `## 4.0 MANUAL REVIEW (TrackLens Disabled)
+
+When all tasks in plan.md are complete:
+
+1. Generate a text-based walkthrough summary
+2. Present as markdown in chat
+3. Ask for approval: "Does this walkthrough look complete? (1) Approve, (2) Request changes"
+4. Use \`/tracklens on\` to re-enable TrackLens walkthrough reviews`;
 
   return `# Maestro Implementation Protocol
 
@@ -260,44 +300,11 @@ ${trackId ? `
    - After completing each task, update plan.md
    - Change \`- [ ] Task: ...\` to \`- [x] Task: ...\`
 
-${trackLensEnabled ? `
-## 4.0 TRACKLENS WALKTHROUGH REVIEW
-
-When all tasks in plan.md are complete, request TrackLens walkthrough review:
-
-1. **CALL TRACKLENS_WALKTHROUGH TOOL:**
-   \`\`\`
-   tracklens_walkthrough with:
-   - trackId: "<track_id>"
-   - summary: "Brief summary of what was accomplished"
-   \`\`\`
-
-2. **WAIT FOR USER DECISION:**
-   - **If approved:** Proceed to finalize track (step 5.0)
-   - **If denied with annotations:** Parse annotations into remediation tasks, execute fixes, regenerate walkthrough, and call tracklens_walkthrough again
-   - **If TrackLens unavailable:** Fall back to manual completion (skip to step 5.0)
-
-3. **REMEDIATION LOOP:**
-   - If user denies with annotations:
-     a. Parse each annotation into a remediation task
-     b. Add tasks to plan.md with - [ ] format
-     c. Execute remediation tasks
-     d. Regenerate walkthrough markdown
-     e. Call tracklens_walkthrough again
-     f. Loop until approved or max 3 iterations
-
-4. **MINIMAL TEXT FALLBACK:**
-   If TrackLens UI is unavailable and manual review is needed:
-   - Generate text-based walkthrough summary
-   - Present as markdown in chat
-   - Ask for approval: "Does this walkthrough look complete? (1) Approve, (2) Request changes"
+${tracklensSection}
 
 ## 5.0 FINALIZE TRACK
 
-After walkthrough approval:` : `
-## 4.0 FINALIZE TRACK
-
-After completing all tasks:`}
+After walkthrough approval:
 
 1. Update track status to complete:
    - Change \`## [~] Track: ...\` to \`## [x] Track: ...\`
@@ -323,21 +330,15 @@ After completing all tasks:`}
 - **Update checkboxes** in plan.md as work progresses
 - **Follow Critical Think templates** for quality assurance
 
-## 7.0 TRACKLENS INTEGRATION
+${isTrackLensEnabled() ? `## 7.0 TRACKLENS INTEGRATION
 
-**TrackLens Walkthrough Status:** ${trackLensEnabled ? "ENABLED" : "DISABLED"}
-${trackLensEnabled ? `
 - All completed tracks require walkthrough review
 - User can approve, deny with feedback, or request changes
-- Review/denial loop continues until user approves
+- Review/denial loop continues until user approves` : `## 7.0 MANUAL REVIEW
 
-**Toggle TrackLens Behavior:**
-- To disable walkthrough reviews: Use \`/tracklens off\` command
-- To re-enable walkthrough reviews: Use \`/tracklens on\` command
-` : `
-- Walkthrough reviews are currently DISABLED
-- To re-enable walkthrough reviews: Use \`/tracklens on\` command
-`}
+- All completed tracks require summary review
+- Present walkthrough summary for user approval
+- Use \`/tracklens on\` to enable TrackLens integration`}
 
 ## 6.0 TOOL MAPPING
 

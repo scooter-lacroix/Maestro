@@ -8,9 +8,9 @@ use ratatui::{
     Frame,
 };
 
-use super::wizard::{SetupWizard, WizardStep};
 #[cfg(test)]
 use super::wizard::ProviderChoice;
+use super::wizard::{SetupWizard, WizardStep};
 
 /// Render the provider selection step
 pub fn render_provider_selection(wizard: &SetupWizard, frame: &mut Frame, area: Rect) {
@@ -46,20 +46,16 @@ fn render_header(frame: &mut Frame, area: Rect, wizard: &SetupWizard) {
     );
 
     let header_lines = vec![
-        Line::from(vec![
-            Span::styled(
-                step_text,
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "Choose how MaestroClaw connects to LLM models.",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            step_text,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![Span::styled(
+            "Choose how MaestroClaw connects to LLM models.",
+            Style::default().fg(Color::DarkGray),
+        )]),
         Line::from(""),
     ];
 
@@ -277,10 +273,22 @@ mod tests {
 
         let content = buffer_to_string(terminal.backend());
         // Key UI elements must be present even at 40-col width
-        assert!(content.contains("OpenAI"), "Buffer should contain OpenAI provider label");
-        assert!(content.contains("Anthropic"), "Buffer should contain Anthropic provider label");
-        assert!(content.contains("Providers"), "Buffer should contain list title");
-        assert!(content.contains("→"), "Buffer should contain selection arrow");
+        assert!(
+            content.contains("OpenAI"),
+            "Buffer should contain OpenAI provider label"
+        );
+        assert!(
+            content.contains("Anthropic"),
+            "Buffer should contain Anthropic provider label"
+        );
+        assert!(
+            content.contains("Providers"),
+            "Buffer should contain list title"
+        );
+        assert!(
+            content.contains("→"),
+            "Buffer should contain selection arrow"
+        );
     }
 
     #[test]
@@ -313,7 +321,10 @@ mod tests {
             .unwrap();
 
         let content = buffer_to_string(terminal.backend());
-        assert!(content.contains("Anthropic"), "Second provider should be visible at 30 cols");
+        assert!(
+            content.contains("Anthropic"),
+            "Second provider should be visible at 30 cols"
+        );
     }
 }
 
@@ -419,7 +430,8 @@ mod key_handling_tests {
         let action = pane.handle_key(KeyCode::Enter);
 
         assert_eq!(
-            action, MaestroClawAction::WizardAdvanced,
+            action,
+            MaestroClawAction::WizardAdvanced,
             "Enter on unconfigured provider should still advance (selection-only)"
         );
         assert_eq!(
@@ -445,7 +457,11 @@ mod key_handling_tests {
         // Char keys are ignored in selection-only mode
         let action = pane.handle_key(KeyCode::Char('s'));
 
-        assert_eq!(action, MaestroClawAction::None, "Char key should produce None in selection-only mode");
+        assert_eq!(
+            action,
+            MaestroClawAction::None,
+            "Char key should produce None in selection-only mode"
+        );
     }
 
     #[test]
@@ -499,7 +515,8 @@ mod key_handling_tests {
         for key in ignored_keys {
             let action = pane.handle_key(key);
             assert_eq!(
-                action, MaestroClawAction::None,
+                action,
+                MaestroClawAction::None,
                 "Key {:?} should produce None action on ProviderSelection",
                 key
             );
@@ -703,7 +720,10 @@ mod channel_setup_tests {
         for _ in 0..channel_count {
             pane.handle_key(KeyCode::Down);
         }
-        assert!(pane.wizard.cursor == channel_count, "Should be on Continue button");
+        assert!(
+            pane.wizard.cursor == channel_count,
+            "Should be on Continue button"
+        );
 
         // Enter on Continue should advance to ToolSummary
         let action = pane.handle_key(KeyCode::Enter);
@@ -793,7 +813,7 @@ mod channel_setup_tests {
         pane.handle_key(KeyCode::Enter); // ToolDetection → PrimaryToolSelection
         pane.handle_key(KeyCode::Enter); // PrimaryToolSelection → ProviderSelection
         pane.handle_key(KeyCode::Enter); // ProviderSelection → ChannelSetup
-        // Advance past all channels to Continue
+                                         // Advance past all channels to Continue
         for _ in 0..ChannelType::all().len() {
             pane.handle_key(KeyCode::Down);
         }

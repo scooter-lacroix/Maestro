@@ -1,11 +1,66 @@
 //! Launch service for executing orchestrate commands
 //!
 //! Provides safe command execution with verification and timeout handling.
+//! Supports the canonical `AgentSessionLaunchSpec` pipeline with provider-aware
+//! suppression and overlap-matrix diagnostics.
 
-use std::process::{Command, Child};
+use super::pane::CommandArgs;
+use leindex_core::provider_boundary::{
+    CapabilityOverlapMatrix, ProviderStatus, RuntimeDiagnostics, ToolSuppressionPolicy,
+};
+use std::collections::BTreeMap;
+use std::process::{Child, Command};
 use std::thread;
 use std::time::Duration;
-use super::pane::CommandArgs;
+
+/// Provider-aware context attached to a launch for suppression and diagnostics.
+#[derive(Debug, Clone)]
+pub struct LaunchProviderContext {
+    /// Suppression policy derived from the overlap matrix at launch time.
+    pub suppression_policy: ToolSuppressionPolicy,
+    /// Overlap matrix snapshot used to derive the suppression policy.
+    pub overlap_matrix: CapabilityOverlapMatrix,
+    /// Runtime diagnostics captured at launch time.
+    pub runtime_diagnostics: RuntimeDiagnostics,
+    /// Environment overrides to inject into the child process.
+    pub environment_overrides: BTreeMap<String, String>,
+}
+
+impl LaunchProviderContext {
+    /// Build a provider context from a suppression policy and overlap matrix.
+    pub fn from_policy_and_matrix(
+        suppression_policy: ToolSuppressionPolicy,
+        overlap_matrix: CapabilityOverlapMatrix,
+    ) -> Self {
+        let runtime_diagnostics = RuntimeDiagnostics {
+            captured_at: chrono::Utc::now(),
+            aggregate_status: ProviderStatus::Healthy,
+            suppressed_count: suppression_policy.suppressed_tools.len(),
+            analysis_preferred_count: suppression_policy.analysis_preferred_tools.len(),
+            memory_preferred_count: suppression_policy.memory_preferred_tools.len(),
+            retained_count: suppression_policy.retained_maestro_tools.len(),
+            overlap_entry_count: overlap_matrix.entries.len(),
+            provider_details: vec![],
+        };
+
+        let mut environment_overrides = BTreeMap::new();
+        if let Ok(json) = suppression_policy.to_json_string() {
+            environment_overrides.insert("MAESTRO_TOOL_SUPPRESSION_POLICY".into(), json);
+        }
+
+        Self {
+            suppression_policy,
+            overlap_matrix,
+            runtime_diagnostics,
+            environment_overrides,
+        }
+    }
+
+    /// Human-readable diagnostics summary line.
+    pub fn diagnostics_summary(&self) -> String {
+        self.runtime_diagnostics.summary_line()
+    }
+}
 
 /// Result of a launch operation
 #[derive(Debug, Clone)]
@@ -18,26 +73,40 @@ pub enum LaunchResult {
 
 /// Request to launch an orchestrate command
 #[derive(Debug, Clone)]
-pub struct LaunchRequest{
+pub struct LaunchRequest {
     track_id: String,
     command: CommandArgs,
+    /// Optional provider-aware context for suppression and diagnostics.
+    provider_context: Option<LaunchProviderContext>,
 }
 
-impl LaunchRequest{
-    pub fn new(track_id: impl Into<String>, command: CommandArgs) -> Self{
-        Self{
+impl LaunchRequest {
+    pub fn new(track_id: impl Into<String>, command: CommandArgs) -> Self {
+        Self {
             track_id: track_id.into(),
             command,
+            provider_context: None,
         }
+    }
+
+    /// Attach a provider context to this launch request.
+    pub fn with_provider_context(mut self, ctx: LaunchProviderContext) -> Self {
+        self.provider_context = Some(ctx);
+        self
+    }
+
+    /// Get a reference to the provider context, if any.
+    pub fn provider_context(&self) -> Option<&LaunchProviderContext> {
+        self.provider_context.as_ref()
     }
 }
 
 /// Service for launching orchestrate commands with timeout support
-pub struct LaunchService{
+pub struct LaunchService {
     timeout_secs: u64,
 }
 
-impl LaunchService{
+impl LaunchService {
     /// Create a new LaunchService with default 30-second timeout
     pub fn new() -> Result<Self, String> {
         Ok(Self { timeout_secs: 30 })
@@ -72,7 +141,10 @@ impl LaunchService{
                     Err(_) => {
                         // Kill the process if it timed out
                         if let Err(e) = child.kill() {
-                            eprintln!("Warning: Failed to kill timed-out process {}: {}", request.track_id, e);
+                            eprintln!(
+                                "Warning: Failed to kill timed-out process {}: {}",
+                                request.track_id, e
+                            );
                         }
                         LaunchResult::Timeout {
                             track_id: request.track_id,
@@ -104,7 +176,11 @@ impl LaunchService{
                     }
                     // Sleep for the check interval or remaining time, whichever is shorter
                     let remaining = timeout - elapsed;
-                    let sleep_duration = if remaining < check_interval { remaining } else { check_interval };
+                    let sleep_duration = if remaining < check_interval {
+                        remaining
+                    } else {
+                        check_interval
+                    };
                     thread::sleep(sleep_duration);
                 }
                 Err(_) => return Err(()), // Error checking status
@@ -117,7 +193,15 @@ impl LaunchService{
         let mut cmd = Command::new(request.command.program());
         cmd.args(request.command.args());
 
-        let child = cmd.spawn()
+        // Inject provider context environment overrides if present
+        if let Some(ref ctx) = request.provider_context {
+            for (key, value) in &ctx.environment_overrides {
+                cmd.env(key, value);
+            }
+        }
+
+        let child = cmd
+            .spawn()
             .map_err(|e| format!("Failed to spawn process: {}", e))?;
 
         Ok(LaunchHandle {
@@ -125,7 +209,21 @@ impl LaunchService{
             child,
             timeout: self.timeout(),
             started_at: std::time::Instant::now(),
+            provider_context: request.provider_context,
         })
+    }
+
+    /// Launch with a full provider-aware context, returning both the handle
+    /// and a diagnostics summary suitable for toast/display.
+    pub fn launch_with_diagnostics(
+        &self,
+        request: LaunchRequest,
+    ) -> (Result<LaunchHandle, String>, Option<String>) {
+        let diagnostics = request
+            .provider_context
+            .as_ref()
+            .map(|ctx| ctx.diagnostics_summary());
+        (self.launch_async(request), diagnostics)
     }
 }
 
@@ -141,6 +239,8 @@ pub struct LaunchHandle {
     child: Child,
     timeout: Duration,
     started_at: std::time::Instant,
+    /// Provider context captured at launch time for diagnostics.
+    provider_context: Option<LaunchProviderContext>,
 }
 
 impl LaunchHandle {
@@ -152,6 +252,18 @@ impl LaunchHandle {
     /// Get the process ID
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// Get the provider context, if any was attached at launch.
+    pub fn provider_context(&self) -> Option<&LaunchProviderContext> {
+        self.provider_context.as_ref()
+    }
+
+    /// Get a diagnostics summary line, or None if no provider context.
+    pub fn diagnostics_summary(&self) -> Option<String> {
+        self.provider_context
+            .as_ref()
+            .map(|ctx| ctx.diagnostics_summary())
     }
 
     /// Check if the process has exceeded its timeout

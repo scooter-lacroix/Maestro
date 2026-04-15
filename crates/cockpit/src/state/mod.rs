@@ -9,6 +9,6 @@ pub mod types;
 pub use types::{
     AnalysisHistoryEntry, AnalysisMode, DashFocus, DashSessionEntry, DiagnosticViewState, HubFocus,
     InputMode, LspDiagnosticCounts, LspDiagnosticDetail, LspDiagnosticSummary, LspInstallerState,
-    LspStatusSummary, McpOption, MemoryInfo, ProjectInfo, SessionEntry, SettingsMenuKind,
-    SettingsOption, Stats,
+    LspStatusSummary, McpOption, MemoryAccessEvent, MemoryInfo, ProjectInfo, SessionEntry,
+    SettingsMenuKind, SettingsOption, Stats,
 };
