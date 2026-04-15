@@ -247,5 +247,5 @@ gemini_prompt*.txt
 # Debug/test output artifacts
 err.txt
 out.txt
-re
+# Test scripts
 test_tracklens_fix.sh

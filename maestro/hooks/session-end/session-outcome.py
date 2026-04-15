@@ -27,7 +27,9 @@ def get_hook_manager(**kwargs: Any) -> Any:
         func = getattr(module, "get_hook_manager", None)
         if callable(func):
             return func(**kwargs)
-    except Exception:
+    except Exception as e:
+        import sys
+        sys.stderr.write(f"Error getting hook manager: {e}\n")
         return None
     return None
 
@@ -93,7 +95,8 @@ def session_outcome_hook(input_data: dict) -> dict:
 
             memories = asyncio.run(_load_session_memories())
             memory_count = len(memories)
-        except Exception:
+        except Exception as e:
+            input_data["outcome_memory_load_error"] = str(e)
             memory_count = 0
 
         outcome["memory_count"] = memory_count
@@ -136,9 +139,8 @@ def session_outcome_hook(input_data: dict) -> dict:
                         await service.close()
 
                 asyncio.run(_store_session_outcome())
-            except Exception:
-                # Session might already be closed
-                pass
+            except Exception as e:
+                input_data["outcome_storage_error"] = str(e)
 
         # Create final ledger entry
         if current_session_id:
@@ -149,8 +151,8 @@ def session_outcome_hook(input_data: dict) -> dict:
                     content=summary,
                     metadata=outcome,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                input_data["outcome_ledger_error"] = str(e)
 
         # Create DB handoff so the next session can resume work
         try:
@@ -181,9 +183,8 @@ def session_outcome_hook(input_data: dict) -> dict:
                     )
 
             asyncio.run(_create_session_handoff())
-        except Exception:
-            # Handoff creation is best-effort
-            pass
+        except Exception as e:
+            input_data["outcome_handoff_error"] = str(e)
 
         input_data["session_outcome_captured"] = outcome
         input_data["outcome_summary"] = summary

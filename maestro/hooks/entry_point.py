@@ -124,7 +124,9 @@ def run_hook(phase: str, event_name: str):
                 if isinstance(next_steps, list) and next_steps:
                     ct_parts.append(f"Suggested next steps: {'; '.join(str(s) for s in next_steps[:5])}")
             if ct_result.get("revised_confidence") is not None:
-                ct_parts.append(f"Confidence: {ct_result['revised_confidence']:.0%}")
+                revised_confidence = ct_result['revised_confidence']
+                if isinstance(revised_confidence, (int, float)):
+                    ct_parts.append(f"Confidence: {revised_confidence:.0%}")
 
             if ct_parts:
                 ct_context = f"[Maestro Critical Think - {phase}]\n" + "\n".join(ct_parts)

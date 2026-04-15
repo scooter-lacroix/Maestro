@@ -47,6 +47,7 @@ class AsyncDatabaseManager:
         self.sync_session_factory: Any = None
         self._sync_fallback = False
         self._initialized = False
+        self._sqlite_pragmas_registered = False
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -88,6 +89,7 @@ class AsyncDatabaseManager:
         self.sync_session_factory = None
         self._sync_fallback = False
         self._initialized = False
+        self._sqlite_pragmas_registered = False
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncIterator[AsyncSession]:
@@ -111,6 +113,10 @@ class AsyncDatabaseManager:
         if not self.database_url.startswith("sqlite"):
             return
 
+        # Idempotency check: only register listener once
+        if self._sqlite_pragmas_registered:
+            return
+
         @event.listens_for(self.engine.sync_engine, "connect")
         def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # type: ignore[no-untyped-def]
             cursor = dbapi_connection.cursor()
@@ -119,6 +125,8 @@ class AsyncDatabaseManager:
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.execute("PRAGMA busy_timeout=10000")
             cursor.close()
+
+        self._sqlite_pragmas_registered = True
 
     @property
     def initialized(self) -> bool:

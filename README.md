@@ -871,21 +871,6 @@ Quick validation:
 - Local install branch safety: `git branch --show-current` before and after `./install.sh`
 - Finalized `main` build: `bun run build:tracklens && cargo test --workspace`
 
-Validate the finalized build on `main` with:
-
-```bash
-git clone --branch main https://github.com/scooter-lacroix/Maestro.git
-cd Maestro
-bun install
-bun run build:tracklens
-cargo test --workspace
-```
-
-Quick validation:
-- Remote install entrypoint: `curl -sSL https://raw.githubusercontent.com/scooter-lacroix/Maestro/main/install.sh | bash`
-- Local install branch safety: `git branch --show-current` before and after `./install.sh`
-- Finalized `main` build: `bun run build:tracklens && cargo test --workspace`
-
 ## Contributing
 
 Contributions are welcome! Please read our contributing guidelines and submit pull requests to the main repository.

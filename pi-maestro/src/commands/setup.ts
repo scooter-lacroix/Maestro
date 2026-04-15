@@ -164,7 +164,8 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
       } else if (result.approved) {
         // If user edited content, apply edits to the files
         if (result.edited_content) {
-          // Parse edited content back into individual docs
+          // Parse edited content back into individual docs.
+          // Expected format: each section separated by "\n---\n" (newline, 3 dashes, newline)
           const sections = result.edited_content.split(/\n---\n/);
           for (const section of sections) {
             const trimmed = section.trim();

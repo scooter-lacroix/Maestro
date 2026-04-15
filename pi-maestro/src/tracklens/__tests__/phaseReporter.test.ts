@@ -8,7 +8,7 @@
  * - Polling stops when phase reaches "decided"
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import {
   startPhaseReporter,
   type TrackLensReportedPhase,

@@ -5286,7 +5286,7 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - manual refresh
                                     if app.ktop_state.is_some() {
-                                        app.ktop_state.as_mut().unwrap().mark_refreshed();
+                                        app.ktop_state.as_mut().expect("ktop_state checked above").mark_refreshed();
                                         app.status_message = "Krustop refreshed".to_string();
                                     }
                                 } else if app.tab_index == tabs::LSPS {

@@ -652,7 +652,7 @@ impl LspManager {
         {
             let running = self.running_lsps.read().await;
             if let Some(existing) = running.get(&lsp_key) {
-                if existing.status == LspStatus::Running {
+                if matches!(existing.status, LspStatus::Running | LspStatus::Starting) {
                     debug!(
                         "LSP '{}' already running for session '{}'",
                         lsp_type.display_name(),

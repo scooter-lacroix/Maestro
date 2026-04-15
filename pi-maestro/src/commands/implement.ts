@@ -340,7 +340,7 @@ ${isTrackLensEnabled() ? `## 7.0 TRACKLENS INTEGRATION
 - Present walkthrough summary for user approval
 - Use \`/tracklens on\` to enable TrackLens integration`}
 
-## 6.0 TOOL MAPPING
+## 7.0 TOOL MAPPING
 
 **File Operations:**
 - **Read** → Read tool

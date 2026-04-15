@@ -253,17 +253,6 @@ class StandaloneNexusClient:
                 "returncode": fallback.returncode,
             }
 
-        return {
-            "success": True,
-            "query": query,
-            "agent": agent,
-            "results": parsed,
-            "memory_ids": [item["id"] for item in parsed if isinstance(item, dict) and "id" in item],
-            "stdout": recall.stdout,
-            "stderr": recall.stderr,
-            "returncode": recall.returncode,
-        }
-
     async def retrieve_project_context(self, project_path: str, limit: int = 10) -> list[dict[str, Any]]:
         return await self._query_context_by_scope(
             "maestro_project_id = :scope_id",
@@ -608,10 +597,10 @@ class StandaloneNexusClient:
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=30.0)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             proc.kill()
             await proc.wait()
-            raise TimeoutError("Subprocess timed out after 30 seconds")
+            raise TimeoutError("Subprocess timed out after 30 seconds") from e
         stdout = stdout_b.decode("utf-8", errors="replace").strip()
         stderr = stderr_b.decode("utf-8", errors="replace").strip()
         return NexusCommandResult(

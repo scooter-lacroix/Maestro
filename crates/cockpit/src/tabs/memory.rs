@@ -331,8 +331,8 @@ fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
             let expand_icon = if m.is_expanded { " v " } else { " > " };
 
             // Create preview content (truncated if too long)
-            let preview = if m.content.len() > PREVIEW_LEN {
-                format!("{}...", &m.content[..PREVIEW_LEN])
+            let preview = if m.content.chars().count() > PREVIEW_LEN {
+                format!("{}...", m.content.chars().take(PREVIEW_LEN).collect::<String>())
             } else {
                 m.content.clone()
             };
@@ -779,8 +779,8 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
         Line::from(vec![
             Span::styled("anchor ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                if selected.content.len() > 26 {
-                    format!("{}...", &selected.content[..26])
+                if selected.content.chars().count() > 26 {
+                    format!("{}...", selected.content.chars().take(26).collect::<String>())
                 } else {
                     selected.content.clone()
                 },
@@ -873,15 +873,18 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
             ),
         ]));
 
+        // Cache graph navigation targets before the loop
+        let graph_nav_targets = graph_navigation_targets(app);
+
         for idx in indices {
             let memory = &app.memories[idx];
-            let cursor_idx = graph_navigation_targets(app)
+            let cursor_idx = graph_nav_targets
                 .iter()
                 .position(|candidate| *candidate == idx)
                 .unwrap_or(0);
             let is_graph_selected = cursor_idx == graph_cursor;
-            let preview = if memory.content.len() > 28 {
-                format!("{}...", &memory.content[..28])
+            let preview = if memory.content.chars().count() > 28 {
+                format!("{}...", memory.content.chars().take(28).collect::<String>())
             } else {
                 memory.content.clone()
             };
