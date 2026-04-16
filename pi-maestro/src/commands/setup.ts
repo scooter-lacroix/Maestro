@@ -7,11 +7,7 @@
  */
 
 import type { ExtensionAPI } from "../types";
-import {
-  findMaestroProjectRoot,
-  writeMaestroFile,
-  maestroProjectExists,
-} from "../lib/project";
+import { writeMaestroFile } from "../lib/project";
 import { initCriticalThinkTemplates } from "../lib/criticalThink";
 import * as path from "path";
 import * as fs from "fs";
@@ -22,7 +18,7 @@ import * as fs from "fs";
 export function registerSetup(pi: ExtensionAPI, commandName: string) {
   pi.registerCommand(commandName, {
     description: "Initialize/refresh maestro project structure",
-    handler: async (args, ctx) => {
+    handler: async (_args, ctx) => {
       const root = process.cwd();
 
       // Check if maestro directory exists and what files are present
@@ -105,7 +101,7 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
   writeMaestroFile(root, "product.md", productMd);
 
   // Generate tech-stack.md
-  const techStackMd = await generateTechStackMd(root, ctx);
+  const techStackMd = await generateTechStackMd(root);
   writeMaestroFile(root, "tech-stack.md", techStackMd);
 
   // Generate workflow.md
@@ -183,12 +179,20 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
         // Parse edited content back into individual docs.
         // Expected format: each section separated by "\n---\n" (newline, 3 dashes, newline)
         const sections = result.edited_content.split(/\n\n---\n\n/);
+        let parsedCount = 0;
         for (const section of sections) {
           const trimmed = section.trim();
           const docMatch = trimmed.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
           if (docMatch) {
             writeMaestroFile(root, `${docMatch[1]}.md`, docMatch[2].trim());
+            parsedCount++;
           }
+        }
+        if (parsedCount < sections.length) {
+          ctx.ui.notify(
+            `TrackLens: ${sections.length - parsedCount} section(s) could not be parsed and were skipped`,
+            "warning"
+          );
         }
       }
   } catch (error) {
@@ -294,7 +298,7 @@ ${isBrownfield ? "Brownfield (existing codebase)" : "Greenfield (new project)"}
 /**
  * Generate tech-stack.md content
  */
-async function generateTechStackMd(root: string, ctx: any): Promise<string> {
+async function generateTechStackMd(root: string): Promise<string> {
   // Detect common technologies
   const techs: string[] = [];
 

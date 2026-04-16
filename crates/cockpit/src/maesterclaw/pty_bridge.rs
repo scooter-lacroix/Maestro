@@ -96,6 +96,14 @@ impl PtyBridge {
                         }
                     }
                     Err(err) => {
+                        // On Linux, EIO is normal PTY shutdown (slave closed)
+                        if err.raw_os_error() == Some(libc::EIO) {
+                            if !pending.is_empty() {
+                                let line = String::from_utf8_lossy(&pending).to_string();
+                                let _ = tx.send(PtyEvent::OutputLine(line));
+                            }
+                            break;
+                        }
                         let _ = tx.send(PtyEvent::Error(err.to_string()));
                         break;
                     }

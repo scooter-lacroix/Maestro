@@ -89,6 +89,8 @@ class SkillLoader:
             # Determine category from relative directory structure
             rel = skill_path.relative_to(self.skills_dir)
             parts = list(rel.parts)
+            if not parts:
+                return None
             # The skill name is always the leaf directory name
             name = parts[-1]
             # Category is the first ancestor under skills_dir, if any

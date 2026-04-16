@@ -106,9 +106,9 @@ impl NexusRuntimeBridge {
             self.event_payload(profile, reason).to_string(),
         );
 
-        // Spawn the process with piped stdout/stderr so we can capture diagnostic output
+        // Spawn the process with piped stderr for diagnostics; stdout not consumed so use null
         let mut child = command
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
             .context("failed to invoke nexus bridge")?;

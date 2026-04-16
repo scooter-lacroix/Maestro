@@ -1225,11 +1225,14 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             None => CheckResult {
                 name: "Standalone Nexus provider health".to_string(),
                 passed: false,
-                message: StandaloneNexusProvider::supported_install_methods()
-                    .into_iter()
-                    .map(NexusInstallMethod::install_hint)
-                    .collect::<Vec<_>>()
-                    .join(" | "),
+                message: format!(
+                    "Nexus not found. Install with: {}",
+                    StandaloneNexusProvider::supported_install_methods()
+                        .into_iter()
+                        .map(NexusInstallMethod::install_hint)
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ),
             },
         }
     }

@@ -704,10 +704,6 @@ fn start_maestroclaw_session(
     app: &mut App,
     session: leindex_core::memory::models::Session,
 ) -> anyhow::Result<()> {
-    if let Some(mut runtime) = app.maestroclaw_runtime.take() {
-        let _ = runtime.stop();
-    }
-
     let launch = build_maestroclaw_launch(&session)?;
     // Redact command arguments for UI display to avoid leaking secrets
     let command_preview = session
@@ -742,6 +738,11 @@ fn start_maestroclaw_session(
     let mut runtime = ClawLoop::launch(claw_session.clone(), launch)?;
     let (cols, rows) = crossterm::terminal::size().unwrap_or((160, 48));
     let _ = runtime.resize(rows, cols);
+
+    // Stop old runtime only after new one launched successfully
+    if let Some(mut old_runtime) = app.maestroclaw_runtime.take() {
+        let _ = old_runtime.stop();
+    }
 
     app.maestroclaw_pane.selected_session = app
         .sessions
@@ -2035,7 +2036,10 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
                     crate::maesterclaw::SessionEntry {
                         id: s.session_id.clone(),
                         title: s.title.clone(),
-                        preview: s.command.as_deref().unwrap_or("(no command)").to_string(),
+                        preview: s.command.as_deref()
+                            .and_then(|cmd| cmd.split_whitespace().next())
+                            .unwrap_or("(no command)")
+                            .to_string(),
                         source: s.tool.as_deref().unwrap_or("unknown").to_string(),
                         last_active,
                         turn_count: 0,
@@ -2358,8 +2362,10 @@ fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
+    // Include PID to avoid predictable path and symlink races
+    let pid = std::process::id();
     let mut path = std::env::temp_dir();
-    path.push(format!("maestro-managed-mcp-{sanitized}.toml"));
+    path.push(format!("maestro-managed-mcp-{sanitized}-{pid}.toml"));
     path
 }
 
@@ -3975,12 +3981,8 @@ async fn run_app<B: Backend>(
                                         if c == 'y' || c == 'Y' {
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
-                                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
-                                                        Ok(m) => m,
-                                                        Err(e) => {
-                                                            app.status_message = format!("Failed to create session manager: {}", e);
-                                                            continue;
-                                                        }
+                                                    let Some(manager) = app.create_session_manager(svc) else {
+                                                        continue;
                                                     };
                                                     match manager.kill_session(&id) {
                                                         Ok(()) => {

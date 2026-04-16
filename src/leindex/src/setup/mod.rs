@@ -2451,10 +2451,17 @@ fn verify_installed_system(install_path: &str, selected_tools: &[String], leinde
     }
     logs.push("Verified Maestro MCP pool surface (serve/proxy/tool-search)".to_string());
 
-    require_file(
-        &local_bin.join(binary_name_for_platform("maestro-cockpit")),
-        "maestro-cockpit binary",
-    )?;
+    let cockpit_bin = local_bin.join(binary_name_for_platform("maestro-cockpit"));
+    require_file(&cockpit_bin, "maestro-cockpit binary")?;
+    // Cockpit is a TUI (no --help), so verify it is executable instead
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&cockpit_bin)?.permissions().mode();
+        if mode & 0o111 == 0 {
+            anyhow::bail!("maestro-cockpit binary is not executable");
+        }
+    }
     logs.push("Verified maestro-cockpit runtime binary".to_string());
 
     let gateway_help = command_output(
