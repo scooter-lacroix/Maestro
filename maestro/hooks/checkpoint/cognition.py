@@ -33,10 +33,9 @@ def checkpoint_hook(input_data: dict) -> dict:
             or os.environ.get("MAESTRO_PROJECT_PATH", "")
         ).strip()
 
-        if not session_id or not project_path:
-            return input_data
-
         # Invoke CriticalThinkEngine for post-checkpoint analysis (best-effort)
+        # Run before persistence guard so analysis is available even when
+        # session_id or project_path is missing.
         try:
             from maestro.critical_think.core import CriticalThinkEngine
 
@@ -69,6 +68,9 @@ def checkpoint_hook(input_data: dict) -> dict:
         except Exception as e:
             # Critical think is best-effort — don't fail the checkpoint
             input_data["critical_think_error"] = str(e)
+
+        if not session_id or not project_path:
+            return input_data
 
         # Single event loop for all persistence operations
         async def _store_all() -> None:
@@ -119,7 +121,7 @@ def checkpoint_hook(input_data: dict) -> dict:
             asyncio.run(_store_all())
             input_data["checkpoint_cognition_scheduled"] = True
         except Exception as e:
-            input_data["ct_storage_error"] = str(e)
+            input_data["checkpoint_storage_error"] = str(e)
 
         return input_data
     except Exception as exc:

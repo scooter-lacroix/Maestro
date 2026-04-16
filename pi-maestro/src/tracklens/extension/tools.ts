@@ -235,6 +235,13 @@ After review, provide your feedback or approval.`,
 
       // Start TrackLens server with the markdown content
       try {
+        // Validate trackId early to avoid discarding completed reviews later
+        const validTrackId = trackId
+          && !trackId.includes("..")
+          && !isAbsolute(trackId)
+          && !trackId.includes("/")
+          && !trackId.includes("\\");
+
         const server = await startTrackLensServer({
           plan: markdown,
           origin: "pi-maestro",
@@ -248,14 +255,7 @@ After review, provide your feedback or approval.`,
         server.stop();
 
         // Persist review history if track directory is available
-        if (trackId && ctx.cwd) {
-          // Sanitize trackId to prevent path traversal and unexpected directories
-          if (trackId.includes("..") || isAbsolute(trackId) || trackId.includes("/") || trackId.includes("\\")) {
-            return {
-              content: [{ type: "text", text: `Error: Invalid track ID: ${trackId}` }],
-              details: { approved: false },
-            };
-          }
+        if (validTrackId && ctx.cwd) {
           const { findMaestroProjectRoot } = await import("../../lib/project");
           const root = findMaestroProjectRoot(ctx.cwd);
           if (root) {

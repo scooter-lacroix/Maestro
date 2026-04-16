@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::os::unix::process::CommandExt;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -602,15 +603,18 @@ result = executor.execute_phase(phase, payload)
 json.dump(result, sys.stdout)
 "#;
 
-    for python in ["python3", "python"] {
+    'interpreter: for python in ["python3", "python"] {
         let phase_owned = phase.to_owned();
         let project_root_owned = project_root.to_path_buf();
         let payload_owned = payload.clone();
 
         let (pid_tx, pid_rx) = std::sync::mpsc::channel();
 
+        // Thread returns Err(()) on spawn failure (so we try next interpreter)
+        // or Ok(Option<String>) for spawn success (None = hook failed).
         let handle = thread::spawn(move || {
             let mut child = match Command::new(python)
+                .process_group(0) // isolate child in its own process group
                 .arg("-c")
                 .arg(script)
                 .arg(&phase_owned)
@@ -621,12 +625,12 @@ json.dump(result, sys.stdout)
                 .spawn()
             {
                 Ok(child) => child,
-                Err(_) => return None,
+                Err(_) => return Err(()),
             };
 
-            if let Some(mut stdin) = child.stdin.take() {
+            if let Some(mut child_stdin) = child.stdin.take() {
                 if let Ok(json) = serde_json::to_string(&payload_owned) {
-                    let _ = stdin.write_all(json.as_bytes());
+                    let _ = child_stdin.write_all(json.as_bytes());
                 }
             }
 
@@ -635,7 +639,7 @@ json.dump(result, sys.stdout)
 
             match child.wait_with_output() {
                 Ok(output) if output.status.success() => {
-                    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
                 }
                 Ok(output) => {
                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -646,9 +650,9 @@ json.dump(result, sys.stdout)
                             stderr.trim()
                         );
                     }
-                    None
+                    Ok(None)
                 }
-                _ => None,
+                _ => Ok(None),
             }
         });
 
@@ -660,13 +664,12 @@ json.dump(result, sys.stdout)
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 eprintln!("Hook executor phase '{}' timed out after {:?}", phase, HOOK_TIMEOUT);
-                // Kill orphaned child process tree to prevent resource leaks
+                // Kill orphaned child process tree to prevent resource leaks.
+                // process_group(0) ensures child is in its own PG, so -pid_raw
+                // safely targets only the child's group.
                 if let Some(pid) = child_pid {
                     let pid_raw = pid as i32;
-                    // Send SIGKILL to the process group (negative PID) to kill the
-                    // child process and any subprocesses it spawned.
                     unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
-                    // Also kill the process directly in case setpgid wasn't called
                     unsafe { libc::kill(pid_raw, libc::SIGKILL); }
                 }
                 return None;
@@ -677,8 +680,9 @@ json.dump(result, sys.stdout)
 
             if handle.is_finished() {
                 match handle.join() {
-                    Ok(Some(result)) => return Some(result),
-                    Ok(None) => return None,
+                    Ok(Ok(Some(result))) => return Some(result),
+                    Ok(Ok(None)) => return None, // hook ran but failed
+                    Ok(Err(())) => continue 'interpreter, // spawn failed, try next interpreter
                     Err(_) => {
                         eprintln!("Hook executor phase '{}' thread panicked", phase);
                         return None;
