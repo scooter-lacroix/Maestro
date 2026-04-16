@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -613,8 +614,10 @@ json.dump(result, sys.stdout)
         // Thread returns Err(()) on spawn failure (so we try next interpreter)
         // or Ok(Option<String>) for spawn success (None = hook failed).
         let handle = thread::spawn(move || {
-            let mut child = match Command::new(python)
-                .process_group(0) // isolate child in its own process group
+            let mut cmd = Command::new(python);
+            #[cfg(unix)]
+            cmd.process_group(0); // isolate child in its own process group
+            let mut child = match cmd
                 .arg("-c")
                 .arg(script)
                 .arg(&phase_owned)
@@ -668,9 +671,12 @@ json.dump(result, sys.stdout)
                 // process_group(0) ensures child is in its own PG, so -pid_raw
                 // safely targets only the child's group.
                 if let Some(pid) = child_pid {
-                    let pid_raw = pid as i32;
-                    unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
-                    unsafe { libc::kill(pid_raw, libc::SIGKILL); }
+                    #[cfg(unix)]
+                    {
+                        let pid_raw = pid as i32;
+                        unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
+                        unsafe { libc::kill(pid_raw, libc::SIGKILL); }
+                    }
                 }
                 return None;
             }

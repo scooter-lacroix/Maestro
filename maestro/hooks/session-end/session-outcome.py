@@ -28,7 +28,6 @@ def get_hook_manager(**kwargs: Any) -> Any:
         if callable(func):
             return func(**kwargs)
     except Exception as e:
-        import sys
         sys.stderr.write(f"Error getting hook manager: {e}\n")
         return None
     return None

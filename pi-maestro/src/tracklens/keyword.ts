@@ -59,7 +59,8 @@ function findKeywordTriggerPositions(
   text: string,
   keyword: string,
 ): TriggerPosition[] {
-  const re = new RegExp(keyword, "i");
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(escaped, "i");
   if (!re.test(text)) return [];
   if (text.trimStart().startsWith("/")) return []; // Slash command — don't trigger
 

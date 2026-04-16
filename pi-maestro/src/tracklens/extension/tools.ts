@@ -16,7 +16,7 @@
 import type { ExtensionAPI } from "../../types";
 import { readFileSync, existsSync } from "fs";
 import { resolve, isAbsolute } from "path";
-import { execSync, execFileSync } from "child_process";
+import { execFileSync } from "child_process";
 import { runRemediationLoop } from "../walkthrough/remediation";
 import { recordRecentDocument } from "../recentDoc";
 import { formatDenialForAgent } from "../feedback";
@@ -688,14 +688,14 @@ After review, provide your feedback or approval.`,
       try {
         if (files && files.length > 0) {
           // Use args array to avoid shell injection
-          diffContent = execFileSync("git", ["diff", gitRef, "--", ...files], {
+          diffContent = execFileSync("git", ["diff", "--no-ext-diff", "--no-textconv", gitRef, "--", ...files], {
             cwd: ctx.cwd,
             encoding: "utf-8",
             maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
           });
         } else {
           // No files specified, diff everything
-          diffContent = execFileSync("git", ["diff", gitRef], {
+          diffContent = execFileSync("git", ["diff", "--no-ext-diff", "--no-textconv", gitRef], {
             cwd: ctx.cwd,
             encoding: "utf-8",
             maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large diffs
