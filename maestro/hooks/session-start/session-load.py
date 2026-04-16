@@ -106,9 +106,9 @@ def session_load_hook(input_data: dict) -> dict:
         try:
             from maestro.memory.coordination.handoffs import HandoffHandler
 
-            async def _resume_handoffs() -> list[dict[str, Any]]:
-                from maestro.memory.database.session import get_session
-                async with get_session() as db_session:
+            def _resume_handoffs() -> list[dict[str, Any]]:
+                from maestro.memory.database.models import get_session_context
+                with get_session_context() as db_session:
                     handler = HandoffHandler(db_session)
                     # Resolve project_path to project_id for scoped handoff pickup
                     project_id = None
@@ -116,7 +116,7 @@ def session_load_hook(input_data: dict) -> dict:
                         try:
                             from maestro.memory.database.models import MaestroProject
                             from sqlalchemy import select
-                            result = await db_session.execute(
+                            result = db_session.execute(
                                 select(MaestroProject).where(MaestroProject.project_path == project_path)
                             )
                             project = result.scalars().first()
@@ -143,7 +143,7 @@ def session_load_hook(input_data: dict) -> dict:
                         handler.pick_handoff(h.handoff_id, session_id, agent_id)
                     return results
 
-            handoffs = asyncio.run(_resume_handoffs())
+            handoffs = _resume_handoffs()
             if handoffs:
                 input_data["resumed_handoffs"] = handoffs
         except Exception as e:

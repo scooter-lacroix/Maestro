@@ -681,7 +681,7 @@ mkdir -p "$PY_PLUGIN_DIR"
 for mod in memory utils config critical_think; do
     if [[ -d "$INSTALL_DIR/maestro/$mod" ]]; then
         # Remove existing module to prevent cp -a nesting on reinstall
-        rm -rf "$PY_PLUGIN_DIR/$mod"
+        rm -rf "${PY_PLUGIN_DIR:?}/$mod"
         cp -a "$INSTALL_DIR/maestro/$mod" "$PY_PLUGIN_DIR/$mod"
         log "[OK] Copied maestro/$mod/"
     else

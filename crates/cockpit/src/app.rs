@@ -581,9 +581,15 @@ fn fallback_maestroclaw_command(session: &leindex_core::memory::models::Session)
         _ => {
             // Use appropriate shell for the platform
             if cfg!(windows) {
-                std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+                std::env::var("COMSPEC")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| "cmd.exe".to_string())
             } else {
-                std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string())
+                std::env::var("SHELL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| "bash".to_string())
             }
         }
     }
@@ -2362,10 +2368,14 @@ fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
-    // Include PID to avoid predictable path and symlink races
-    let pid = std::process::id();
-    let mut path = std::env::temp_dir();
-    path.push(format!("maestro-managed-mcp-{sanitized}-{pid}.toml"));
+    // Use tempfile for atomic creation with random suffix (avoids TOCTOU/symlink races)
+    let named = tempfile::Builder::new()
+        .prefix(&format!("maestro-mcp-{sanitized}-"))
+        .suffix(".toml")
+        .tempfile()
+        .expect("failed to create temp manifest file");
+    // Keep the file on disk (editor needs to read/write it); path is returned
+    let (_, path) = named.keep().expect("failed to persist temp manifest");
     path
 }
 
@@ -3982,6 +3992,9 @@ async fn run_app<B: Backend>(
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
                                                     let Some(manager) = app.create_session_manager(svc) else {
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_session_id = None;
+                                                        app.target_group_path = None;
                                                         continue;
                                                     };
                                                     match manager.kill_session(&id) {

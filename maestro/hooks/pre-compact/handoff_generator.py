@@ -184,9 +184,9 @@ def generate_handoff(input_data: dict) -> dict:
 
         async def _persist_compaction_handoff() -> None:
             """Create DB handoff and store in memory in one event loop."""
-            # Part 1: Create DB handoff record
-            from maestro.memory.database.session import get_session
-            async with get_session() as db_session:
+            # Part 1: Create DB handoff record (sync SQLAlchemy)
+            from maestro.memory.database.models import get_session_context
+            with get_session_context() as db_session:
                 handler = HandoffHandler(db_session)
                 context = {
                     "compaction_count": compaction_count,
@@ -207,7 +207,7 @@ def generate_handoff(input_data: dict) -> dict:
                     context_data=context,
                 )
 
-            # Part 2: Store in Nexus memory
+            # Part 2: Store in Nexus memory (async)
             service = MaestroMemoryService()
             await service.initialize()
             try:

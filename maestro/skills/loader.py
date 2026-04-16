@@ -118,13 +118,12 @@ class SkillLoader:
         """
         skills: Dict[str, SkillDefinition] = {}
 
-        # Collect all potential skill files (primary + fallback names)
-        skill_files = set(self.skills_dir.rglob("SKILL.md"))
+        # Collect unique skill directories (primary + fallback names)
+        skill_paths = {p.parent for p in self.skills_dir.rglob("SKILL.md")}
         for fallback_name in ["skill.md", "README.md"]:
-            skill_files.update(self.skills_dir.rglob(fallback_name))
+            skill_paths.update(p.parent for p in self.skills_dir.rglob(fallback_name))
 
-        for skill_file in sorted(skill_files):
-            skill_path = skill_file.parent
+        for skill_path in sorted(skill_paths):
 
             # Skip infrastructure directories at root of skills dir
             rel_parts = skill_path.relative_to(self.skills_dir).parts

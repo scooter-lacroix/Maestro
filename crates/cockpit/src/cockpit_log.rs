@@ -403,9 +403,16 @@ pub fn tail_log(log_path: &Path, n: usize) -> Result<Vec<String>> {
     let text = String::from_utf8_lossy(&buf);
     let mut lines_iter = text.lines();
 
-    // If we sought into the middle of the file, skip the first (potentially partial) line.
+    // Skip first line only if the seek landed mid-line (not on a line boundary)
     if start > 0 {
-        lines_iter.next();
+        let mut prev = [0u8; 1];
+        file.seek(SeekFrom::Start(start - 1))
+            .with_context(|| format!("Failed to seek in log file: {}", log_path.display()))?;
+        file.read_exact(&mut prev)
+            .with_context(|| format!("Failed to read log file: {}", log_path.display()))?;
+        if prev[0] != b'\n' {
+            lines_iter.next();
+        }
     }
 
     let lines: Vec<String> = lines_iter
