@@ -52,6 +52,8 @@ def main() -> None:
         input_data = json.loads(raw_input) if raw_input.strip() else {}
     except json.JSONDecodeError:
         input_data = {}
+    if not isinstance(input_data, dict):
+        input_data = {}
     result = check_should_continue(input_data)
     json.dump(result, sys.stdout)
 

@@ -392,7 +392,10 @@ fn parse_memory_access_history(
             }
 
             // Now apply defaults for the struct
-            let agent_id = raw_agent_id.unwrap_or("unknown").to_string();
+            let agent_id = raw_agent_id
+                .filter(|v| !v.is_empty())
+                .unwrap_or("unknown")
+                .to_string();
             let timestamp = raw_timestamp.unwrap_or("").to_string();
             let access_type = event
                 .get("access_type")
@@ -8025,9 +8028,7 @@ fn memory_graph_navigation_targets(app: &App) -> Vec<usize> {
             .then_with(|| app.memories[a.0].category.cmp(&app.memories[b.0].category))
             .then_with(|| app.memories[a.0].content.cmp(&app.memories[b.0].content))
     });
-    let mut targets = vec![selected_idx];
-    targets.extend(ranked.into_iter().map(|(idx, _, _)| idx));
-    targets
+    ranked.into_iter().map(|(idx, _, _)| idx).collect()
 }
 
 /// Render the memory relationship graph
@@ -8363,8 +8364,17 @@ fn memory_wrap_text(text: &str, max_width: usize) -> Vec<String> {
                 current_line = String::new();
             }
             if word.len() > max_width {
-                for chunk in word.as_bytes().chunks(max_width) {
-                    lines.push(String::from_utf8_lossy(chunk).to_string());
+                // Char-safe chunking to avoid splitting multi-byte UTF-8
+                let mut char_chunk = String::new();
+                for ch in word.chars() {
+                    if char_chunk.len() + ch.len_utf8() > max_width && !char_chunk.is_empty() {
+                        lines.push(char_chunk);
+                        char_chunk = String::new();
+                    }
+                    char_chunk.push(ch);
+                }
+                if !char_chunk.is_empty() {
+                    lines.push(char_chunk);
                 }
             } else {
                 current_line = word.to_string();

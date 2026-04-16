@@ -33,34 +33,7 @@ def review_hook(input_data: dict) -> dict:
             or os.environ.get("MAESTRO_PROJECT_PATH", "")
         ).strip()
 
-        if not session_id or not project_path:
-            return input_data
-
-        async def _store_review_data() -> None:
-            service = MaestroMemoryService()
-            await service.initialize()
-            try:
-                # Store review transition
-                await service.store_command_context(
-                    command="hook:review",
-                    project_path=project_path,
-                    context={
-                        "session_id": session_id,
-                        "track_id": input_data.get("track_id"),
-                        "task_id": input_data.get("task_id") or input_data.get("current_task_id"),
-                        "iteration": input_data.get("iteration"),
-                        "event": "review_transition",
-                        "review_point_reached": bool(input_data.get("review_point_reached", True)),
-                        "selected_cli": input_data.get("selected_cli") or os.environ.get("MAESTRO_SELECTED_CLI", ""),
-                    },
-                )
-            finally:
-                await service.close()
-
-        asyncio.run(_store_review_data())
-        input_data["review_cognition_scheduled"] = True
-
-        # Invoke CriticalThinkEngine for pre-review analysis
+        # Invoke CriticalThinkEngine for pre-review analysis (runs regardless of persistence)
         try:
             from maestro.critical_think.core import CriticalThinkEngine
 
@@ -118,6 +91,34 @@ def review_hook(input_data: dict) -> dict:
             # Critical think is best-effort — don't fail the review
             input_data["critical_think_error"] = str(e)
 
+        # Persist review transition to Nexus (requires session_id and project_path)
+        if session_id and project_path:
+            try:
+                async def _store_review_data() -> None:
+                    service = MaestroMemoryService()
+                    await service.initialize()
+                    try:
+                        await service.store_command_context(
+                            command="hook:review",
+                            project_path=project_path,
+                            context={
+                                "session_id": session_id,
+                                "track_id": input_data.get("track_id"),
+                                "task_id": input_data.get("task_id") or input_data.get("current_task_id"),
+                                "iteration": input_data.get("iteration"),
+                                "event": "review_transition",
+                                "review_point_reached": bool(input_data.get("review_point_reached", True)),
+                                "selected_cli": input_data.get("selected_cli") or os.environ.get("MAESTRO_SELECTED_CLI", ""),
+                            },
+                        )
+                    finally:
+                        await service.close()
+
+                asyncio.run(_store_review_data())
+                input_data["review_cognition_scheduled"] = True
+            except Exception as e:
+                input_data["review_persistence_error"] = str(e)
+
         return input_data
     except Exception as exc:
         input_data["hook_error"] = str(exc)
@@ -129,6 +130,8 @@ def main() -> None:
         raw_input = sys.stdin.read()
         input_data = json.loads(raw_input) if raw_input.strip() else {}
     except json.JSONDecodeError:
+        input_data = {}
+    if not isinstance(input_data, dict):
         input_data = {}
     result = review_hook(input_data)
     json.dump(result, sys.stdout)

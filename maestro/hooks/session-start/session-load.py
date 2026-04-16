@@ -122,8 +122,8 @@ def session_load_hook(input_data: dict) -> dict:
                             project = result.scalars().first()
                             if project:
                                 project_id = project.id
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            input_data["project_lookup_error"] = str(e)
                     if project_id is None:
                         return []
                     pickable = handler.get_pickable_handoffs(
@@ -164,6 +164,9 @@ def main() -> None:
         raw_input = sys.stdin.read()
         input_data = json.loads(raw_input) if raw_input.strip() else {}
     except json.JSONDecodeError:
+        input_data = {}
+
+    if not isinstance(input_data, dict):
         input_data = {}
 
     # Execute hook
