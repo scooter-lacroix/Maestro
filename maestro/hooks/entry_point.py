@@ -128,8 +128,16 @@ def run_hook(phase: str, event_name: str):
             if ct_result.get("revised_confidence") is not None:
                 revised_confidence = ct_result['revised_confidence']
                 if isinstance(revised_confidence, (int, float)):
-                    # Normalize to 0-1 range: if on 1-10 scale, divide by 10
-                    normalized = revised_confidence / 10 if revised_confidence > 1 else revised_confidence
+                    # Normalize to 0-1 range based on apparent scale
+                    if revised_confidence > 100:
+                        normalized = revised_confidence / 1000
+                    elif revised_confidence > 10:
+                        normalized = revised_confidence / 100
+                    elif revised_confidence > 1:
+                        normalized = revised_confidence / 10
+                    else:
+                        normalized = revised_confidence
+                    normalized = max(0.0, min(1.0, normalized))
                     ct_parts.append(f"Confidence: {normalized:.0%}")
 
             if ct_parts:

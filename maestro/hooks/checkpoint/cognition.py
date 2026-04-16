@@ -130,7 +130,11 @@ def checkpoint_hook(input_data: dict) -> dict:
 
 
 def main() -> None:
-    input_data = json.loads(sys.stdin.read())
+    try:
+        raw_input = sys.stdin.read()
+        input_data = json.loads(raw_input) if raw_input.strip() else {}
+    except json.JSONDecodeError:
+        input_data = {}
     result = checkpoint_hook(input_data)
     json.dump(result, sys.stdout)
 

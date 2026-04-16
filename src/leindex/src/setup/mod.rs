@@ -1755,31 +1755,6 @@ fn validate_nexus_provider(tx: &Sender<SetupEvent>, log: &mut Option<File>, meth
             setup_log_write(log, &format!("  [WARN] {}", msg));
         }
     }
-
-    // Validate nexus installation (read-only check)
-    match Command::new("nexus").arg("--version").output() {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            if out.status.success() {
-                let version = stdout.trim().lines().next().unwrap_or("unknown");
-                let _ = tx.send(SetupEvent::Log(format!("  [OK] nexus version: {}", version)));
-                setup_log_write(log, &format!("  [OK] nexus version: {}", version));
-            } else {
-                let msg = format!(
-                    "nexus --version failed: {}",
-                    if stderr.trim().is_empty() { &stdout } else { &stderr }.trim()
-                );
-                let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
-                setup_log_write(log, &format!("  [WARN] {}", msg));
-            }
-        }
-        Err(e) => {
-            let msg = format!("Could not execute nexus --version: {}", e);
-            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
-            setup_log_write(log, &format!("  [WARN] {}", msg));
-        }
-    }
 }
 
 fn home_dir() -> Result<PathBuf> {

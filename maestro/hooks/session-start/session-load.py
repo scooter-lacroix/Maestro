@@ -110,9 +110,20 @@ def session_load_hook(input_data: dict) -> dict:
                 from maestro.memory.database.session import get_session
                 async with get_session() as db_session:
                     handler = HandoffHandler(db_session)
-                    # Only resume handoffs when we can filter by project.
-                    # Without project_id, we'd pick up handoffs from unrelated projects.
-                    project_id = None  # TODO: resolve project_path to project_id
+                    # Resolve project_path to project_id for scoped handoff pickup
+                    project_id = None
+                    if project_path:
+                        try:
+                            from maestro.memory.database.models import MaestroProject
+                            from sqlalchemy import select
+                            result = await db_session.execute(
+                                select(MaestroProject).where(MaestroProject.project_path == project_path)
+                            )
+                            project = result.scalars().first()
+                            if project:
+                                project_id = project.id
+                        except Exception:
+                            pass
                     if project_id is None:
                         return []
                     pickable = handler.get_pickable_handoffs(
@@ -149,8 +160,11 @@ def session_load_hook(input_data: dict) -> dict:
 
 def main() -> None:
     """Main entry point for the hook."""
-    # Read stdin
-    input_data = json.loads(sys.stdin.read())
+    try:
+        raw_input = sys.stdin.read()
+        input_data = json.loads(raw_input) if raw_input.strip() else {}
+    except json.JSONDecodeError:
+        input_data = {}
 
     # Execute hook
     result = session_load_hook(input_data)
