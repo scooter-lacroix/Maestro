@@ -105,9 +105,9 @@ def generate_handoff(input_data: dict) -> dict:
                 # Common patterns: -archived, -backup, -old, .bak, _v2, etc.
                 if suffix.startswith(('-', '_', '.')) or suffix.startswith('-archived') or suffix.startswith('-backup'):
                     candidates.append((1, d))  # Priority 1: starts with track_id + separator
-                # Contains track_id as a word boundary (less preferred)
-                elif re.search(rf'\b{re.escape(track_id)}\b', d.name):
-                    candidates.append((2, d))  # Priority 2: word boundary match
+            # Contains track_id as a word boundary (less preferred, catches non-prefix names)
+            elif re.search(rf'\b{re.escape(track_id)}\b', d.name):
+                candidates.append((2, d))  # Priority 2: word boundary match
 
         if candidates:
             # Sort by priority and use the best match
@@ -243,9 +243,10 @@ def main() -> None:
         sys.exit(1)
     try:
         result = generate_handoff(input_data)
+        json.dump(result, sys.stdout)
     except Exception as e:
-        result = {"hook_error": f"generate_handoff failed: {e}"}
-    json.dump(result, sys.stdout)
+        json.dump({"hook_error": f"generate_handoff failed: {e}"}, sys.stdout)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

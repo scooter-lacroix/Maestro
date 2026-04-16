@@ -2225,8 +2225,13 @@ fn apply_selected_channels_to_config(
     }
 
     // Now populate selected channels from env vars (overwriting if available)
+    // Treat empty env vars as absent to avoid overwriting persisted credentials with blanks.
+    fn env_non_empty(name: &str) -> Option<String> {
+        std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+    }
+
     if selected_channels.contains(&ChannelType::Telegram) {
-        if let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") {
+        if let Some(bot_token) = env_non_empty("TELEGRAM_BOT_TOKEN") {
             config.channels.telegram = Some(TelegramConfig {
                 bot_token,
                 allowed_users: parse_env_list("TELEGRAM_ALLOWED_USERS"),
@@ -2235,9 +2240,9 @@ fn apply_selected_channels_to_config(
     }
 
     if selected_channels.contains(&ChannelType::Discord) {
-        if let (Ok(bot_token), Ok(guild_id)) = (
-            std::env::var("DISCORD_BOT_TOKEN"),
-            std::env::var("DISCORD_GUILD_ID"),
+        if let (Some(bot_token), Some(guild_id)) = (
+            env_non_empty("DISCORD_BOT_TOKEN"),
+            env_non_empty("DISCORD_GUILD_ID"),
         ) {
             config.channels.discord = Some(DiscordConfig {
                 bot_token,
@@ -2248,9 +2253,9 @@ fn apply_selected_channels_to_config(
     }
 
     if selected_channels.contains(&ChannelType::Slack) {
-        if let (Ok(bot_token), Ok(app_token)) = (
-            std::env::var("SLACK_BOT_TOKEN"),
-            std::env::var("SLACK_APP_TOKEN"),
+        if let (Some(bot_token), Some(app_token)) = (
+            env_non_empty("SLACK_BOT_TOKEN"),
+            env_non_empty("SLACK_APP_TOKEN"),
         ) {
             config.channels.slack = Some(SlackConfig {
                 bot_token,
@@ -2261,9 +2266,9 @@ fn apply_selected_channels_to_config(
     }
 
     if selected_channels.contains(&ChannelType::Matrix) {
-        if let (Ok(homeserver_url), Ok(access_token)) = (
-            std::env::var("MATRIX_HOMESERVER_URL"),
-            std::env::var("MATRIX_ACCESS_TOKEN"),
+        if let (Some(homeserver_url), Some(access_token)) = (
+            env_non_empty("MATRIX_HOMESERVER_URL"),
+            env_non_empty("MATRIX_ACCESS_TOKEN"),
         ) {
             config.channels.matrix = Some(MatrixConfig {
                 homeserver_url,
@@ -2276,9 +2281,9 @@ fn apply_selected_channels_to_config(
     }
 
     if selected_channels.contains(&ChannelType::WhatsApp) {
-        if let (Ok(bridge_url), Ok(api_token)) = (
-            std::env::var("WHATSAPP_BRIDGE_URL"),
-            std::env::var("WHATSAPP_API_TOKEN"),
+        if let (Some(bridge_url), Some(api_token)) = (
+            env_non_empty("WHATSAPP_BRIDGE_URL"),
+            env_non_empty("WHATSAPP_API_TOKEN"),
         ) {
             config.channels.whatsapp = Some(WhatsAppConfig {
                 bridge_url,
@@ -2290,9 +2295,9 @@ fn apply_selected_channels_to_config(
     }
 
     if selected_channels.contains(&ChannelType::Mattermost) {
-        if let (Ok(server_url), Ok(bot_token)) = (
-            std::env::var("MATTERMOST_SERVER_URL"),
-            std::env::var("MATTERMOST_TOKEN"),
+        if let (Some(server_url), Some(bot_token)) = (
+            env_non_empty("MATTERMOST_SERVER_URL"),
+            env_non_empty("MATTERMOST_TOKEN"),
         ) {
             config.channels.mattermost = Some(MattermostConfig {
                 server_url,
@@ -2363,7 +2368,7 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
     Ok(())
 }
 
-fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
+fn managed_manifest_temp_path(server_name: &str) -> Result<PathBuf, std::io::Error> {
     let sanitized: String = server_name
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
@@ -2372,11 +2377,10 @@ fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
     let named = tempfile::Builder::new()
         .prefix(&format!("maestro-mcp-{sanitized}-"))
         .suffix(".toml")
-        .tempfile()
-        .expect("failed to create temp manifest file");
+        .tempfile()?;
     // Keep the file on disk (editor needs to read/write it); path is returned
-    let (_, path) = named.keep().expect("failed to persist temp manifest");
-    path
+    let (_, path) = named.keep()?;
+    Ok(path)
 }
 
 fn edit_managed_manifest<B: Backend>(
@@ -3270,7 +3274,17 @@ async fn run_app<B: Backend>(
                                                     }
                                                 };
                                                 let manifest_path =
-                                                    managed_manifest_temp_path(&name);
+                                                    match managed_manifest_temp_path(&name) {
+                                                        Ok(p) => p,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Failed to create temp manifest: {}", e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
                                                 if let Err(e) = edit_managed_manifest(
                                                     terminal,
                                                     &app.config.editor,
@@ -9144,7 +9158,7 @@ mod app_wiring_tests {
     }
 
     #[test]
-    fn test_open_session_browser_and_select_switches_to_sessions_tab() {
+    fn test_open_session_browser_selects_session_and_updates_status() {
         use crate::maesterclaw::MaestroClawAction;
 
         let mut app = App::new(None, None, None);

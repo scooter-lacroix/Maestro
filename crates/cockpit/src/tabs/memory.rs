@@ -153,9 +153,7 @@ pub fn graph_navigation_targets(app: &App) -> Vec<usize> {
             .then_with(|| app.memories[a.0].content.cmp(&app.memories[b.0].content))
     });
 
-    let mut targets = vec![selected_idx];
-    targets.extend(ranked.into_iter().map(|(idx, _, _)| idx));
-    targets
+    ranked.into_iter().map(|(idx, _, _)| idx).collect()
 }
 
 pub fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {

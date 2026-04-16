@@ -133,14 +133,18 @@ def session_load_hook(input_data: dict) -> dict:
                     results = []
                     for h in pickable[:3]:  # Limit to 3 most recent
                         context = handler.get_handoff_context(h.handoff_id)
-                        results.append({
-                            "handoff_id": h.handoff_id,
-                            "title": h.title,
-                            "from_agent": h.from_agent_id,
-                            "summary": h.summary,
-                            "context": context,
-                        })
-                        handler.pick_handoff(h.handoff_id, session_id, agent_id)
+                        try:
+                            handler.pick_handoff(h.handoff_id, session_id, agent_id)
+                            results.append({
+                                "handoff_id": h.handoff_id,
+                                "title": h.title,
+                                "from_agent": h.from_agent_id,
+                                "summary": h.summary,
+                                "context": context,
+                            })
+                        except Exception:
+                            # Another session may have picked this handoff; skip it
+                            continue
                     return results
 
             handoffs = _resume_handoffs()
