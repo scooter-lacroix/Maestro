@@ -20,7 +20,7 @@ use ratatui::{
 use std::hash::{Hash, Hasher};
 use std::{
     collections::hash_map::DefaultHasher,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs, io,
     io::Write,
     path::PathBuf,
@@ -7359,56 +7359,140 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
-
-    // Handle memory detail modes - show placeholder for graph/detail views
-    // TODO: Implement full memory graph visualization and detail view rendering
-    if matches!(
+    let is_detail = matches!(
         app.input_mode,
         InputMode::MemoryDetail | InputMode::MemoryDetailFocus
-    ) {
-        let list_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .title(" 🧠 Memory Detail View ")
-            .title_style(Style::default().fg(theme.accent_alt));
+    );
+    let is_creating = app.input_mode == InputMode::NewMemoryContent
+        || app.input_mode == InputMode::NewMemoryCategory;
+    let has_suggestions = !app.hot_cache.is_empty();
 
-        let text = vec![
-            Line::from(""),
-            Line::from("  Memory Detail / Graph View"),
-            Line::from(""),
-            Line::from("  This feature shows detailed memory relationships"),
-            Line::from("  and graphical visualization of memory connections."),
-            Line::from(""),
-            Line::from("  Press 'Esc' to return to memory list."),
-        ];
-        let para = Paragraph::new(text).block(list_block).alignment(Alignment::Center);
-        frame.render_widget(para, area);
-        return;
-    }
+    // Determine layout
+    let (search_area, hint_area, list_area, input_area, detail_area) = if is_creating {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(5),
+                Constraint::Min(0),
+            ])
+            .split(area);
+        (chunks[0], None, Some(chunks[2]), Some(chunks[1]), None)
+    } else if is_detail || app.memory_graph_enabled {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .split(area);
+        let main = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(chunks[1]);
+        (chunks[0], None, Some(main[0]), None, Some(main[1]))
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                if has_suggestions {
+                    Constraint::Length(2)
+                } else {
+                    Constraint::Length(0)
+                },
+                Constraint::Min(0),
+            ])
+            .split(area);
+        (
+            chunks[0],
+            if has_suggestions { Some(chunks[1]) } else { None },
+            Some(chunks[2]),
+            None,
+            None,
+        )
+    };
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
-
+    // Search bar
     let search_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" 🔎 Memory Search (Ctrl+F, Ctrl+L clear, r refresh) ")
-        .title_style(Style::default().fg(theme.accent));
-
+        .title(" Memory Search (Ctrl+F, Ctrl+L clear, r refresh, n new, Enter details, g graph) ")
+        .title_style(Style::default().fg(theme.accent))
+        .style(Style::default().bg(theme.panel_bg));
     let search_text = if app.input_mode == InputMode::MemorySearch {
-        format!("{}█", app.memory_query)
+        format!("{}|", app.memory_query)
     } else {
         app.memory_query.clone()
     };
-    frame.render_widget(Paragraph::new(search_text).block(search_block), chunks[0]);
+    frame.render_widget(Paragraph::new(search_text).block(search_block), search_area);
+
+    // Suggestion hints
+    if let Some(hint_area) = hint_area {
+        render_memory_suggestion_hints(frame, hint_area, app);
+    }
+
+    // Memory creation input
+    if let Some(input_area) = input_area {
+        let input_title = if app.input_mode == InputMode::NewMemoryContent {
+            " New Memory Content (Enter to continue, Esc to cancel) "
+        } else {
+            " Category (general, knowledge, preference, spec, fact, pattern, decision, context, temp, observation) "
+        };
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(input_title)
+            .title_style(Style::default().fg(theme.accent_alt))
+            .border_style(Style::default().fg(theme.accent));
+        let input_text = if app.input_mode == InputMode::NewMemoryContent {
+            format!("{}|", app.new_memory_content)
+        } else {
+            format!("{}|", app.new_memory_category)
+        };
+        frame.render_widget(
+            Paragraph::new(input_text)
+                .block(input_block)
+                .style(Style::default().fg(Color::White)),
+            input_area,
+        );
+    }
+
+    // Memory list
+    if let Some(list_area) = list_area {
+        render_memory_list(frame, list_area, app);
+    }
+
+    // Detail panel
+    if let Some(detail_area) = detail_area {
+        render_memory_detail(frame, detail_area, app);
+    }
+}
+
+/// Maximum content preview length in collapsed view
+const MEMORY_PREVIEW_LEN: usize = 60;
+
+/// Render the memory list with expandable entries
+fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+    let is_detail = matches!(
+        app.input_mode,
+        InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+    );
+
+    let subtitle = if app.input_mode == InputMode::MemoryDetailFocus {
+        "graph focused, Tab returns to list"
+    } else if app.memory_graph_enabled {
+        "Tab focuses graph, g hides graph"
+    } else if is_detail {
+        "Enter to view details"
+    } else {
+        "Enter to view details, Space expand"
+    };
 
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" 🧠 Memory Results ")
-        .title_style(Style::default().fg(theme.accent_alt));
+        .title(format!(" Memory Results ({}) ", subtitle))
+        .title_style(Style::default().fg(theme.accent_alt))
+        .style(Style::default().bg(theme.panel_bg));
 
     if app.memories.is_empty() {
         let text = vec![
@@ -7416,9 +7500,9 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
             Line::from("  No memories found."),
             Line::from(""),
             Line::from("  Tip: press 'r' to import system-wide memories."),
+            Line::from("  Tip: press 'n' to create a new memory."),
         ];
-        let para = Paragraph::new(text).block(list_block);
-        frame.render_widget(para, chunks[1]);
+        frame.render_widget(Paragraph::new(text).block(list_block), area);
         return;
     }
 
@@ -7426,13 +7510,93 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
         .memories
         .iter()
         .map(|m| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", m.category),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Span::styled(m.content.clone(), Style::default().fg(Color::White)),
-            ]))
+            let expand_icon = if m.is_expanded { " v " } else { " > " };
+            let preview = if m.content.chars().count() > MEMORY_PREVIEW_LEN {
+                format!(
+                    "{}...",
+                    m.content.chars().take(MEMORY_PREVIEW_LEN).collect::<String>()
+                )
+            } else {
+                m.content.clone()
+            };
+            let (cat_color, cat_icon) = memory_category_style(&m.category);
+            let importance_indicator = match m.importance.as_str() {
+                "critical" => " [!]",
+                "high" => " [*]",
+                _ => "",
+            };
+
+            if m.is_expanded {
+                let mut lines = vec![Line::from(vec![
+                    Span::styled(expand_icon, Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("[{}{}] ", cat_icon, m.category),
+                        Style::default().fg(cat_color).bold(),
+                    ),
+                    Span::styled(preview, Style::default().fg(Color::White)),
+                    Span::styled(importance_indicator, Style::default().fg(Color::Red)),
+                ])];
+
+                if let Some(ref summary) = m.summary {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Summary: {}", summary),
+                            Style::default().fg(Color::DarkGray).italic(),
+                        ),
+                    ]));
+                }
+
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    Span::styled(
+                        format!("Created: {} | Access: {} times", m.created_at, m.access_count),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+
+                if !m.tags.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Tags: {}", m.tags.join(", ")),
+                            Style::default().fg(Color::Cyan),
+                        ),
+                    ]));
+                }
+
+                if !m.stored_by.trim().is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Agent: {}", m.stored_by),
+                            Style::default().fg(Color::Magenta),
+                        ),
+                    ]));
+                }
+
+                if let Some(state) = m.nexus_runtime_state.as_deref() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Runtime: {}", state),
+                            Style::default().fg(Color::Green),
+                        ),
+                    ]));
+                }
+
+                ListItem::new(lines)
+            } else {
+                ListItem::new(Line::from(vec![
+                    Span::styled(expand_icon, Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("[{}{}] ", cat_icon, m.category),
+                        Style::default().fg(cat_color),
+                    ),
+                    Span::styled(preview, Style::default().fg(Color::White)),
+                    Span::styled(importance_indicator, Style::default().fg(Color::Red)),
+                ]))
+            }
         })
         .collect();
 
@@ -7445,7 +7609,780 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
                 .bold(),
         )
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(list, chunks[1], &mut app.memory_state);
+    frame.render_stateful_widget(list, area, &mut app.memory_state);
+}
+
+/// Render the detail panel with full metadata and vector visualization
+fn render_memory_detail(frame: &mut Frame, area: Rect, app: &App) {
+    let theme = app.theme();
+    let selected_idx = app.memory_state.selected().unwrap_or(0);
+    let memory = app.memories.get(selected_idx);
+
+    let detail_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Memory Details ")
+        .title_style(Style::default().fg(theme.accent_alt))
+        .style(Style::default().bg(theme.panel_bg));
+
+    let inner = detail_block.inner(area);
+
+    if let Some(m) = memory {
+        let detail_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(10)])
+            .split(inner);
+
+        render_memory_detail_content(frame, detail_chunks[0], m, &theme);
+
+        if app.memory_graph_enabled {
+            render_memory_graph(frame, detail_chunks[1], app, &theme);
+        } else {
+            render_memory_vector_viz(frame, detail_chunks[1], m, &theme);
+        }
+    } else {
+        frame.render_widget(
+            Paragraph::new("No memory selected")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center),
+            inner,
+        );
+    }
+
+    frame.render_widget(detail_block, area);
+}
+
+/// Render content and metadata section of the detail panel
+fn render_memory_detail_content(
+    frame: &mut Frame,
+    area: Rect,
+    memory: &crate::state::MemoryInfo,
+    theme: &crate::theme::Theme,
+) {
+    let (cat_color, cat_icon) = memory_category_style(&memory.category);
+
+    let mut lines = vec![
+        // Header with category and importance
+        Line::from(vec![
+            Span::styled(
+                format!("[{}{}] ", cat_icon, memory.category),
+                Style::default().fg(cat_color).bold(),
+            ),
+            Span::styled(
+                format!("[{}]", memory.importance),
+                Style::default().fg(memory_importance_color(&memory.importance)),
+            ),
+            if let Some(score) = memory.similarity_score {
+                Span::styled(
+                    format!(" [sim: {:.2}]", score),
+                    Style::default().fg(Color::Magenta),
+                )
+            } else {
+                Span::raw("")
+            },
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Content:",
+            Style::default().fg(theme.accent).bold(),
+        )),
+    ];
+
+    // Wrapped content
+    let content_lines = memory_wrap_text(&memory.content, area.width.saturating_sub(2) as usize);
+    for line in content_lines {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(Color::White),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Summary
+    if let Some(ref summary) = memory.summary {
+        lines.push(Line::from(Span::styled(
+            "Summary:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+        lines.push(Line::from(Span::styled(
+            summary.clone(),
+            Style::default().fg(Color::DarkGray).italic(),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Metadata
+    lines.push(Line::from(Span::styled(
+        "Metadata:",
+        Style::default().fg(theme.accent).bold(),
+    )));
+
+    lines.push(Line::from(vec![
+        Span::styled("  Created: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(&memory.created_at, Style::default().fg(Color::White)),
+    ]));
+
+    if let Some(ref expires) = memory.expires_at {
+        lines.push(Line::from(vec![
+            Span::styled("  Expires: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(expires, Style::default().fg(Color::Yellow)),
+        ]));
+    }
+
+    if let Some(ref accessed) = memory.last_accessed {
+        lines.push(Line::from(vec![
+            Span::styled("  Last Accessed: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(accessed, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("  Access Count: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{}", memory.access_count),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
+
+    if let Some(ref source) = memory.source {
+        lines.push(Line::from(vec![
+            Span::styled("  Source: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(source, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    if let Some(ref session_id) = memory.session_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Session: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session_id, Style::default().fg(Color::Cyan)),
+        ]));
+    }
+
+    if let Some(ref project_id) = memory.project_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Project ID: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(project_id, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    if let Some(ref track_id) = memory.track_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Track ID: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(track_id, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    // Tags
+    if !memory.tags.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("  Tags: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                memory.tags.join(", "),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Stored By: ", Style::default().fg(Color::Cyan).bold()),
+        Span::styled(
+            if memory.stored_by.trim().is_empty() {
+                "unknown"
+            } else {
+                &memory.stored_by
+            },
+            Style::default().fg(Color::White),
+        ),
+    ]));
+
+    // Nexus runtime / subconscious
+    if memory.nexus_scope.is_some()
+        || memory.nexus_runtime_state.is_some()
+        || !memory.related_memory_ids.is_empty()
+    {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Nexus Runtime / Subconscious:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+
+        if let Some(scope) = memory.nexus_scope.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("  Scope: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(scope, Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        if let Some(runtime_state) = memory.nexus_runtime_state.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("  Runtime: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(runtime_state, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+
+        if !memory.related_memory_ids.is_empty() {
+            let preview = memory
+                .related_memory_ids
+                .iter()
+                .take(12)
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(Line::from(vec![
+                Span::styled("  Related IDs: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    if memory.related_memory_ids.len() > 12 {
+                        format!("{} ...", preview)
+                    } else {
+                        preview
+                    },
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+        }
+    }
+
+    // Agent access history
+    if !memory.accessed_by.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Accessed By Agents:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+        for agent in &memory.accessed_by {
+            lines.push(Line::from(vec![
+                Span::styled("  * ", Style::default().fg(Color::DarkGray)),
+                Span::styled(agent, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+    }
+
+    // Access history
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Access History:",
+        Style::default().fg(theme.accent).bold().underlined(),
+    )));
+
+    if memory.access_history.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No detailed access history recorded.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for event in &memory.access_history {
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    if event.timestamp.trim().is_empty() {
+                        "unknown-time".to_string()
+                    } else {
+                        event.timestamp.clone()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(" ", Style::default()),
+                Span::styled(&event.agent_id, Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!(" ({})", event.access_type),
+                    Style::default().fg(Color::Gray),
+                ),
+            ];
+            if let Some(tool_used) = &event.tool_used {
+                spans.push(Span::styled(
+                    format!(" via {}", tool_used),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// Relationship classification between memories
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MemoryRelationKind {
+    NexusLink,
+    SessionLink,
+    TrackLink,
+    ProjectLink,
+    AgentLink,
+    TagLink,
+    CategoryLink,
+    Other,
+}
+
+fn memory_relation_kind_label(kind: MemoryRelationKind) -> &'static str {
+    match kind {
+        MemoryRelationKind::NexusLink => "nexus link",
+        MemoryRelationKind::SessionLink => "session link",
+        MemoryRelationKind::TrackLink => "track link",
+        MemoryRelationKind::ProjectLink => "project link",
+        MemoryRelationKind::AgentLink => "agent link",
+        MemoryRelationKind::TagLink => "tag link",
+        MemoryRelationKind::CategoryLink => "category link",
+        MemoryRelationKind::Other => "other",
+    }
+}
+
+fn memory_relation_style(kind: MemoryRelationKind) -> (Color, &'static str) {
+    match kind {
+        MemoryRelationKind::NexusLink => (Color::Magenta, "N"),
+        MemoryRelationKind::SessionLink => (Color::Cyan, "S"),
+        MemoryRelationKind::TrackLink => (Color::Blue, "T"),
+        MemoryRelationKind::ProjectLink => (Color::Green, "P"),
+        MemoryRelationKind::AgentLink => (Color::Yellow, "A"),
+        MemoryRelationKind::TagLink => (Color::LightBlue, "#"),
+        MemoryRelationKind::CategoryLink => (Color::LightYellow, "C"),
+        MemoryRelationKind::Other => (Color::DarkGray, "."),
+    }
+}
+
+fn memory_relation_rank(kind: MemoryRelationKind) -> u8 {
+    match kind {
+        MemoryRelationKind::NexusLink => 100,
+        MemoryRelationKind::SessionLink => 90,
+        MemoryRelationKind::TrackLink => 80,
+        MemoryRelationKind::ProjectLink => 70,
+        MemoryRelationKind::AgentLink => 60,
+        MemoryRelationKind::TagLink => 40,
+        MemoryRelationKind::CategoryLink => 30,
+        MemoryRelationKind::Other => 10,
+    }
+}
+
+fn classify_memory_relation(
+    selected: &crate::state::MemoryInfo,
+    memory: &crate::state::MemoryInfo,
+) -> MemoryRelationKind {
+    if selected.id == memory.id {
+        return MemoryRelationKind::NexusLink;
+    }
+    if selected.related_memory_ids.contains(&memory.id)
+        || memory.related_memory_ids.contains(&selected.id)
+    {
+        return MemoryRelationKind::NexusLink;
+    }
+    if selected.session_id.is_some() && selected.session_id == memory.session_id {
+        return MemoryRelationKind::SessionLink;
+    }
+    if selected.track_id.is_some() && selected.track_id == memory.track_id {
+        return MemoryRelationKind::TrackLink;
+    }
+    if selected.project_id.is_some() && selected.project_id == memory.project_id {
+        return MemoryRelationKind::ProjectLink;
+    }
+    if !selected.stored_by.trim().is_empty()
+        && selected.stored_by.eq_ignore_ascii_case(&memory.stored_by)
+        && !matches!(
+            selected.stored_by.to_ascii_lowercase().as_str(),
+            "unknown" | "nexus" | "maestro"
+        )
+    {
+        return MemoryRelationKind::AgentLink;
+    }
+    if selected
+        .tags
+        .iter()
+        .any(|tag| memory.tags.iter().any(|c| c == tag))
+    {
+        return MemoryRelationKind::TagLink;
+    }
+    if selected.category == memory.category {
+        return MemoryRelationKind::CategoryLink;
+    }
+    MemoryRelationKind::Other
+}
+
+fn memory_graph_navigation_targets(app: &App) -> Vec<usize> {
+    if app.memories.is_empty() {
+        return Vec::new();
+    }
+    let selected_idx = app
+        .memory_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.memories.len().saturating_sub(1));
+    let selected = &app.memories[selected_idx];
+    let mut ranked = Vec::new();
+    for (idx, memory) in app.memories.iter().enumerate() {
+        if idx == selected_idx {
+            continue;
+        }
+        let kind = classify_memory_relation(selected, memory);
+        ranked.push((idx, memory_relation_rank(kind), kind));
+    }
+    ranked.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| app.memories[a.0].category.cmp(&app.memories[b.0].category))
+            .then_with(|| app.memories[a.0].content.cmp(&app.memories[b.0].content))
+    });
+    let mut targets = vec![selected_idx];
+    targets.extend(ranked.into_iter().map(|(idx, _, _)| idx));
+    targets
+}
+
+/// Render the memory relationship graph
+fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::theme::Theme) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Memory Relationships ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.memories.is_empty() || inner.height == 0 || inner.width == 0 {
+        frame.render_widget(
+            Paragraph::new("No memories to visualize.").style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let targets = memory_graph_navigation_targets(app);
+    if targets.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No graph targets available.")
+                .style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let selected_idx = app
+        .memory_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.memories.len().saturating_sub(1));
+    let graph_cursor = app
+        .memory_graph_selection
+        .min(targets.len().saturating_sub(1));
+    let selected = &app.memories[selected_idx];
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("anchor ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if selected.content.chars().count() > 26 {
+                    format!(
+                        "{}...",
+                        selected.content.chars().take(26).collect::<String>()
+                    )
+                } else {
+                    selected.content.clone()
+                },
+                Style::default().fg(Color::Cyan).bold(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("focus ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if app.input_mode == InputMode::MemoryDetailFocus {
+                    "graph navigation"
+                } else {
+                    "list navigation"
+                },
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  Tab ", Style::default().fg(Color::DarkGray)),
+            Span::styled("switch", Style::default().fg(Color::Green)),
+            Span::styled("  Enter ", Style::default().fg(Color::DarkGray)),
+            Span::styled("open", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(""),
+    ];
+
+    if let Some(scope) = selected.nexus_scope.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("scope ", Style::default().fg(Color::DarkGray)),
+            Span::styled(scope, Style::default().fg(Color::Green)),
+        ]));
+    }
+
+    if let Some(runtime_state) = selected.nexus_runtime_state.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("runtime ", Style::default().fg(Color::DarkGray)),
+            Span::styled(runtime_state, Style::default().fg(Color::Magenta)),
+        ]));
+    }
+
+    if !selected.related_memory_ids.is_empty() {
+        let preview = selected
+            .related_memory_ids
+            .iter()
+            .take(8)
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(vec![
+            Span::styled("nexus ids ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if selected.related_memory_ids.len() > 8 {
+                    format!("{} ...", preview)
+                } else {
+                    preview
+                },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Group related memories by relationship kind
+    let mut related_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for idx in targets.into_iter().skip(1) {
+        let memory = &app.memories[idx];
+        let relation = memory_relation_kind_label(classify_memory_relation(selected, memory)).to_string();
+        related_groups.entry(relation).or_default().push(idx);
+    }
+
+    // Cache navigation targets for cursor comparison
+    let graph_nav_targets = memory_graph_navigation_targets(app);
+
+    for (relation, indices) in related_groups {
+        let kind = match relation.as_str() {
+            "nexus link" => MemoryRelationKind::NexusLink,
+            "session link" => MemoryRelationKind::SessionLink,
+            "track link" => MemoryRelationKind::TrackLink,
+            "project link" => MemoryRelationKind::ProjectLink,
+            "agent link" => MemoryRelationKind::AgentLink,
+            "tag link" => MemoryRelationKind::TagLink,
+            "category link" => MemoryRelationKind::CategoryLink,
+            _ => MemoryRelationKind::Other,
+        };
+        let (cat_color, cat_icon) = memory_relation_style(kind);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} {}", cat_icon, relation),
+                Style::default().fg(cat_color).bold(),
+            ),
+            Span::styled(
+                format!(" ({})", indices.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+
+        for idx in indices {
+            let memory = &app.memories[idx];
+            let cursor_idx = graph_nav_targets
+                .iter()
+                .position(|candidate| *candidate == idx)
+                .unwrap_or(0);
+            let is_graph_selected = cursor_idx == graph_cursor;
+            let preview = if memory.content.chars().count() > 28 {
+                format!(
+                    "{}...",
+                    memory.content.chars().take(28).collect::<String>()
+                )
+            } else {
+                memory.content.clone()
+            };
+            let style = if is_graph_selected {
+                Style::default().fg(Color::Black).bg(Color::Yellow).bold()
+            } else {
+                Style::default().fg(Color::White)
+            };
+            lines.push(Line::from(vec![
+                Span::styled("  |- ", Style::default().fg(cat_color)),
+                Span::styled(
+                    format!("[{}] ", memory.id),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(preview, style),
+            ]));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+/// Render a simple vector space visualization using ASCII art
+fn render_memory_vector_viz(
+    frame: &mut Frame,
+    area: Rect,
+    memory: &crate::state::MemoryInfo,
+    theme: &crate::theme::Theme,
+) {
+    if area.height < 5 || area.width < 10 {
+        return;
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Vector Space Visualization ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let inner = block.inner(area);
+    let viz_lines = generate_memory_vector_viz(memory, inner.width, inner.height);
+    frame.render_widget(
+        Paragraph::new(viz_lines).style(Style::default().fg(Color::White)),
+        inner,
+    );
+    frame.render_widget(block, area);
+}
+
+/// Generate ASCII art for vector space visualization
+fn generate_memory_vector_viz(
+    memory: &crate::state::MemoryInfo,
+    width: u16,
+    height: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let grid_width = width.saturating_sub(2) as usize;
+    let grid_height = height.saturating_sub(2) as usize;
+
+    if grid_width < 10 || grid_height < 3 {
+        return vec![Line::from("Too small")];
+    }
+
+    let center_x = grid_width / 2;
+    let center_y = grid_height / 2;
+
+    for y in 0..grid_height {
+        let mut row = String::new();
+        for x in 0..grid_width {
+            let dx = (x as i32 - center_x as i32).abs();
+            let dy = (y as i32 - center_y as i32).abs();
+            let dist = (dx * dx + dy * dy) as f32;
+            let intensity = memory.similarity_score.unwrap_or(0.8);
+
+            if x == center_x && y == center_y {
+                row.push('*');
+            } else if dist < (grid_width as f32 * intensity * 0.3).powi(2) {
+                row.push('.');
+            } else if dist < (grid_width as f32 * 0.5).powi(2) {
+                if x % 4 == 0 && y % 2 == 0 {
+                    row.push('o');
+                } else {
+                    row.push(' ');
+                }
+            } else {
+                row.push(' ');
+            }
+        }
+        lines.push(Line::from(Span::styled(
+            row,
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    if lines.len() > 2 {
+        lines.push(Line::from(vec![
+            Span::styled("* ", Style::default().fg(Color::Green)),
+            Span::styled("Current ", Style::default().fg(Color::DarkGray)),
+            Span::styled(". ", Style::default().fg(Color::Cyan)),
+            Span::styled("Related ", Style::default().fg(Color::DarkGray)),
+            Span::styled("o ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Other", Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    lines
+}
+
+/// Render non-intrusive suggestion hints from the hot cache
+fn render_memory_suggestion_hints(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+    let suggestions = app.hot_cache.active_suggestions();
+    if suggestions.is_empty() {
+        return;
+    }
+    let hint_text = format!(
+        " Suggestions: {} ",
+        suggestions
+            .iter()
+            .take(3)
+            .map(|s| s.preview.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
+    frame.render_widget(
+        Paragraph::new(hint_text).style(
+            Style::default()
+                .fg(theme.accent_alt)
+                .bg(theme.panel_bg),
+        ),
+        area,
+    );
+}
+
+/// Get color and icon for a memory category
+fn memory_category_style(category: &str) -> (Color, &'static str) {
+    match category.to_lowercase().as_str() {
+        "general" => (Color::Yellow, ""),
+        "knowledge" => (Color::Blue, ""),
+        "preference" | "preferences" => (Color::Magenta, ""),
+        "specification" | "specifications" => (Color::Cyan, ""),
+        "fact" => (Color::Green, ""),
+        "pattern" => (Color::LightBlue, ""),
+        "decision" => (Color::LightYellow, ""),
+        "context" => (Color::Gray, ""),
+        "temporary" => (Color::DarkGray, ""),
+        "observation" => (Color::LightCyan, ""),
+        _ => (Color::White, ""),
+    }
+}
+
+/// Get color for importance level
+fn memory_importance_color(importance: &str) -> Color {
+    match importance.to_lowercase().as_str() {
+        "critical" => Color::Red,
+        "high" => Color::LightRed,
+        "normal" => Color::White,
+        "low" => Color::DarkGray,
+        _ => Color::White,
+    }
+}
+
+/// Simple text wrapper
+fn memory_wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width < 10 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    for word in text.split_whitespace() {
+        if current_line.len() + word.len() + 1 > max_width {
+            if !current_line.is_empty() {
+                lines.push(current_line.trim().to_string());
+                current_line = String::new();
+            }
+            if word.len() > max_width {
+                for chunk in word.as_bytes().chunks(max_width) {
+                    lines.push(String::from_utf8_lossy(chunk).to_string());
+                }
+            } else {
+                current_line = word.to_string();
+            }
+        } else {
+            if !current_line.is_empty() {
+                current_line.push(' ');
+            }
+            current_line.push_str(word);
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
