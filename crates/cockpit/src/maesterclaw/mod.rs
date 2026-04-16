@@ -639,7 +639,6 @@ impl MaestroClawPane {
         frame.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: false })
-                .scroll((self.output_scroll, 0))
                 .block(block),
             area,
         );

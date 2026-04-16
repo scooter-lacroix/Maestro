@@ -722,18 +722,26 @@ async fn reset_review(
     state.iteration.fetch_add(1, Ordering::SeqCst);
 
     // Update content if provided
+    let mut next_phase = TrackLensPhase::Reviewing;
     if let Some(content) = req.content {
+        let is_editable = content
+            .content
+            .starts_with("<!-- tracklens:editable -->");
         let mut guard = state
             .content
             .write()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         *guard = Some(content);
+        drop(guard);
+        if is_editable {
+            next_phase = TrackLensPhase::Editing;
+        }
     }
 
-    // Reset phase to Reviewing
+    // Reset phase for the next round
     state
         .phase_tx
-        .send(TrackLensPhase::Reviewing)
+        .send(next_phase)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let iteration = state.iteration.load(Ordering::SeqCst);

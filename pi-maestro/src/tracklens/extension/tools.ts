@@ -248,11 +248,12 @@ After review, provide your feedback or approval.`,
           htmlContent,
         });
 
-        // Wait for user decision
-        const result = await server.waitForDecision();
-
-        // Stop the server
-        server.stop();
+        let result: Awaited<ReturnType<typeof server.waitForDecision>>;
+        try {
+          result = await server.waitForDecision();
+        } finally {
+          server.stop();
+        }
 
         // Persist review history if track directory is available
         if (validTrackId && ctx.cwd) {
@@ -492,11 +493,12 @@ After review, provide your feedback or approval.`,
           mode: "walkthrough",
         });
 
-        // Wait for user decision
-        const result = await server.waitForDecision();
-
-        // Stop the server
-        server.stop();
+        let result: Awaited<ReturnType<typeof server.waitForDecision>>;
+        try {
+          result = await server.waitForDecision();
+        } finally {
+          server.stop();
+        }
 
         // Handle approval/denial
         if (!result.approved && result.annotations && result.annotations.length > 0) {
@@ -515,8 +517,12 @@ After review, provide your feedback or approval.`,
                 mode: "walkthrough",
               });
 
-              const reviewResult = await reviewServer.waitForDecision();
-              reviewServer.stop();
+              let reviewResult: Awaited<ReturnType<typeof reviewServer.waitForDecision>>;
+              try {
+                reviewResult = await reviewServer.waitForDecision();
+              } finally {
+                reviewServer.stop();
+              }
 
               return {
                 approved: reviewResult.approved,
@@ -777,16 +783,15 @@ After review, provide your feedback or approval.`,
       }
 
       // Start TrackLens server in code-review mode
-      try {
-        const server = await startTrackLensServer({
-          plan: diffContent,
-          origin: "pi-maestro",
-          htmlContent,
-          mode: "code-review",
-        });
+      const server = await startTrackLensServer({
+        plan: diffContent,
+        origin: "pi-maestro",
+        htmlContent,
+        mode: "code-review",
+      });
 
+      try {
         const result = await server.waitForDecision();
-        server.stop();
 
         return {
           content: [
@@ -810,6 +815,8 @@ After review, provide your feedback or approval.`,
           ],
           details: { approved: false, manualReview: true },
         };
+      } finally {
+        server.stop();
       }
     },
   });

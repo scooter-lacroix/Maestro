@@ -59,6 +59,7 @@ def detect_leindex() -> LeIndexStatus:
     cli_path = shutil.which("leindex")
     if cli_path:
         status.cli_path = cli_path
+        status.mode = LeIndexMode.CLI
         try:
             result = subprocess.run(
                 ["leindex", "--version"],
@@ -68,9 +69,8 @@ def detect_leindex() -> LeIndexStatus:
             )
             if result.returncode == 0:
                 status.cli_version = result.stdout.strip()
-                status.mode = LeIndexMode.CLI
         except Exception:
-            status.mode = LeIndexMode.CLI
+            pass  # mode already set above
 
     # Check MCP
     try:

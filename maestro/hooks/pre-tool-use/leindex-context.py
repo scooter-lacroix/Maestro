@@ -326,8 +326,6 @@ def leindex_context_hook(input_data: dict) -> dict:
                 for m in memories
             ]
             context_info["context_injected"] = True
-            if legacy_fallback_used:
-                context_info["compatibility_mode"] = True
 
         # Add context to tool input for Edit operations
         if tool_name == "Edit" and context_info["context_injected"]:

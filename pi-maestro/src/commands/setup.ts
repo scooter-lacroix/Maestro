@@ -182,7 +182,7 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
       if (result.edited_content) {
         // Parse edited content back into individual docs.
         // Expected format: each section separated by "\n---\n" (newline, 3 dashes, newline)
-        const sections = result.edited_content.split(/\n---\n/);
+        const sections = result.edited_content.split(/\n\n---\n\n/);
         for (const section of sections) {
           const trimmed = section.trim();
           const docMatch = trimmed.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);

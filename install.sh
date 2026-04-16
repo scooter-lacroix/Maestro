@@ -97,6 +97,9 @@ log_section "Preparing the Overture..."
 BRANCH_EXPLICIT=0
 if [[ -n "${MAESTRO_BRANCH:-}" ]]; then
     BRANCH_EXPLICIT=1
+else
+    # Detect remote default branch via git ls-remote
+    MAESTRO_BRANCH="$(git ls-remote --symref "${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}" HEAD 2>/dev/null | awk '/^ref:/ {sub("refs/heads/","",$2); print $2; exit}')"
 fi
 MAESTRO_BRANCH="${MAESTRO_BRANCH:-master}"
 REPO_URL="${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}"
@@ -677,6 +680,8 @@ mkdir -p "$PY_PLUGIN_DIR"
 # critical_think/ (metacognitive analysis at checkpoints).
 for mod in memory utils config critical_think; do
     if [[ -d "$INSTALL_DIR/maestro/$mod" ]]; then
+        # Remove existing module to prevent cp -a nesting on reinstall
+        rm -rf "$PY_PLUGIN_DIR/$mod"
         cp -a "$INSTALL_DIR/maestro/$mod" "$PY_PLUGIN_DIR/$mod"
         log "[OK] Copied maestro/$mod/"
     else

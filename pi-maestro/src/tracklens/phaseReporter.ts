@@ -76,14 +76,14 @@ export function startPhaseReporter(options: PhaseReporterOptions): () => void {
     try {
       // Create timeout abort controller
       const timeoutController = new AbortController();
-      const timeoutId = setTimeout(() => timeoutController.abort(), 5000);
+      const fetchTimeoutId = setTimeout(() => timeoutController.abort(), 5000);
 
       // Chain with existing signal
       const combinedSignal = signal.aborted
         ? signal
         : (() => {
             // If original signal aborts, clear timeout
-            signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+            signal.addEventListener("abort", () => clearTimeout(fetchTimeoutId), { once: true });
             return {
               get aborted() { return signal.aborted || timeoutController.signal.aborted; },
               addEventListener: timeoutController.signal.addEventListener.bind(timeoutController.signal),

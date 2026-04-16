@@ -127,7 +127,7 @@ fn prune_old_logs(log_dir: &Path) {
         .lines()
         .filter(|line| {
             serde_json::from_str::<SessionEntry>(line)
-                .map(|e| e.started > cutoff_utc || e.ended.map_or(true, |t| t > cutoff_utc))
+                .map(|e| e.started > cutoff_utc || e.ended.map_or(false, |t| t > cutoff_utc))
                 .unwrap_or(true)
         })
         .map(String::from)

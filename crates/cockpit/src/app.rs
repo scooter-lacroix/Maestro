@@ -2354,11 +2354,12 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
 }
 
 fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
+    let sanitized: String = server_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
     let mut path = std::env::temp_dir();
-    path.push(format!(
-        "maestro-managed-mcp-{}.toml",
-        server_name.replace('/', "-")
-    ));
+    path.push(format!("maestro-managed-mcp-{sanitized}.toml"));
     path
 }
 
@@ -5805,7 +5806,7 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::MAESTROCLAW {
                                     let action =
                                         app.maestroclaw_pane.handle_key_with_session_count(
-                                            KeyCode::Enter,
+                                            KeyCode::Down,
                                             app.sessions.len(),
                                         );
                                     let _ = handle_maestroclaw_action(&mut app, action);
@@ -7630,6 +7631,9 @@ fn render_memory_detail(frame: &mut Frame, area: Rect, app: &App) {
 
     let inner = detail_block.inner(area);
 
+    // Render block FIRST so its background doesn't overwrite inner content
+    frame.render_widget(detail_block, area);
+
     if let Some(m) = memory {
         let detail_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -7651,8 +7655,6 @@ fn render_memory_detail(frame: &mut Frame, area: Rect, app: &App) {
             inner,
         );
     }
-
-    frame.render_widget(detail_block, area);
 }
 
 /// Render content and metadata section of the detail panel
@@ -8142,7 +8144,7 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
 
     // Group related memories by relationship kind
     let mut related_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for idx in targets.into_iter().skip(1) {
+    for idx in targets {
         let memory = &app.memories[idx];
         let relation = memory_relation_kind_label(classify_memory_relation(selected, memory)).to_string();
         related_groups.entry(relation).or_default().push(idx);
@@ -8229,12 +8231,13 @@ fn render_memory_vector_viz(
         .title_style(Style::default().fg(theme.accent));
 
     let inner = block.inner(area);
+    // Render block FIRST so its background doesn't overwrite inner content
+    frame.render_widget(block, area);
     let viz_lines = generate_memory_vector_viz(memory, inner.width, inner.height);
     frame.render_widget(
         Paragraph::new(viz_lines).style(Style::default().fg(Color::White)),
         inner,
     );
-    frame.render_widget(block, area);
 }
 
 /// Generate ASCII art for vector space visualization

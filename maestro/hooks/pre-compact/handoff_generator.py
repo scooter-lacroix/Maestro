@@ -241,7 +241,10 @@ def main() -> None:
     except json.JSONDecodeError as e:
         json.dump({"hook_error": f"Invalid JSON input: {e}"}, sys.stdout)
         sys.exit(1)
-    result = generate_handoff(input_data)
+    try:
+        result = generate_handoff(input_data)
+    except Exception as e:
+        result = {"hook_error": f"generate_handoff failed: {e}"}
     json.dump(result, sys.stdout)
 
 

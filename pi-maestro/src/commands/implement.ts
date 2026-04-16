@@ -300,7 +300,7 @@ ${trackId ? `
 
 ${tracklensSection}
 
- ## 5.0 FINALIZE TRACK
+## 5.0 FINALIZE TRACK
 
 ${isTrackLensEnabled() ? "After walkthrough approval:" : "After manual review approval:"}
 1. Update track status to complete:

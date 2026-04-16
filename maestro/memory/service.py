@@ -895,7 +895,7 @@ class MaestroMemoryService:
                 include_raw=True,
             )
 
-            if not result.get("results"):
+            if not result.get("success"):
                 logger.warning(f"Memory search failed: {result.get('error')}")
                 return []
 
@@ -1004,7 +1004,7 @@ class MaestroMemoryService:
             )
 
             # Check if search was successful and has results
-            if not search_result.get("results"):
+            if not search_result.get("success"):
                 logger.debug(f"Memory search failed: {search_result.get('error')}")
                 await self._record_db_metric("enhance_context_search_failed")
                 return context
