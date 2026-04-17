@@ -7,11 +7,14 @@ Integrates with the UnifiedHookManager to restore previous session state.
 """
 
 import json
+import logging
 import sys
 import os
 import asyncio
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Add maestro to path if needed
 maestro_root = Path(__file__).parent.parent.parent
@@ -142,8 +145,9 @@ def session_load_hook(input_data: dict) -> dict:
                                 "summary": h.summary,
                                 "context": context,
                             })
-                        except Exception:
+                        except Exception as e:
                             # Another session may have picked this handoff; skip it
+                            logger.debug("Skipped handoff %s (likely picked by another session): %s", h.handoff_id, e)
                             continue
                     return results
 

@@ -2230,11 +2230,26 @@ fn apply_selected_channels_to_config(
         std::env::var(name).ok().filter(|v| !v.trim().is_empty())
     }
 
+    fn env_list_or_existing(name: &str, existing: &Option<Vec<String>>) -> Vec<String> {
+        let parsed = parse_env_list(name);
+        if parsed.is_empty() {
+            existing.clone().unwrap_or_default()
+        } else {
+            parsed
+        }
+    }
+
+    fn env_opt_or_existing(name: &str, existing: Option<String>) -> Option<String> {
+        env_non_empty(name).or(existing)
+    }
+
     if selected_channels.contains(&ChannelType::Telegram) {
         if let Some(bot_token) = env_non_empty("TELEGRAM_BOT_TOKEN") {
+            let existing = config.channels.telegram.take();
             config.channels.telegram = Some(TelegramConfig {
                 bot_token,
-                allowed_users: parse_env_list("TELEGRAM_ALLOWED_USERS"),
+                allowed_users: env_list_or_existing("TELEGRAM_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
@@ -2244,10 +2259,12 @@ fn apply_selected_channels_to_config(
             env_non_empty("DISCORD_BOT_TOKEN"),
             env_non_empty("DISCORD_GUILD_ID"),
         ) {
+            let existing = config.channels.discord.take();
             config.channels.discord = Some(DiscordConfig {
                 bot_token,
                 guild_id,
-                allowed_users: parse_env_list("DISCORD_ALLOWED_USERS"),
+                allowed_users: env_list_or_existing("DISCORD_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
@@ -2257,10 +2274,12 @@ fn apply_selected_channels_to_config(
             env_non_empty("SLACK_BOT_TOKEN"),
             env_non_empty("SLACK_APP_TOKEN"),
         ) {
+            let existing = config.channels.slack.take();
             config.channels.slack = Some(SlackConfig {
                 bot_token,
                 app_token,
-                allowed_users: parse_env_list("SLACK_ALLOWED_USERS"),
+                allowed_users: env_list_or_existing("SLACK_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
@@ -2270,12 +2289,16 @@ fn apply_selected_channels_to_config(
             env_non_empty("MATRIX_HOMESERVER_URL"),
             env_non_empty("MATRIX_ACCESS_TOKEN"),
         ) {
+            let existing = config.channels.matrix.take();
             config.channels.matrix = Some(MatrixConfig {
                 homeserver_url,
                 access_token,
-                bot_user_id: std::env::var("MATRIX_BOT_USER_ID").ok(),
-                allowed_users: parse_env_list("MATRIX_ALLOWED_USERS"),
-                room_ids: parse_env_list("MATRIX_ROOM_IDS"),
+                bot_user_id: env_opt_or_existing("MATRIX_BOT_USER_ID",
+                    existing.as_ref().and_then(|c| c.bot_user_id.clone())),
+                allowed_users: env_list_or_existing("MATRIX_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
+                room_ids: env_list_or_existing("MATRIX_ROOM_IDS",
+                    &existing.as_ref().map(|c| c.room_ids.clone())),
             });
         }
     }
@@ -2285,11 +2308,14 @@ fn apply_selected_channels_to_config(
             env_non_empty("WHATSAPP_BRIDGE_URL"),
             env_non_empty("WHATSAPP_API_TOKEN"),
         ) {
+            let existing = config.channels.whatsapp.take();
             config.channels.whatsapp = Some(WhatsAppConfig {
                 bridge_url,
                 api_token,
-                phone_number_id: std::env::var("WHATSAPP_PHONE_NUMBER_ID").ok(),
-                allowed_users: parse_env_list("WHATSAPP_ALLOWED_USERS"),
+                phone_number_id: env_opt_or_existing("WHATSAPP_PHONE_NUMBER_ID",
+                    existing.as_ref().and_then(|c| c.phone_number_id.clone())),
+                allowed_users: env_list_or_existing("WHATSAPP_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
@@ -2299,12 +2325,16 @@ fn apply_selected_channels_to_config(
             env_non_empty("MATTERMOST_SERVER_URL"),
             env_non_empty("MATTERMOST_TOKEN"),
         ) {
+            let existing = config.channels.mattermost.take();
             config.channels.mattermost = Some(MattermostConfig {
                 server_url,
                 bot_token,
-                team_id: std::env::var("MATTERMOST_TEAM_ID").ok(),
-                channel_id: std::env::var("MATTERMOST_CHANNEL_ID").ok(),
-                allowed_users: parse_env_list("MATTERMOST_ALLOWED_USERS"),
+                team_id: env_opt_or_existing("MATTERMOST_TEAM_ID",
+                    existing.as_ref().and_then(|c| c.team_id.clone())),
+                channel_id: env_opt_or_existing("MATTERMOST_CHANNEL_ID",
+                    existing.as_ref().and_then(|c| c.channel_id.clone())),
+                allowed_users: env_list_or_existing("MATTERMOST_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
@@ -2366,6 +2396,15 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
     execute!(io::stdout(), EnterAlternateScreen)?;
     enable_raw_mode()?;
     Ok(())
+}
+
+/// RAII guard that removes the temp manifest file on drop, ensuring cleanup on all exit paths.
+struct TempManifestGuard(PathBuf);
+
+impl Drop for TempManifestGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 fn managed_manifest_temp_path(server_name: &str) -> Result<PathBuf, std::io::Error> {
@@ -3285,6 +3324,7 @@ async fn run_app<B: Backend>(
                                                             continue;
                                                         }
                                                     };
+                                                let _manifest_guard = TempManifestGuard(manifest_path.clone());
                                                 if let Err(e) = edit_managed_manifest(
                                                     terminal,
                                                     &app.config.editor,
@@ -3365,7 +3405,7 @@ async fn run_app<B: Backend>(
                                                         );
                                                     }
                                                 }
-                                                let _ = fs::remove_file(&manifest_path);
+                                                // TempManifestGuard cleans up manifest_path on drop
                                             }
                                             McpOption::Reinstall => {
                                                 let Some(server) = server.as_ref() else {

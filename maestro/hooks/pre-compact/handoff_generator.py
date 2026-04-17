@@ -228,8 +228,7 @@ def generate_handoff(input_data: dict) -> dict:
 
         asyncio.run(_persist_compaction_handoff())
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("Failed to persist compaction handoff to DB: %s", e)
+        logger.warning("Failed to persist compaction handoff to DB: {}", e)
         input_data["compaction_memory_error"] = str(e)
 
     return input_data
