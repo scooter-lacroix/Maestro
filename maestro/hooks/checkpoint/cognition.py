@@ -40,13 +40,17 @@ def checkpoint_hook(input_data: dict) -> dict:
             from maestro.critical_think.core import CriticalThinkEngine
 
             engine = CriticalThinkEngine()
+
+            def _as_text(value: Any) -> str:
+                return value if isinstance(value, str) else "" if value is None else str(value)
+
             task_desc = (
-                input_data.get("task_description")
-                or input_data.get("current_task")
+                _as_text(input_data.get("task_description"))
+                or _as_text(input_data.get("current_task"))
                 or f"Checkpoint at task {input_data.get('task_id', 'unknown')}"
             )
-            original_plan = input_data.get("original_plan", "")
-            actual_result = input_data.get("actual_result", "")
+            original_plan = _as_text(input_data.get("original_plan"))
+            actual_result = _as_text(input_data.get("actual_result"))
             if not actual_result:
                 completed = input_data.get("task_completed", False)
                 actual_result = "Task completed" if completed else "Task in progress"

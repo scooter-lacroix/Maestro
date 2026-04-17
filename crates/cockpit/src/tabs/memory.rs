@@ -1046,10 +1046,12 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
                 lines.push(current_line.trim().to_string());
                 current_line = String::new();
             }
-            // Handle very long words
+            // Handle very long words by splitting on character boundaries
             if word.len() > max_width {
-                for chunk in word.as_bytes().chunks(max_width) {
-                    lines.push(String::from_utf8_lossy(chunk).to_string());
+                let mut chars = word.chars().peekable();
+                while chars.peek().is_some() {
+                    let chunk: String = chars.by_ref().take(max_width).collect();
+                    lines.push(chunk);
                 }
             } else {
                 current_line = word.to_string();

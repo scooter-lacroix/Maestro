@@ -177,11 +177,11 @@ class SyncSessionAdapter:
 
     async def flush(self) -> None:
         """Flush pending changes to the database (sync wrapper)."""
-        self._session.flush()
+        await asyncio.to_thread(self._session.flush)
 
     async def refresh(self, instance: Any) -> None:
         """Refresh an instance from the database (sync wrapper)."""
-        self._session.refresh(instance)
+        await asyncio.to_thread(self._session.refresh, instance)
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._session, name)

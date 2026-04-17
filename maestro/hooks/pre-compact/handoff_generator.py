@@ -75,11 +75,14 @@ def _count_compactions(handoff_path: Path) -> int:
 def generate_handoff(input_data: dict) -> dict:
     """Generate or update the compaction handoff document."""
     project_path = input_data.get("project_path", os.getcwd())
-    track_id = input_data.get("track_id", input_data.get("current_track", "unknown"))
+    # Resolve track_id: explicit None falls back to current_track, then "unknown"
+    raw_track_id = input_data.get("track_id")
+    if raw_track_id is None:
+        raw_track_id = input_data.get("current_track", "unknown")
 
     # Validate track_id: allow only alphanumeric, hyphens, underscores
     # Ensure track_id is a string before regex match (could be null/number)
-    track_id_str = str(track_id) if track_id is not None else ""
+    track_id_str = str(raw_track_id) if raw_track_id is not None else "unknown"
     _TRACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
     if not _TRACK_ID_RE.match(track_id_str):
         raise ValueError(f"Invalid track_id: must match [a-zA-Z0-9_-]: {track_id_str}")
@@ -228,8 +231,10 @@ def generate_handoff(input_data: dict) -> dict:
 
         asyncio.run(_persist_compaction_handoff())
     except Exception as e:
-        logger.warning("Failed to persist compaction handoff to DB: {}", e)
+        message = f"Failed to persist compaction handoff: {e}"
+        logger.opt(exception=True).warning(message)
         input_data["compaction_memory_error"] = str(e)
+        input_data["hook_error"] = message
 
     return input_data
 
