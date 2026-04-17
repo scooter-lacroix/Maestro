@@ -76,7 +76,8 @@ def _count_compactions(handoff_path: Path) -> int:
 
 def generate_handoff(input_data: dict) -> dict:
     """Generate or update the compaction handoff document."""
-    project_path = input_data.get("project_path", os.getcwd())
+    raw_project_path = input_data.get("project_path")
+    project_path = raw_project_path if isinstance(raw_project_path, str) and raw_project_path.strip() else os.getcwd()
     # Resolve track_id: explicit None falls back to current_track, then "unknown"
     raw_track_id = input_data.get("track_id")
     if raw_track_id is None:

@@ -36,31 +36,34 @@ def checkpoint_hook(input_data: dict) -> dict:
         # Invoke CriticalThinkEngine for post-checkpoint analysis (best-effort)
         # Run before persistence guard so analysis is available even when
         # session_id or project_path is missing.
+        def _as_text(value: Any) -> str:
+            return value if isinstance(value, str) else "" if value is None else str(value)
+
+        def _as_bool(value: Any) -> bool:
+            if isinstance(value, bool):
+                return value
+            if value is None:
+                return False
+            if isinstance(value, (int, float)):
+                return value != 0
+            if isinstance(value, str):
+                return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+            return bool(value)
+
         try:
             from maestro.critical_think.core import CriticalThinkEngine
 
             engine = CriticalThinkEngine()
-
-            def _as_text(value: Any) -> str:
-                return value if isinstance(value, str) else "" if value is None else str(value)
-
-            def _as_bool(value: Any) -> bool:
-                if isinstance(value, bool):
-                    return value
-                if value is None:
-                    return False
-                if isinstance(value, (int, float)):
-                    return value != 0
-                if isinstance(value, str):
-                    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-                return bool(value)
 
             task_desc = (
                 _as_text(input_data.get("task_description"))
                 or _as_text(input_data.get("current_task"))
                 or f"Checkpoint at task {input_data.get('task_id', 'unknown')}"
             )
-            original_plan = _as_text(input_data.get("original_plan"))
+            original_plan = (
+                _as_text(input_data.get("original_plan"))
+                or "No explicit plan provided"
+            )
             actual_result = _as_text(input_data.get("actual_result"))
             if not actual_result:
                 completed = _as_bool(input_data.get("task_completed"))

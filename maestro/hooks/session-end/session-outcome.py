@@ -150,8 +150,8 @@ def session_outcome_hook(input_data: dict) -> dict:
                         await service.close()
 
                     # Part 2: Create DB handoff in the same event loop
-                    from maestro.memory.database.session import get_session
-                    async with get_session() as db_session:
+                    from maestro.memory.database.models import get_session_context
+                    with get_session_context() as db_session:
                         handler = HandoffHandler(db_session)
                         track_id = input_data.get("track_id")
                         project_path = (
