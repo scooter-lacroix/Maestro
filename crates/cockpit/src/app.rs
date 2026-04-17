@@ -20,7 +20,7 @@ use ratatui::{
 use std::hash::{Hash, Hasher};
 use std::{
     collections::hash_map::DefaultHasher,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs, io,
     io::Write,
     path::PathBuf,
@@ -2837,6 +2837,7 @@ async fn run_app<B: Backend>(
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
                                                 let Some(manager) = app.create_session_manager(svc) else {
+                                                    app.input_mode = InputMode::Normal;
                                                     continue;
                                                 };
 
@@ -8211,28 +8212,25 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
 
     lines.push(Line::from(""));
 
-    // Group related memories by relationship kind
-    let mut related_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    // Group related memories by relationship kind, preserving ranked order
+    let mut related_groups: Vec<(MemoryRelationKind, Vec<usize>)> = Vec::new();
     for idx in targets {
         let memory = &app.memories[idx];
-        let relation = memory_relation_kind_label(classify_memory_relation(selected, memory)).to_string();
-        related_groups.entry(relation).or_default().push(idx);
+        let kind = classify_memory_relation(selected, memory);
+        if let Some(entry) = related_groups.iter_mut().find(|(k, _)| *k == kind) {
+            entry.1.push(idx);
+        } else {
+            related_groups.push((kind, vec![idx]));
+        }
     }
+    // Stable sort by rank so highest-priority relations appear first
+    related_groups.sort_by(|a, b| memory_relation_rank(b.0).cmp(&memory_relation_rank(a.0)));
 
     // Cache navigation targets for cursor comparison
     let graph_nav_targets = memory_graph_navigation_targets(app);
 
-    for (relation, indices) in related_groups {
-        let kind = match relation.as_str() {
-            "nexus link" => MemoryRelationKind::NexusLink,
-            "session link" => MemoryRelationKind::SessionLink,
-            "track link" => MemoryRelationKind::TrackLink,
-            "project link" => MemoryRelationKind::ProjectLink,
-            "agent link" => MemoryRelationKind::AgentLink,
-            "tag link" => MemoryRelationKind::TagLink,
-            "category link" => MemoryRelationKind::CategoryLink,
-            _ => MemoryRelationKind::Other,
-        };
+    for (kind, indices) in related_groups {
+        let relation = memory_relation_kind_label(kind);
         let (cat_color, cat_icon) = memory_relation_style(kind);
         lines.push(Line::from(vec![
             Span::styled(

@@ -47,7 +47,7 @@ def _detect_git_info(project_path: str) -> dict:
         if result.returncode == 0:
             info["branch"] = result.stdout.strip()
     except Exception:
-        logger.debug("Could not determine git branch info", exc_info=True)
+        logger.opt(exception=True).debug("Could not determine git branch info")
     return info
 
 
