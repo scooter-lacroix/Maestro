@@ -849,7 +849,7 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
 
     let mut related_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
 
-    for idx in targets.into_iter().skip(1) {
+    for idx in targets {
         let memory = &app.memories[idx];
         let relation = relation_kind_label(classify_relation(selected, memory)).to_string();
         related_groups.entry(relation).or_default().push(idx);

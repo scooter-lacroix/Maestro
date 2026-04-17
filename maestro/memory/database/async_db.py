@@ -84,6 +84,8 @@ class AsyncDatabaseManager:
                     class_=Session,
                 )
                 self._sync_fallback = True
+                # Apply same SQLite PRAGMAs to sync fallback engine
+                self._setup_sync_sqlite_pragmas()
             self._initialized = True
 
     async def close(self) -> None:
@@ -136,6 +138,22 @@ class AsyncDatabaseManager:
 
         self._sqlite_pragmas_registered = True
 
+    def _setup_sync_sqlite_pragmas(self) -> None:
+        """Apply SQLite PRAGMAs to the sync fallback engine."""
+        if self.sync_engine is None:
+            return
+        if not self.database_url.startswith("sqlite"):
+            return
+
+        @event.listens_for(self.sync_engine, "connect")
+        def _set_sync_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # type: ignore[no-untyped-def]
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.close()
+
     @property
     def initialized(self) -> bool:
         return self._initialized
@@ -156,24 +174,24 @@ class SyncSessionAdapter:
         self._session = session
 
     async def execute(self, *args: Any, **kwargs: Any) -> Any:
-        return self._session.execute(*args, **kwargs)
+        return await asyncio.to_thread(self._session.execute, *args, **kwargs)
 
     async def scalar(self, *args: Any, **kwargs: Any) -> Any:
-        return self._session.scalar(*args, **kwargs)
+        return await asyncio.to_thread(self._session.scalar, *args, **kwargs)
 
     async def commit(self) -> None:
-        self._session.commit()
+        await asyncio.to_thread(self._session.commit)
 
     async def rollback(self) -> None:
-        self._session.rollback()
+        await asyncio.to_thread(self._session.rollback)
 
     async def add(self, instance: Any) -> None:
         """Add an instance to the session (sync wrapper)."""
-        self._session.add(instance)
+        await asyncio.to_thread(self._session.add, instance)
 
     async def delete(self, instance: Any) -> None:
         """Delete an instance from the session (sync wrapper)."""
-        self._session.delete(instance)
+        await asyncio.to_thread(self._session.delete, instance)
 
     async def flush(self) -> None:
         """Flush pending changes to the database (sync wrapper)."""

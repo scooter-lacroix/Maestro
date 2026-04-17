@@ -83,8 +83,8 @@ def generate_handoff(input_data: dict) -> dict:
         raw_track_id = input_data.get("current_track", "unknown")
 
     # Validate track_id: allow only alphanumeric, hyphens, underscores
-    # Ensure track_id is a string before regex match (could be null/number)
-    track_id_str = str(raw_track_id) if raw_track_id is not None else "unknown"
+    # raw_track_id is guaranteed non-None (falls back to "unknown")
+    track_id_str = str(raw_track_id)
     if not _TRACK_ID_RE.match(track_id_str):
         raise ValueError(f"Invalid track_id: must match [a-zA-Z0-9_-]: {track_id_str}")
     track_id = track_id_str  # Use validated string

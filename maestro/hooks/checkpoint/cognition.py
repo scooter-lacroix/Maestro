@@ -78,10 +78,10 @@ def checkpoint_hook(input_data: dict) -> dict:
 
         # Single event loop for all persistence operations
         async def _store_all() -> None:
-            # Part 1: Store checkpoint
             service = MaestroMemoryService()
             await service.initialize()
             try:
+                # Part 1: Store checkpoint
                 await service.store_command_context(
                     command="hook:checkpoint",
                     project_path=project_path,
@@ -96,16 +96,11 @@ def checkpoint_hook(input_data: dict) -> dict:
                         "selected_cli": input_data.get("selected_cli") or os.environ.get("MAESTRO_SELECTED_CLI", ""),
                     },
                 )
-            finally:
-                await service.close()
 
-            # Part 2: Store critical think result (if available)
-            if "critical_think_result" in input_data:
-                try:
-                    service2 = MaestroMemoryService()
-                    await service2.initialize()
+                # Part 2: Store critical think result (if available)
+                if "critical_think_result" in input_data:
                     try:
-                        await service2.store_command_context(
+                        await service.store_command_context(
                             command="hook:checkpoint:critical_think",
                             project_path=project_path,
                             context={
@@ -116,10 +111,10 @@ def checkpoint_hook(input_data: dict) -> dict:
                                 "critical_think_result": input_data["critical_think_result"],
                             },
                         )
-                    finally:
-                        await service2.close()
-                except Exception as e:
-                    input_data["ct_storage_error"] = str(e)
+                    except Exception as e:
+                        input_data["ct_storage_error"] = str(e)
+            finally:
+                await service.close()
 
         try:
             asyncio.run(_store_all())
