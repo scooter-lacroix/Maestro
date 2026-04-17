@@ -203,7 +203,7 @@ class SyncSessionAdapter:
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._session, name)
-        if callable(attr):
+        if callable(attr) and not name.startswith("__"):
             @functools.wraps(attr)
             async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 return await asyncio.to_thread(attr, *args, **kwargs)

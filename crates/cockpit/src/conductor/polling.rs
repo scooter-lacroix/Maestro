@@ -674,8 +674,10 @@ json.dump(result, sys.stdout)
                     #[cfg(unix)]
                     {
                         let pid_raw = pid as i32;
-                        unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
-                        unsafe { libc::kill(pid_raw, libc::SIGKILL); }
+                        if pid_raw > 0 {
+                            unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
+                            unsafe { libc::kill(pid_raw, libc::SIGKILL); }
+                        }
                     }
                 }
                 return None;
