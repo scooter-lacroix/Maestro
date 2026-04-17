@@ -772,6 +772,13 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
     let graph_cursor = app
         .memory_graph_selection
         .min(targets.len().saturating_sub(1));
+
+    // Pre-compute position lookup for O(1) cursor index resolution
+    let graph_nav_positions: std::collections::HashMap<usize, usize> = targets
+        .iter()
+        .enumerate()
+        .map(|(pos, &idx)| (idx, pos))
+        .collect();
     let selected = &app.memories[selected_idx];
     let mut lines: Vec<Line> = vec![
         Line::from(vec![
@@ -871,15 +878,9 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
             ),
         ]));
 
-        // Cache graph navigation targets before the loop
-        let graph_nav_targets = graph_navigation_targets(app);
-
         for idx in indices {
             let memory = &app.memories[idx];
-            let cursor_idx = graph_nav_targets
-                .iter()
-                .position(|candidate| *candidate == idx)
-                .unwrap_or(0);
+            let cursor_idx = graph_nav_positions.get(&idx).copied().unwrap_or(0);
             let is_graph_selected = cursor_idx == graph_cursor;
             let preview = if memory.content.chars().count() > 28 {
                 format!("{}...", memory.content.chars().take(28).collect::<String>())
@@ -1041,13 +1042,13 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     let mut current_line = String::new();
 
     for word in text.split_whitespace() {
-        if current_line.len() + word.len() + 1 > max_width {
+        if current_line.chars().count() + word.chars().count() + 1 > max_width {
             if !current_line.is_empty() {
                 lines.push(current_line.trim().to_string());
                 current_line = String::new();
             }
             // Handle very long words by splitting on character boundaries
-            if word.len() > max_width {
+            if word.chars().count() > max_width {
                 let mut chars = word.chars().peekable();
                 while chars.peek().is_some() {
                     let chunk: String = chars.by_ref().take(max_width).collect();

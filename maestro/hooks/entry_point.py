@@ -132,7 +132,7 @@ def run_hook(phase: str, event_name: str):
                     # to avoid discontinuities at threshold edges.
                     if revised_confidence > 100:
                         normalized = revised_confidence / 1000
-                    elif revised_confidence >= 10:
+                    elif revised_confidence > 10:
                         normalized = revised_confidence / 100
                     elif revised_confidence >= 1:
                         normalized = revised_confidence / 10
