@@ -658,9 +658,9 @@ After review, provide your feedback or approval.`,
           details: { approved: false },
         };
       }
-      // Allow: HEAD, branch names, tags, commit SHAs, refs/* paths
+      // Allow: HEAD, branch names, tags, commit SHAs, refs/* paths, and refspec suffixes (~^:)
       // Reject values that look like git flags
-      if (!/^[a-zA-Z0-9_\/\-\.]+$/.test(gitRef)) {
+      if (!/^[a-zA-Z0-9_\/\-\.~^:]+$/.test(gitRef)) {
         return {
           content: [
             {

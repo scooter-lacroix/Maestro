@@ -90,6 +90,7 @@ def generate_handoff(input_data: dict) -> dict:
     track_id = track_id_str  # Use validated string
 
     tracks_dir = Path(project_path) / "maestro" / "tracks"
+    tracks_root = tracks_dir.resolve(strict=False)
     track_dir = tracks_dir / track_id
 
     if not track_dir.exists() and tracks_dir.exists():
@@ -97,7 +98,7 @@ def generate_handoff(input_data: dict) -> dict:
         # followed by common archive/suffix patterns
         candidates = []
         for d in tracks_dir.iterdir():
-            if not d.is_dir():
+            if not d.is_dir() or d.is_symlink():
                 continue
             # Exact match (shouldn't reach here due to the exists() check above,
             # but kept for completeness)
@@ -118,6 +119,14 @@ def generate_handoff(input_data: dict) -> dict:
             candidates.sort(key=lambda x: x[0])
             track_dir = candidates[0][1]
 
+    # Verify resolved path stays within tracks root (prevent symlink escape)
+    resolved_track_dir = track_dir.resolve(strict=False)
+    try:
+        resolved_track_dir.relative_to(tracks_root)
+    except ValueError:
+        raise ValueError(f"Resolved track path escapes tracks root: {resolved_track_dir}")
+
+    track_dir = resolved_track_dir
     track_dir.mkdir(parents=True, exist_ok=True)
     handoff_path = track_dir / "compaction-handoff.md"
 
@@ -243,6 +252,9 @@ def generate_handoff(input_data: dict) -> dict:
 def main() -> None:
     try:
         input_data = json.loads(sys.stdin.read())
+        if not isinstance(input_data, dict):
+            json.dump({"hook_error": "Invalid JSON input: expected a JSON object"}, sys.stdout)
+            sys.exit(1)
     except json.JSONDecodeError as e:
         json.dump({"hook_error": f"Invalid JSON input: {e}"}, sys.stdout)
         sys.exit(1)

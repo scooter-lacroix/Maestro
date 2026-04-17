@@ -44,6 +44,17 @@ def checkpoint_hook(input_data: dict) -> dict:
             def _as_text(value: Any) -> str:
                 return value if isinstance(value, str) else "" if value is None else str(value)
 
+            def _as_bool(value: Any) -> bool:
+                if isinstance(value, bool):
+                    return value
+                if value is None:
+                    return False
+                if isinstance(value, (int, float)):
+                    return value != 0
+                if isinstance(value, str):
+                    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+                return bool(value)
+
             task_desc = (
                 _as_text(input_data.get("task_description"))
                 or _as_text(input_data.get("current_task"))
@@ -52,7 +63,7 @@ def checkpoint_hook(input_data: dict) -> dict:
             original_plan = _as_text(input_data.get("original_plan"))
             actual_result = _as_text(input_data.get("actual_result"))
             if not actual_result:
-                completed = input_data.get("task_completed", False)
+                completed = _as_bool(input_data.get("task_completed"))
                 actual_result = "Task completed" if completed else "Task in progress"
 
             ct_result = engine.invoke_after(
@@ -92,7 +103,7 @@ def checkpoint_hook(input_data: dict) -> dict:
                         "iteration": input_data.get("iteration"),
                         "event": "checkpoint_transition",
                         "checkpoint_interval": input_data.get("checkpoint_interval"),
-                        "task_completed": bool(input_data.get("task_completed", False)),
+                        "task_completed": _as_bool(input_data.get("task_completed")),
                         "selected_cli": input_data.get("selected_cli") or os.environ.get("MAESTRO_SELECTED_CLI", ""),
                     },
                 )
