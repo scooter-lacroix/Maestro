@@ -675,8 +675,9 @@ json.dump(result, sys.stdout)
                     {
                         let pid_raw = pid as i32;
                         if pid_raw > 0 {
+                            // SAFETY: kill(-pid) sends SIGKILL to the entire process group,
+                            // which includes the group leader itself. No separate kill(pid) needed.
                             unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
-                            unsafe { libc::kill(pid_raw, libc::SIGKILL); }
                         }
                     }
                 }

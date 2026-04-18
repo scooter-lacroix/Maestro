@@ -201,13 +201,22 @@ def session_outcome_hook(input_data: dict) -> dict:
         return input_data
 
     except Exception as e:
-        input_data["hook_error"] = str(e)
-        return input_data
+        if isinstance(input_data, dict):
+            input_data["hook_error"] = str(e)
+            return input_data
+        return {"hook_error": str(e)}
 
 
 def main() -> None:
     """Main entry point for the hook."""
-    input_data = json.loads(sys.stdin.read())
+    try:
+        input_data = json.loads(sys.stdin.read())
+        if not isinstance(input_data, dict):
+            json.dump({"hook_error": "Invalid JSON input: expected a JSON object"}, sys.stdout)
+            sys.exit(1)
+    except json.JSONDecodeError as e:
+        json.dump({"hook_error": f"Invalid JSON input: {e}"}, sys.stdout)
+        sys.exit(1)
     result = session_outcome_hook(input_data)
     json.dump(result, sys.stdout)
 
