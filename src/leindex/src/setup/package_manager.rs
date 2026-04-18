@@ -360,7 +360,15 @@ pub fn get_yazi_addon_purposes() -> Vec<PackagePurpose> {
 
 /// Returns yazi addon package names for a distribution
 pub fn get_yazi_addon_packages(distro: Distro) -> Vec<String> {
-    get_package_names(&get_yazi_addon_purposes(), distro)
+    let mut packages = get_package_names(&get_yazi_addon_purposes(), distro);
+    // Arch: poppler-glib and poppler-qt6 have strict version-locked depends on poppler.
+    // Without including them, `pacman -S --needed poppler` breaks when the installed
+    // poppler-glib/qt6 pin to the previous poppler version.
+    if matches!(distro, Distro::Arch) {
+        packages.push("poppler-glib".to_string());
+        packages.push("poppler-qt6".to_string());
+    }
+    packages
 }
 
 /// Returns the yazi addon installation command for the distribution
