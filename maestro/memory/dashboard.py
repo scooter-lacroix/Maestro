@@ -749,13 +749,15 @@ npm run build
             async with service.db_manager.get_async_session() as session:
                 if project_id is not None:
                     project = await session.scalar(select(MaestroProject).where(MaestroProject.id == project_id))
-                    if project is not None:
-                        project_path = project.project_path
+                    if project is None:
+                        return {"success": True, "memories": [], "total": 0}
+                    project_path = project.project_path
 
                 if track_id is not None:
                     track = await session.scalar(select(MaestroTrack).where(MaestroTrack.id == track_id))
-                    if track is not None:
-                        track_name = track.track_id
+                    if track is None:
+                        return {"success": True, "memories": [], "total": 0}
+                    track_name = track.track_id
 
             if service.nexus_client is None:
                 raise HTTPException(status_code=503, detail="Nexus client not initialized")
@@ -772,6 +774,8 @@ npm run build
                 "memories": [sanitize_dict_for_json(memory) for memory in memories],
                 "total": len(memories)
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error listing memories: {e}")
             raise HTTPException(status_code=500, detail="Failed to list memories")

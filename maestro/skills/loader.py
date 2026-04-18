@@ -89,6 +89,8 @@ class SkillLoader:
             # Determine category from relative directory structure
             rel = skill_path.relative_to(self.skills_dir)
             parts = list(rel.parts)
+            if not parts:
+                return None
             # The skill name is always the leaf directory name
             name = parts[-1]
             # Category is the first ancestor under skills_dir, if any
@@ -109,13 +111,19 @@ class SkillLoader:
           skills_dir/category/subcategory/skill-name/SKILL.md   ← previously missed
           skills_dir/math/math/linear-algebra/matrices/SKILL.md ← previously missed
 
+        Also discovers skills with fallback names (skill.md, README.md).
+
         Returns:
             Dictionary mapping skill names to SkillDefinitions.
         """
         skills: Dict[str, SkillDefinition] = {}
 
-        for skill_file in sorted(self.skills_dir.rglob("SKILL.md")):
-            skill_path = skill_file.parent
+        # Collect unique skill directories (primary + fallback names)
+        skill_paths = {p.parent for p in self.skills_dir.rglob("SKILL.md")}
+        for fallback_name in ["skill.md", "README.md"]:
+            skill_paths.update(p.parent for p in self.skills_dir.rglob(fallback_name))
+
+        for skill_path in sorted(skill_paths):
 
             # Skip infrastructure directories at root of skills dir
             rel_parts = skill_path.relative_to(self.skills_dir).parts
@@ -226,9 +234,15 @@ class SkillLoader:
 
     def _find_skill_path(self, skill_name: str) -> Optional[Path]:
         """Find the path to a skill directory by name (recursive)."""
+        # Check primary SKILL.md first
         for skill_file in self.skills_dir.rglob("SKILL.md"):
             if skill_file.parent.name == skill_name:
                 return skill_file.parent
+        # Check fallback names
+        for fallback_name in ["skill.md", "README.md"]:
+            for skill_file in self.skills_dir.rglob(fallback_name):
+                if skill_file.parent.name == skill_name:
+                    return skill_file.parent
         return None
 
     def _create_definition(

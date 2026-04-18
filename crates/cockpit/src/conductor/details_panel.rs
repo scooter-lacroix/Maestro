@@ -5,6 +5,17 @@ use leindex_core::orchestrate::model::{IterationStatus, SessionStatus};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+/// Truncates a string to a maximum character count (UTF-8 safe).
+/// If the string exceeds max_chars, returns the first max_chars characters plus "...".
+/// Otherwise returns the original string.
+fn truncate_str_safe(s: &str, max_chars: usize) -> String {
+    if s.chars().count() > max_chars {
+        s.chars().take(max_chars).collect::<String>() + "..."
+    } else {
+        s.to_string()
+    }
+}
+
 pub fn render_details_panel(
     frame: &mut Frame,
     area: Rect,
@@ -315,11 +326,8 @@ fn render_details_view(
                     ]));
 
                     if !last_log.output.is_empty() {
-                        let summary = if last_log.output.len() > 200 {
-                            format!("{}...", &last_log.output[..200].replace('\n', " "))
-                        } else {
-                            last_log.output.replace('\n', " ")
-                        };
+                        let output_no_newlines = last_log.output.replace('\n', " ");
+                        let summary = truncate_str_safe(&output_no_newlines, 200);
                         details.push(Line::from(vec![
                             Span::styled(
                                 "  Output: ",
@@ -641,11 +649,8 @@ fn summarize_runtime_logs(logs: &[RuntimeLogEntry], max_items: usize) -> Vec<Lin
                 RuntimeLogLevel::Error => "[err]",
             };
             let task = entry.task_id.as_deref().unwrap_or("track");
-            let mut summary = entry.summary.replace('\n', " ");
-            if summary.len() > 92 {
-                summary.truncate(89);
-                summary.push_str("...");
-            }
+            let summary_no_newlines = entry.summary.replace('\n', " ");
+            let summary = truncate_str_safe(&summary_no_newlines, 89);
             Line::from(format!("  {} {} {}", prefix, task, summary))
         })
         .collect()

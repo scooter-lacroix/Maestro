@@ -7,11 +7,7 @@
  */
 
 import type { ExtensionAPI } from "../types";
-import {
-  findMaestroProjectRoot,
-  writeMaestroFile,
-  maestroProjectExists,
-} from "../lib/project";
+import { writeMaestroFile } from "../lib/project";
 import { initCriticalThinkTemplates } from "../lib/criticalThink";
 import * as path from "path";
 import * as fs from "fs";
@@ -22,7 +18,7 @@ import * as fs from "fs";
 export function registerSetup(pi: ExtensionAPI, commandName: string) {
   pi.registerCommand(commandName, {
     description: "Initialize/refresh maestro project structure",
-    handler: async (args, ctx) => {
+    handler: async (_args, ctx) => {
       const root = process.cwd();
 
       // Check if maestro directory exists and what files are present
@@ -105,7 +101,7 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
   writeMaestroFile(root, "product.md", productMd);
 
   // Generate tech-stack.md
-  const techStackMd = await generateTechStackMd(root, ctx);
+  const techStackMd = generateTechStackMd(root);
   writeMaestroFile(root, "tech-stack.md", techStackMd);
 
   // Generate workflow.md
@@ -115,6 +111,90 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
   // Generate tracks.md
   const tracksMd = generateTracksMd();
   writeMaestroFile(root, "tracks.md", tracksMd);
+
+  // TrackLens review of generated setup docs
+  try {
+    const combinedMarkdown = [
+      "# Maestro Setup Review\n",
+      "---\n\n",
+      "<!--MAESTRO_FILE:product.md-->\n\n",
+      productMd,
+      "\n\n<!--MAESTRO_FILE:tech-stack.md-->\n\n",
+      techStackMd,
+      "\n\n<!--MAESTRO_FILE:workflow.md-->\n\n",
+      workflowMd,
+    ].join("");
+
+    // @ts-ignore - Dynamic import for TrackLens server
+    const tracklensServer = await import("@maestro/tracklens-server");
+
+    let htmlContent: string | null = null;
+    const htmlPaths = [
+      path.resolve(root, "apps/tracklens-opencode/tracklens.html"),
+      path.resolve(root, "dist/tracklens-editor.html"),
+    ];
+    for (const htmlPath of htmlPaths) {
+      if (fs.existsSync(htmlPath)) {
+        htmlContent = fs.readFileSync(htmlPath, "utf-8");
+        break;
+      }
+    }
+
+    if (!htmlContent) {
+      ctx.ui.notify("TrackLens review UI unavailable — setup docs not found. Setup aborted.", "error");
+      return; // Fail closed — don't proceed without review
+    }
+
+    const server = await tracklensServer.startTrackLensServer({
+        plan: combinedMarkdown,
+        origin: "pi-maestro",
+        htmlContent,
+      });
+
+      let result: { approved: boolean; feedback?: string; edited_content?: string; };
+      try {
+        result = await server.waitForDecision() as {
+          approved: boolean; feedback?: string; edited_content?: string;
+        };
+      } finally {
+        server.stop();
+      }
+
+      // Abort setup if review was denied - user rejected the generated docs
+      if (!result.approved) {
+        if (result.feedback) {
+          ctx.ui.notify(`Setup review denied: ${result.feedback}`, "error");
+        } else {
+          ctx.ui.notify("Setup review was denied. Cancelling setup.", "error");
+        }
+        return; // Abort - do not show success toast
+      }
+      
+      // Review approved - apply any user edits to the files
+      if (result.edited_content) {
+        // Parse edited content using HTML comment markers.
+        // <!--MAESTRO_FILE:filename.md--> won't collide with markdown horizontal rules.
+        const markerRegex = /<!--MAESTRO_FILE:(product|tech-stack|workflow)\.md-->\n\n([\s\S]*?)(?=\n\n<!--MAESTRO_FILE:|$)/g;
+        const expectedFiles = ["product", "tech-stack", "workflow"];
+        const parsedFiles: string[] = [];
+        let match;
+        while ((match = markerRegex.exec(result.edited_content)) !== null) {
+          writeMaestroFile(root, `${match[1]}.md`, match[2].trim());
+          parsedFiles.push(match[1]);
+        }
+        const missingFiles = expectedFiles.filter(f => !parsedFiles.includes(f));
+        if (missingFiles.length > 0) {
+          ctx.ui.notify(
+            `TrackLens: Could not parse edits for: ${missingFiles.map(f => f + ".md").join(", ")}`,
+            "warning"
+          );
+        }
+      }
+  } catch (error) {
+    // TrackLens server failed to start or crashed - abort setup
+    ctx.ui.notify(`TrackLens review failed: ${error instanceof Error ? error.message : 'Unknown error'}. Setup aborted.`, "error");
+    return; // Abort - do not show success toast
+  }
 
   ctx.ui.notify("Maestro project initialized successfully", "success");
 }
@@ -213,7 +293,7 @@ ${isBrownfield ? "Brownfield (existing codebase)" : "Greenfield (new project)"}
 /**
  * Generate tech-stack.md content
  */
-async function generateTechStackMd(root: string, ctx: any): Promise<string> {
+function generateTechStackMd(root: string): string {
   // Detect common technologies
   const techs: string[] = [];
 

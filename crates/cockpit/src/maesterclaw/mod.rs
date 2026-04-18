@@ -418,8 +418,8 @@ impl MaestroClawPane {
                 } else {
                     " "
                 };
-                let title = if session.title.len() > 22 {
-                    format!("{}...", &session.title[..22])
+                let title = if session.title.chars().count() > 22 {
+                    format!("{}...", session.title.chars().take(22).collect::<String>())
                 } else {
                     session.title.clone()
                 };
@@ -586,6 +586,7 @@ impl MaestroClawPane {
                 Style::default().fg(Color::Blue)
             });
 
+        let scroll = self.output_scroll as u16;
         let lines: Vec<Line> = if self.agent_output.is_empty() {
             vec![
                 Line::from(""),
@@ -603,11 +604,9 @@ impl MaestroClawPane {
                 ]),
             ]
         } else {
+
             self.agent_output
                 .iter()
-                .rev()
-                .take(area.height.saturating_sub(2) as usize)
-                .rev()
                 .map(|line| {
                     let color = match line.line_type {
                         OutputLineType::AgentText => Color::White,
@@ -631,7 +630,7 @@ impl MaestroClawPane {
         frame.render_widget(
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: false })
-                .scroll((self.output_scroll, 0))
+                .scroll((scroll, 0))
                 .block(block),
             area,
         );

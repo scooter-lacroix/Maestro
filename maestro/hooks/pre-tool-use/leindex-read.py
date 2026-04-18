@@ -23,7 +23,6 @@ if str(maestro_root) not in sys.path:
 
 
 LeIndexCache: Any = None
-LEGACY_READ_FALLBACK_USED = False
 
 
 def _init_cache():

@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -69,24 +70,53 @@ class StandaloneNexusClient:
         metadata: Optional[dict[str, Any]] = None,
         memory_lane_type: Optional[str] = None,
     ) -> dict[str, Any]:
-        args = [
-            "store",
-            "--content",
-            content,
-            "--agent",
-            agent,
-            "--category",
-            category,
-        ]
-        label_list = [label for label in (labels or []) if label]
-        if label_list:
-            args.extend(["--labels", ",".join(label_list)])
-        if metadata:
-            args.extend(["--metadata-json", _json_dumps(metadata)])
-        if memory_lane_type:
-            args.extend(["--memory-lane-type", memory_lane_type])
+        # Use temp files for sensitive data to avoid exposing via CLI argv
+        content_file = None
+        metadata_file = None
 
-        result = await self._run_nexus(args)
+        try:
+            # Write content to temp file with secure permissions
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix='nexus_content_') as f:
+                f.write(content)
+                content_file = f.name
+
+            args = [
+                "store",
+                "--content-file",
+                content_file,
+                "--agent",
+                agent,
+                "--category",
+                category,
+            ]
+            label_list = [label for label in (labels or []) if label]
+            if label_list:
+                args.extend(["--labels", ",".join(label_list)])
+
+            # Write metadata to temp file if present
+            if metadata:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix='nexus_metadata_') as f:
+                    f.write(_json_dumps(metadata))
+                    metadata_file = f.name
+                    os.chmod(metadata_file, 0o600)
+                args.extend(["--metadata-json-file", metadata_file])
+
+            if memory_lane_type:
+                args.extend(["--memory-lane-type", memory_lane_type])
+
+            result = await self._run_nexus(args)
+        finally:
+            # Clean up temp files
+            if content_file and os.path.exists(content_file):
+                try:
+                    os.unlink(content_file)
+                except OSError:
+                    pass
+            if metadata_file and os.path.exists(metadata_file):
+                try:
+                    os.unlink(metadata_file)
+                except OSError:
+                    pass
         memory_id = self._extract_memory_id(result.stdout)
         if not result.success or memory_id is None:
             return {
@@ -241,26 +271,18 @@ class StandaloneNexusClient:
             )
             if fallback.success:
                 parsed = self._parse_search_output(fallback.stdout)
+            # Use parsed CLI results when available; fall back to SQL only if empty
+            used_db_fallback = not parsed
+            results = parsed if parsed else await self._query_command_fallback(query, project_path=project_path, limit=limit)
             return {
-                "success": fallback.success,
+                "success": fallback.success or used_db_fallback,
                 "query": query,
                 "agent": agent,
-                "results": await self._query_command_fallback(query, project_path=project_path, limit=limit),
+                "results": results,
                 "stdout": fallback.stdout,
                 "stderr": fallback.stderr,
                 "returncode": fallback.returncode,
             }
-
-        return {
-            "success": True,
-            "query": query,
-            "agent": agent,
-            "results": parsed,
-            "memory_ids": [item["id"] for item in parsed if isinstance(item, dict) and "id" in item],
-            "stdout": recall.stdout,
-            "stderr": recall.stderr,
-            "returncode": recall.returncode,
-        }
 
     async def retrieve_project_context(self, project_path: str, limit: int = 10) -> list[dict[str, Any]]:
         return await self._query_context_by_scope(
@@ -327,7 +349,14 @@ class StandaloneNexusClient:
             return tracks
 
     async def hydrate_memories(self, memory_ids: Iterable[int]) -> list[dict[str, Any]]:
-        ids = [int(memory_id) for memory_id in memory_ids if str(memory_id).strip()]
+        ids: list[int] = []
+        for memory_id in memory_ids:
+            if memory_id is None or not str(memory_id).strip():
+                continue
+            try:
+                ids.append(int(memory_id))
+            except (TypeError, ValueError):
+                continue
         if not ids:
             return []
 
@@ -407,10 +436,9 @@ class StandaloneNexusClient:
             total_stmt = text(
                 """
                 SELECT COUNT(*) AS total_memories
-                FROM memories m
-                JOIN agent_namespaces ns ON ns.id = m.namespace_id
+                FROM memories
                 WHERE is_active = 1
-                  AND (:agent_type IS NULL OR ns.name = :agent_type)
+                  AND (:agent_type IS NULL OR json_extract(metadata, '$.agent_type') = :agent_type)
                 """
             )
             total_result = await session.execute(total_stmt, {"agent_type": agent_type})
@@ -597,14 +625,32 @@ class StandaloneNexusClient:
         if self.config_path:
             command.extend(["--config", str(self.config_path)])
         command.extend(args)
-        logger.debug("Running nexus command: %s", " ".join(command))
+        # Log command without sensitive payload args (--content, --metadata-json, --content-file, --metadata-json-file)
+        safe_preview = []
+        skip_next = False
+        for part in command:
+            if skip_next:
+                safe_preview.append("<redacted>")
+                skip_next = False
+                continue
+            if part in ("--content", "--metadata-json", "--content-file", "--metadata-json-file"):
+                skip_next = True
+                safe_preview.append(part)
+                continue
+            safe_preview.append(part)
+        logger.debug(f"Running nexus command: {' '.join(safe_preview)}")
         proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        stdout_b, stderr_b = await proc.communicate()
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+        except asyncio.TimeoutError as e:
+            proc.kill()
+            await proc.wait()
+            raise TimeoutError("Subprocess timed out after 30 seconds") from e
         stdout = stdout_b.decode("utf-8", errors="replace").strip()
         stderr = stderr_b.decode("utf-8", errors="replace").strip()
         return NexusCommandResult(
@@ -766,7 +812,7 @@ class StandaloneNexusClient:
             "source": None,
             "session_id": metadata.get("session_id"),
             "project_id": getattr(row, "maestro_project_id", None),
-            "track_id": getattr(row, "maestro_track_id", None),
+            "track_id": metadata.get("track_id") or getattr(row, "maestro_track_id", None),
             "command": getattr(row, "maestro_command", None) or metadata.get("maestro_command"),
             "command_context": command_context,
             "created_at": row.created_at,

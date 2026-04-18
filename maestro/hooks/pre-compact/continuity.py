@@ -27,7 +27,9 @@ def get_hook_manager(**kwargs: Any) -> Any:
         func = getattr(module, "get_hook_manager", None)
         if callable(func):
             return func(**kwargs)
-    except Exception:
+    except Exception as e:
+        import sys
+        sys.stderr.write(f"Error getting hook manager: {e}\n")
         return None
     return None
 
@@ -70,7 +72,8 @@ def continuity_hook(input_data: dict) -> dict:
 
             recent_memories = asyncio.run(_load_session_memories())
             important_memories = recent_memories[:10]
-        except Exception:
+        except Exception as e:
+            input_data["continuity_memory_load_error"] = str(e)
             important_memories = []
 
         # Create continuity ledger entry
@@ -109,7 +112,10 @@ def continuity_hook(input_data: dict) -> dict:
                     try:
                         await service.store_command_context(
                             command="hook:pre-compact",
-                            project_path=getattr(manager.session_manager.get_session_by_id(session_id), "project_path", None) or os.getcwd(),
+                            project_path=getattr(
+                                manager.session_manager.get_session_by_id(session_id) if manager.session_manager else None,
+                                "project_path", None
+                            ) or os.getcwd(),
                             context={
                                 "session_id": session_id,
                                 "current_task_id": input_data.get("current_task_id", ""),
@@ -125,8 +131,8 @@ def continuity_hook(input_data: dict) -> dict:
                         await service.close()
 
                 asyncio.run(_store_continuity_memory())
-            except Exception:
-                pass
+            except Exception as e:
+                input_data["continuity_storage_error"] = str(e)
 
         return input_data
 

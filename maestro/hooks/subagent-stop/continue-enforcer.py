@@ -47,7 +47,13 @@ def check_should_continue(input_data: dict) -> dict:
 
 
 def main() -> None:
-    input_data = json.loads(sys.stdin.read())
+    try:
+        raw_input = sys.stdin.read()
+        input_data = json.loads(raw_input) if raw_input.strip() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+    if not isinstance(input_data, dict):
+        input_data = {}
     result = check_should_continue(input_data)
     json.dump(result, sys.stdout)
 

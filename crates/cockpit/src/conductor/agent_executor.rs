@@ -708,7 +708,7 @@ mod tests {
         );
         assert_eq!(
             role_utils::cycle_role(&Some(AgentRole::Kraken)),
-            AgentRole::Scout
+            AgentRole::Sentinel
         );
     }
 

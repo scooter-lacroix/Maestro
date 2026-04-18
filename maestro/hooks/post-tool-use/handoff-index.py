@@ -28,7 +28,9 @@ def get_hook_manager(**kwargs: Any) -> Any:
         func = getattr(module, "get_hook_manager", None)
         if callable(func):
             return func(**kwargs)
-    except Exception:
+    except Exception as e:
+        import sys
+        sys.stderr.write(f"Error getting hook manager: {e}\n")
         return None
     return None
 
@@ -136,8 +138,8 @@ def handoff_index_hook(input_data: dict) -> dict:
                         await service.close()
 
                 asyncio.run(_store_handoff_memory())
-            except Exception:
-                pass
+            except Exception as e:
+                input_data["handoff_storage_error"] = str(e)
 
         return input_data
 

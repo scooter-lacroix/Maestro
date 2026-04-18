@@ -95,7 +95,17 @@ def enforce_leindex(input_data: dict) -> dict:
 
 
 def main() -> None:
-    input_data = json.loads(sys.stdin.read())
+    try:
+        raw_input = sys.stdin.read()
+        input_data = json.loads(raw_input) if raw_input.strip() else {}
+    except json.JSONDecodeError as e:
+        sys.stderr.write(f"Failed to parse JSON input: {e}\n")
+        sys.stdout.write("{}")
+        sys.exit(1)
+    except Exception as e:
+        sys.stderr.write(f"Failed to read hook stdin: {e}\n")
+        sys.stdout.write("{}")
+        sys.exit(1)
     result = enforce_leindex(input_data)
     json.dump(result, sys.stdout)
 

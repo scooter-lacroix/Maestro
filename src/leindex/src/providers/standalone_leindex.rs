@@ -204,6 +204,11 @@ impl StandaloneLeIndexProvider {
                 None => {
                     status = ProviderStatus::Degraded;
                     warnings.push("`leindex mcp --help` did not succeed".to_string());
+                    diagnostics.push(self.diagnostic(
+                        ProviderStatus::Degraded,
+                        "MCP entrypoint is not callable",
+                        ["mcp"],
+                    ));
                 }
             }
         }

@@ -152,7 +152,7 @@ The installer's success criteria now include proof that the standalone providers
 
 | Surface | Verification | What it proves |
 |---------|--------------|----------------|
-| Maestro runtime | `maestro --help`, `maestro tracklens --help`, `maestro mcp --help` | The full CLI and MCP pool surface are installed |
+| Maestro runtime | `maestro --help`, `maestro track-lens --help`, `maestro mcp --help` | The full CLI and MCP pool surface are installed |
 | Standalone LeIndex | `leindex --version`, `leindex --help`, `leindex mcp --help` | Analysis provider is installed and exposes the expected command/MCP surface |
 | Standalone Nexus | `nexus --version`, `nexus init --help`, `nexus session --help` | Memory/cognition provider is installed and initialized |
 | Managed-session config | Claude/OpenCode/Codex/Gemini/Qwen/Amp/Droid config files | Direct provider wiring is written to the supported tool configs |
@@ -202,7 +202,7 @@ ls ~/.maestro/skills/
 # Runtime binaries
 ls ~/.local/bin/maestro*
 maestro --help
-maestro tracklens --help
+maestro track-lens --help
 maestro mcp --help
 leindex --version
 leindex --help

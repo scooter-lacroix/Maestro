@@ -248,17 +248,24 @@ class HookExecutor:
             result = self.execute_hook(phase, hook_name, output_data)
             # Merge result into output_data to preserve state even if the hook returns a fresh dict
             if isinstance(result, dict):
+                overlapping = set(result.keys()) & set(output_data.keys())
+                if overlapping:
+                    logger.warning(
+                        "Hook '{}' result overwrites existing keys: {}",
+                        hook_name,
+                        overlapping,
+                    )
                 output_data.update(result)
             else:
                 logger.warning(
-                    "Hook '%s' returned non-dict type %s; skipping merge to preserve pipeline state",
+                    "Hook '{}' returned non-dict type {}; skipping merge to preserve pipeline state",
                     hook_name,
                     type(result).__name__,
                 )
 
             phase_results.append({
                 "hook": hook_name,
-                "success": "hook_error" not in result,
+                "success": isinstance(result, dict) and "hook_error" not in result,
             })
 
         nexus_result = self._emit_nexus_lifecycle(phase, output_data)
@@ -451,6 +458,12 @@ def execute_subagent_stop(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """Execute all subagent-stop hooks."""
     executor = get_hook_executor()
     return executor.execute_phase("subagent-stop", input_data)
+
+
+def execute_loop(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute all loop hooks."""
+    executor = get_hook_executor()
+    return executor.execute_phase("loop", input_data)
 
 
 def execute_review(input_data: Dict[str, Any]) -> Dict[str, Any]:

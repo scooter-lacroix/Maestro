@@ -27,7 +27,8 @@ def get_hook_manager(**kwargs: Any) -> Any:
         func = getattr(module, "get_hook_manager", None)
         if callable(func):
             return func(**kwargs)
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"Error getting hook manager: {e}\n")
         return None
     return None
 
@@ -78,23 +79,34 @@ def session_outcome_hook(input_data: dict) -> dict:
                 duration = (session.ended_at - session.started_at).total_seconds()
                 outcome["duration_seconds"] = duration
 
-        # Get memory count for this session from Nexus-backed truth.
+        # Import MaestroMemoryService early — used by both _async_operations and _persist_operations
+        from maestro.memory.service import MaestroMemoryService
+
+        # Combined async coordinator for all async operations
+        # This consolidates all asyncio.run() calls into a single event loop execution
+        async def _async_operations() -> tuple[int, str]:
+            """Perform all async operations in one event loop."""
+            service = MaestroMemoryService()
+            await service.initialize()
+            try:
+                # Get memory count for this session from Nexus-backed truth
+                memories = await service.retrieve_session_context(session_id=session_id, limit=500)
+                return len(memories), ""
+            except Exception as e:
+                return 0, str(e)
+            finally:
+                await service.close()
+
         memory_count = 0
+        memory_error = ""
         try:
-            from maestro.memory.service import MaestroMemoryService
-
-            async def _load_session_memories() -> list[dict[str, Any]]:
-                service = MaestroMemoryService()
-                await service.initialize()
-                try:
-                    return await service.retrieve_session_context(session_id=session_id, limit=500)
-                finally:
-                    await service.close()
-
-            memories = asyncio.run(_load_session_memories())
-            memory_count = len(memories)
-        except Exception:
+            memory_count, memory_error = asyncio.run(_async_operations())
+        except Exception as e:
+            input_data["outcome_memory_load_error"] = str(e)
             memory_count = 0
+
+        if memory_error:
+            input_data["outcome_memory_load_error"] = memory_error
 
         outcome["memory_count"] = memory_count
 
@@ -108,13 +120,15 @@ def session_outcome_hook(input_data: dict) -> dict:
             project_name = Path(session.project_path).name
             summary += f" in {project_name}"
 
-        # Store outcome in memory
+        # Store outcome in memory and create DB handoff in the same async context
         current_session_id = getattr(manager, '_current_session_id', None)
         if current_session_id or session_id:
             try:
-                from maestro.memory.service import MaestroMemoryService
+                from maestro.memory.coordination.handoffs import HandoffHandler, HandoffTemplate
 
-                async def _store_session_outcome() -> None:
+                async def _persist_operations() -> None:
+                    """Store outcome and create handoff in a single async operation."""
+                    # Part 1: Store outcome in Nexus
                     service = MaestroMemoryService()
                     await service.initialize()
                     try:
@@ -135,10 +149,39 @@ def session_outcome_hook(input_data: dict) -> dict:
                     finally:
                         await service.close()
 
-                asyncio.run(_store_session_outcome())
-            except Exception:
-                # Session might already be closed
-                pass
+                    # Part 2: Create DB handoff in the same event loop
+                    from maestro.memory.database.models import get_session_context
+                    with get_session_context() as db_session:
+                        handler = HandoffHandler(db_session)
+                        track_id = input_data.get("track_id")
+                        project_path = (
+                            session.project_path if session and session.project_path else os.getcwd()
+                        )
+                        context = HandoffTemplate.generic_handoff(
+                            title=f"Session handoff: {session_id[:8]}",
+                            description=summary,
+                            current_state={
+                                "track_id": track_id,
+                                "current_task": input_data.get("current_task_id"),
+                                "iteration": input_data.get("iteration"),
+                            },
+                            achievements=input_data.get("achievements", []),
+                            blockers=input_data.get("blockers", []),
+                            action_items=input_data.get("action_items", []),
+                            remaining_work=input_data.get("remaining_work", ""),
+                        )
+                        handler.create_handoff(
+                            title=f"Session handoff: {session_id[:8]}",
+                            from_session_id=session_id,
+                            from_agent_id=agent_id,
+                            project_path=project_path,
+                            summary=summary,
+                            context_data=context,
+                        )
+
+                asyncio.run(_persist_operations())
+            except Exception as e:
+                input_data["outcome_storage_error"] = str(e)
 
         # Create final ledger entry
         if current_session_id:
@@ -149,8 +192,8 @@ def session_outcome_hook(input_data: dict) -> dict:
                     content=summary,
                     metadata=outcome,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                input_data["outcome_ledger_error"] = str(e)
 
         input_data["session_outcome_captured"] = outcome
         input_data["outcome_summary"] = summary
@@ -158,13 +201,22 @@ def session_outcome_hook(input_data: dict) -> dict:
         return input_data
 
     except Exception as e:
-        input_data["hook_error"] = str(e)
-        return input_data
+        if isinstance(input_data, dict):
+            input_data["hook_error"] = str(e)
+            return input_data
+        return {"hook_error": str(e)}
 
 
 def main() -> None:
     """Main entry point for the hook."""
-    input_data = json.loads(sys.stdin.read())
+    try:
+        input_data = json.loads(sys.stdin.read())
+        if not isinstance(input_data, dict):
+            json.dump({"hook_error": "Invalid JSON input: expected a JSON object"}, sys.stdout)
+            sys.exit(1)
+    except json.JSONDecodeError as e:
+        json.dump({"hook_error": f"Invalid JSON input: {e}"}, sys.stdout)
+        sys.exit(1)
     result = session_outcome_hook(input_data)
     json.dump(result, sys.stdout)
 

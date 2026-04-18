@@ -40,6 +40,12 @@ pub struct TrackLensDecision {
     /// Optional autonomy mode change
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autonomy_mode: Option<AutonomyMode>,
+    /// User's inline-edited content (from CodeMirror edit mode)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_content: Option<String>,
+    /// Metadata about the review phase
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase_metadata: Option<PhaseMetadata>,
 }
 
 /// Decision behavior - allow or deny
@@ -152,6 +158,43 @@ pub enum AnnotationSeverity {
     Error,
 }
 
+// ─── Phase Tracking ──────────────────────────────────────────────────────────
+
+/// Phase of a TrackLens review session
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackLensPhase {
+    /// Server is launching
+    Launching,
+    /// UI is loading content
+    Loading,
+    /// User is reviewing (annotating)
+    Reviewing,
+    /// User is editing content inline
+    Editing,
+    /// User has made a decision
+    Decided,
+}
+
+impl Default for TrackLensPhase {
+    fn default() -> Self {
+        Self::Launching
+    }
+}
+
+/// Metadata about a completed review phase
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseMetadata {
+    /// Duration of review in milliseconds
+    pub review_duration_ms: u64,
+    /// Number of edits made during review
+    pub edit_count: u32,
+    /// Number of annotations created
+    pub annotation_count: u32,
+    /// Review iteration (0-indexed)
+    pub iteration: u32,
+}
+
 // ─── Autonomy Mode ────────────────────────────────────────────────────────────
 
 /// Autonomy mode for Conductor (mapped from legacy permissions)
@@ -179,10 +222,85 @@ mod tests {
             annotations: None,
             feedback: None,
             autonomy_mode: None,
+            edited_content: None,
+            phase_metadata: None,
         };
 
         let json = serde_json::to_string(&decision).unwrap();
         assert!(json.contains("\"behavior\":\"allow\""));
+        // New optional fields should be absent when None
+        assert!(!json.contains("edited_content"));
+        assert!(!json.contains("phase_metadata"));
+    }
+
+    #[test]
+    fn test_decision_with_edited_content() {
+        let decision = TrackLensDecision {
+            behavior: DecisionBehavior::Allow,
+            annotations: None,
+            feedback: None,
+            autonomy_mode: None,
+            edited_content: Some("# Revised Plan\n\nUpdated content here".to_string()),
+            phase_metadata: Some(PhaseMetadata {
+                review_duration_ms: 45000,
+                edit_count: 3,
+                annotation_count: 2,
+                iteration: 0,
+            }),
+        };
+
+        let json = serde_json::to_string(&decision).unwrap();
+        assert!(json.contains("edited_content"));
+        assert!(json.contains("phase_metadata"));
+        assert!(json.contains("review_duration_ms"));
+
+        // Round-trip: deserialize should preserve all fields
+        let restored: TrackLensDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.behavior, DecisionBehavior::Allow);
+        assert!(restored.edited_content.is_some());
+        assert!(restored.phase_metadata.is_some());
+        let meta = restored.phase_metadata.unwrap();
+        assert_eq!(meta.review_duration_ms, 45000);
+        assert_eq!(meta.edit_count, 3);
+        assert_eq!(meta.annotation_count, 2);
+        assert_eq!(meta.iteration, 0);
+    }
+
+    #[test]
+    fn test_phase_enum_serialization() {
+        let phases = vec![
+            TrackLensPhase::Launching,
+            TrackLensPhase::Loading,
+            TrackLensPhase::Reviewing,
+            TrackLensPhase::Editing,
+            TrackLensPhase::Decided,
+        ];
+
+        let json = serde_json::to_string(&phases).unwrap();
+        assert!(json.contains("\"launching\""));
+        assert!(json.contains("\"loading\""));
+        assert!(json.contains("\"reviewing\""));
+        assert!(json.contains("\"editing\""));
+        assert!(json.contains("\"decided\""));
+
+        // Round-trip
+        let restored: Vec<TrackLensPhase> = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, phases);
+    }
+
+    #[test]
+    fn test_phase_default() {
+        assert_eq!(TrackLensPhase::default(), TrackLensPhase::Launching);
+    }
+
+    #[test]
+    fn test_decision_backward_compatible() {
+        // Old-format JSON (no edited_content or phase_metadata) should still deserialize
+        let old_json = r#"{"behavior":"deny","annotations":null,"feedback":"Please fix this"}"#;
+        let decision: TrackLensDecision = serde_json::from_str(old_json).unwrap();
+        assert_eq!(decision.behavior, DecisionBehavior::Deny);
+        assert!(decision.edited_content.is_none());
+        assert!(decision.phase_metadata.is_none());
     }
 
     #[test]

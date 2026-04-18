@@ -27,7 +27,9 @@ def get_hook_manager(**kwargs: Any) -> Any:
         func = getattr(module, "get_hook_manager", None)
         if callable(func):
             return func(**kwargs)
-    except Exception:
+    except Exception as e:
+        import sys
+        sys.stderr.write(f"Error getting hook manager: {e}\n")
         return None
     return None
 
@@ -111,10 +113,8 @@ def session_register_hook(input_data: dict) -> dict:
                     await service.close()
 
             asyncio.run(_store_session_start())
-        except Exception:
-            # Session registration should never fail just because Nexus capture is unavailable.
-            pass
-
+        except Exception as e:
+            input_data["session_start_storage_error"] = str(e)
         return input_data
 
     except Exception as e:

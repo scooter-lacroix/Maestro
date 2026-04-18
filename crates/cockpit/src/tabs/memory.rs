@@ -153,9 +153,7 @@ pub fn graph_navigation_targets(app: &App) -> Vec<usize> {
             .then_with(|| app.memories[a.0].content.cmp(&app.memories[b.0].content))
     });
 
-    let mut targets = vec![selected_idx];
-    targets.extend(ranked.into_iter().map(|(idx, _, _)| idx));
-    targets
+    ranked.into_iter().map(|(idx, _, _)| idx).collect()
 }
 
 pub fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -331,8 +329,8 @@ fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
             let expand_icon = if m.is_expanded { " v " } else { " > " };
 
             // Create preview content (truncated if too long)
-            let preview = if m.content.len() > PREVIEW_LEN {
-                format!("{}...", &m.content[..PREVIEW_LEN])
+            let preview = if m.content.chars().count() > PREVIEW_LEN {
+                format!("{}...", m.content.chars().take(PREVIEW_LEN).collect::<String>())
             } else {
                 m.content.clone()
             };
@@ -774,13 +772,20 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
     let graph_cursor = app
         .memory_graph_selection
         .min(targets.len().saturating_sub(1));
+
+    // Pre-compute position lookup for O(1) cursor index resolution
+    let graph_nav_positions: std::collections::HashMap<usize, usize> = targets
+        .iter()
+        .enumerate()
+        .map(|(pos, &idx)| (idx, pos))
+        .collect();
     let selected = &app.memories[selected_idx];
     let mut lines: Vec<Line> = vec![
         Line::from(vec![
             Span::styled("anchor ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                if selected.content.len() > 26 {
-                    format!("{}...", &selected.content[..26])
+                if selected.content.chars().count() > 26 {
+                    format!("{}...", selected.content.chars().take(26).collect::<String>())
                 } else {
                     selected.content.clone()
                 },
@@ -844,7 +849,7 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
 
     let mut related_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
 
-    for idx in targets.into_iter().skip(1) {
+    for idx in targets {
         let memory = &app.memories[idx];
         let relation = relation_kind_label(classify_relation(selected, memory)).to_string();
         related_groups.entry(relation).or_default().push(idx);
@@ -875,13 +880,10 @@ fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::
 
         for idx in indices {
             let memory = &app.memories[idx];
-            let cursor_idx = graph_navigation_targets(app)
-                .iter()
-                .position(|candidate| *candidate == idx)
-                .unwrap_or(0);
+            let cursor_idx = graph_nav_positions.get(&idx).copied().unwrap_or(0);
             let is_graph_selected = cursor_idx == graph_cursor;
-            let preview = if memory.content.len() > 28 {
-                format!("{}...", &memory.content[..28])
+            let preview = if memory.content.chars().count() > 28 {
+                format!("{}...", memory.content.chars().take(28).collect::<String>())
             } else {
                 memory.content.clone()
             };
@@ -1040,15 +1042,17 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     let mut current_line = String::new();
 
     for word in text.split_whitespace() {
-        if current_line.len() + word.len() + 1 > max_width {
+        if current_line.chars().count() + word.chars().count() + 1 > max_width {
             if !current_line.is_empty() {
                 lines.push(current_line.trim().to_string());
                 current_line = String::new();
             }
-            // Handle very long words
-            if word.len() > max_width {
-                for chunk in word.as_bytes().chunks(max_width) {
-                    lines.push(String::from_utf8_lossy(chunk).to_string());
+            // Handle very long words by splitting on character boundaries
+            if word.chars().count() > max_width {
+                let mut chars = word.chars().peekable();
+                while chars.peek().is_some() {
+                    let chunk: String = chars.by_ref().take(max_width).collect();
+                    lines.push(chunk);
                 }
             } else {
                 current_line = word.to_string();

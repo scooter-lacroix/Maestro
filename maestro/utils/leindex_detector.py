@@ -1,10 +1,13 @@
 """Detect LeIndex availability and provide installation guidance."""
 
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class LeIndexMode(Enum):
@@ -59,6 +62,7 @@ def detect_leindex() -> LeIndexStatus:
     cli_path = shutil.which("leindex")
     if cli_path:
         status.cli_path = cli_path
+        status.mode = LeIndexMode.CLI
         try:
             result = subprocess.run(
                 ["leindex", "--version"],
@@ -68,9 +72,8 @@ def detect_leindex() -> LeIndexStatus:
             )
             if result.returncode == 0:
                 status.cli_version = result.stdout.strip()
-                status.mode = LeIndexMode.CLI
-        except Exception:
-            status.mode = LeIndexMode.CLI
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.debug("Failed to query leindex version at %s: %s", cli_path, exc)
 
     # Check MCP
     try:

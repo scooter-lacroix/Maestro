@@ -8,9 +8,11 @@ Nexus internals.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, Union
 
 from sqlalchemy import event
 from sqlalchemy import create_engine
@@ -47,35 +49,44 @@ class AsyncDatabaseManager:
         self.sync_session_factory: Any = None
         self._sync_fallback = False
         self._initialized = False
+        self._sqlite_pragmas_registered = False
+        self._init_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         if self._initialized:
             return
 
-        try:
-            self.engine = create_async_engine(
-                self.database_url,
-                future=True,
-                pool_pre_ping=True,
-            )
-            self.session_factory = async_sessionmaker(
-                bind=self.engine,
-                expire_on_commit=False,
-                class_=AsyncSession,
-            )
-            await self._setup_sqlite_pragmas()
-        except ModuleNotFoundError as exc:
-            if "aiosqlite" not in str(exc):
-                raise
-            sync_url = self.database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
-            self.sync_engine = create_engine(sync_url, future=True)
-            self.sync_session_factory = sessionmaker(
-                bind=self.sync_engine,
-                expire_on_commit=False,
-                class_=Session,
-            )
-            self._sync_fallback = True
-        self._initialized = True
+        async with self._init_lock:
+            # Double-check after acquiring lock
+            if self._initialized:
+                return
+
+            try:
+                self.engine = create_async_engine(
+                    self.database_url,
+                    future=True,
+                    pool_pre_ping=True,
+                )
+                self.session_factory = async_sessionmaker(
+                    bind=self.engine,
+                    expire_on_commit=False,
+                    class_=AsyncSession,
+                )
+                await self._setup_sqlite_pragmas()
+            except ModuleNotFoundError as exc:
+                if "aiosqlite" not in str(exc):
+                    raise
+                sync_url = self.database_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
+                self.sync_engine = create_engine(sync_url, future=True)
+                self.sync_session_factory = sessionmaker(
+                    bind=self.sync_engine,
+                    expire_on_commit=False,
+                    class_=Session,
+                )
+                self._sync_fallback = True
+                # Apply same SQLite PRAGMAs to sync fallback engine
+                self._setup_sync_sqlite_pragmas()
+            self._initialized = True
 
     async def close(self) -> None:
         if self.engine is not None:
@@ -88,9 +99,10 @@ class AsyncDatabaseManager:
         self.sync_session_factory = None
         self._sync_fallback = False
         self._initialized = False
+        self._sqlite_pragmas_registered = False
 
     @asynccontextmanager
-    async def get_async_session(self) -> AsyncIterator[AsyncSession]:
+    async def get_async_session(self) -> AsyncIterator[Union[AsyncSession, "SyncSessionAdapter"]]:
         await self.initialize()
         if self._sync_fallback:
             assert self.sync_session_factory is not None
@@ -111,8 +123,30 @@ class AsyncDatabaseManager:
         if not self.database_url.startswith("sqlite"):
             return
 
+        # Idempotency check: only register listener once
+        if self._sqlite_pragmas_registered:
+            return
+
         @event.listens_for(self.engine.sync_engine, "connect")
         def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # type: ignore[no-untyped-def]
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.close()
+
+        self._sqlite_pragmas_registered = True
+
+    def _setup_sync_sqlite_pragmas(self) -> None:
+        """Apply SQLite PRAGMAs to the sync fallback engine."""
+        if self.sync_engine is None:
+            return
+        if not self.database_url.startswith("sqlite"):
+            return
+
+        @event.listens_for(self.sync_engine, "connect")
+        def _set_sync_sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # type: ignore[no-untyped-def]
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA journal_mode=WAL")
@@ -140,19 +174,41 @@ class SyncSessionAdapter:
         self._session = session
 
     async def execute(self, *args: Any, **kwargs: Any) -> Any:
-        return self._session.execute(*args, **kwargs)
+        return await asyncio.to_thread(self._session.execute, *args, **kwargs)
 
     async def scalar(self, *args: Any, **kwargs: Any) -> Any:
-        return self._session.scalar(*args, **kwargs)
+        return await asyncio.to_thread(self._session.scalar, *args, **kwargs)
 
     async def commit(self) -> None:
-        self._session.commit()
+        await asyncio.to_thread(self._session.commit)
 
     async def rollback(self) -> None:
-        self._session.rollback()
+        await asyncio.to_thread(self._session.rollback)
+
+    async def add(self, instance: Any) -> None:
+        """Add an instance to the session (sync wrapper)."""
+        await asyncio.to_thread(self._session.add, instance)
+
+    async def delete(self, instance: Any) -> None:
+        """Delete an instance from the session (sync wrapper)."""
+        await asyncio.to_thread(self._session.delete, instance)
+
+    async def flush(self) -> None:
+        """Flush pending changes to the database (sync wrapper)."""
+        await asyncio.to_thread(self._session.flush)
+
+    async def refresh(self, instance: Any) -> None:
+        """Refresh an instance from the database (sync wrapper)."""
+        await asyncio.to_thread(self._session.refresh, instance)
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._session, name)
+        attr = getattr(self._session, name)
+        if callable(attr) and not name.startswith("__"):
+            @functools.wraps(attr)
+            async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                return await asyncio.to_thread(attr, *args, **kwargs)
+            return _async_wrapper
+        return attr
 
 
 __all__ = ["AsyncDatabaseManager"]

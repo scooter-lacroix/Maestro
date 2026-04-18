@@ -299,17 +299,17 @@ fn nexus_install_command(method: &str) -> String {
 pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     normalize_standard_tool_paths();
     // Open durable log file for the entire setup run.
-    let mut log_file = match open_setup_log() {
+    let (mut log_file, setup_log_path) = match open_setup_log() {
         Ok((f, path)) => {
             let _ = tx.send(SetupEvent::Log(format!("Setup log: {}", path.display())));
-            Some(f)
+            (Some(f), Some(path))
         }
         Err(e) => {
             let _ = tx.send(SetupEvent::Log(format!(
                 "[WARN] Could not open setup log: {}",
                 e
             )));
-            None
+            (None, None)
         }
     };
     setup_log_write(
@@ -1390,13 +1390,15 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     {
         let install_path = config.install_path.clone();
         let selected_tools = config.selected_tools.clone();
+        let leindex_install_method = config.leindex_install_method.clone();
+        let nexus_install_method = config.nexus_install_method.clone();
         steps.push(Step {
             name: "Finale - System Verification".to_string(),
             description:
                 "Validating binaries, commands, hooks, skills, and selected integrations..."
                     .to_string(),
             action: StepAction::Internal(Box::new(move || {
-                verify_installed_system(&install_path, &selected_tools)
+                verify_installed_system(&install_path, &selected_tools, &leindex_install_method, &nexus_install_method)
             })),
         });
     }
@@ -1447,7 +1449,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
 
                 setup_log_raw(
                     &mut log_file,
-                    &format!("  command: {}", &command[..command.len().min(500)]),
+                    &format!("  command: {}", command.chars().take(500).collect::<String>()),
                 );
 
                 // For sudo commands, we need to handle them specially
@@ -1650,7 +1652,7 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
     }
 
     setup_log_write(&mut log_file, "SETUP COMPLETED SUCCESSFULLY");
-    if let Some(path) = setup_log_path().ok() {
+    if let Some(path) = setup_log_path {
         let _ = tx.send(SetupEvent::Log(format!(
             "Setup log saved to: {}",
             path.display()
@@ -1749,29 +1751,6 @@ fn validate_nexus_provider(tx: &Sender<SetupEvent>, log: &mut Option<File>, meth
         }
         Err(e) => {
             let msg = format!("Could not execute nexus --version: {}", e);
-            let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
-            setup_log_write(log, &format!("  [WARN] {}", msg));
-        }
-    }
-
-    // Validate nexus init (previously silently swallowed)
-    match Command::new("nexus").arg("init").output() {
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            if out.status.success() {
-                let _ = tx.send(SetupEvent::Log("  [OK] nexus init succeeded".to_string()));
-                setup_log_write(log, "  [OK] nexus init succeeded");
-            } else {
-                let msg = format!(
-                    "nexus init returned non-zero (may already be initialized): {}",
-                    stderr.trim()
-                );
-                let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
-                setup_log_write(log, &format!("  [WARN] {}", msg));
-            }
-        }
-        Err(e) => {
-            let msg = format!("Could not execute nexus init: {}", e);
             let _ = tx.send(SetupEvent::Log(format!("  [WARN] {}", msg)));
             setup_log_write(log, &format!("  [WARN] {}", msg));
         }
@@ -2415,7 +2394,7 @@ fn release_binary_path(repo_root: &Path, bin_name: &str) -> PathBuf {
     repo_root.join("target").join("release").join(binary_name)
 }
 
-fn verify_installed_system(install_path: &str, selected_tools: &[String]) -> Result<Vec<String>> {
+fn verify_installed_system(install_path: &str, selected_tools: &[String], leindex_install_method: &str, nexus_install_method: &str) -> Result<Vec<String>> {
     let mut logs = Vec::new();
     let maestro_home = expand_user_path(install_path)?;
     let local_bin = home_dir()?.join(".local").join("bin");
@@ -2472,10 +2451,17 @@ fn verify_installed_system(install_path: &str, selected_tools: &[String]) -> Res
     }
     logs.push("Verified Maestro MCP pool surface (serve/proxy/tool-search)".to_string());
 
-    require_file(
-        &local_bin.join(binary_name_for_platform("maestro-cockpit")),
-        "maestro-cockpit binary",
-    )?;
+    let cockpit_bin = local_bin.join(binary_name_for_platform("maestro-cockpit"));
+    require_file(&cockpit_bin, "maestro-cockpit binary")?;
+    // Cockpit is a TUI (no --help), so verify it is executable instead
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&cockpit_bin)?.permissions().mode();
+        if mode & 0o111 == 0 {
+            anyhow::bail!("maestro-cockpit binary is not executable");
+        }
+    }
     logs.push("Verified maestro-cockpit runtime binary".to_string());
 
     let gateway_help = command_output(
@@ -2496,63 +2482,73 @@ fn verify_installed_system(install_path: &str, selected_tools: &[String]) -> Res
     }
     logs.push("Verified maestro-lsp-mcp-bridge binary".to_string());
 
-    if let Some(leindex) = StandaloneLeIndexProvider::detect()? {
-        let provider_report = leindex.health_report_sync(Path::new("."))?;
-        if !matches!(
-            provider_report.status,
-            crate::provider_boundary::ProviderStatus::Healthy
-        ) {
-            anyhow::bail!(provider_health_failure_message(
-                "Standalone LeIndex",
-                &provider_report
-            ));
-        }
-        let leindex_binary = Path::new("leindex");
-        let leindex_help = command_output(leindex_binary, &["--help"])?;
-        for token in ["index", "search", "analyze", "phase", "mcp"] {
-            if !leindex_help.contains(token) {
+    // Skip LeIndex verification if install method is "skip"
+    if leindex_install_method != "skip" {
+        if let Some(leindex) = StandaloneLeIndexProvider::detect()? {
+            let provider_report = leindex.health_report_sync(Path::new("."))?;
+            if !matches!(
+                provider_report.status,
+                crate::provider_boundary::ProviderStatus::Healthy
+            ) {
+                anyhow::bail!(provider_health_failure_message(
+                    "Standalone LeIndex",
+                    &provider_report
+                ));
+            }
+            let leindex_binary = leindex.binary();
+            let leindex_help = command_output(leindex_binary, &["--help"])?;
+            for token in ["index", "search", "analyze", "phase", "mcp"] {
+                if !leindex_help.contains(token) {
+                    anyhow::bail!(
+                        "Standalone LeIndex help is missing expected command surface token `{}`",
+                        token
+                    );
+                }
+            }
+            let leindex_mcp = command_output(leindex_binary, &["mcp", "--help"])?;
+            if !leindex_mcp.contains("Run MCP server in stdio mode") {
                 anyhow::bail!(
-                    "Standalone LeIndex help is missing expected command surface token `{}`",
-                    token
+                    "Standalone LeIndex MCP surface is missing the expected stdio entrypoint"
                 );
             }
+            logs.push("Verified standalone LeIndex provider health".to_string());
+            logs.push("Verified standalone LeIndex command/MCP surface".to_string());
+        } else {
+            anyhow::bail!("Standalone LeIndex provider not found. Install LeIndex before using Maestro-managed sessions");
         }
-        let leindex_mcp = command_output(leindex_binary, &["mcp", "--help"])?;
-        if !leindex_mcp.contains("Run MCP server in stdio mode") {
-            anyhow::bail!(
-                "Standalone LeIndex MCP surface is missing the expected stdio entrypoint"
-            );
-        }
-        logs.push("Verified standalone LeIndex provider health".to_string());
-        logs.push("Verified standalone LeIndex command/MCP surface".to_string());
     } else {
-        anyhow::bail!("Standalone LeIndex provider not found. Install LeIndex before using Maestro-managed sessions");
+        logs.push("Skipping LeIndex verification (install method: skip)".to_string());
     }
 
-    if let Some(nexus) = StandaloneNexusProvider::discover() {
-        let provider_report = nexus.health_report_sync(Path::new("."))?;
-        if !matches!(
-            provider_report.status,
-            crate::provider_boundary::ProviderStatus::Healthy
-        ) {
-            anyhow::bail!(provider_health_failure_message(
-                "Standalone Nexus",
-                &provider_report
-            ));
+    // Skip Nexus verification if install method is "skip"
+    if nexus_install_method != "skip" {
+        if let Some(nexus) = StandaloneNexusProvider::discover() {
+            let provider_report = nexus.health_report_sync(Path::new("."))?;
+            if !matches!(
+                provider_report.status,
+                crate::provider_boundary::ProviderStatus::Healthy
+            ) {
+                anyhow::bail!(provider_health_failure_message(
+                    "Standalone Nexus",
+                    &provider_report
+                ));
+            }
+            let nexus_binary = Path::new("nexus");
+            let nexus_init = command_output(nexus_binary, &["init", "--help"])?;
+            if !nexus_init.contains("init") {
+                anyhow::bail!("Standalone Nexus init surface did not respond as expected");
+            }
+            let nexus_session = command_output(nexus_binary, &["session", "--help"])?;
+            if !nexus_session.contains("session") {
+                anyhow::bail!("Standalone Nexus session surface did not respond as expected");
+            }
+            logs.push("Verified standalone Nexus provider health".to_string());
+            logs.push("Verified standalone Nexus init/session surface".to_string());
+        } else {
+            anyhow::bail!("Standalone Nexus provider not found. Install and initialize Nexus before using Maestro-managed sessions");
         }
-        let nexus_binary = Path::new("nexus");
-        let nexus_init = command_output(nexus_binary, &["init", "--help"])?;
-        if !nexus_init.contains("init") {
-            anyhow::bail!("Standalone Nexus init surface did not respond as expected");
-        }
-        let nexus_session = command_output(nexus_binary, &["session", "--help"])?;
-        if !nexus_session.contains("session") {
-            anyhow::bail!("Standalone Nexus session surface did not respond as expected");
-        }
-        logs.push("Verified standalone Nexus provider health".to_string());
-        logs.push("Verified standalone Nexus init/session surface".to_string());
     } else {
-        anyhow::bail!("Standalone Nexus provider not found. Install and initialize Nexus before using Maestro-managed sessions");
+        logs.push("Skipping Nexus verification (install method: skip)".to_string());
     }
 
     for tool in selected_tools {

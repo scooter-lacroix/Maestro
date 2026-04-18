@@ -92,13 +92,16 @@ trap 'rc=$?; ts=$(date "+%Y-%m-%d %H:%M:%S"); echo "" >> "$INSTALL_LOG"; if [[ $
 clear
 log_section "Preparing the Overture..."
 
-# Default remote installs to main. Local installs stay on the current checkout
+# Default remote installs to master. Local installs stay on the current checkout
 # unless MAESTRO_BRANCH was explicitly provided by the caller.
 BRANCH_EXPLICIT=0
 if [[ -n "${MAESTRO_BRANCH:-}" ]]; then
     BRANCH_EXPLICIT=1
+else
+    # Detect remote default branch via git ls-remote
+    MAESTRO_BRANCH="$(git ls-remote --symref "${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}" HEAD 2>/dev/null | awk '/^ref:/ {sub("refs/heads/","",$2); print $2; exit}')"
 fi
-MAESTRO_BRANCH="${MAESTRO_BRANCH:-main}"
+MAESTRO_BRANCH="${MAESTRO_BRANCH:-master}"
 REPO_URL="${REPO_URL:-https://github.com/scooter-lacroix/Maestro.git}"
 
 # Determine if we're running from a cloned repo or a remote install
@@ -284,8 +287,7 @@ install_nexus_provider() {
         ver="$(nexus --version 2>&1 || echo 'unknown')"
         log "[OK] Standalone Nexus already available (version: $ver)"
         local init_out
-        init_out="$(nexus init 2>&1)" || true
-        if [[ $? -ne 0 ]]; then
+        if ! init_out="$(nexus init 2>&1)"; then
             log "[WARN] nexus init returned non-zero (already initialized?): $init_out"
         else
             log "[OK] nexus init succeeded"
@@ -367,8 +369,12 @@ install_nexus_provider() {
     # Validate nexus init (no longer silently swallow errors)
     log "Running nexus init..."
     local init_out
-    init_out="$(nexus init 2>&1)"
-    local init_rc=$?
+    local init_rc
+    if init_out="$(nexus init 2>&1)"; then
+        init_rc=0
+    else
+        init_rc=$?
+    fi
     log_raw "nexus init output (rc=$init_rc):"
     echo "$init_out" >> "$INSTALL_LOG"
     if [[ $init_rc -ne 0 ]]; then
@@ -382,7 +388,6 @@ install_nexus_provider() {
 log_section "Checking for Bun..."
 if ! command -v bun &> /dev/null; then
     log "[!] Bun not found. Installing Bun..."
-    local bun_out
     bun_out="$(curl -fsSL https://bun.sh/install 2>&1 | bash 2>&1)" || true
     echo "$bun_out" >> "$INSTALL_LOG"
     export BUN_INSTALL="$HOME/.bun"
@@ -660,6 +665,58 @@ if [[ $SETUP_SUCCESS -eq 0 ]]; then
     echo -e "      3. See README.md for full manual setup instructions"
     echo -e "      4. Full install log: ${Y}$INSTALL_LOG${NC}"
     echo ""
+    exit 1
+fi
+
+# Copy live Python modules to plugin bundle (hooks/skills already copied by maestro-setup).
+# Only copy modules that are actively imported — skip dead/orphaned code.
+log_section "Installing Python modules..."
+MAESTRO_PLUGIN_DIR="${MAESTRO_PLUGIN_DIR:-$HOME/.claude/plugins/maestro}"
+PY_PLUGIN_DIR="$MAESTRO_PLUGIN_DIR/maestro"
+mkdir -p "$PY_PLUGIN_DIR"
+
+# Live modules needed by hooks: memory/ (Nexus service, 11+ hook imports),
+# utils/ (small utilities), config/ (settings manager),
+# critical_think/ (metacognitive analysis at checkpoints).
+for mod in memory utils config critical_think; do
+    if [[ -d "$INSTALL_DIR/maestro/$mod" ]]; then
+        # Remove existing module to prevent cp -a nesting on reinstall
+        rm -rf "${PY_PLUGIN_DIR:?}/$mod"
+        cp -a "$INSTALL_DIR/maestro/$mod" "$PY_PLUGIN_DIR/$mod"
+        log "[OK] Copied maestro/$mod/"
+    else
+        log "[WARN] maestro/$mod/ not found in source — skipping"
+    fi
+done
+
+# Copy top-level __init__.py and non-deprecated .py files
+for pyfile in "$INSTALL_DIR/maestro/"*.py; do
+    [[ -f "$pyfile" ]] || continue
+    fname="$(basename "$pyfile")"
+    # handoffs.py is explicitly deprecated — skip
+    [[ "$fname" == "handoffs.py" ]] && continue
+    cp -a "$pyfile" "$PY_PLUGIN_DIR/$fname"
+    log "[OK] Copied maestro/$fname"
+done
+
+# Verify critical Python modules are present
+PY_VERIFY_OK=1
+for check in \
+    "maestro/memory/service.py:Nexus memory service" \
+    "maestro/memory/hooks/unified.py:Hook manager" \
+    "maestro/memory/nexus_client.py:Nexus client" \
+    "maestro/critical_think/__init__.py:Critical think module"; do
+    fpath="${check%%:*}"
+    flabel="${check##*:}"
+    if [[ ! -f "$MAESTRO_PLUGIN_DIR/$fpath" ]]; then
+        log "[VERIFY FAIL] $flabel not found at $MAESTRO_PLUGIN_DIR/$fpath"
+        PY_VERIFY_OK=0
+    fi
+done
+if [[ "$PY_VERIFY_OK" -eq 1 ]]; then
+    log "[OK] Python modules installed and verified"
+else
+    log "[ERROR] Critical Python modules are missing. Installation failed."
     exit 1
 fi
 

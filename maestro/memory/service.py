@@ -437,7 +437,7 @@ class MaestroMemoryService:
 
                 self._initialized = False
                 # Issue 16: Use custom exception
-                raise MaestroInitializationError(f"Failed to initialize memory service: {e}")
+                raise MaestroInitializationError(f"Failed to initialize memory service: {e}") from e
 
     async def close(self) -> None:
         """Close database connections and cleanup resources."""
@@ -560,7 +560,7 @@ class MaestroMemoryService:
         try:
             normalized_unicode = unicodedata.normalize('NFC', path)
         except (TypeError, ValueError) as e:
-            raise MaestroValidationError(f"Invalid Unicode in path: {e}")
+            raise MaestroValidationError(f"Invalid Unicode in path: {e}") from e
 
         # Issue 2: Check for suspicious patterns before normalization
         suspicious_patterns = [
@@ -623,7 +623,7 @@ class MaestroMemoryService:
             return normalized
 
         except (OSError, ValueError) as e:
-            raise MaestroValidationError(f"Invalid project path: {e}")
+            raise MaestroValidationError(f"Invalid project path: {e}") from e
 
     def _validate_memory_id(self, memory_id: int | str) -> int:
         """Validate memory_id is a positive integer"""
@@ -782,7 +782,7 @@ class MaestroMemoryService:
         except Exception as e:
             # Issue 12: Sanitize error message for user
             sanitized_msg = self._sanitize_error_message(e, include_details=True)
-            raise MaestroRetrievalError(f"Failed to retrieve project context: {sanitized_msg}")
+            raise MaestroRetrievalError(f"Failed to retrieve project context: {sanitized_msg}") from e
 
     async def retrieve_track_context(
         self,
@@ -820,7 +820,7 @@ class MaestroMemoryService:
         except Exception as e:
             # Issue 12: Sanitize error message for user
             sanitized_msg = self._sanitize_error_message(e, include_details=True)
-            raise MaestroRetrievalError(f"Failed to retrieve track context: {sanitized_msg}")
+            raise MaestroRetrievalError(f"Failed to retrieve track context: {sanitized_msg}") from e
 
     async def retrieve_session_context(
         self,
@@ -854,7 +854,7 @@ class MaestroMemoryService:
 
         except Exception as e:
             sanitized_msg = self._sanitize_error_message(e, include_details=True)
-            raise MaestroRetrievalError(f"Failed to retrieve session context: {sanitized_msg}")
+            raise MaestroRetrievalError(f"Failed to retrieve session context: {sanitized_msg}") from e
 
     async def search_similar_commands(
         self,
@@ -895,7 +895,7 @@ class MaestroMemoryService:
                 include_raw=True,
             )
 
-            if not result.get("results"):
+            if not result.get("success"):
                 logger.warning(f"Memory search failed: {result.get('error')}")
                 return []
 
@@ -906,7 +906,7 @@ class MaestroMemoryService:
         except Exception as e:
             # Issue 12: Sanitize error message for user
             sanitized_msg = self._sanitize_error_message(e, include_details=True)
-            raise MaestroRetrievalError(f"Failed to search similar commands: {sanitized_msg}")
+            raise MaestroRetrievalError(f"Failed to search similar commands: {sanitized_msg}") from e
 
     # Constants for memory enhancement (Issue 17: Extract magic numbers)
     DEFAULT_MEMORY_LIMIT = 3
@@ -1004,7 +1004,7 @@ class MaestroMemoryService:
             )
 
             # Check if search was successful and has results
-            if not search_result.get("results"):
+            if not search_result.get("success"):
                 logger.debug(f"Memory search failed: {search_result.get('error')}")
                 await self._record_db_metric("enhance_context_search_failed")
                 return context

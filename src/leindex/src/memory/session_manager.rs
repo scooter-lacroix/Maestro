@@ -230,7 +230,7 @@ impl SessionManager {
         let escaped_session_id = shell_escape(session_id);
         let mcp_config_path = self.write_session_mcp_config(session_id)?;
         let mcp_config = shell_escape(mcp_config_path.to_string_lossy().as_ref());
-        let profile = self.build_session_provider_profile(session_id, project_path)?;
+        let profile = self.build_session_provider_profile_with_tool(session_id, project_path, tool)?;
         let provider_profile = shell_escape("maestro_runtime");
         let analysis_provider = shell_escape("standalone_leindex");
         let memory_provider = shell_escape("standalone_nexus");
@@ -441,7 +441,18 @@ impl SessionManager {
     ) -> Result<SessionProviderProfile> {
         // Run the async variant via a blocking adapter to remain callable
         // from synchronous contexts (CLI, setup wizard, etc.).
-        self.run_profile_future(self.build_session_provider_profile_inner(session_id, project_path))
+        self.run_profile_future(self.build_session_provider_profile_inner(session_id, project_path, None))
+    }
+
+    /// Variant that accepts a tool parameter directly, avoiding database query.
+    /// Use this when the session hasn't been inserted yet (e.g., during creation).
+    fn build_session_provider_profile_with_tool(
+        &self,
+        session_id: &str,
+        project_path: &str,
+        tool: &str,
+    ) -> Result<SessionProviderProfile> {
+        self.run_profile_future(self.build_session_provider_profile_inner(session_id, project_path, Some(tool)))
     }
 
     /// Async variant for callers already inside a Tokio runtime (e.g.
@@ -452,7 +463,7 @@ impl SessionManager {
         session_id: &str,
         project_path: &str,
     ) -> Result<SessionProviderProfile> {
-        self.build_session_provider_profile_inner(session_id, project_path).await
+        self.build_session_provider_profile_inner(session_id, project_path, None).await
     }
 
     /// Shared core that builds the profile. Uses async health checks
@@ -461,22 +472,26 @@ impl SessionManager {
         &self,
         session_id: &str,
         project_path: &str,
+        tool_override: Option<&str>,
     ) -> Result<SessionProviderProfile> {
         let leindex_provider = StandaloneLeIndexProvider::detect()?
             .context("Standalone LeIndex provider not found. Install LeIndex before launching managed Maestro sessions.")?;
         let nexus_provider = StandaloneNexusProvider::discover()
             .context("Standalone Nexus provider not found. Install and initialize Nexus before launching managed Maestro sessions.")?;
-        let selected_cli = self
-            .service
-            .list_sessions()
-            .ok()
-            .and_then(|sessions| {
-                sessions
-                    .into_iter()
-                    .find(|session| session.session_id == session_id)
-                    .and_then(|session| session.tool)
-            })
-            .unwrap_or_else(|| "unknown".to_string());
+        let selected_cli = if let Some(tool) = tool_override {
+            tool.to_string()
+        } else {
+            self.service
+                .list_sessions()
+                .ok()
+                .and_then(|sessions| {
+                    sessions
+                        .into_iter()
+                        .find(|session| session.session_id == session_id)
+                        .and_then(|session| session.tool)
+                })
+                .unwrap_or_else(|| "unknown".to_string())
+        };
         let overlap_profile = managed_cli_overlap_profile(&selected_cli);
 
         let pooled_shared_servers = self
@@ -629,18 +644,20 @@ impl SessionManager {
         let provider_mcp =
             self.build_provider_mcp_config(session_id, project_path, include_stdio_type)?;
         let mut settings = ensure_json_object(existing);
-        settings.as_object_mut().unwrap().insert(
-            "mcpServers".to_string(),
-            serde_json::to_value(self.build_mcp_servers_config_with_stdio_type(
-                session_id,
-                project_path,
-                include_stdio_type,
-            )?)?,
-        );
-        settings.as_object_mut().unwrap().insert(
-            "maestro".to_string(),
-            self.build_provider_diagnostics_json(&profile, &provider_mcp),
-        );
+        if let Some(obj) = settings.as_object_mut() {
+            obj.insert(
+                "mcpServers".to_string(),
+                serde_json::to_value(self.build_mcp_servers_config_with_stdio_type(
+                    session_id,
+                    project_path,
+                    include_stdio_type,
+                )?)?,
+            );
+            obj.insert(
+                "maestro".to_string(),
+                self.build_provider_diagnostics_json(&profile, &provider_mcp),
+            );
+        }
         Ok(settings)
     }
 
@@ -653,16 +670,18 @@ impl SessionManager {
         let profile = self.build_session_provider_profile(session_id, project_path)?;
         let provider_mcp = self.build_provider_mcp_config(session_id, project_path, false)?;
         let mut settings = ensure_json_object(existing);
-        settings.as_object_mut().unwrap().insert(
-            "mcp".to_string(),
-            serde_json::to_value(
-                self.build_opencode_mcp_servers_config(session_id, project_path)?,
-            )?,
-        );
-        settings.as_object_mut().unwrap().insert(
-            "maestro".to_string(),
-            self.build_provider_diagnostics_json(&profile, &provider_mcp),
-        );
+        if let Some(obj) = settings.as_object_mut() {
+            obj.insert(
+                "mcp".to_string(),
+                serde_json::to_value(
+                    self.build_opencode_mcp_servers_config(session_id, project_path)?,
+                )?,
+            );
+            obj.insert(
+                "maestro".to_string(),
+                self.build_provider_diagnostics_json(&profile, &provider_mcp),
+            );
+        }
         Ok(settings)
     }
 
@@ -1432,9 +1451,12 @@ impl SessionManager {
                 // panics on current_thread runtimes. A fresh thread is never
                 // inside any tokio context, so Handle::block_on is safe here.
                 std::thread::scope(|s| {
-                    s.spawn(|| handle.block_on(lsp_manager.stop_all_session_lsps(&sid)))
+                    match s.spawn(|| handle.block_on(lsp_manager.stop_all_session_lsps(&sid)))
                         .join()
-                        .unwrap()
+                    {
+                        Ok(result) => result,
+                        Err(_) => anyhow::bail!("LSP stop thread panicked"),
+                    }
                 })
             } else {
                 let rt = tokio::runtime::Runtime::new()?;
@@ -1525,7 +1547,10 @@ impl SessionManager {
             // Spawn a dedicated thread to avoid block_in_place which
             // panics on current_thread runtimes.
             std::thread::scope(|s| {
-                s.spawn(|| handle.block_on(future)).join().unwrap()
+                match s.spawn(|| handle.block_on(future)).join() {
+                    Ok(result) => result,
+                    Err(_) => anyhow::bail!("Memory provider thread panicked"),
+                }
             })
         } else {
             tokio::runtime::Runtime::new()?.block_on(future)

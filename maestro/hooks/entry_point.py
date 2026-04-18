@@ -25,13 +25,14 @@ if str(maestro_root) not in sys.path:
 def run_hook(phase: str, event_name: str):
     from maestro.hooks.executor import get_hook_executor
 
-    # Delay stream hijacking until after imports
     original_stdout = sys.stdout
     original_stderr = sys.stderr
-    sys.stdout = io.StringIO()
-    sys.stderr = io.StringIO()
 
     try:
+        # Hijack streams inside try to ensure finally restores them
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+
         # Capture input from stdin
         try:
             raw_input = sys.stdin.read()
@@ -45,8 +46,9 @@ def run_hook(phase: str, event_name: str):
         if not isinstance(data, dict):
             data = {}
 
-        # Ensure project_path is set
-        data.setdefault("project_path", data.get("cwd") or os.getcwd())
+        # Ensure project_path is set (handle missing, None, and empty string)
+        if not data.get("project_path"):
+            data["project_path"] = data.get("cwd") or os.getcwd()
         
         # Execute hooks for the phase
         executor = get_hook_executor()
@@ -78,8 +80,8 @@ def run_hook(phase: str, event_name: str):
                     }
                 }
         elif phase == "pre-tool-use":
-            reason = result.get("hook_message") or result.get("hook_error")
-            if result.get("hook_block") and reason:
+            reason = result.get("hook_message") or result.get("hook_error") or "Blocked by Maestro hook policy"
+            if result.get("hook_block"):
                 response = {
                     "hookSpecificOutput": {
                         "hookEventName": event_name,
@@ -88,8 +90,9 @@ def run_hook(phase: str, event_name: str):
                     }
                 }
         elif phase == "subagent-stop":
-            if result.get("hook_block") and result.get("hook_message"):
-                response = {"decision": "block", "reason": result["hook_message"]}
+            reason = result.get("hook_message") or result.get("hook_error") or "Blocked by Maestro subagent-stop policy"
+            if result.get("hook_block"):
+                response = {"decision": "block", "reason": reason}
         elif phase == "pre-compact":
             messages = []
             continuity = result.get("continuity_preserved")
@@ -97,11 +100,73 @@ def run_hook(phase: str, event_name: str):
                 messages.append(f"Preserved {continuity.get('preserved_count', 0)} memories.")
             if result.get("hook_error"):
                 messages.append(f"Warning: {result['hook_error']}")
-            
+
             response = {
                 "continue": True,
                 "systemMessage": "\n".join(messages) if messages else "Maestro pre-compact complete."
             }
+
+        # Consume critical_think_result from checkpoint/review/loop hooks
+        # and surface as additionalContext so Claude sees the metacognitive analysis.
+        ct_result = result.get("critical_think_result")
+        if ct_result and isinstance(ct_result, dict):
+            ct_parts = []
+            if ct_result.get("synthesis"):
+                ct_parts.append(f"Analysis: {ct_result['synthesis']}")
+            if ct_result.get("pitfalls"):
+                pitfalls = ct_result["pitfalls"]
+                if isinstance(pitfalls, list) and pitfalls:
+                    ct_parts.append(f"Pitfalls: {'; '.join(str(p) for p in pitfalls[:5])}")
+            if ct_result.get("risks"):
+                risks = ct_result["risks"]
+                if isinstance(risks, list) and risks:
+                    ct_parts.append(f"Risks: {'; '.join(str(r) for r in risks[:5])}")
+            if ct_result.get("next_steps"):
+                next_steps = ct_result["next_steps"]
+                if isinstance(next_steps, list) and next_steps:
+                    ct_parts.append(f"Suggested next steps: {'; '.join(str(s) for s in next_steps[:5])}")
+            if ct_result.get("revised_confidence") is not None:
+                revised_confidence = ct_result['revised_confidence']
+                if isinstance(revised_confidence, (int, float)):
+                    # Normalize to 0-1 range using inclusive boundary checks
+                    # to avoid discontinuities at threshold edges.
+                    if revised_confidence > 100:
+                        normalized = revised_confidence / 1000
+                    elif revised_confidence > 10:
+                        normalized = revised_confidence / 100
+                    elif revised_confidence >= 1:
+                        normalized = revised_confidence / 10
+                    else:
+                        normalized = revised_confidence
+                    normalized = max(0.0, min(1.0, normalized))
+                    ct_parts.append(f"Confidence: {normalized:.0%}")
+
+            if ct_parts:
+                ct_context = f"[Maestro Critical Think - {phase}]\n" + "\n".join(ct_parts)
+                if response and "hookSpecificOutput" in response:
+                    existing = response["hookSpecificOutput"].get("additionalContext", "")
+                    response["hookSpecificOutput"]["additionalContext"] = (
+                        f"{existing}\n\n{ct_context}" if existing else ct_context
+                    )
+                elif response and "systemMessage" in response:
+                    response["systemMessage"] += f"\n\n{ct_context}"
+                elif response and "reason" in response:
+                    # subagent-stop block — preserve decision, append CT context
+                    response["reason"] = f"{response['reason']}\n\n{ct_context}"
+                elif response:
+                    # Preserve existing response structure (e.g., {"decision": "block"})
+                    # by merging CT context into a new hookSpecificOutput field
+                    response["hookSpecificOutput"] = {
+                        "hookEventName": event_name,
+                        "additionalContext": ct_context,
+                    }
+                else:
+                    response = {
+                        "hookSpecificOutput": {
+                            "hookEventName": event_name,
+                            "additionalContext": ct_context,
+                        }
+                    }
 
         # Print final JSON to REAL stdout
         original_stdout.write(json.dumps(response if response else {}))
@@ -113,7 +178,9 @@ def run_hook(phase: str, event_name: str):
         original_stdout.write("{}")
     finally:
         # Capture hijacked stderr content before restoring streams
-        captured_stderr = sys.stderr.getvalue()
+        captured_stderr = ""
+        if hasattr(sys.stderr, 'getvalue'):
+            captured_stderr = sys.stderr.getvalue()
 
         # Restore original streams first to ensure consistent state
         sys.stdout = original_stdout

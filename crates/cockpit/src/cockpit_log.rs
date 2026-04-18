@@ -396,12 +396,26 @@ pub fn tail_log(log_path: &Path, n: usize) -> Result<Vec<String>> {
     file.seek(SeekFrom::Start(start))
         .with_context(|| format!("Failed to seek in log file: {}", log_path.display()))?;
 
-    let mut buf = String::new();
-    file.read_to_string(&mut buf)
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
         .with_context(|| format!("Failed to read log file: {}", log_path.display()))?;
 
-    let lines: Vec<String> = buf
-        .lines()
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines_iter = text.lines();
+
+    // Skip first line only if the seek landed mid-line (not on a line boundary)
+    if start > 0 {
+        let mut prev = [0u8; 1];
+        file.seek(SeekFrom::Start(start - 1))
+            .with_context(|| format!("Failed to seek in log file: {}", log_path.display()))?;
+        file.read_exact(&mut prev)
+            .with_context(|| format!("Failed to read log file: {}", log_path.display()))?;
+        if prev[0] != b'\n' {
+            lines_iter.next();
+        }
+    }
+
+    let lines: Vec<String> = lines_iter
         .filter(|l| !l.starts_with('#') && *l != "---")
         .rev()
         .take(n)

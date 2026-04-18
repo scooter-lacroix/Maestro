@@ -366,20 +366,37 @@ fn parse_memory_access_history(
     events
         .iter()
         .filter_map(|event| {
-            let agent_id = event
+            // Extract raw values first, before applying defaults
+            let raw_agent_id = event
                 .get("agent_id")
                 .or_else(|| event.get("agent"))
                 .and_then(|value| value.as_str())
-                .unwrap_or("unknown")
-                .trim()
-                .to_string();
-            let timestamp = event
+                .map(|s| s.trim());
+            let raw_timestamp = event
                 .get("timestamp")
                 .or_else(|| event.get("at"))
                 .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .trim()
+                .map(|s| s.trim());
+            let raw_tool_used = event
+                .get("tool_used")
+                .or_else(|| event.get("tool"))
+                .and_then(|value| value.as_str())
+                .map(|s| s.trim());
+
+            // Skip if all raw values are empty or None
+            let all_empty = raw_agent_id.map_or(true, |s| s.is_empty())
+                && raw_timestamp.map_or(true, |s| s.is_empty())
+                && raw_tool_used.map_or(true, |s| s.is_empty());
+            if all_empty {
+                return None;
+            }
+
+            // Now apply defaults for the struct
+            let agent_id = raw_agent_id
+                .filter(|v| !v.is_empty())
+                .unwrap_or("unknown")
                 .to_string();
+            let timestamp = raw_timestamp.unwrap_or("").to_string();
             let access_type = event
                 .get("access_type")
                 .or_else(|| event.get("type"))
@@ -387,23 +404,14 @@ fn parse_memory_access_history(
                 .unwrap_or("read")
                 .trim()
                 .to_string();
-            let tool_used = event
-                .get("tool_used")
-                .or_else(|| event.get("tool"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty());
+            let tool_used = raw_tool_used.map(|s| s.to_string()).filter(|s| !s.is_empty());
 
-            if agent_id.is_empty() && timestamp.is_empty() && tool_used.is_none() {
-                None
-            } else {
-                Some(crate::state::MemoryAccessEvent {
-                    agent_id,
-                    timestamp,
-                    tool_used,
-                    access_type,
-                })
-            }
+            Some(crate::state::MemoryAccessEvent {
+                agent_id,
+                timestamp,
+                tool_used,
+                access_type,
+            })
         })
         .collect()
 }
@@ -570,7 +578,20 @@ fn fallback_maestroclaw_command(session: &leindex_core::memory::models::Session)
         "qwen" => "qwen".to_string(),
         "iflow" => "iflow".to_string(),
         "droid" => "droid".to_string(),
-        _ => std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string()),
+        _ => {
+            // Use appropriate shell for the platform
+            if cfg!(windows) {
+                std::env::var("COMSPEC")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| "cmd.exe".to_string())
+            } else {
+                std::env::var("SHELL")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| "bash".to_string())
+            }
+        }
     }
 }
 
@@ -689,15 +710,13 @@ fn start_maestroclaw_session(
     app: &mut App,
     session: leindex_core::memory::models::Session,
 ) -> anyhow::Result<()> {
-    if let Some(runtime) = app.maestroclaw_runtime.as_mut() {
-        let _ = runtime.stop();
-    }
-
     let launch = build_maestroclaw_launch(&session)?;
+    // Redact command arguments for UI display to avoid leaking secrets
     let command_preview = session
         .command
         .clone()
         .filter(|value| !value.trim().is_empty())
+        .and_then(|cmd| cmd.split_whitespace().next().map(|first_word| first_word.to_string()))
         .unwrap_or_else(|| fallback_maestroclaw_command(&session));
     let claw_session = ClawSession {
         id: session.session_id.clone(),
@@ -725,6 +744,11 @@ fn start_maestroclaw_session(
     let mut runtime = ClawLoop::launch(claw_session.clone(), launch)?;
     let (cols, rows) = crossterm::terminal::size().unwrap_or((160, 48));
     let _ = runtime.resize(rows, cols);
+
+    // Stop old runtime only after new one launched successfully
+    if let Some(mut old_runtime) = app.maestroclaw_runtime.take() {
+        let _ = old_runtime.stop();
+    }
 
     app.maestroclaw_pane.selected_session = app
         .sessions
@@ -2018,7 +2042,10 @@ fn handle_maestroclaw_action(app: &mut App, action: crate::maesterclaw::MaestroC
                     crate::maesterclaw::SessionEntry {
                         id: s.session_id.clone(),
                         title: s.title.clone(),
-                        preview: s.command.as_deref().unwrap_or("(no command)").to_string(),
+                        preview: s.command.as_deref()
+                            .and_then(|cmd| cmd.split_whitespace().next())
+                            .unwrap_or("(no command)")
+                            .to_string(),
                         source: s.tool.as_deref().unwrap_or("unknown").to_string(),
                         last_active,
                         turn_count: 0,
@@ -2176,81 +2203,138 @@ fn apply_selected_channels_to_config(
             .unwrap_or_default()
     }
 
+    // Only clear deselected channels — preserve configs for selected ones
+    // (even if env vars are missing, we keep the existing persisted config)
+    if !selected_channels.contains(&ChannelType::Telegram) {
+        config.channels.telegram = None;
+    }
+    if !selected_channels.contains(&ChannelType::Discord) {
+        config.channels.discord = None;
+    }
+    if !selected_channels.contains(&ChannelType::Slack) {
+        config.channels.slack = None;
+    }
+    if !selected_channels.contains(&ChannelType::Matrix) {
+        config.channels.matrix = None;
+    }
+    if !selected_channels.contains(&ChannelType::WhatsApp) {
+        config.channels.whatsapp = None;
+    }
+    if !selected_channels.contains(&ChannelType::Mattermost) {
+        config.channels.mattermost = None;
+    }
+
+    // Now populate selected channels from env vars (overwriting if available)
+    // Treat empty env vars as absent to avoid overwriting persisted credentials with blanks.
+    fn env_non_empty(name: &str) -> Option<String> {
+        std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+    }
+
+    fn env_list_or_existing(name: &str, existing: &Option<Vec<String>>) -> Vec<String> {
+        let parsed = parse_env_list(name);
+        if parsed.is_empty() {
+            existing.clone().unwrap_or_default()
+        } else {
+            parsed
+        }
+    }
+
+    fn env_opt_or_existing(name: &str, existing: Option<String>) -> Option<String> {
+        env_non_empty(name).or(existing)
+    }
+
     if selected_channels.contains(&ChannelType::Telegram) {
-        if let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") {
+        if let Some(bot_token) = env_non_empty("TELEGRAM_BOT_TOKEN") {
+            let existing = config.channels.telegram.take();
             config.channels.telegram = Some(TelegramConfig {
                 bot_token,
-                allowed_users: parse_env_list("TELEGRAM_ALLOWED_USERS"),
+                allowed_users: env_list_or_existing("TELEGRAM_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
 
     if selected_channels.contains(&ChannelType::Discord) {
-        if let (Ok(bot_token), Ok(guild_id)) = (
-            std::env::var("DISCORD_BOT_TOKEN"),
-            std::env::var("DISCORD_GUILD_ID"),
+        if let (Some(bot_token), Some(guild_id)) = (
+            env_non_empty("DISCORD_BOT_TOKEN"),
+            env_non_empty("DISCORD_GUILD_ID"),
         ) {
+            let existing = config.channels.discord.take();
             config.channels.discord = Some(DiscordConfig {
                 bot_token,
                 guild_id,
-                allowed_users: parse_env_list("DISCORD_ALLOWED_USERS"),
+                allowed_users: env_list_or_existing("DISCORD_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
 
     if selected_channels.contains(&ChannelType::Slack) {
-        if let (Ok(bot_token), Ok(app_token)) = (
-            std::env::var("SLACK_BOT_TOKEN"),
-            std::env::var("SLACK_APP_TOKEN"),
+        if let (Some(bot_token), Some(app_token)) = (
+            env_non_empty("SLACK_BOT_TOKEN"),
+            env_non_empty("SLACK_APP_TOKEN"),
         ) {
+            let existing = config.channels.slack.take();
             config.channels.slack = Some(SlackConfig {
                 bot_token,
                 app_token,
-                allowed_users: parse_env_list("SLACK_ALLOWED_USERS"),
+                allowed_users: env_list_or_existing("SLACK_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
 
     if selected_channels.contains(&ChannelType::Matrix) {
-        if let (Ok(homeserver_url), Ok(access_token)) = (
-            std::env::var("MATRIX_HOMESERVER_URL"),
-            std::env::var("MATRIX_ACCESS_TOKEN"),
+        if let (Some(homeserver_url), Some(access_token)) = (
+            env_non_empty("MATRIX_HOMESERVER_URL"),
+            env_non_empty("MATRIX_ACCESS_TOKEN"),
         ) {
+            let existing = config.channels.matrix.take();
             config.channels.matrix = Some(MatrixConfig {
                 homeserver_url,
                 access_token,
-                bot_user_id: std::env::var("MATRIX_BOT_USER_ID").ok(),
-                allowed_users: parse_env_list("MATRIX_ALLOWED_USERS"),
-                room_ids: parse_env_list("MATRIX_ROOM_IDS"),
+                bot_user_id: env_opt_or_existing("MATRIX_BOT_USER_ID",
+                    existing.as_ref().and_then(|c| c.bot_user_id.clone())),
+                allowed_users: env_list_or_existing("MATRIX_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
+                room_ids: env_list_or_existing("MATRIX_ROOM_IDS",
+                    &existing.as_ref().map(|c| c.room_ids.clone())),
             });
         }
     }
 
     if selected_channels.contains(&ChannelType::WhatsApp) {
-        if let (Ok(bridge_url), Ok(api_token)) = (
-            std::env::var("WHATSAPP_BRIDGE_URL"),
-            std::env::var("WHATSAPP_API_TOKEN"),
+        if let (Some(bridge_url), Some(api_token)) = (
+            env_non_empty("WHATSAPP_BRIDGE_URL"),
+            env_non_empty("WHATSAPP_API_TOKEN"),
         ) {
+            let existing = config.channels.whatsapp.take();
             config.channels.whatsapp = Some(WhatsAppConfig {
                 bridge_url,
                 api_token,
-                phone_number_id: std::env::var("WHATSAPP_PHONE_NUMBER_ID").ok(),
-                allowed_users: parse_env_list("WHATSAPP_ALLOWED_USERS"),
+                phone_number_id: env_opt_or_existing("WHATSAPP_PHONE_NUMBER_ID",
+                    existing.as_ref().and_then(|c| c.phone_number_id.clone())),
+                allowed_users: env_list_or_existing("WHATSAPP_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
 
     if selected_channels.contains(&ChannelType::Mattermost) {
-        if let (Ok(server_url), Ok(bot_token)) = (
-            std::env::var("MATTERMOST_SERVER_URL"),
-            std::env::var("MATTERMOST_TOKEN"),
+        if let (Some(server_url), Some(bot_token)) = (
+            env_non_empty("MATTERMOST_SERVER_URL"),
+            env_non_empty("MATTERMOST_TOKEN"),
         ) {
+            let existing = config.channels.mattermost.take();
             config.channels.mattermost = Some(MattermostConfig {
                 server_url,
                 bot_token,
-                team_id: std::env::var("MATTERMOST_TEAM_ID").ok(),
-                channel_id: std::env::var("MATTERMOST_CHANNEL_ID").ok(),
-                allowed_users: parse_env_list("MATTERMOST_ALLOWED_USERS"),
+                team_id: env_opt_or_existing("MATTERMOST_TEAM_ID",
+                    existing.as_ref().and_then(|c| c.team_id.clone())),
+                channel_id: env_opt_or_existing("MATTERMOST_CHANNEL_ID",
+                    existing.as_ref().and_then(|c| c.channel_id.clone())),
+                allowed_users: env_list_or_existing("MATTERMOST_ALLOWED_USERS",
+                    &existing.as_ref().map(|c| c.allowed_users.clone())),
             });
         }
     }
@@ -2314,13 +2398,28 @@ fn resume_fullscreen_app<B: Backend>(_terminal: &mut Terminal<B>) -> Result<()> 
     Ok(())
 }
 
-fn managed_manifest_temp_path(server_name: &str) -> PathBuf {
-    let mut path = std::env::temp_dir();
-    path.push(format!(
-        "maestro-managed-mcp-{}.toml",
-        server_name.replace('/', "-")
-    ));
-    path
+/// RAII guard that removes the temp manifest file on drop, ensuring cleanup on all exit paths.
+struct TempManifestGuard(PathBuf);
+
+impl Drop for TempManifestGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn managed_manifest_temp_path(server_name: &str) -> Result<PathBuf, std::io::Error> {
+    let sanitized: String = server_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    // Use tempfile for atomic creation with random suffix (avoids TOCTOU/symlink races)
+    let named = tempfile::Builder::new()
+        .prefix(&format!("maestro-mcp-{sanitized}-"))
+        .suffix(".toml")
+        .tempfile()?;
+    // Keep the file on disk (editor needs to read/write it); path is returned
+    let (_, path) = named.keep()?;
+    Ok(path)
 }
 
 fn edit_managed_manifest<B: Backend>(
@@ -2706,15 +2805,24 @@ async fn run_app<B: Backend>(
                                                         continue;
                                                     };
 
-                                                    let _ = manager.fork_session(
+                                                    match manager.fork_session(
                                                         &id,
                                                         &app.rename_buffer,
                                                         &orig,
-                                                    );
-                                                    app.status_message = format!(
-                                                        "Session forked as {}",
-                                                        app.rename_buffer
-                                                    );
+                                                    ) {
+                                                        Ok(_) => {
+                                                            app.status_message = format!(
+                                                                "Session forked as {}",
+                                                                app.rename_buffer
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Failed to fork session: {}",
+                                                                e
+                                                            );
+                                                        }
+                                                    }
                                                     if let Ok(sessions) = svc.list_sessions() {
                                                         app.sessions = sessions;
                                                     }
@@ -2729,6 +2837,7 @@ async fn run_app<B: Backend>(
                                         if let Some(svc) = service.as_ref() {
                                             if let Some(id) = app.target_session_id.take() {
                                                 let Some(manager) = app.create_session_manager(svc) else {
+                                                    app.input_mode = InputMode::Normal;
                                                     continue;
                                                 };
 
@@ -3205,7 +3314,18 @@ async fn run_app<B: Backend>(
                                                     }
                                                 };
                                                 let manifest_path =
-                                                    managed_manifest_temp_path(&name);
+                                                    match managed_manifest_temp_path(&name) {
+                                                        Ok(p) => p,
+                                                        Err(e) => {
+                                                            app.status_message = format!(
+                                                                "Failed to create temp manifest: {}", e
+                                                            );
+                                                            app.input_mode = InputMode::Normal;
+                                                            app.target_mcp_name = None;
+                                                            continue;
+                                                        }
+                                                    };
+                                                let _manifest_guard = TempManifestGuard(manifest_path.clone());
                                                 if let Err(e) = edit_managed_manifest(
                                                     terminal,
                                                     &app.config.editor,
@@ -3286,7 +3406,7 @@ async fn run_app<B: Backend>(
                                                         );
                                                     }
                                                 }
-                                                let _ = fs::remove_file(&manifest_path);
+                                                // TempManifestGuard cleans up manifest_path on drop
                                             }
                                             McpOption::Reinstall => {
                                                 let Some(server) = server.as_ref() else {
@@ -3926,12 +4046,11 @@ async fn run_app<B: Backend>(
                                         if c == 'y' || c == 'Y' {
                                             if let Some(svc) = service.as_ref() {
                                                 if let Some(id) = app.target_session_id.take() {
-                                                    let manager = match leindex_core::memory::session_manager::SessionManager::new(svc.clone()) {
-                                                        Ok(m) => m,
-                                                        Err(e) => {
-                                                            app.status_message = format!("Failed to create session manager: {}", e);
-                                                            continue;
-                                                        }
+                                                    let Some(manager) = app.create_session_manager(svc) else {
+                                                        app.input_mode = InputMode::Normal;
+                                                        app.target_session_id = None;
+                                                        app.target_group_path = None;
+                                                        continue;
                                                     };
                                                     match manager.kill_session(&id) {
                                                         Ok(()) => {
@@ -5277,7 +5396,7 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::KRUSTOP {
                                     // Ktop tab - manual refresh
                                     if app.ktop_state.is_some() {
-                                        app.ktop_state.as_mut().unwrap().mark_refreshed();
+                                        app.ktop_state.as_mut().expect("ktop_state checked above").mark_refreshed();
                                         app.status_message = "Krustop refreshed".to_string();
                                     }
                                 } else if app.tab_index == tabs::LSPS {
@@ -5757,7 +5876,7 @@ async fn run_app<B: Backend>(
                                 } else if app.tab_index == tabs::MAESTROCLAW {
                                     let action =
                                         app.maestroclaw_pane.handle_key_with_session_count(
-                                            KeyCode::Enter,
+                                            KeyCode::Down,
                                             app.sessions.len(),
                                         );
                                     let _ = handle_maestroclaw_action(&mut app, action);
@@ -7314,29 +7433,140 @@ fn render_projects(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
+    let is_detail = matches!(
+        app.input_mode,
+        InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+    );
+    let is_creating = app.input_mode == InputMode::NewMemoryContent
+        || app.input_mode == InputMode::NewMemoryCategory;
+    let has_suggestions = !app.hot_cache.is_empty();
 
+    // Determine layout
+    let (search_area, hint_area, list_area, input_area, detail_area) = if is_creating {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(5),
+                Constraint::Min(0),
+            ])
+            .split(area);
+        (chunks[0], None, Some(chunks[2]), Some(chunks[1]), None)
+    } else if is_detail || app.memory_graph_enabled {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .split(area);
+        let main = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(chunks[1]);
+        (chunks[0], None, Some(main[0]), None, Some(main[1]))
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                if has_suggestions {
+                    Constraint::Length(2)
+                } else {
+                    Constraint::Length(0)
+                },
+                Constraint::Min(0),
+            ])
+            .split(area);
+        (
+            chunks[0],
+            if has_suggestions { Some(chunks[1]) } else { None },
+            Some(chunks[2]),
+            None,
+            None,
+        )
+    };
+
+    // Search bar
     let search_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" 🔎 Memory Search (Ctrl+F, Ctrl+L clear, r refresh) ")
-        .title_style(Style::default().fg(theme.accent));
-
+        .title(" Memory Search (Ctrl+F, Ctrl+L clear, r refresh, n new, Enter details, g graph) ")
+        .title_style(Style::default().fg(theme.accent))
+        .style(Style::default().bg(theme.panel_bg));
     let search_text = if app.input_mode == InputMode::MemorySearch {
-        format!("{}█", app.memory_query)
+        format!("{}|", app.memory_query)
     } else {
         app.memory_query.clone()
     };
-    frame.render_widget(Paragraph::new(search_text).block(search_block), chunks[0]);
+    frame.render_widget(Paragraph::new(search_text).block(search_block), search_area);
+
+    // Suggestion hints
+    if let Some(hint_area) = hint_area {
+        render_memory_suggestion_hints(frame, hint_area, app);
+    }
+
+    // Memory creation input
+    if let Some(input_area) = input_area {
+        let input_title = if app.input_mode == InputMode::NewMemoryContent {
+            " New Memory Content (Enter to continue, Esc to cancel) "
+        } else {
+            " Category (general, knowledge, preference, spec, fact, pattern, decision, context, temp, observation) "
+        };
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(input_title)
+            .title_style(Style::default().fg(theme.accent_alt))
+            .border_style(Style::default().fg(theme.accent));
+        let input_text = if app.input_mode == InputMode::NewMemoryContent {
+            format!("{}|", app.new_memory_content)
+        } else {
+            format!("{}|", app.new_memory_category)
+        };
+        frame.render_widget(
+            Paragraph::new(input_text)
+                .block(input_block)
+                .style(Style::default().fg(Color::White)),
+            input_area,
+        );
+    }
+
+    // Memory list
+    if let Some(list_area) = list_area {
+        render_memory_list(frame, list_area, app);
+    }
+
+    // Detail panel
+    if let Some(detail_area) = detail_area {
+        render_memory_detail(frame, detail_area, app);
+    }
+}
+
+/// Maximum content preview length in collapsed view
+const MEMORY_PREVIEW_LEN: usize = 60;
+
+/// Render the memory list with expandable entries
+fn render_memory_list(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+    let is_detail = matches!(
+        app.input_mode,
+        InputMode::MemoryDetail | InputMode::MemoryDetailFocus
+    );
+
+    let subtitle = if app.input_mode == InputMode::MemoryDetailFocus {
+        "graph focused, Tab returns to list"
+    } else if app.memory_graph_enabled {
+        "Tab focuses graph, g hides graph"
+    } else if is_detail {
+        "Enter to view details"
+    } else {
+        "Enter to view details, Space expand"
+    };
 
     let list_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(" 🧠 Memory Results ")
-        .title_style(Style::default().fg(theme.accent_alt));
+        .title(format!(" Memory Results ({}) ", subtitle))
+        .title_style(Style::default().fg(theme.accent_alt))
+        .style(Style::default().bg(theme.panel_bg));
 
     if app.memories.is_empty() {
         let text = vec![
@@ -7344,9 +7574,9 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
             Line::from("  No memories found."),
             Line::from(""),
             Line::from("  Tip: press 'r' to import system-wide memories."),
+            Line::from("  Tip: press 'n' to create a new memory."),
         ];
-        let para = Paragraph::new(text).block(list_block);
-        frame.render_widget(para, chunks[1]);
+        frame.render_widget(Paragraph::new(text).block(list_block), area);
         return;
     }
 
@@ -7354,13 +7584,93 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
         .memories
         .iter()
         .map(|m| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", m.category),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Span::styled(m.content.clone(), Style::default().fg(Color::White)),
-            ]))
+            let expand_icon = if m.is_expanded { " v " } else { " > " };
+            let preview = if m.content.chars().count() > MEMORY_PREVIEW_LEN {
+                format!(
+                    "{}...",
+                    m.content.chars().take(MEMORY_PREVIEW_LEN).collect::<String>()
+                )
+            } else {
+                m.content.clone()
+            };
+            let (cat_color, cat_icon) = memory_category_style(&m.category);
+            let importance_indicator = match m.importance.as_str() {
+                "critical" => " [!]",
+                "high" => " [*]",
+                _ => "",
+            };
+
+            if m.is_expanded {
+                let mut lines = vec![Line::from(vec![
+                    Span::styled(expand_icon, Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("[{}{}] ", cat_icon, m.category),
+                        Style::default().fg(cat_color).bold(),
+                    ),
+                    Span::styled(preview, Style::default().fg(Color::White)),
+                    Span::styled(importance_indicator, Style::default().fg(Color::Red)),
+                ])];
+
+                if let Some(ref summary) = m.summary {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Summary: {}", summary),
+                            Style::default().fg(Color::DarkGray).italic(),
+                        ),
+                    ]));
+                }
+
+                lines.push(Line::from(vec![
+                    Span::raw("      "),
+                    Span::styled(
+                        format!("Created: {} | Access: {} times", m.created_at, m.access_count),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+
+                if !m.tags.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Tags: {}", m.tags.join(", ")),
+                            Style::default().fg(Color::Cyan),
+                        ),
+                    ]));
+                }
+
+                if !m.stored_by.trim().is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Agent: {}", m.stored_by),
+                            Style::default().fg(Color::Magenta),
+                        ),
+                    ]));
+                }
+
+                if let Some(state) = m.nexus_runtime_state.as_deref() {
+                    lines.push(Line::from(vec![
+                        Span::raw("      "),
+                        Span::styled(
+                            format!("Runtime: {}", state),
+                            Style::default().fg(Color::Green),
+                        ),
+                    ]));
+                }
+
+                ListItem::new(lines)
+            } else {
+                ListItem::new(Line::from(vec![
+                    Span::styled(expand_icon, Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("[{}{}] ", cat_icon, m.category),
+                        Style::default().fg(cat_color),
+                    ),
+                    Span::styled(preview, Style::default().fg(Color::White)),
+                    Span::styled(importance_indicator, Style::default().fg(Color::Red)),
+                ]))
+            }
         })
         .collect();
 
@@ -7373,7 +7683,786 @@ fn render_memory(frame: &mut Frame, area: Rect, app: &mut App) {
                 .bold(),
         )
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(list, chunks[1], &mut app.memory_state);
+    frame.render_stateful_widget(list, area, &mut app.memory_state);
+}
+
+/// Render the detail panel with full metadata and vector visualization
+fn render_memory_detail(frame: &mut Frame, area: Rect, app: &App) {
+    let theme = app.theme();
+    let selected_idx = app.memory_state.selected().unwrap_or(0);
+    let memory = app.memories.get(selected_idx);
+
+    let detail_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Memory Details ")
+        .title_style(Style::default().fg(theme.accent_alt))
+        .style(Style::default().bg(theme.panel_bg));
+
+    let inner = detail_block.inner(area);
+
+    // Render block FIRST so its background doesn't overwrite inner content
+    frame.render_widget(detail_block, area);
+
+    if let Some(m) = memory {
+        let detail_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(10)])
+            .split(inner);
+
+        render_memory_detail_content(frame, detail_chunks[0], m, &theme);
+
+        if app.memory_graph_enabled {
+            render_memory_graph(frame, detail_chunks[1], app, &theme);
+        } else {
+            render_memory_vector_viz(frame, detail_chunks[1], m, &theme);
+        }
+    } else {
+        frame.render_widget(
+            Paragraph::new("No memory selected")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center),
+            inner,
+        );
+    }
+}
+
+/// Render content and metadata section of the detail panel
+fn render_memory_detail_content(
+    frame: &mut Frame,
+    area: Rect,
+    memory: &crate::state::MemoryInfo,
+    theme: &crate::theme::Theme,
+) {
+    let (cat_color, cat_icon) = memory_category_style(&memory.category);
+
+    let mut lines = vec![
+        // Header with category and importance
+        Line::from(vec![
+            Span::styled(
+                format!("[{}{}] ", cat_icon, memory.category),
+                Style::default().fg(cat_color).bold(),
+            ),
+            Span::styled(
+                format!("[{}]", memory.importance),
+                Style::default().fg(memory_importance_color(&memory.importance)),
+            ),
+            if let Some(score) = memory.similarity_score {
+                Span::styled(
+                    format!(" [sim: {:.2}]", score),
+                    Style::default().fg(Color::Magenta),
+                )
+            } else {
+                Span::raw("")
+            },
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Content:",
+            Style::default().fg(theme.accent).bold(),
+        )),
+    ];
+
+    // Wrapped content
+    let content_lines = memory_wrap_text(&memory.content, area.width.saturating_sub(2) as usize);
+    for line in content_lines {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(Color::White),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Summary
+    if let Some(ref summary) = memory.summary {
+        lines.push(Line::from(Span::styled(
+            "Summary:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+        lines.push(Line::from(Span::styled(
+            summary.clone(),
+            Style::default().fg(Color::DarkGray).italic(),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Metadata
+    lines.push(Line::from(Span::styled(
+        "Metadata:",
+        Style::default().fg(theme.accent).bold(),
+    )));
+
+    lines.push(Line::from(vec![
+        Span::styled("  Created: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(&memory.created_at, Style::default().fg(Color::White)),
+    ]));
+
+    if let Some(ref expires) = memory.expires_at {
+        lines.push(Line::from(vec![
+            Span::styled("  Expires: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(expires, Style::default().fg(Color::Yellow)),
+        ]));
+    }
+
+    if let Some(ref accessed) = memory.last_accessed {
+        lines.push(Line::from(vec![
+            Span::styled("  Last Accessed: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(accessed, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled("  Access Count: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{}", memory.access_count),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
+
+    if let Some(ref source) = memory.source {
+        lines.push(Line::from(vec![
+            Span::styled("  Source: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(source, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    if let Some(ref session_id) = memory.session_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Session: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(session_id, Style::default().fg(Color::Cyan)),
+        ]));
+    }
+
+    if let Some(ref project_id) = memory.project_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Project ID: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(project_id, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    if let Some(ref track_id) = memory.track_id {
+        lines.push(Line::from(vec![
+            Span::styled("  Track ID: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(track_id, Style::default().fg(Color::White)),
+        ]));
+    }
+
+    // Tags
+    if !memory.tags.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("  Tags: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                memory.tags.join(", "),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Stored By: ", Style::default().fg(Color::Cyan).bold()),
+        Span::styled(
+            if memory.stored_by.trim().is_empty() {
+                "unknown"
+            } else {
+                &memory.stored_by
+            },
+            Style::default().fg(Color::White),
+        ),
+    ]));
+
+    // Nexus runtime / subconscious
+    if memory.nexus_scope.is_some()
+        || memory.nexus_runtime_state.is_some()
+        || !memory.related_memory_ids.is_empty()
+    {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Nexus Runtime / Subconscious:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+
+        if let Some(scope) = memory.nexus_scope.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("  Scope: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(scope, Style::default().fg(Color::Green)),
+            ]));
+        }
+
+        if let Some(runtime_state) = memory.nexus_runtime_state.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("  Runtime: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(runtime_state, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+
+        if !memory.related_memory_ids.is_empty() {
+            let preview = memory
+                .related_memory_ids
+                .iter()
+                .take(12)
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(Line::from(vec![
+                Span::styled("  Related IDs: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    if memory.related_memory_ids.len() > 12 {
+                        format!("{} ...", preview)
+                    } else {
+                        preview
+                    },
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+        }
+    }
+
+    // Agent access history
+    if !memory.accessed_by.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Accessed By Agents:",
+            Style::default().fg(theme.accent).bold(),
+        )));
+        for agent in &memory.accessed_by {
+            lines.push(Line::from(vec![
+                Span::styled("  * ", Style::default().fg(Color::DarkGray)),
+                Span::styled(agent, Style::default().fg(Color::Magenta)),
+            ]));
+        }
+    }
+
+    // Access history
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Access History:",
+        Style::default().fg(theme.accent).bold().underlined(),
+    )));
+
+    if memory.access_history.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No detailed access history recorded.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for event in &memory.access_history {
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    if event.timestamp.trim().is_empty() {
+                        "unknown-time".to_string()
+                    } else {
+                        event.timestamp.clone()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(" ", Style::default()),
+                Span::styled(&event.agent_id, Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    format!(" ({})", event.access_type),
+                    Style::default().fg(Color::Gray),
+                ),
+            ];
+            if let Some(tool_used) = &event.tool_used {
+                spans.push(Span::styled(
+                    format!(" via {}", tool_used),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// Relationship classification between memories
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MemoryRelationKind {
+    NexusLink,
+    SessionLink,
+    TrackLink,
+    ProjectLink,
+    AgentLink,
+    TagLink,
+    CategoryLink,
+    Other,
+}
+
+fn memory_relation_kind_label(kind: MemoryRelationKind) -> &'static str {
+    match kind {
+        MemoryRelationKind::NexusLink => "nexus link",
+        MemoryRelationKind::SessionLink => "session link",
+        MemoryRelationKind::TrackLink => "track link",
+        MemoryRelationKind::ProjectLink => "project link",
+        MemoryRelationKind::AgentLink => "agent link",
+        MemoryRelationKind::TagLink => "tag link",
+        MemoryRelationKind::CategoryLink => "category link",
+        MemoryRelationKind::Other => "other",
+    }
+}
+
+fn memory_relation_style(kind: MemoryRelationKind) -> (Color, &'static str) {
+    match kind {
+        MemoryRelationKind::NexusLink => (Color::Magenta, "N"),
+        MemoryRelationKind::SessionLink => (Color::Cyan, "S"),
+        MemoryRelationKind::TrackLink => (Color::Blue, "T"),
+        MemoryRelationKind::ProjectLink => (Color::Green, "P"),
+        MemoryRelationKind::AgentLink => (Color::Yellow, "A"),
+        MemoryRelationKind::TagLink => (Color::LightBlue, "#"),
+        MemoryRelationKind::CategoryLink => (Color::LightYellow, "C"),
+        MemoryRelationKind::Other => (Color::DarkGray, "."),
+    }
+}
+
+fn memory_relation_rank(kind: MemoryRelationKind) -> u8 {
+    match kind {
+        MemoryRelationKind::NexusLink => 100,
+        MemoryRelationKind::SessionLink => 90,
+        MemoryRelationKind::TrackLink => 80,
+        MemoryRelationKind::ProjectLink => 70,
+        MemoryRelationKind::AgentLink => 60,
+        MemoryRelationKind::TagLink => 40,
+        MemoryRelationKind::CategoryLink => 30,
+        MemoryRelationKind::Other => 10,
+    }
+}
+
+fn classify_memory_relation(
+    selected: &crate::state::MemoryInfo,
+    memory: &crate::state::MemoryInfo,
+) -> MemoryRelationKind {
+    if selected.id == memory.id {
+        return MemoryRelationKind::NexusLink;
+    }
+    if selected.related_memory_ids.contains(&memory.id)
+        || memory.related_memory_ids.contains(&selected.id)
+    {
+        return MemoryRelationKind::NexusLink;
+    }
+    if selected.session_id.is_some() && selected.session_id == memory.session_id {
+        return MemoryRelationKind::SessionLink;
+    }
+    if selected.track_id.is_some() && selected.track_id == memory.track_id {
+        return MemoryRelationKind::TrackLink;
+    }
+    if selected.project_id.is_some() && selected.project_id == memory.project_id {
+        return MemoryRelationKind::ProjectLink;
+    }
+    if !selected.stored_by.trim().is_empty()
+        && selected.stored_by.eq_ignore_ascii_case(&memory.stored_by)
+        && !matches!(
+            selected.stored_by.to_ascii_lowercase().as_str(),
+            "unknown" | "nexus" | "maestro"
+        )
+    {
+        return MemoryRelationKind::AgentLink;
+    }
+    if selected
+        .tags
+        .iter()
+        .any(|tag| memory.tags.iter().any(|c| c == tag))
+    {
+        return MemoryRelationKind::TagLink;
+    }
+    if selected.category == memory.category {
+        return MemoryRelationKind::CategoryLink;
+    }
+    MemoryRelationKind::Other
+}
+
+fn memory_graph_navigation_targets(app: &App) -> Vec<usize> {
+    if app.memories.is_empty() {
+        return Vec::new();
+    }
+    let selected_idx = app
+        .memory_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.memories.len().saturating_sub(1));
+    let selected = &app.memories[selected_idx];
+    let mut ranked = Vec::new();
+    for (idx, memory) in app.memories.iter().enumerate() {
+        if idx == selected_idx {
+            continue;
+        }
+        let kind = classify_memory_relation(selected, memory);
+        ranked.push((idx, memory_relation_rank(kind), kind));
+    }
+    ranked.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| app.memories[a.0].category.cmp(&app.memories[b.0].category))
+            .then_with(|| app.memories[a.0].content.cmp(&app.memories[b.0].content))
+    });
+    ranked.into_iter().map(|(idx, _, _)| idx).collect()
+}
+
+/// Render the memory relationship graph
+fn render_memory_graph(frame: &mut Frame, area: Rect, app: &App, theme: &crate::theme::Theme) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Memory Relationships ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.memories.is_empty() || inner.height == 0 || inner.width == 0 {
+        frame.render_widget(
+            Paragraph::new("No memories to visualize.").style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let targets = memory_graph_navigation_targets(app);
+    if targets.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No graph targets available.")
+                .style(Style::default().fg(Color::DarkGray)),
+            inner,
+        );
+        return;
+    }
+
+    let selected_idx = app
+        .memory_state
+        .selected()
+        .unwrap_or(0)
+        .min(app.memories.len().saturating_sub(1));
+    let graph_cursor = app
+        .memory_graph_selection
+        .min(targets.len().saturating_sub(1));
+    let selected = &app.memories[selected_idx];
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("anchor ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if selected.content.chars().count() > 26 {
+                    format!(
+                        "{}...",
+                        selected.content.chars().take(26).collect::<String>()
+                    )
+                } else {
+                    selected.content.clone()
+                },
+                Style::default().fg(Color::Cyan).bold(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("focus ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if app.input_mode == InputMode::MemoryDetailFocus {
+                    "graph navigation"
+                } else {
+                    "list navigation"
+                },
+                Style::default().fg(Color::White),
+            ),
+            Span::styled("  Tab ", Style::default().fg(Color::DarkGray)),
+            Span::styled("switch", Style::default().fg(Color::Green)),
+            Span::styled("  Enter ", Style::default().fg(Color::DarkGray)),
+            Span::styled("open", Style::default().fg(Color::Green)),
+        ]),
+        Line::from(""),
+    ];
+
+    if let Some(scope) = selected.nexus_scope.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("scope ", Style::default().fg(Color::DarkGray)),
+            Span::styled(scope, Style::default().fg(Color::Green)),
+        ]));
+    }
+
+    if let Some(runtime_state) = selected.nexus_runtime_state.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("runtime ", Style::default().fg(Color::DarkGray)),
+            Span::styled(runtime_state, Style::default().fg(Color::Magenta)),
+        ]));
+    }
+
+    if !selected.related_memory_ids.is_empty() {
+        let preview = selected
+            .related_memory_ids
+            .iter()
+            .take(8)
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(vec![
+            Span::styled("nexus ids ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if selected.related_memory_ids.len() > 8 {
+                    format!("{} ...", preview)
+                } else {
+                    preview
+                },
+                Style::default().fg(Color::Cyan),
+            ),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Group related memories by relationship kind, preserving ranked order
+    let mut related_groups: Vec<(MemoryRelationKind, Vec<usize>)> = Vec::new();
+    for idx in targets {
+        let memory = &app.memories[idx];
+        let kind = classify_memory_relation(selected, memory);
+        if let Some(entry) = related_groups.iter_mut().find(|(k, _)| *k == kind) {
+            entry.1.push(idx);
+        } else {
+            related_groups.push((kind, vec![idx]));
+        }
+    }
+    // Stable sort by rank so highest-priority relations appear first
+    related_groups.sort_by(|a, b| memory_relation_rank(b.0).cmp(&memory_relation_rank(a.0)));
+
+    // Cache navigation targets for cursor comparison
+    let graph_nav_targets = memory_graph_navigation_targets(app);
+
+    for (kind, indices) in related_groups {
+        let relation = memory_relation_kind_label(kind);
+        let (cat_color, cat_icon) = memory_relation_style(kind);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} {}", cat_icon, relation),
+                Style::default().fg(cat_color).bold(),
+            ),
+            Span::styled(
+                format!(" ({})", indices.len()),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+
+        for idx in indices {
+            let memory = &app.memories[idx];
+            let cursor_idx = graph_nav_targets
+                .iter()
+                .position(|candidate| *candidate == idx)
+                .unwrap_or(0);
+            let is_graph_selected = cursor_idx == graph_cursor;
+            let preview = if memory.content.chars().count() > 28 {
+                format!(
+                    "{}...",
+                    memory.content.chars().take(28).collect::<String>()
+                )
+            } else {
+                memory.content.clone()
+            };
+            let style = if is_graph_selected {
+                Style::default().fg(Color::Black).bg(Color::Yellow).bold()
+            } else {
+                Style::default().fg(Color::White)
+            };
+            lines.push(Line::from(vec![
+                Span::styled("  |- ", Style::default().fg(cat_color)),
+                Span::styled(
+                    format!("[{}] ", memory.id),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(preview, style),
+            ]));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+/// Render a simple vector space visualization using ASCII art
+fn render_memory_vector_viz(
+    frame: &mut Frame,
+    area: Rect,
+    memory: &crate::state::MemoryInfo,
+    theme: &crate::theme::Theme,
+) {
+    if area.height < 5 || area.width < 10 {
+        return;
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Vector Space Visualization ")
+        .title_style(Style::default().fg(theme.accent));
+
+    let inner = block.inner(area);
+    // Render block FIRST so its background doesn't overwrite inner content
+    frame.render_widget(block, area);
+    let viz_lines = generate_memory_vector_viz(memory, inner.width, inner.height);
+    frame.render_widget(
+        Paragraph::new(viz_lines).style(Style::default().fg(Color::White)),
+        inner,
+    );
+}
+
+/// Generate ASCII art for vector space visualization
+fn generate_memory_vector_viz(
+    memory: &crate::state::MemoryInfo,
+    width: u16,
+    height: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let grid_width = width.saturating_sub(2) as usize;
+    let grid_height = height.saturating_sub(2) as usize;
+
+    if grid_width < 10 || grid_height < 3 {
+        return vec![Line::from("Too small")];
+    }
+
+    let center_x = grid_width / 2;
+    let center_y = grid_height / 2;
+
+    for y in 0..grid_height {
+        let mut row = String::new();
+        for x in 0..grid_width {
+            let dx = (x as i32 - center_x as i32).abs();
+            let dy = (y as i32 - center_y as i32).abs();
+            let dist = (dx * dx + dy * dy) as f32;
+            let intensity = memory.similarity_score.unwrap_or(0.8);
+
+            if x == center_x && y == center_y {
+                row.push('*');
+            } else if dist < (grid_width as f32 * intensity * 0.3).powi(2) {
+                row.push('.');
+            } else if dist < (grid_width as f32 * 0.5).powi(2) {
+                if x % 4 == 0 && y % 2 == 0 {
+                    row.push('o');
+                } else {
+                    row.push(' ');
+                }
+            } else {
+                row.push(' ');
+            }
+        }
+        lines.push(Line::from(Span::styled(
+            row,
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    if lines.len() > 2 {
+        lines.push(Line::from(vec![
+            Span::styled("* ", Style::default().fg(Color::Green)),
+            Span::styled("Current ", Style::default().fg(Color::DarkGray)),
+            Span::styled(". ", Style::default().fg(Color::Cyan)),
+            Span::styled("Related ", Style::default().fg(Color::DarkGray)),
+            Span::styled("o ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Other", Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    lines
+}
+
+/// Render non-intrusive suggestion hints from the hot cache
+fn render_memory_suggestion_hints(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme();
+    let suggestions = app.hot_cache.active_suggestions();
+    if suggestions.is_empty() {
+        return;
+    }
+    let hint_text = format!(
+        " Suggestions: {} ",
+        suggestions
+            .iter()
+            .take(3)
+            .map(|s| s.preview.as_str())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
+    frame.render_widget(
+        Paragraph::new(hint_text).style(
+            Style::default()
+                .fg(theme.accent_alt)
+                .bg(theme.panel_bg),
+        ),
+        area,
+    );
+}
+
+/// Get color and icon for a memory category
+fn memory_category_style(category: &str) -> (Color, &'static str) {
+    match category.to_lowercase().as_str() {
+        "general" => (Color::Yellow, ""),
+        "knowledge" => (Color::Blue, ""),
+        "preference" | "preferences" => (Color::Magenta, ""),
+        "specification" | "specifications" => (Color::Cyan, ""),
+        "fact" => (Color::Green, ""),
+        "pattern" => (Color::LightBlue, ""),
+        "decision" => (Color::LightYellow, ""),
+        "context" => (Color::Gray, ""),
+        "temporary" => (Color::DarkGray, ""),
+        "observation" => (Color::LightCyan, ""),
+        _ => (Color::White, ""),
+    }
+}
+
+/// Get color for importance level
+fn memory_importance_color(importance: &str) -> Color {
+    match importance.to_lowercase().as_str() {
+        "critical" => Color::Red,
+        "high" => Color::LightRed,
+        "normal" => Color::White,
+        "low" => Color::DarkGray,
+        _ => Color::White,
+    }
+}
+
+/// Simple text wrapper
+fn memory_wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if max_width < 10 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    for word in text.split_whitespace() {
+        if current_line.len() + word.len() + 1 > max_width {
+            if !current_line.is_empty() {
+                lines.push(current_line.trim().to_string());
+                current_line = String::new();
+            }
+            if word.len() > max_width {
+                // Char-safe chunking to avoid splitting multi-byte UTF-8
+                let mut char_chunk = String::new();
+                for ch in word.chars() {
+                    if char_chunk.len() + ch.len_utf8() > max_width && !char_chunk.is_empty() {
+                        lines.push(char_chunk);
+                        char_chunk = String::new();
+                    }
+                    char_chunk.push(ch);
+                }
+                if !char_chunk.is_empty() {
+                    lines.push(char_chunk);
+                }
+            } else {
+                current_line = word.to_string();
+            }
+        } else {
+            if !current_line.is_empty() {
+                current_line.push(' ');
+            }
+            current_line.push_str(word);
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn render_lsps(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -8107,7 +9196,7 @@ mod app_wiring_tests {
     }
 
     #[test]
-    fn test_open_session_browser_and_select_switches_to_sessions_tab() {
+    fn test_open_session_browser_selects_session_and_updates_status() {
         use crate::maesterclaw::MaestroClawAction;
 
         let mut app = App::new(None, None, None);
@@ -8137,14 +9226,10 @@ mod app_wiring_tests {
         assert!(handled);
         assert!(app.maestroclaw_pane.is_session_browser_active());
 
-        // 2. SessionBrowserSelect should find the session and switch to Sessions tab.
+        // 2. SessionBrowserSelect should find the session and select it.
         let handled = handle_maestroclaw_action(&mut app, MaestroClawAction::SessionBrowserSelect);
         assert!(handled);
-        assert_eq!(
-            app.tab_index,
-            tabs::SESSIONS,
-            "tab_index must switch to Sessions after SessionBrowserSelect"
-        );
-        assert_eq!(app.status_message, "Focused session 'My Test Session'");
+        assert!(app.maestroclaw_pane.selected_session.is_some());
+        assert_eq!(app.status_message, "Selected session 'My Test Session' in MaestroClaw");
     }
 }

@@ -7,11 +7,14 @@ Integrates with the UnifiedHookManager to restore previous session state.
 """
 
 import json
+import logging
 import sys
 import os
 import asyncio
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Add maestro to path if needed
 maestro_root = Path(__file__).parent.parent.parent
@@ -93,12 +96,67 @@ def session_load_hook(input_data: dict) -> dict:
 
         # Inject context into input
         if memories:
-            context_summaries = [
-                m.content for m in memories
-                if hasattr(m, 'content')
-            ]
+            context_summaries = []
+            for m in memories:
+                if isinstance(m, dict):
+                    context_summaries.append(m.get("content") or "")
+                elif hasattr(m, 'content'):
+                    context_summaries.append(m.content or "")
             input_data["restored_context"] = context_summaries
             input_data["context_loaded"] = True
+
+        # Resume pickable handoffs from previous sessions
+        try:
+            from maestro.memory.coordination.handoffs import HandoffHandler
+
+            def _resume_handoffs() -> list[dict[str, Any]]:
+                from maestro.memory.database.models import get_session_context
+                with get_session_context() as db_session:
+                    handler = HandoffHandler(db_session)
+                    # Resolve project_path to project_id for scoped handoff pickup
+                    project_id = None
+                    if project_path:
+                        try:
+                            from maestro.memory.database.models import MaestroProject
+                            from sqlalchemy import select
+                            result = db_session.execute(
+                                select(MaestroProject).where(MaestroProject.project_path == project_path)
+                            )
+                            project = result.scalars().first()
+                            if project:
+                                project_id = project.id
+                        except Exception as e:
+                            input_data["project_lookup_error"] = str(e)
+                    if project_id is None:
+                        return []
+                    pickable = handler.get_pickable_handoffs(
+                        agent_id=agent_id,
+                        project_id=project_id,
+                    )
+                    results = []
+                    for h in pickable[:3]:  # Limit to 3 most recent
+                        context = handler.get_handoff_context(h.handoff_id)
+                        try:
+                            handler.pick_handoff(h.handoff_id, session_id, agent_id)
+                            results.append({
+                                "handoff_id": h.handoff_id,
+                                "title": h.title,
+                                "from_agent": h.from_agent_id,
+                                "summary": h.summary,
+                                "context": context,
+                            })
+                        except Exception as e:
+                            # Another session may have picked this handoff; skip it
+                            logger.debug("Skipped handoff %s (likely picked by another session): %s", h.handoff_id, e)
+                            continue
+                    return results
+
+            handoffs = _resume_handoffs()
+            if handoffs:
+                input_data["resumed_handoffs"] = handoffs
+        except Exception as e:
+            # Handoff resumption is best-effort
+            input_data["handoff_resumption_error"] = str(e)
 
         return input_data
 
@@ -110,8 +168,14 @@ def session_load_hook(input_data: dict) -> dict:
 
 def main() -> None:
     """Main entry point for the hook."""
-    # Read stdin
-    input_data = json.loads(sys.stdin.read())
+    try:
+        raw_input = sys.stdin.read()
+        input_data = json.loads(raw_input) if raw_input.strip() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    if not isinstance(input_data, dict):
+        input_data = {}
 
     # Execute hook
     result = session_load_hook(input_data)

@@ -13,6 +13,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::thread;
+use std::time::{Duration, Instant};
 
 impl ConductorPane {
     /// Poll the orchestrate engine state for all tracks to find active ones
@@ -412,28 +416,15 @@ impl ConductorPane {
                     if !suppress_output {
                         self.state.transition(&comp_event);
                         crate::conductor::telemetry::BUS.broadcast(comp_event);
-                        self.schedule_cognition_transition(
-                            "loop",
+                        // Schedule all three transitions in parallel to avoid blocking UI thread for up to 90s
+                        self.schedule_cognition_transitions_parallel(
+                            &[
+                                ("loop", false, true),
+                                ("review", true, false),
+                                ("checkpoint", true, true),
+                            ],
                             log.iteration,
                             &log.task_id,
-                            false,
-                            true,
-                            suppress_output,
-                        );
-                        self.schedule_cognition_transition(
-                            "review",
-                            log.iteration,
-                            &log.task_id,
-                            true,
-                            false,
-                            suppress_output,
-                        );
-                        self.schedule_cognition_transition(
-                            "checkpoint",
-                            log.iteration,
-                            &log.task_id,
-                            true,
-                            true,
                             suppress_output,
                         );
                     }
@@ -504,6 +495,80 @@ impl ConductorPane {
             );
         }
     }
+
+    /// Schedule multiple cognition transitions in parallel to avoid blocking UI thread
+    fn schedule_cognition_transitions_parallel(
+        &mut self,
+        phases: &[(&str, bool, bool)], // (phase_name, review_point_reached, task_completed)
+        iteration: u64,
+        task_id: &str,
+        suppress_output: bool,
+    ) {
+        if suppress_output {
+            return;
+        }
+
+        let project_root = self
+            .current_project
+            .as_ref()
+            .map(|project| project.root_dir.clone())
+            .or_else(|| self.tracks_dir.parent().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| self.tracks_dir.clone());
+
+        // Build payloads for all phases
+        let payloads: Vec<_> = phases
+            .iter()
+            .map(|(phase, review_point_reached, task_completed)| {
+                let payload = json!({
+                    "session_id": self.state.session_id.clone().unwrap_or_default(),
+                    "track_id": self.state.current_track.clone().unwrap_or_default(),
+                    "task_id": task_id,
+                    "iteration": iteration,
+                    "project_path": project_root.display().to_string(),
+                    "cwd": project_root.display().to_string(),
+                    "selected_cli": self
+                        .state
+                        .active_agent
+                        .as_ref()
+                        .map(|agent| agent.tool.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    "loop_mode": format!("{:?}", self.loop_mode),
+                    "review_point_reached": review_point_reached,
+                    "checkpoint_interval": self.state.max_iterations,
+                    "task_completed": task_completed,
+                });
+                (*phase, payload)
+            })
+            .collect();
+
+        // Spawn threads for each phase in parallel
+        let handles: Vec<_> = payloads
+            .into_iter()
+            .map(|(phase, payload)| {
+                let phase = phase.to_string();
+                let project_root = project_root.clone();
+                thread::spawn(move || {
+                    (phase.clone(), run_hook_executor_phase(&phase, &payload, &project_root))
+                })
+            })
+            .collect();
+
+        // Collect results and log them
+        for handle in handles {
+            if let Ok((phase, stdout)) = handle.join() {
+                if let Some(stdout) = stdout {
+                    let summary = format!("scheduled {} transition for iteration {}", phase, iteration);
+                    self.push_runtime_log(
+                        crate::conductor::model::RuntimeLogLevel::Info,
+                        Some(iteration),
+                        Some(task_id.to_string()),
+                        summary,
+                        Some(stdout),
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn map_session_status(status: SessionStatus) -> ConductorStatus {
@@ -524,49 +589,115 @@ fn run_hook_executor_phase(
     payload: &serde_json::Value,
     project_root: &Path,
 ) -> Option<String> {
+    const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
     let script = r#"
 import json
 import sys
-from maestro.hooks.executor import execute_checkpoint, execute_review
+from maestro.hooks.executor import get_hook_executor
 
 phase = sys.argv[1]
 payload = json.loads(sys.stdin.read())
-mapping = {
-    "review": execute_review,
-    "checkpoint": execute_checkpoint,
-}
-result = mapping[phase](payload)
+executor = get_hook_executor()
+result = executor.execute_phase(phase, payload)
 json.dump(result, sys.stdout)
 "#;
 
-    for python in ["python3", "python"] {
-        let mut child = match Command::new(python)
-            .arg("-c")
-            .arg(script)
-            .arg(phase)
-            .current_dir(project_root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(_) => continue,
-        };
+    'interpreter: for python in ["python3", "python"] {
+        let phase_owned = phase.to_owned();
+        let project_root_owned = project_root.to_path_buf();
+        let payload_owned = payload.clone();
 
-        if let Some(mut stdin) = child.stdin.take() {
-            if let Ok(json) = serde_json::to_string(payload) {
-                let _ = stdin.write_all(json.as_bytes());
+        let (pid_tx, pid_rx) = std::sync::mpsc::channel();
+
+        // Thread returns Err(()) on spawn failure (so we try next interpreter)
+        // or Ok(Option<String>) for spawn success (None = hook failed).
+        let handle = thread::spawn(move || {
+            let mut cmd = Command::new(python);
+            #[cfg(unix)]
+            cmd.process_group(0); // isolate child in its own process group
+            let mut child = match cmd
+                .arg("-c")
+                .arg(script)
+                .arg(&phase_owned)
+                .current_dir(&project_root_owned)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(_) => return Err(()),
+            };
+
+            if let Some(mut child_stdin) = child.stdin.take() {
+                if let Ok(json) = serde_json::to_string(&payload_owned) {
+                    let _ = child_stdin.write_all(json.as_bytes());
+                }
             }
-        }
 
-        let output = match child.wait_with_output() {
-            Ok(output) => output,
-            Err(_) => continue,
-        };
+            // Send PID before blocking wait so the main thread can kill on timeout
+            let _ = pid_tx.send(child.id());
 
-        if output.status.success() {
-            return Some(String::from_utf8_lossy(&output.stdout).trim().to_string());
+            match child.wait_with_output() {
+                Ok(output) if output.status.success() => {
+                    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.is_empty() {
+                        eprintln!(
+                            "Hook executor phase '{}' failed: {}",
+                            phase_owned,
+                            stderr.trim()
+                        );
+                    }
+                    Ok(None)
+                }
+                _ => Ok(None),
+            }
+        });
+
+        // Wait briefly for the spawned thread to send us the child PID
+        let child_pid = pid_rx.recv_timeout(POLL_INTERVAL).ok();
+
+        let deadline = Instant::now() + HOOK_TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                eprintln!("Hook executor phase '{}' timed out after {:?}", phase, HOOK_TIMEOUT);
+                // Kill orphaned child process tree to prevent resource leaks.
+                // process_group(0) ensures child is in its own PG, so -pid_raw
+                // safely targets only the child's group.
+                if let Some(pid) = child_pid {
+                    #[cfg(unix)]
+                    {
+                        let pid_raw = pid as i32;
+                        if pid_raw > 0 {
+                            // SAFETY: kill(-pid) sends SIGKILL to the entire process group,
+                            // which includes the group leader itself. No separate kill(pid) needed.
+                            unsafe { libc::kill(-pid_raw, libc::SIGKILL); }
+                        }
+                    }
+                }
+                return None;
+            }
+
+            let wait_duration = std::cmp::min(POLL_INTERVAL, remaining);
+            thread::sleep(wait_duration);
+
+            if handle.is_finished() {
+                match handle.join() {
+                    Ok(Ok(Some(result))) => return Some(result),
+                    Ok(Ok(None)) => return None, // hook ran but failed
+                    Ok(Err(())) => continue 'interpreter, // spawn failed, try next interpreter
+                    Err(_) => {
+                        eprintln!("Hook executor phase '{}' thread panicked", phase);
+                        return None;
+                    }
+                }
+            }
         }
     }
 

@@ -68,7 +68,7 @@ def _run_leindex_tool(tool_name: str, args: Dict[str, Any], working_dir: str) ->
     return result.stdout.strip()
 
 
-LEGACY_CONTEXT_FALLBACK_USED = False
+# Legacy context fallback is now tracked via return value instead of global mutable
 
 
 def analyze_intent(prompt: str) -> str:
@@ -144,7 +144,7 @@ def get_relevant_code_context(
     prompt: str,
     working_dir: str,
     intent: str,
-) -> str:
+) -> tuple[str, bool]:
     """
     Get relevant code context using LeIndex analysis.
 
@@ -154,7 +154,7 @@ def get_relevant_code_context(
         intent: Analyzed intent
 
     Returns:
-        Formatted context string
+        Tuple of (formatted context string, legacy_fallback_used flag)
     """
     context_parts: List[str] = []
     files = extract_file_references(prompt, working_dir)
@@ -204,8 +204,7 @@ def get_relevant_code_context(
             context_parts.append(f"## Standalone LeIndex Deep Analysis\n{deep_context}")
 
     # Compatibility fallback only if the standalone CLI is unavailable or failed.
-    global LEGACY_CONTEXT_FALLBACK_USED
-    LEGACY_CONTEXT_FALLBACK_USED = False
+    legacy_fallback_used = False
 
     if not context_parts:
         try:
@@ -220,12 +219,11 @@ def get_relevant_code_context(
                 ctx = context_func(working_dir, prompt, max_files=3)
                 if ctx and "No specific files identified" not in ctx:
                     context_parts.append(ctx)
-                    LEGACY_CONTEXT_FALLBACK_USED = True
+                    legacy_fallback_used = True
         except Exception:
             pass
 
-    return "\n\n".join(context_parts) if context_parts else ""
-
+    return ("\n\n".join(context_parts) if context_parts else "", legacy_fallback_used)
 
 def recall_relevant_memories(
     query: str,
@@ -305,12 +303,12 @@ def leindex_context_hook(input_data: dict) -> dict:
         }
 
         # Get relevant code context
-        code_context = get_relevant_code_context(prompt, working_dir, intent)
+        code_context, legacy_fallback_used = get_relevant_code_context(prompt, working_dir, intent)
 
         if code_context:
             context_info["code_context"] = code_context
             context_info["context_injected"] = True
-        if LEGACY_CONTEXT_FALLBACK_USED:
+        if legacy_fallback_used:
             context_info["source"] = "compatibility_legacy_fallback"
             context_info["compatibility_mode"] = True
 
@@ -328,8 +326,6 @@ def leindex_context_hook(input_data: dict) -> dict:
                 for m in memories
             ]
             context_info["context_injected"] = True
-            if LEGACY_CONTEXT_FALLBACK_USED:
-                context_info["compatibility_mode"] = True
 
         # Add context to tool input for Edit operations
         if tool_name == "Edit" and context_info["context_injected"]:

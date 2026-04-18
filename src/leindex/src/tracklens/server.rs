@@ -16,6 +16,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::time::{timeout, Duration};
@@ -24,7 +25,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-use super::types::{ReviewMode, TrackLensDecision};
+use super::types::{ReviewMode, TrackLensDecision, TrackLensPhase};
 
 // ─── Server Configuration ─────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ impl Default for ServerConfig {
 // ─── Server State ─────────────────────────────────────────────────────────────
 
 /// Shared server state
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ServerState {
     /// Current review content
     pub content: Arc<std::sync::RwLock<Option<ReviewContent>>>,
@@ -68,6 +69,16 @@ pub struct ServerState {
     pub deadline_tx: watch::Sender<u64>,
     /// Timeout deadline receiver
     pub deadline_rx: watch::Receiver<u64>,
+    /// Phase tracking transmitter
+    pub phase_tx: watch::Sender<TrackLensPhase>,
+    /// Phase tracking receiver
+    pub phase_rx: watch::Receiver<TrackLensPhase>,
+    /// Review iteration counter
+    pub iteration: Arc<AtomicU32>,
+    /// Shutdown signal transmitter
+    pub shutdown_tx: watch::Sender<bool>,
+    /// Shutdown signal receiver
+    pub shutdown_rx: watch::Receiver<bool>,
 }
 
 /// Review content
@@ -116,6 +127,8 @@ impl TrackLensServer {
             .as_secs()
             + 20;
         let (deadline_tx, deadline_rx) = watch::channel(initial_deadline);
+        let (phase_tx, phase_rx) = watch::channel(TrackLensPhase::Launching);
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         Self {
             config,
@@ -127,6 +140,11 @@ impl TrackLensServer {
                 client_ready_rx,
                 deadline_tx,
                 deadline_rx,
+                phase_tx,
+                phase_rx,
+                iteration: Arc::new(AtomicU32::new(0)),
+                shutdown_tx,
+                shutdown_rx,
             }),
         }
     }
@@ -189,7 +207,12 @@ impl TrackLensServer {
             .route("/api/diff", get(get_diff))
             .route("/api/status", get(get_status))
             .route("/api/vaults", get(get_vaults))
-            .route("/api/agents", get(get_agents));
+            .route("/api/agents", get(get_agents))
+            .route("/api/phase", get(get_phase))
+            .route("/api/phase", post(set_phase))
+            .route("/api/content", post(update_content))
+            .route("/api/reset", post(reset_review))
+            .route("/api/shutdown", post(shutdown_server));
 
         // Add static asset serving if bundle directory found
         if bundle_dir.join("assets").exists() {
@@ -213,7 +236,7 @@ impl TrackLensServer {
                     .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
             )
             .layer(CompressionLayer::new()) // Compress HTML responses
-            .layer(RequestBodyLimitLayer::new(1024 * 100)) // Limit request body to 100KB
+            .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // Limit request body to 10MB for large payloads
             .with_state(self.state.clone());
 
         // Open browser if configured (non-blocking)
@@ -226,10 +249,28 @@ impl TrackLensServer {
             });
         }
 
-        // Spawn server in background
-        let _state = self.state.clone();
+        // Spawn server in background with graceful shutdown
+        let mut shutdown_rx = self.state.shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = axum::serve(listener, app).await {
+            if let Err(e) = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    // Check initial value before waiting for changes
+                    if *shutdown_rx.borrow() {
+                        return;
+                    }
+                    // Wait until shutdown signal is sent
+                    loop {
+                        shutdown_rx
+                            .changed()
+                            .await
+                            .unwrap_or(());
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                })
+                .await
+            {
                 eprintln!("Server error: {}", e);
             }
         });
@@ -258,14 +299,24 @@ impl TrackLensServer {
         .map_err(|_| anyhow::anyhow!("Timed out waiting for TrackLens UI readiness"))?
     }
 
-    /// Set the review content
+    /// Set the review content.
+    /// If the content starts with `<!-- tracklens:editable -->`, automatically
+    /// sets the phase to `Editing` so the UI opens in edit mode.
     pub fn set_content(&self, content: ReviewContent) -> anyhow::Result<()> {
+        let is_editable = content.content.starts_with("<!-- tracklens:editable -->");
+
         let mut state = self
             .state
             .content
             .write()
             .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
         *state = Some(content);
+
+        // Auto-set phase to Editing for seed content
+        if is_editable {
+            let _ = self.state.phase_tx.send(TrackLensPhase::Editing);
+        }
+
         Ok(())
     }
 
@@ -284,6 +335,72 @@ impl TrackLensServer {
                 return Ok(decision.clone());
             }
         }
+    }
+
+    /// Set the current phase
+    pub fn set_phase(&self, phase: TrackLensPhase) -> anyhow::Result<()> {
+        self.state
+            .phase_tx
+            .send(phase)
+            .map_err(|e| anyhow::anyhow!("Failed to set phase: {}", e))
+    }
+
+    /// Get the current phase
+    pub fn current_phase(&self) -> TrackLensPhase {
+        *self.state.phase_rx.borrow()
+    }
+
+    /// Wait for phase to change from the current value
+    pub async fn wait_for_phase_change(&self) -> anyhow::Result<TrackLensPhase> {
+        let mut rx = self.state.phase_rx.clone();
+        rx.changed()
+            .await
+            .map_err(|e| anyhow::anyhow!("Phase channel closed: {}", e))?;
+        let phase = *rx.borrow();
+        Ok(phase)
+    }
+
+    /// Get current review iteration
+    pub fn iteration(&self) -> u32 {
+        self.state.iteration.load(Ordering::SeqCst)
+    }
+
+    /// Reset for a new review round: clear decision, increment iteration, update content, reset phase
+    pub fn reset_for_resubmit(&self, new_content: Option<ReviewContent>) -> anyhow::Result<()> {
+        // Clear the decision
+        self.state
+            .decision_tx
+            .send(None)
+            .map_err(|e| anyhow::anyhow!("Failed to clear decision: {}", e))?;
+
+        // Increment iteration
+        self.state.iteration.fetch_add(1, Ordering::SeqCst);
+
+        // Update content if provided
+        if let Some(content) = new_content {
+            let mut guard = self
+                .state
+                .content
+                .write()
+                .map_err(|e| anyhow::anyhow!("Failed to acquire content lock: {}", e))?;
+            *guard = Some(content);
+        }
+
+        // Reset phase to Reviewing
+        self.state
+            .phase_tx
+            .send(TrackLensPhase::Reviewing)
+            .map_err(|e| anyhow::anyhow!("Failed to reset phase: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Signal the server to shut down gracefully
+    pub fn shutdown(&self) -> anyhow::Result<()> {
+        self.state
+            .shutdown_tx
+            .send(true)
+            .map_err(|e| anyhow::anyhow!("Failed to send shutdown signal: {}", e))
     }
 }
 
@@ -430,12 +547,16 @@ async fn extend_timeout(
     State(state): State<Arc<ServerState>>,
     Json(req): Json<ExtendTimeoutRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Calculate new deadline: current time + requested minutes
+    // Calculate new deadline: extend from current deadline or now, whichever is later
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let new_deadline = now + (req.minutes * 60);
+    
+    // Read current deadline from the receiver to extend from it
+    let current_deadline = *state.deadline_rx.borrow();
+    let base = current_deadline.max(now);
+    let new_deadline = base + (req.minutes * 60);
 
     state
         .deadline_tx
@@ -529,12 +650,121 @@ async fn get_plan(State(state): State<Arc<ServerState>>) -> Json<serde_json::Val
     }
 }
 
+// ─── Phase & Content Update Endpoints ──────────────────────────────────────────
+
+/// Request to change the current review phase
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetPhaseRequest {
+    /// Target phase
+    pub phase: TrackLensPhase,
+}
+
+/// Get the current review phase
+async fn get_phase(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
+    let phase = *state.phase_rx.borrow();
+    Json(serde_json::json!({ "phase": phase }))
+}
+
+/// Set the current review phase
+async fn set_phase(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<SetPhaseRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    state
+        .phase_tx
+        .send(req.phase)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::OK)
+}
+
+/// Update the review content (for multi-round editing)
+async fn update_content(
+    State(state): State<Arc<ServerState>>,
+    Json(content): Json<ReviewContent>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let is_editable = content.content.starts_with("<!-- tracklens:editable -->");
+    let mut guard = state
+        .content
+        .write()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    *guard = Some(content);
+    drop(guard);
+    
+    // Auto-set phase to Editing for seed content (matches set_content behavior)
+    if is_editable {
+        state
+            .phase_tx
+            .send(TrackLensPhase::Editing)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    Ok(StatusCode::OK)
+}
+
+/// Request to reset the review for a new round
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetReviewRequest {
+    /// Optional new content for the review round
+    pub content: Option<ReviewContent>,
+}
+
+/// Reset the review for a new round: clears decision, increments iteration, resets phase
+async fn reset_review(
+    State(state): State<Arc<ServerState>>,
+    Json(req): Json<ResetReviewRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    // Clear the decision
+    state
+        .decision_tx
+        .send(None)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Increment iteration
+    state.iteration.fetch_add(1, Ordering::SeqCst);
+
+    // Update content if provided
+    let mut next_phase = TrackLensPhase::Reviewing;
+    if let Some(content) = req.content {
+        let is_editable = content
+            .content
+            .starts_with("<!-- tracklens:editable -->");
+        let mut guard = state
+            .content
+            .write()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        *guard = Some(content);
+        drop(guard);
+        if is_editable {
+            next_phase = TrackLensPhase::Editing;
+        }
+    }
+
+    // Reset phase for the next round
+    state
+        .phase_tx
+        .send(next_phase)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let iteration = state.iteration.load(Ordering::SeqCst);
+    Ok(Json(serde_json::json!({ "status": "reset", "iteration": iteration })))
+}
+
+/// Shut down the server gracefully
+async fn shutdown_server(
+    State(state): State<Arc<ServerState>>,
+) -> Result<impl IntoResponse, StatusCode> {
+    state
+        .shutdown_tx
+        .send(true)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({ "status": "shutting_down" })))
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tracklens::types::DecisionBehavior;
+    use crate::tracklens::types::{DecisionBehavior, TrackLensPhase};
     use reqwest::Client;
 
     #[tokio::test]
@@ -546,6 +776,58 @@ mod tests {
         };
         let server = TrackLensServer::new(config);
         assert!(server.start().await.is_ok());
+        // Verify phase defaults to Launching
+        assert_eq!(server.current_phase(), TrackLensPhase::Launching);
+        // Verify iteration starts at 0
+        assert_eq!(server.iteration(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_phase_tracking() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        assert_eq!(server.current_phase(), TrackLensPhase::Launching);
+
+        // Transition to Loading
+        server.set_phase(TrackLensPhase::Loading).unwrap();
+        assert_eq!(server.current_phase(), TrackLensPhase::Loading);
+
+        // Transition to Reviewing
+        server.set_phase(TrackLensPhase::Reviewing).unwrap();
+        assert_eq!(server.current_phase(), TrackLensPhase::Reviewing);
+
+        // Transition to Editing
+        server.set_phase(TrackLensPhase::Editing).unwrap();
+        assert_eq!(server.current_phase(), TrackLensPhase::Editing);
+
+        // Transition to Decided
+        server.set_phase(TrackLensPhase::Decided).unwrap();
+        assert_eq!(server.current_phase(), TrackLensPhase::Decided);
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_phase_change() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        assert_eq!(server.current_phase(), TrackLensPhase::Launching);
+
+        // Spawn a task that changes phase after a delay
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            server_clone.set_phase(TrackLensPhase::Reviewing).unwrap();
+        });
+
+        let new_phase = server.wait_for_phase_change().await.unwrap();
+        assert_eq!(new_phase, TrackLensPhase::Reviewing);
     }
 
     /// Cross-boundary decision integration test
@@ -612,5 +894,323 @@ mod tests {
         }
 
         assert_eq!(urls.len(), 5, "All server URLs should be unique");
+    }
+
+    /// Test GET /api/phase returns the current phase
+    #[tokio::test]
+    async fn test_get_phase_endpoint() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        let url = server.start().await.expect("Server should start");
+        let client = Client::new();
+
+        // Default phase is Launching
+        let resp = client.get(format!("{}/api/phase", url)).send().await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["phase"], "launching");
+
+        // Set phase server-side and verify endpoint reflects it
+        server.set_phase(TrackLensPhase::Reviewing).unwrap();
+        let resp = client.get(format!("{}/api/phase", url)).send().await.unwrap();
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["phase"], "reviewing");
+    }
+
+    /// Test POST /api/phase changes the phase via HTTP
+    #[tokio::test]
+    async fn test_set_phase_endpoint() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        let url = server.start().await.expect("Server should start");
+        let client = Client::new();
+
+        // Set phase to Editing via HTTP
+        let resp = client
+            .post(format!("{}/api/phase", url))
+            .json(&serde_json::json!({ "phase": "editing" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // Verify server-side state updated
+        assert_eq!(server.current_phase(), TrackLensPhase::Editing);
+
+        // Verify GET reflects the change
+        let resp = client.get(format!("{}/api/phase", url)).send().await.unwrap();
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["phase"], "editing");
+    }
+
+    /// Test POST /api/content replaces review content
+    #[tokio::test]
+    async fn test_update_content_endpoint() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        let url = server.start().await.expect("Server should start");
+        let client = Client::new();
+
+        // Initially no content
+        let resp = client.get(format!("{}/api/content", url)).send().await.unwrap();
+        assert_eq!(resp.status(), 404);
+
+        // POST new content
+        let new_content = serde_json::json!({
+            "mode": "review",
+            "content": "# Revised Plan\n\nUpdated via POST /api/content",
+            "metadata": {
+                "track_id": "test-123",
+                "document_type": "plan.md",
+                "origin": "test"
+            }
+        });
+        let resp = client
+            .post(format!("{}/api/content", url))
+            .json(&new_content)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // Verify GET returns updated content
+        let resp = client.get(format!("{}/api/content", url)).send().await.unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["content"], "# Revised Plan\n\nUpdated via POST /api/content");
+        assert_eq!(body["metadata"]["track_id"], "test-123");
+    }
+
+    /// Test POST /api/reset clears decision, increments iteration, resets phase
+    #[tokio::test]
+    async fn test_reset_review_endpoint() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        let url = server.start().await.expect("Server should start");
+        let client = Client::new();
+
+        // Set up initial state: phase = Editing, iteration = 0
+        server.set_phase(TrackLensPhase::Editing).unwrap();
+        assert_eq!(server.iteration(), 0);
+
+        // Submit a decision to populate the channel
+        let decision = serde_json::json!({
+            "behavior": "deny",
+            "annotations": null,
+            "feedback": "Needs work"
+        });
+        client
+            .post(format!("{}/api/decision", url))
+            .json(&decision)
+            .send()
+            .await
+            .unwrap();
+
+        // Reset with new content
+        let reset_payload = serde_json::json!({
+            "content": {
+                "mode": "review",
+                "content": "# Revised Plan v2",
+                "metadata": {
+                    "track_id": "test-456",
+                    "document_type": "plan.md",
+                    "origin": "test"
+                }
+            }
+        });
+        let resp = client
+            .post(format!("{}/api/reset", url))
+            .json(&reset_payload)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["status"], "reset");
+        assert_eq!(body["iteration"], 1);
+
+        // Verify server state
+        assert_eq!(server.iteration(), 1);
+        assert_eq!(server.current_phase(), TrackLensPhase::Reviewing);
+
+        // Verify content was updated
+        let resp = client.get(format!("{}/api/content", url)).send().await.unwrap();
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["content"], "# Revised Plan v2");
+    }
+
+    /// Test reset_for_resubmit method (programmatic reset)
+    #[tokio::test]
+    async fn test_reset_for_resubmit_method() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+
+        // Initial state
+        assert_eq!(server.iteration(), 0);
+        assert_eq!(server.current_phase(), TrackLensPhase::Launching);
+
+        // Set up some state
+        server.set_phase(TrackLensPhase::Decided).unwrap();
+        assert_eq!(server.current_phase(), TrackLensPhase::Decided);
+
+        // Reset with new content
+        let new_content = ReviewContent {
+            mode: ReviewMode::Review,
+            content: "# Updated content".to_string(),
+            metadata: ReviewMetadata {
+                track_id: Some("test".to_string()),
+                document_type: "plan.md".to_string(),
+                origin: "test".to_string(),
+            },
+        };
+        server.reset_for_resubmit(Some(new_content)).unwrap();
+
+        assert_eq!(server.iteration(), 1);
+        assert_eq!(server.current_phase(), TrackLensPhase::Reviewing);
+
+        // Reset again without content
+        server.reset_for_resubmit(None).unwrap();
+        assert_eq!(server.iteration(), 2);
+        assert_eq!(server.current_phase(), TrackLensPhase::Reviewing);
+    }
+
+    /// Test POST /api/shutdown triggers graceful shutdown
+    #[tokio::test]
+    async fn test_shutdown_endpoint() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        let url = server.start().await.expect("Server should start");
+        let client = Client::new();
+
+        // Verify server is up before shutdown
+        let resp = client.get(format!("{}/api/status", url)).send().await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // Request shutdown
+        let resp = client
+            .post(format!("{}/api/shutdown", url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["status"], "shutting_down");
+
+        // Poll until server is shut down (with timeout)
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(2);
+        loop {
+            let result = client.get(format!("{}/api/status", url)).send().await;
+            if result.is_err() {
+                break; // Server is shut down
+            }
+            if start.elapsed() > timeout {
+                panic!("Server did not shut down within {:?}", timeout);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Test shutdown() method (programmatic shutdown)
+    #[tokio::test]
+    async fn test_shutdown_method() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+        let url = server.start().await.expect("Server should start");
+
+        // Verify server is up
+        let client = Client::new();
+        let resp = client.get(format!("{}/api/status", url)).send().await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // Trigger shutdown programmatically
+        server.shutdown().unwrap();
+
+        // Poll until server is shut down (with timeout)
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(2);
+        loop {
+            let result = client.get(format!("{}/api/status", url)).send().await;
+            if result.is_err() {
+                break; // Server is shut down
+            }
+            if start.elapsed() > timeout {
+                panic!("Server did not shut down within {:?}", timeout);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Test set_content with editable marker auto-sets phase to Editing
+    #[tokio::test]
+    async fn test_set_content_editable_marker() {
+        let config = ServerConfig {
+            port: 0,
+            open_browser: false,
+            ..Default::default()
+        };
+        let server = TrackLensServer::new(config);
+
+        // Normal content should not change phase
+        let normal_content = ReviewContent {
+            mode: ReviewMode::Review,
+            content: "# Normal Plan\n\nNo marker here.".to_string(),
+            metadata: ReviewMetadata {
+                track_id: Some("test".to_string()),
+                document_type: "plan.md".to_string(),
+                origin: "test".to_string(),
+            },
+        };
+        server.set_content(normal_content).unwrap();
+        assert_eq!(
+            server.current_phase(),
+            TrackLensPhase::Launching,
+            "Normal content should not change phase from Launching"
+        );
+
+        // Editable content should auto-set phase to Editing
+        let editable_content = ReviewContent {
+            mode: ReviewMode::Review,
+            content: "<!-- tracklens:editable -->\n# Seed Plan\n\nEdit this.".to_string(),
+            metadata: ReviewMetadata {
+                track_id: Some("test".to_string()),
+                document_type: "plan.md".to_string(),
+                origin: "test".to_string(),
+            },
+        };
+        server.set_content(editable_content).unwrap();
+        assert_eq!(
+            server.current_phase(),
+            TrackLensPhase::Editing,
+            "Editable marker should auto-set phase to Editing"
+        );
     }
 }

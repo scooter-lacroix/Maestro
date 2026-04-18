@@ -375,6 +375,47 @@ impl Integrator {
         Ok(())
     }
 
+    /// Build the TOML map for an MCP server entry based on the tool type.
+    fn build_mcp_server_table(tool: &IntegrationTool) -> TomlMap<String, TomlValue> {
+        let mut server_table = TomlMap::new();
+        if matches!(tool, IntegrationTool::Codex) {
+            let command = if cfg!(target_os = "windows") {
+                "leindex.exe"
+            } else {
+                "leindex"
+            };
+            server_table.insert(
+                "command".to_string(),
+                TomlValue::String(command.to_string()),
+            );
+            server_table.insert(
+                "args".to_string(),
+                TomlValue::Array(vec![
+                    TomlValue::String("mcp".to_string()),
+                ]),
+            );
+        } else {
+            let command = if cfg!(target_os = "windows") {
+                "maestro.exe"
+            } else {
+                "maestro"
+            };
+            server_table.insert(
+                "command".to_string(),
+                TomlValue::String(command.to_string()),
+            );
+            server_table.insert(
+                "args".to_string(),
+                TomlValue::Array(vec![
+                    TomlValue::String("mcp".to_string()),
+                    TomlValue::String("proxy".to_string()),
+                    TomlValue::String(tool.mcp_server_name().to_string()),
+                ]),
+            );
+        }
+        server_table
+    }
+
     /// Update a TOML config file with MCP server config
     fn update_toml_config(&self, tool: IntegrationTool, config_path: &Path) -> Result<()> {
         if !config_path.exists() {
@@ -383,19 +424,24 @@ impl Integrator {
                 config_path.display()
             ));
 
-            // Create basic TOML structure
+            // Build server config using shared helper
+            let server_table = Self::build_mcp_server_table(&tool);
+            let command = server_table.get("command")
+                .and_then(|v: &TomlValue| v.as_str())
+                .unwrap_or("leindex");
+            let args: Vec<String> = server_table.get("args")
+                .and_then(|v: &TomlValue| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v: &TomlValue| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let args_str = args.iter()
+                .map(|a| format!("\"{}\"", a))
+                .collect::<Vec<_>>()
+                .join(", ");
             let toml_content = format!(
-                r#"[mcp_servers.{}]
-command = "{}"
-args = ["mcp", "proxy", "{}"]
-"#,
+                "[mcp_servers.{}]\ncommand = \"{}\"\nargs = [{}]\n",
                 tool.mcp_server_name(),
-                if cfg!(target_os = "windows") {
-                    "maestro.exe"
-                } else {
-                    "maestro"
-                },
-                tool.mcp_server_name()
+                command,
+                args_str
             );
 
             if !self.dry_run {
@@ -413,11 +459,6 @@ args = ["mcp", "proxy", "{}"]
 
         // Build the TOML structure for the MCP server
         let server_name = tool.mcp_server_name();
-        let command = if cfg!(target_os = "windows") {
-            "maestro.exe"
-        } else {
-            "maestro"
-        };
 
         // Ensure mcp_servers table exists
         if toml_val.is_table() {
@@ -427,19 +468,7 @@ args = ["mcp", "proxy", "{}"]
             }
 
             if let Some(mcp_servers) = table.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
-                let mut server_table = TomlMap::new();
-                server_table.insert(
-                    "command".to_string(),
-                    TomlValue::String(command.to_string()),
-                );
-                server_table.insert(
-                    "args".to_string(),
-                    TomlValue::Array(vec![
-                        TomlValue::String("mcp".to_string()),
-                        TomlValue::String("proxy".to_string()),
-                        TomlValue::String(server_name.to_string()),
-                    ]),
-                );
+                let server_table = Self::build_mcp_server_table(&tool);
 
                 mcp_servers.insert(server_name.to_string(), TomlValue::Table(server_table));
             }
@@ -1196,11 +1225,14 @@ Load Maestro and execute: /maestro {} {{{{args}}}}
             None => CheckResult {
                 name: "Standalone Nexus provider health".to_string(),
                 passed: false,
-                message: StandaloneNexusProvider::supported_install_methods()
-                    .into_iter()
-                    .map(NexusInstallMethod::install_hint)
-                    .collect::<Vec<_>>()
-                    .join(" | "),
+                message: format!(
+                    "Nexus not found. Install with: {}",
+                    StandaloneNexusProvider::supported_install_methods()
+                        .into_iter()
+                        .map(NexusInstallMethod::install_hint)
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ),
             },
         }
     }
