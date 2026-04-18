@@ -79,7 +79,6 @@ class StandaloneNexusClient:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix='nexus_content_') as f:
                 f.write(content)
                 content_file = f.name
-                os.chmod(content_file, 0o600)
 
             args = [
                 "store",

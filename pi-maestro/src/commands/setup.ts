@@ -101,7 +101,7 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
   writeMaestroFile(root, "product.md", productMd);
 
   // Generate tech-stack.md
-  const techStackMd = await generateTechStackMd(root);
+  const techStackMd = generateTechStackMd(root);
   writeMaestroFile(root, "tech-stack.md", techStackMd);
 
   // Generate workflow.md
@@ -127,17 +127,15 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
 
     // @ts-ignore - Dynamic import for TrackLens server
     const tracklensServer = await import("@maestro/tracklens-server");
-    const { existsSync: exists, readFileSync: read } = await import("fs");
-    const { resolve } = await import("path");
 
     let htmlContent: string | null = null;
     const htmlPaths = [
-      resolve(root, "apps/tracklens-opencode/tracklens.html"),
-      resolve(root, "dist/tracklens-editor.html"),
+      path.resolve(root, "apps/tracklens-opencode/tracklens.html"),
+      path.resolve(root, "dist/tracklens-editor.html"),
     ];
     for (const htmlPath of htmlPaths) {
-      if (exists(htmlPath)) {
-        htmlContent = read(htmlPath, "utf-8");
+      if (fs.existsSync(htmlPath)) {
+        htmlContent = fs.readFileSync(htmlPath, "utf-8");
         break;
       }
     }
@@ -177,15 +175,17 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
         // Parse edited content using HTML comment markers.
         // <!--MAESTRO_FILE:filename.md--> won't collide with markdown horizontal rules.
         const markerRegex = /<!--MAESTRO_FILE:(product|tech-stack|workflow)\.md-->\n\n([\s\S]*?)(?=\n\n<!--MAESTRO_FILE:|$)/g;
-        let parsedCount = 0;
+        const expectedFiles = ["product", "tech-stack", "workflow"];
+        const parsedFiles: string[] = [];
         let match;
         while ((match = markerRegex.exec(result.edited_content)) !== null) {
           writeMaestroFile(root, `${match[1]}.md`, match[2].trim());
-          parsedCount++;
+          parsedFiles.push(match[1]);
         }
-        if (parsedCount < 3) {
+        const missingFiles = expectedFiles.filter(f => !parsedFiles.includes(f));
+        if (missingFiles.length > 0) {
           ctx.ui.notify(
-            `TrackLens: ${3 - parsedCount} file(s) could not be parsed and were skipped`,
+            `TrackLens: Could not parse edits for: ${missingFiles.map(f => f + ".md").join(", ")}`,
             "warning"
           );
         }
@@ -293,7 +293,7 @@ ${isBrownfield ? "Brownfield (existing codebase)" : "Greenfield (new project)"}
 /**
  * Generate tech-stack.md content
  */
-async function generateTechStackMd(root: string): Promise<string> {
+function generateTechStackMd(root: string): string {
   // Detect common technologies
   const techs: string[] = [];
 

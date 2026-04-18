@@ -109,7 +109,7 @@ def generate_handoff(input_data: dict) -> dict:
             elif d.name.startswith(track_id):
                 suffix = d.name[len(track_id):]
                 # Common patterns: -archived, -backup, -old, .bak, _v2, etc.
-                if suffix.startswith(('-', '_', '.')) or suffix.startswith('-archived') or suffix.startswith('-backup'):
+                if suffix.startswith(('-', '_', '.')):
                     candidates.append((1, d))  # Priority 1: starts with track_id + separator
             # Contains track_id as a word boundary (less preferred, catches non-prefix names)
             elif re.search(rf'\b{re.escape(track_id)}\b', d.name):
