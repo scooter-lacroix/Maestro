@@ -117,13 +117,11 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
     const combinedMarkdown = [
       "# Maestro Setup Review\n",
       "---\n\n",
-      "## product.md\n\n",
+      "<!--MAESTRO_FILE:product.md-->\n\n",
       productMd,
-      "\n\n---\n\n",
-      "## tech-stack.md\n\n",
+      "\n\n<!--MAESTRO_FILE:tech-stack.md-->\n\n",
       techStackMd,
-      "\n\n---\n\n",
-      "## workflow.md\n\n",
+      "\n\n<!--MAESTRO_FILE:workflow.md-->\n\n",
       workflowMd,
     ].join("");
 
@@ -176,21 +174,18 @@ async function initializeMaestroProject(root: string, ctx: any): Promise<void> {
       
       // Review approved - apply any user edits to the files
       if (result.edited_content) {
-        // Parse edited content back into individual docs.
-        // Expected format: each section separated by "\n---\n" (newline, 3 dashes, newline)
-        const sections = result.edited_content.split(/\n\n---\n\n/);
+        // Parse edited content using HTML comment markers.
+        // <!--MAESTRO_FILE:filename.md--> won't collide with markdown horizontal rules.
+        const markerRegex = /<!--MAESTRO_FILE:(product|tech-stack|workflow)\.md-->\n\n([\s\S]*?)(?=\n\n<!--MAESTRO_FILE:|$)/g;
         let parsedCount = 0;
-        for (const section of sections) {
-          const trimmed = section.trim();
-          const docMatch = trimmed.match(/^## (product|tech-stack|workflow)\.md\n\n([\s\S]*)/);
-          if (docMatch) {
-            writeMaestroFile(root, `${docMatch[1]}.md`, docMatch[2].trim());
-            parsedCount++;
-          }
+        let match;
+        while ((match = markerRegex.exec(result.edited_content)) !== null) {
+          writeMaestroFile(root, `${match[1]}.md`, match[2].trim());
+          parsedCount++;
         }
-        if (parsedCount < sections.length) {
+        if (parsedCount < 3) {
           ctx.ui.notify(
-            `TrackLens: ${sections.length - parsedCount} section(s) could not be parsed and were skipped`,
+            `TrackLens: ${3 - parsedCount} file(s) could not be parsed and were skipped`,
             "warning"
           );
         }
