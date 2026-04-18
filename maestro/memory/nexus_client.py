@@ -272,9 +272,10 @@ class StandaloneNexusClient:
             if fallback.success:
                 parsed = self._parse_search_output(fallback.stdout)
             # Use parsed CLI results when available; fall back to SQL only if empty
+            used_db_fallback = not parsed
             results = parsed if parsed else await self._query_command_fallback(query, project_path=project_path, limit=limit)
             return {
-                "success": fallback.success,
+                "success": fallback.success or used_db_fallback,
                 "query": query,
                 "agent": agent,
                 "results": results,
@@ -348,7 +349,14 @@ class StandaloneNexusClient:
             return tracks
 
     async def hydrate_memories(self, memory_ids: Iterable[int]) -> list[dict[str, Any]]:
-        ids = [int(memory_id) for memory_id in memory_ids if memory_id is not None and str(memory_id).strip()]
+        ids: list[int] = []
+        for memory_id in memory_ids:
+            if memory_id is None or not str(memory_id).strip():
+                continue
+            try:
+                ids.append(int(memory_id))
+            except (TypeError, ValueError):
+                continue
         if not ids:
             return []
 
@@ -630,7 +638,7 @@ class StandaloneNexusClient:
                 safe_preview.append(part)
                 continue
             safe_preview.append(part)
-        logger.debug("Running nexus command: %s", " ".join(safe_preview))
+        logger.debug(f"Running nexus command: {' '.join(safe_preview)}")
         proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
