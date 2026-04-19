@@ -584,15 +584,24 @@ pub fn run_orchestra(tx: Sender<SetupEvent>, config: Config) {
                             dst_cmd.display()
                         ));
 
-                        // Skill pack (Agent Skills standard)
+                        // Skill pack (Agent Skills standard) — skip gracefully if absent
+                        // (directory may be empty/untracked in git, so clones won't have it)
                         let src_skill =
                             repo_root.join("claude-code").join("skills").join("maestro");
-                        let dst_skill = home_dir()?.join(".claude").join("skills").join("maestro");
-                        copy_dir_recursive(&src_skill, &dst_skill)?;
-                        logs.push(format!(
-                            "Installed Claude Code skill to {}",
-                            dst_skill.display()
-                        ));
+                        if src_skill.exists() {
+                            let dst_skill =
+                                home_dir()?.join(".claude").join("skills").join("maestro");
+                            copy_dir_recursive(&src_skill, &dst_skill)?;
+                            logs.push(format!(
+                                "Installed Claude Code skill to {}",
+                                dst_skill.display()
+                            ));
+                        } else {
+                            logs.push(
+                                "Skipped Claude Code skill pack (not present in install source)"
+                                    .to_string(),
+                            );
+                        }
 
                         // Templates
                         let src_tpl = repo_root.join("claude-code").join("templates");
@@ -2573,14 +2582,11 @@ fn verify_selected_tool(tool: &str, maestro_home: &Path, logs: &mut Vec<String>)
                     .join("maestro:setup.md"),
                 "Claude Maestro setup command",
             )?;
-            require_file(
-                &home
-                    .join(".claude")
-                    .join("skills")
-                    .join("maestro")
-                    .join("SKILL.md"),
-                "Claude Maestro skill",
-            )?;
+            let claude_skill_dir = home.join(".claude").join("skills").join("maestro");
+            let claude_skill = claude_skill_dir.join("SKILL.md");
+            if claude_skill_dir.exists() {
+                require_file(&claude_skill, "Claude Maestro skill")?;
+            }
             require_file(
                 &home
                     .join(".claude")

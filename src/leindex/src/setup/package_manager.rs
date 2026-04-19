@@ -360,7 +360,15 @@ pub fn get_yazi_addon_purposes() -> Vec<PackagePurpose> {
 
 /// Returns yazi addon package names for a distribution
 pub fn get_yazi_addon_packages(distro: Distro) -> Vec<String> {
-    get_package_names(&get_yazi_addon_purposes(), distro)
+    let mut packages = get_package_names(&get_yazi_addon_purposes(), distro);
+    // Arch: poppler-glib and poppler-qt6 have strict version-locked depends on poppler.
+    // Without including them, `pacman -S --needed poppler` breaks when the installed
+    // poppler-glib/qt6 pin to the previous poppler version.
+    if matches!(distro, Distro::Arch) {
+        packages.push("poppler-glib".to_string());
+        packages.push("poppler-qt6".to_string());
+    }
+    packages
 }
 
 /// Returns the yazi addon installation command for the distribution
@@ -506,5 +514,24 @@ mod tests {
         assert!(get_build_tools_install_command(Distro::Debian).contains("apt-get"));
         assert!(get_build_tools_install_command(Distro::Arch).contains("pacman"));
         assert!(get_build_tools_install_command(Distro::Fedora).contains("dnf group"));
+    }
+
+    #[test]
+    fn test_yazi_addon_arch_includes_poppler_companions() {
+        let arch_pkgs = get_yazi_addon_packages(Distro::Arch);
+        assert!(arch_pkgs.contains(&"poppler".to_string()));
+        assert!(arch_pkgs.contains(&"poppler-glib".to_string()));
+        assert!(arch_pkgs.contains(&"poppler-qt6".to_string()));
+    }
+
+    #[test]
+    fn test_yazi_addon_non_arch_excludes_poppler_companions() {
+        let debian_pkgs = get_yazi_addon_packages(Distro::Debian);
+        assert!(!debian_pkgs.contains(&"poppler-glib".to_string()));
+        assert!(!debian_pkgs.contains(&"poppler-qt6".to_string()));
+
+        let fedora_pkgs = get_yazi_addon_packages(Distro::Fedora);
+        assert!(!fedora_pkgs.contains(&"poppler-glib".to_string()));
+        assert!(!fedora_pkgs.contains(&"poppler-qt6".to_string()));
     }
 }
