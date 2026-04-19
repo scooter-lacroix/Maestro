@@ -2582,14 +2582,14 @@ fn verify_selected_tool(tool: &str, maestro_home: &Path, logs: &mut Vec<String>)
                     .join("maestro:setup.md"),
                 "Claude Maestro setup command",
             )?;
-            require_file(
-                &home
-                    .join(".claude")
-                    .join("skills")
-                    .join("maestro")
-                    .join("SKILL.md"),
-                "Claude Maestro skill",
-            )?;
+            let claude_skill = home
+                .join(".claude")
+                .join("skills")
+                .join("maestro")
+                .join("SKILL.md");
+            if claude_skill.exists() {
+                require_file(&claude_skill, "Claude Maestro skill")?;
+            }
             require_file(
                 &home
                     .join(".claude")

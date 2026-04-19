@@ -515,4 +515,23 @@ mod tests {
         assert!(get_build_tools_install_command(Distro::Arch).contains("pacman"));
         assert!(get_build_tools_install_command(Distro::Fedora).contains("dnf group"));
     }
+
+    #[test]
+    fn test_yazi_addon_arch_includes_poppler_companions() {
+        let arch_pkgs = get_yazi_addon_packages(Distro::Arch);
+        assert!(arch_pkgs.contains(&"poppler".to_string()));
+        assert!(arch_pkgs.contains(&"poppler-glib".to_string()));
+        assert!(arch_pkgs.contains(&"poppler-qt6".to_string()));
+    }
+
+    #[test]
+    fn test_yazi_addon_non_arch_excludes_poppler_companions() {
+        let debian_pkgs = get_yazi_addon_packages(Distro::Debian);
+        assert!(!debian_pkgs.contains(&"poppler-glib".to_string()));
+        assert!(!debian_pkgs.contains(&"poppler-qt6".to_string()));
+
+        let fedora_pkgs = get_yazi_addon_packages(Distro::Fedora);
+        assert!(!fedora_pkgs.contains(&"poppler-glib".to_string()));
+        assert!(!fedora_pkgs.contains(&"poppler-qt6".to_string()));
+    }
 }

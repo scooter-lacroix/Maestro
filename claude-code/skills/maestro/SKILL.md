@@ -9,7 +9,7 @@ Use this skill whenever you run Maestro inside Claude Code. Keep it native to Cl
 
 - **Commands:** `/maestro`, `/maestro:setup`, `/maestro:newTrack`, `/maestro:implement`, `/maestro:orchestrate`, `/maestro:status`, `/maestro:revert`, `/maestro:leindex`, `/maestro:tui`.
 - **Skill install path (user scope):** `~/.claude/skills/maestro/` (installed by the Maestro wizard).
-- **MCP:** `claude.mcpServers.leindex` → `{ "command": "maestro", "args": ["mcp", "tool-search"], "type": "stdio" (if required) }` so Claude Code reaches the Maestro MCP pool through the dynamic broker. Do **not** point to any TLDR/legacy endpoints.
+- **MCP:** `claude.mcpServers.leindex` → `{ "command": "leindex", "args": ["mcp"], "type": "stdio" }` so Claude Code reaches the standalone LeIndex binary directly. Do **not** point to any TLDR/legacy endpoints.
 - **No cross-tool bleed:** Avoid references to `~/.config/gemini`, `~/.amp`, or OpenCode paths.
 
 ## Quick flow
